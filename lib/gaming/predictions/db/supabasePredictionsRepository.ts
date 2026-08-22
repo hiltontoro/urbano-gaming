@@ -41,6 +41,7 @@ import {
   QualificationSupersededError,
   DraftResultAlreadyExistsError,
 } from "../types";
+import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../../authority/types";
 
 function mapTeam(row: any): TeamRecord {
   return {
@@ -137,6 +138,7 @@ function mapMatchResult(row: any): MatchResultRecord {
     finalizedAt: row.finalized_at,
     supersedesMatchResultId: row.supersedes_match_result_id,
     enteredByGamingMemberId: row.entered_by_gaming_member_id,
+    finalizedByGamingMemberId: row.finalized_by_gaming_member_id,
     createdAt: row.created_at,
   };
 }
@@ -219,6 +221,8 @@ function translateNamedError(error: { code?: string; message?: string }): Error 
     ["SUPERSEDED_RESULT_NOT_FINALIZED", () => new SupersededResultNotFinalizedError()],
     ["PRIZE_QUALIFICATION_NOT_FOUND", () => new PrizeQualificationNotFoundError()],
     ["QUALIFICATION_SUPERSEDED", () => new QualificationSupersededError()],
+    ["CONSEQUENTIAL_FINALIZER_AUTHORITY_REQUIRED", () => new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER")],
+    ["REASON_REQUIRED", () => new ReasonRequiredError()],
   ];
   for (const [code, build] of table) {
     if (error.message.includes(code)) return build();
@@ -756,11 +760,13 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async finalizeMatchResult(
     matchResultId: string,
-    finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }> {
     const { data, error } = await this.client.rpc("finalize_match_result_atomically", {
       p_match_result_id: matchResultId,
       p_finalized_by_gaming_member_id: finalizedByGamingMemberId,
+      p_reason: reason,
     });
     if (error) {
       const translated = translateNamedError(error);
@@ -777,7 +783,8 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async correctMatchResult(
     matchResultId: string,
-    finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;
@@ -787,6 +794,7 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
     const { data, error } = await this.client.rpc("correct_match_result_atomically", {
       p_match_result_id: matchResultId,
       p_finalized_by_gaming_member_id: finalizedByGamingMemberId,
+      p_reason: reason,
     });
     if (error) {
       const translated = translateNamedError(error);

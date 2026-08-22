@@ -17,6 +17,9 @@ import type {
   LeaderboardEntry,
 } from "../types";
 import { InMemoryMetagameRepository } from "../../metagame/db/inMemoryMetagameRepository";
+import { InMemoryAuditStore } from "../../audit/db/inMemoryAuditStore";
+import { InMemoryAuthorityRepository } from "../../authority/db/inMemoryAuthorityRepository";
+import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../../authority/types";
 import {
   MatchNotFoundError,
   MatchCancelledError,
@@ -89,6 +92,24 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   private readonly metagame = new InMemoryMetagameRepository();
   get metagameRepository(): InMemoryMetagameRepository {
     return this.metagame;
+  }
+
+  /**
+   * Admin Control Plane A0. Composed, not injected, mirroring metagame
+   * above — auditStore is shared with authority so that grant/revoke
+   * events and FINALIZE_RESULT/CORRECT_RESULT events land in the same
+   * ledger, exactly as one Postgres transaction guarantees for the real
+   * schema. Exposed via getters for the same reason metagameRepository
+   * is: tests need to inspect the real instance finalize/correct wrote
+   * to, not a second, silently-diverging one.
+   */
+  private readonly auditStore = new InMemoryAuditStore();
+  private readonly authority = new InMemoryAuthorityRepository(this.auditStore);
+  get authorityRepository(): InMemoryAuthorityRepository {
+    return this.authority;
+  }
+  get auditStoreForTests(): InMemoryAuditStore {
+    return this.auditStore;
   }
 
   /** Test-only seam: configure a progression rule's point value. */
@@ -478,6 +499,7 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
         finalizedAt: null,
         supersedesMatchResultId: input.supersedesMatchResultId ?? null,
         enteredByGamingMemberId: input.enteredByGamingMemberId,
+        finalizedByGamingMemberId: null,
         createdAt: new Date().toISOString(),
       };
     }
@@ -689,10 +711,21 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
 
   async finalizeMatchResult(
     matchResultId: string,
-    _finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }> {
     const result = this.matchResults.get(matchResultId);
     if (!result) throw new MatchResultNotFoundError();
+
+    // Authority checked before any mutation and before the idempotent-
+    // return branch — an unauthorized caller learns nothing about the
+    // Result's state, mirroring the RPC's own ordering.
+    const hasAuthority = await this.authority.hasActiveAuthority(
+      finalizedByGamingMemberId,
+      "CONSEQUENTIAL_FINALIZER"
+    );
+    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
+
     if (result.finalizedAt) {
       return { matchResultId, finalizedAt: result.finalizedAt, alreadyFinalized: true };
     }
@@ -707,7 +740,24 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     if (matchForGuard.cancelledAt) throw new MatchCancelledError();
 
     const finalizedAt = new Date().toISOString();
-    this.matchResults.set(matchResultId, { ...result, finalizedAt });
+    this.matchResults.set(matchResultId, {
+      ...result,
+      finalizedAt,
+      finalizedByGamingMemberId,
+    });
+
+    this.auditStore.record({
+      actionType: "FINALIZE_RESULT",
+      actorKind: "GAMING_MEMBER",
+      actorId: finalizedByGamingMemberId,
+      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+      targetType: "match_results",
+      targetId: matchResultId,
+      previousReference: null,
+      resultingReference: { table: "match_results", id: matchResultId },
+      outcome: "SUCCESS",
+      reason,
+    });
 
     const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
 
@@ -779,16 +829,26 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
 
   async correctMatchResult(
     matchResultId: string,
-    _finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;
     supersedesMatchResultId: string;
     alreadyFinalized: boolean;
   }> {
+    if (!reason || reason.trim().length === 0) throw new ReasonRequiredError();
+
     const result = this.matchResults.get(matchResultId);
     if (!result) throw new MatchResultNotFoundError();
     if (!result.supersedesMatchResultId) throw new NotACorrectionError();
+
+    const hasAuthority = await this.authority.hasActiveAuthority(
+      finalizedByGamingMemberId,
+      "CONSEQUENTIAL_FINALIZER"
+    );
+    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
+
     if (result.finalizedAt) {
       return {
         matchResultId,
@@ -810,7 +870,25 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     if (matchForGuard.cancelledAt) throw new MatchCancelledError();
 
     const finalizedAt = new Date().toISOString();
-    this.matchResults.set(matchResultId, { ...result, finalizedAt });
+    const supersedesMatchResultId = result.supersedesMatchResultId;
+    this.matchResults.set(matchResultId, {
+      ...result,
+      finalizedAt,
+      finalizedByGamingMemberId,
+    });
+
+    this.auditStore.record({
+      actionType: "CORRECT_RESULT",
+      actorKind: "GAMING_MEMBER",
+      actorId: finalizedByGamingMemberId,
+      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+      targetType: "match_results",
+      targetId: matchResultId,
+      previousReference: { table: "match_results", id: supersedesMatchResultId },
+      resultingReference: { table: "match_results", id: matchResultId },
+      outcome: "SUCCESS",
+      reason,
+    });
 
     const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
 

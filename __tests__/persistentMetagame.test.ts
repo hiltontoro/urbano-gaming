@@ -105,6 +105,7 @@ describe("Finalized Experience Summary — authorship and idempotency", () => {
 
   it("Soccer Predictions: occurred_at is the first accepted Prediction's own created_at, never moved by a later pre-kickoff revision", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, striker } = await setupRankedMatch(repo);
     const gamingMemberId = "gm-1";
 
@@ -196,6 +197,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("0/4 — every dimension wrong", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 3, predictedAwayScore: 3,
@@ -210,6 +212,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("1/4 — only EXACT_SCORELINE correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 1, predictedAwayScore: 0,
@@ -223,6 +226,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("1/4 — only ANY_GOALSCORER correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 3, predictedAwayScore: 3,
@@ -236,6 +240,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("1/4 — only ANY_GOAL_MINUTE correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 3, predictedAwayScore: 3,
@@ -249,6 +254,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("1/4 — only FIRST_TEAM_TO_SCORE correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 3, predictedAwayScore: 3,
@@ -262,6 +268,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("2/4 — EXACT_SCORELINE and ANY_GOAL_MINUTE correct, keys stay in fixed canonical order (not evaluation order)", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 1, predictedAwayScore: 0,
@@ -275,6 +282,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("3/4 — EXACT_SCORELINE, ANY_GOALSCORER, FIRST_TEAM_TO_SCORE correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 1, predictedAwayScore: 0,
@@ -288,6 +296,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("4/4 — every dimension correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 1, predictedAwayScore: 0,
@@ -307,6 +316,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 
   it("correct_dimension_count always equals correct_dimension_keys.length", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const setup = await setupTwoScorerMatch(repo);
     const { summary } = await finalizeWithPrediction(repo, setup, {
       predictedHomeScore: 1, predictedAwayScore: 0,
@@ -332,6 +342,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
 describe("Predictions-v2 — corrections proving case: ordinary 46 vs true 45+1", () => {
   it("correcting an official goal from ordinary minute 46 to (45, stoppage 1) flips Goal Minute correctness without disturbing the original Evaluation/Summary", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, striker } = await setupRankedMatchNoXpConfig(repo);
     const gamingMemberId = "gm-correction";
 
@@ -369,7 +380,7 @@ describe("Predictions-v2 — corrections proving case: ordinary 46 vs true 45+1"
       officialGoalEvents: [{ scorerPlayerId: striker.playerId, minuteRegulation: 45, minuteStoppage: 1 }],
       enteredByGamingMemberId: "gm-admin",
     });
-    const correctionResult = await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin");
+    const correctionResult = await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.");
 
     // Evaluation 1 / Summary 1 remain untouched — the immutable
     // evidence trail is never mutated or deleted.
@@ -408,6 +419,7 @@ describe("Predictions-v2 — corrections proving case: ordinary 46 vs true 45+1"
 describe("Activity Classification — Match-level, predeclared, locked", () => {
   it("an unclassified Match rejects a Prediction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const home = await createTeam(repo, { name: "Home FC" });
     const away = await createTeam(repo, { name: "Away FC" });
     const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Test Cup", kickoffAt: futureIso() });
@@ -425,6 +437,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
 
   it("a RANKED Match accepts a Prediction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupRankedMatch(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -436,6 +449,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
 
   it("classification is freely changeable before any Prediction or Result evidence exists", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupRankedMatch(repo);
     const changed = await setMatchActivityClassification(repo, match.matchId, "CASUAL");
     expect(changed.activityClassification).toBe("CASUAL");
@@ -444,6 +458,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
 
   it("classification becomes immutable once a Prediction exists", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupRankedMatch(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -460,6 +475,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
 
   it("classification becomes immutable once Result evidence exists, even with zero Predictions", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupRankedMatch(repo);
     await saveDraftResult(repo, { matchId: match.matchId, homeScore: 0, awayScore: 0, officialGoalEvents: [], enteredByGamingMemberId: "gm-admin" });
     await expect(setMatchActivityClassification(repo, match.matchId, "CASUAL")).rejects.toBeInstanceOf(
@@ -469,6 +485,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
 
   it("no Experience may be upgraded from Casual to Ranked (or any other classification) after evidence exists — the mechanism is symmetric for every pair", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupRankedMatch(repo);
     await setMatchActivityClassification(repo, match.matchId, "CASUAL");
     await submitPrediction(repo, {
@@ -678,6 +695,7 @@ describe("Daily participation allowance — configurable N, never a Product-chos
 describe("Missing-policy boundary — absence of configuration is never an error", () => {
   it("NO CONFIGURATION: a real Prediction finalize succeeds end-to-end with zero policy/rule rows — Evaluation, Summary, and Prize Qualification all behave normally, zero XP events", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, striker } = await setupRankedMatchNoXpConfig(repo);
     const gamingMemberId = "gm-no-config";
 

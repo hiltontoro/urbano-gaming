@@ -145,13 +145,17 @@ export interface PredictionsRepository {
     matchResultId: string
   ): Promise<OfficialGoalEventRecord[]>;
 
+  /** reason is optional for first finalization — pass null when the caller supplies none. */
   finalizeMatchResult(
     matchResultId: string,
-    finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }>;
+  /** reason is mandatory for correction — enforced both here and at the RPC layer. */
   correctMatchResult(
     matchResultId: string,
-    finalizedByGamingMemberId: string
+    finalizedByGamingMemberId: string,
+    reason: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;

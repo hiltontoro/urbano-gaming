@@ -131,6 +131,14 @@ export interface MatchResultRecord {
   finalizedAt: string | null;
   supersedesMatchResultId: string | null;
   enteredByGamingMemberId: string;
+  /**
+   * The Consequential Finalizer who ran finalize/correct — null for
+   * every Result finalized before Admin Control Plane A0 (never
+   * backfilled) and for a still-open draft. See
+   * Product/Authority_and_Audit_Foundation.md, "Result Finalization
+   * Accountability."
+   */
+  finalizedByGamingMemberId: string | null;
   createdAt: string;
 }
 

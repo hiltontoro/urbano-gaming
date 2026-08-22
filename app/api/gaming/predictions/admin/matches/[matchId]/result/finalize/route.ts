@@ -8,6 +8,7 @@ import {
 import { finalizeMatchResult } from "@/lib/gaming/predictions/finalizeMatchResult";
 import { correctMatchResult } from "@/lib/gaming/predictions/correctMatchResult";
 import { MatchResultNotFoundError } from "@/lib/gaming/predictions/types";
+import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "@/lib/gaming/authority/types";
 
 /**
  * POST /api/gaming/predictions/admin/matches/[matchId]/result/finalize
@@ -34,16 +35,34 @@ export async function POST(
 
   const repo = buildPredictionsRepo(credentials);
 
+  let reason: string | null = null;
+  try {
+    const body: unknown = await request.json();
+    if (body && typeof body === "object" && typeof (body as { reason?: unknown }).reason === "string") {
+      reason = (body as { reason: string }).reason;
+    }
+  } catch {
+    // No body, or non-JSON body — reason stays null, matching every
+    // other optional-field route in this codebase's own tolerance for
+    // an empty POST body.
+  }
+
   try {
     const draft = await repo.getDraftMatchResult(params.matchId);
     if (!draft) throw new MatchResultNotFoundError();
 
     const result = draft.supersedesMatchResultId
-      ? await correctMatchResult(repo, draft.matchResultId, admin.gamingMemberId)
-      : await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId);
+      ? await correctMatchResult(repo, draft.matchResultId, admin.gamingMemberId, reason ?? "")
+      : await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId, reason);
 
     return NextResponse.json({ result });
   } catch (err) {
+    if (err instanceof InsufficientPlatformAuthorityError) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
+    if (err instanceof ReasonRequiredError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     const status = statusForPredictionsError(err);
     if (status) return NextResponse.json({ error: (err as Error).message }, { status });
     console.error("FINALIZE_RESULT failed:", err);

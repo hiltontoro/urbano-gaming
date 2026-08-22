@@ -106,6 +106,7 @@ async function setupMatchAndVenue(repo: InMemoryPredictionsRepository, kickoffAt
 describe("Scoreline dimension", () => {
   it("exact scoreline match is correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -125,6 +126,7 @@ describe("Scoreline dimension", () => {
 
   it("a mismatched scoreline is incorrect even when the other three dimensions are correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -149,6 +151,7 @@ describe("Scoreline dimension", () => {
 describe("Goalscorer dimension", () => {
   it("the selected player scoring once is correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -168,6 +171,7 @@ describe("Goalscorer dimension", () => {
 
   it("the selected player not scoring is incorrect", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, vini } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -187,6 +191,7 @@ describe("Goalscorer dimension", () => {
 
   it("the selected player scoring twice (a brace) is still correct — not a multiset match", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -209,6 +214,7 @@ describe("Goalscorer dimension", () => {
 
   it("No Goalscorer is correct on a 0-0 official result", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -227,6 +233,7 @@ describe("Goalscorer dimension", () => {
 
   it("No Goalscorer is incorrect when the official match had a goal", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -248,6 +255,7 @@ describe("Goalscorer dimension", () => {
 describe("Goal Minute dimension", () => {
   it("a matching ordinary minute is correct", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -267,6 +275,7 @@ describe("Goal Minute dimension", () => {
 
   it("an absent minute is incorrect", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -286,6 +295,7 @@ describe("Goal Minute dimension", () => {
 
   it("first-half stoppage (45+2) matches only the identical (regulation, stoppage) pair, never a summed elapsed minute", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -305,6 +315,7 @@ describe("Goal Minute dimension", () => {
 
   it("the exact defect this fixes: a first-half-stoppage goal (45+10) does NOT satisfy a prediction of ordinary minute 55, despite summing to the same integer", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -324,6 +335,7 @@ describe("Goal Minute dimension", () => {
 
   it("second-half stoppage (90+7) matches only (90, 7), not ordinary 90 or a different stoppage offset", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const predictionExact = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-exact", venueActivationId: activation.venueActivationId,
@@ -351,6 +363,7 @@ describe("Goal Minute dimension", () => {
 
   it("No Goal is correct only when the official match had zero goals", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -371,6 +384,7 @@ describe("Goal Minute dimension", () => {
 describe("First Team to Score dimension", () => {
   it("the Home Team scoring first is correct when Home is predicted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, lewa } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -393,6 +407,7 @@ describe("First Team to Score dimension", () => {
 
   it("the Away Team scoring first is correct when Away is predicted, and ordering (not ordinal insertion) decides it", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, lewa } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -418,6 +433,7 @@ describe("First Team to Score dimension", () => {
 
   it("No Goal is correct on a 0-0 official result", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -436,6 +452,7 @@ describe("First Team to Score dimension", () => {
 
   it("an own goal credits the opposing Team, not the scorer's own Team", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, vini } = await setupMatchAndVenue(repo);
     // Vini plays for the Home Team (Real Madrid); an own goal by Vini
     // must credit AWAY (Barcelona) as the first-scoring Team.
@@ -459,6 +476,7 @@ describe("First Team to Score dimension", () => {
 describe("Independence of the four dimensions", () => {
   it("the founder's own example: Mbappe 20' + a Barcelona player 70', predicted as 2-1/Mbappe/70'/Barcelona-first", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, lewa } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -492,6 +510,7 @@ describe("Independence of the four dimensions", () => {
 describe("Roster validation", () => {
   it("a valid active player on either Match Team is accepted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, lewa } = await setupMatchAndVenue(repo);
     await expect(
       submitPrediction(repo, {
@@ -505,6 +524,7 @@ describe("Roster validation", () => {
 
   it("a player from neither Match Team is rejected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const otherTeam = await createTeam(repo, { name: "Bayern" });
     const outsider = await createPlayer(repo, { teamId: otherTeam.teamId, name: "Kane" });
@@ -520,6 +540,7 @@ describe("Roster validation", () => {
 
   it("an arbitrary/nonexistent player id is rejected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(
       submitPrediction(repo, {
@@ -533,6 +554,7 @@ describe("Roster validation", () => {
 
   it("a deactivated player cannot be newly selected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await setPlayerActive(repo, mbappe.playerId, false);
     await expect(
@@ -547,6 +569,7 @@ describe("Roster validation", () => {
 
   it("a player becoming inactive after settlement does not corrupt the historical Prediction or Evaluation", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -572,6 +595,7 @@ describe("Roster validation", () => {
 describe("Prediction uniqueness — one per Match per Gaming Member, globally", () => {
   it("a second venue activation for the same match rejects with VenueActivationImmutableError", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const venue2 = await createVenue(repo, { name: "Venue 2", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
     const activation2 = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue2.venueId });
@@ -595,6 +619,7 @@ describe("Prediction uniqueness — one per Match per Gaming Member, globally", 
 
   it("the same member may predict a different match freely", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match: matchA, activation: activationA, home, away } = await setupMatchAndVenue(repo);
     const matchB = await createMatch(repo, {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Friendly", kickoffAt: futureIso(),
@@ -617,6 +642,7 @@ describe("Prediction uniqueness — one per Match per Gaming Member, globally", 
 
   it("editing the same match through the same activation updates in place, not a second row", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const first = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -648,6 +674,7 @@ describe("Geolocation eligibility", () => {
 
   it("submission with no reported position fails honestly, no fallback", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(
       submitPrediction(repo, {
@@ -660,6 +687,7 @@ describe("Geolocation eligibility", () => {
 
   it("a submission from outside the venue radius is rejected with GeoNotEligibleError", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(
       submitPrediction(repo, {
@@ -672,6 +700,7 @@ describe("Geolocation eligibility", () => {
 
   it("a revision re-verifies eligibility — cannot submit at the venue then edit from home", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -689,6 +718,7 @@ describe("Geolocation eligibility", () => {
 
   it("no raw coordinates are persisted on the resulting record", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -708,6 +738,7 @@ describe("Geolocation eligibility", () => {
 describe("Deadline enforcement — kickoff lock", () => {
   it("editing is permitted before kickoff", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo, futureIso(600_000));
     await expect(
       submitPrediction(repo, {
@@ -720,6 +751,7 @@ describe("Deadline enforcement — kickoff lock", () => {
 
   it("submission is rejected once kickoff has passed", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo, pastIso(1000));
     await expect(
       submitPrediction(repo, {
@@ -732,6 +764,7 @@ describe("Deadline enforcement — kickoff lock", () => {
 
   it("a cancelled match rejects new predictions", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await repo.cancelMatch(match.matchId);
     await expect(
@@ -747,6 +780,7 @@ describe("Deadline enforcement — kickoff lock", () => {
 describe("Result draft / finalization boundary", () => {
   it("a draft has zero settlement effect", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -764,6 +798,7 @@ describe("Result draft / finalization boundary", () => {
 
   it("finalize produces evaluations exactly once and is idempotent on retry", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -785,6 +820,7 @@ describe("Result draft / finalization boundary", () => {
 describe("Result correction — supersession, compensation, no destroyed evidence", () => {
   it("a correction preserves the old evaluation and produces a new one against the corrected result", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, vini } = await setupMatchAndVenue(repo);
     // Override setupMatchAndVenue's generic default (PARTICIPATION=1)
     // with this test's specific fixture values — later insertion wins.
@@ -821,7 +857,7 @@ describe("Result correction — supersession, compensation, no destroyed evidenc
       officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 20 }],
       enteredByGamingMemberId: "gm-admin",
     });
-    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin");
+    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.");
 
     const stillOld = await repo.getEvaluation(prediction.predictionId, draft.matchResultId);
     expect(stillOld!.correctDimensionCount).toBe(4);
@@ -851,6 +887,7 @@ describe("Result correction — supersession, compensation, no destroyed evidenc
 
   it("a superseded qualification is never deleted; redemption history is preserved with the discrepancy visible", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, vini } = await setupMatchAndVenue(repo);
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 3, prizeLabel: "Sticker" });
@@ -881,7 +918,7 @@ describe("Result correction — supersession, compensation, no destroyed evidenc
       officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 20 }],
       enteredByGamingMemberId: "gm-admin",
     });
-    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin");
+    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.");
 
     const stillThere = await repo.getQualificationForEvaluation(oldEvaluation!.evaluationId);
     expect(stillThere).not.toBeNull();
@@ -898,6 +935,7 @@ describe("Result correction — supersession, compensation, no destroyed evidenc
 describe("Gaming XP (progression events)", () => {
   it("participation and performance both fire and stack when configured to", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await repo.metagameRepository.createGamingXpRule({
       categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5,
@@ -919,6 +957,7 @@ describe("Gaming XP (progression events)", () => {
 
   it("venue-hopping cannot create duplicate progression — only one prediction, one evaluation, ever exists per member per match", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -937,6 +976,7 @@ describe("Gaming XP (progression events)", () => {
 
   it("gaming_progression_events (0061) receives no new writes — the canonical ledger is gaming_xp_events", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-alex", venueActivationId: activation.venueActivationId,
@@ -958,6 +998,7 @@ describe("Gaming XP (progression events)", () => {
 describe("Prize tiers and qualification", () => {
   it("a configured tier produces a qualification", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
     const prediction = await submitPrediction(repo, {
@@ -975,6 +1016,7 @@ describe("Prize tiers and qualification", () => {
 
   it("an absent 2/4 tier produces no qualification and no error", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 3, prizeLabel: "Cap" });
@@ -1000,6 +1042,7 @@ describe("Prize tiers and qualification", () => {
 
   it("redemption is exactly once and idempotent on retry", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
     const prediction = await submitPrediction(repo, {
@@ -1021,6 +1064,7 @@ describe("Prize tiers and qualification", () => {
 
   it("a superseded, never-redeemed qualification cannot be newly redeemed", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe, vini } = await setupMatchAndVenue(repo);
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
     const prediction = await submitPrediction(repo, {
@@ -1044,7 +1088,7 @@ describe("Prize tiers and qualification", () => {
       matchId: match.matchId, homeScore: 0, awayScore: 0, officialGoalEvents: [],
       enteredByGamingMemberId: "gm-admin",
     });
-    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin");
+    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.");
 
     await expect(
       redeemPrizeQualification(repo, oldQualification!.prizeQualificationId, "gm-admin")
@@ -1055,6 +1099,7 @@ describe("Prize tiers and qualification", () => {
 describe("Ownership / privacy", () => {
   it("getPredictionForMember never returns another member's prediction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-alex", venueActivationId: activation.venueActivationId,
@@ -1087,6 +1132,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("ordinary regulation minutes 1-90 are accepted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const p1 = await attemptSubmit(repo, activation.venueActivationId, match.matchId, 1, null);
     expect(p1.predictedGoalMinuteRegulation).toBe(1);
@@ -1098,6 +1144,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("null/null is accepted as No Goal", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const p = await attemptSubmit(repo, activation.venueActivationId, match.matchId, null, null);
     expect(p.predictedGoalMinuteRegulation).toBeNull();
@@ -1106,6 +1153,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("regulation null with a non-null stoppage is rejected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(attemptSubmit(repo, activation.venueActivationId, match.matchId, null, 1)).rejects.toBeInstanceOf(
       InvalidGoalMinuteError
@@ -1114,6 +1162,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("stoppage with a base minute other than 45 or 90 is rejected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(attemptSubmit(repo, activation.venueActivationId, match.matchId, 46, 1)).rejects.toBeInstanceOf(
       InvalidGoalMinuteError
@@ -1122,6 +1171,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("zero or negative stoppage is rejected", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(attemptSubmit(repo, activation.venueActivationId, match.matchId, 45, 0)).rejects.toBeInstanceOf(
       InvalidGoalMinuteError
@@ -1135,6 +1185,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("a regulation minute above 90 is rejected — extra time is outside the canonical prediction boundary", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     await expect(attemptSubmit(repo, activation.venueActivationId, match.matchId, 91, null)).rejects.toBeInstanceOf(
       InvalidGoalMinuteError
@@ -1143,6 +1194,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 
   it("no artificial stoppage-offset ceiling is imposed — a large positive offset at a valid boundary minute is accepted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupMatchAndVenue(repo);
     const p = await attemptSubmit(repo, activation.venueActivationId, match.matchId, 90, 50);
     expect(p.predictedGoalMinuteStoppage).toBe(50);
@@ -1154,6 +1206,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
 describe("Predictions-v2 — own goal rules", () => {
   it("an own goal by the predicted player does NOT satisfy Any Goalscorer", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, vini } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1173,6 +1226,7 @@ describe("Predictions-v2 — own goal rules", () => {
 
   it("the same own goal DOES satisfy a matching Any Goal Minute prediction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, vini } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1196,6 +1250,7 @@ describe("Predictions-v2 — own goal rules", () => {
 describe("Predictions-v2 — regulation-time boundary", () => {
   it("an extra-time official goal (minuteRegulation > 90) does not satisfy Goalscorer, Goal Minute, or First Team, and does not invalidate a scoreless-regulation No Goal/No Goalscorer/No Team prediction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1222,6 +1277,7 @@ describe("Predictions-v2 — regulation-time boundary", () => {
 
   it("a prediction naming the extra-time scorer/minute is NOT satisfied by that extra-time goal", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1247,6 +1303,7 @@ describe("Predictions-v2 — regulation-time boundary", () => {
 describe("Predictions-v2 — cancelled/abandoned Match cannot produce a settlement", () => {
   it("a Match cancelled before kickoff cannot be finalized", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1275,6 +1332,7 @@ describe("Predictions-v2 — cancelled/abandoned Match cannot produce a settleme
 
   it("a Match cancelled with a draft Result already entered still cannot be finalized", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1300,6 +1358,7 @@ describe("Predictions-v2 — cancelled/abandoned Match cannot produce a settleme
 
   it("a correction cannot finalize after the Match has been cancelled", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation, mbappe } = await setupMatchAndVenue(repo);
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
@@ -1324,7 +1383,7 @@ describe("Predictions-v2 — cancelled/abandoned Match cannot produce a settleme
     });
     await cancelMatch(repo, match.matchId);
 
-    await expect(correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin")).rejects.toBeInstanceOf(
+    await expect(correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.")).rejects.toBeInstanceOf(
       MatchCancelledError
     );
   });
@@ -1345,6 +1404,7 @@ describe("Predictions-v2 — cancelled/abandoned Match cannot produce a settleme
 describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () => {
   it("a non-boundary stoppage tuple (46, 1) is rejected on first-time draft entry", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     await expect(
       saveDraftResult(repo, {
@@ -1357,6 +1417,7 @@ describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () 
 
   it("a non-boundary stoppage tuple is also rejected on a correction", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     const draft = await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 1, awayScore: 0,
@@ -1376,6 +1437,7 @@ describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () 
 
   it("legal period-boundary stoppage tuples — including extra-time (105, 120) — are all accepted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     const draft = await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 4, awayScore: 0,
@@ -1393,6 +1455,7 @@ describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () 
 
   it("a null stoppage is always accepted regardless of minute, including extra time", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     const draft = await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 1, awayScore: 0,
@@ -1430,6 +1493,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("a freshly created, classified Match has undeclared (null) XP eligibility — playable is not eligible", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupUndeclaredMatch(repo);
     const fetched = await repo.getMatchById(match.matchId);
     expect(fetched!.xpEligible).toBeNull();
@@ -1437,6 +1501,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("explicit eligible declaration succeeds before any evidence exists", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupUndeclaredMatch(repo);
     const result = await setMatchXpEligibility(repo, match.matchId, true);
     expect(result).toEqual({ matchId: match.matchId, xpEligible: true, locked: false });
@@ -1445,6 +1510,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("explicit non-eligible declaration succeeds before any evidence exists — a distinct state from undeclared", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupUndeclaredMatch(repo);
     const result = await setMatchXpEligibility(repo, match.matchId, false);
     expect(result).toEqual({ matchId: match.matchId, xpEligible: false, locked: false });
@@ -1453,6 +1519,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("idempotent redeclaration of the same value, once locked, returns success rather than erroring", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, true);
     await submitPrediction(repo, {
@@ -1467,6 +1534,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("eligibility cannot change once a Prediction exists", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, true);
     await submitPrediction(repo, {
@@ -1480,6 +1548,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("eligibility cannot change once Result evidence exists, even with zero Predictions ever submitted", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, false);
     await saveDraftResult(repo, {
@@ -1492,6 +1561,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("no retroactive not-eligible -> eligible upgrade after evidence exists", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, false);
     await submitPrediction(repo, {
@@ -1506,6 +1576,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("activating/enabling a Venue Activation never alters Match XP eligibility", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, venue } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, true);
     // A second, independent Venue Activation for the same Match — one
@@ -1519,6 +1590,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("an eligible Match's finalized Summary preserves xpEligible: true, and produces the applicable fixture XP", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, true);
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
@@ -1547,6 +1619,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("a non-eligible Match's finalized Summary preserves xpEligible: false, and produces zero XP even with valid fixture policy/rules configured", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, false);
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
@@ -1577,6 +1650,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("an undeclared (null) Match behaves identically to explicitly non-eligible — fail-closed, never silently eligible", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     // xp_eligible left null — no declaration call at all.
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
@@ -1601,6 +1675,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("TRAINING still produces zero XP even when the Match is declared XP-eligible", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const home = await createTeam(repo, { name: "Training XP Home" });
     const away = await createTeam(repo, { name: "Training XP Away" });
     const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Training", kickoffAt: futureIso() });
@@ -1627,6 +1702,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
 
   it("correction preserves the Match's own eligibility fact on the superseding Summary too", async () => {
     const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
     await setMatchXpEligibility(repo, match.matchId, true);
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
@@ -1653,7 +1729,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
       ],
       enteredByGamingMemberId: "gm-admin",
     });
-    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin");
+    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Official result corrected on review.");
 
     const current = await repo.getCurrentEvaluationForPrediction(prediction.predictionId);
     const summary2 = await repo.metagameRepository.getExperienceSummaryByIdempotencyKey("SOCCER_PREDICTIONS", current!.evaluationId);

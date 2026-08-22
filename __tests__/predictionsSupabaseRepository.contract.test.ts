@@ -13,6 +13,8 @@ import { redeemPrizeQualification } from "../lib/gaming/predictions/redeemPrizeQ
 import { requireGamingAdmin } from "../lib/gaming/predictions/httpAuth";
 import { cancelMatch } from "../lib/gaming/predictions/adminCatalog";
 import { InvalidGoalscorerSelectionError, InvalidGoalMinuteError, MatchCancelledError, XpEligibilityLockedError } from "../lib/gaming/predictions/types";
+import { SupabaseAuditRepository } from "../lib/gaming/audit/db/supabaseAuditRepository";
+import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../lib/gaming/authority/types";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
@@ -27,6 +29,7 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const repo = new SupabasePredictionsRepository(supabaseUrl, supabaseServiceRoleKey);
 const gamingRepo = new SupabaseGamingRepository(supabaseUrl, supabaseServiceRoleKey);
 const cleanupClient = createClient(supabaseUrl, supabaseServiceRoleKey);
+const auditRepo = new SupabaseAuditRepository(supabaseUrl, supabaseServiceRoleKey);
 
 const createdAuthUserIds: string[] = [];
 const createdGamingMemberIds: string[] = [];
@@ -42,6 +45,20 @@ async function createRealGamingMember(displayName: string): Promise<{ authUserId
   const member = await gamingRepo.createGamingMember(data.user.id, displayName);
   createdGamingMemberIds.push(member.gamingMemberId);
   return { authUserId: data.user.id, gamingMemberId: member.gamingMemberId };
+}
+
+/**
+ * Admin Control Plane A0. Direct authority_grants insert — the same
+ * fixture posture this file already uses for gaming_admins (see the
+ * "already Gaming admin" test below) — for tests that need an already-
+ * authorized Consequential Finalizer and are not themselves proving the
+ * grant/revoke workflow.
+ */
+async function grantFinalizerAuthority(gamingMemberId: string): Promise<void> {
+  const { error } = await cleanupClient
+    .from("authority_grants")
+    .insert({ gaming_member_id: gamingMemberId, authority_class: "CONSEQUENTIAL_FINALIZER" });
+  if (error) throw error;
 }
 
 /** Two Teams, two Players each — the same minimal proving case used throughout the behavioral suite. */
@@ -128,6 +145,12 @@ afterAll(async () => {
   // dependency order, before the auth user delete that would otherwise
   // be blocked by that same deliberate FK restriction.
   if (createdGamingMemberIds.length > 0) {
+    // Admin Control Plane A0: authority_grants/admin_audit_events also
+    // reference gaming_members with no cascade, for the same reason
+    // gaming_xp_events/experience_summaries below do not — deleted
+    // first, in dependency order.
+    await cleanupClient.from("admin_audit_events").delete().in("actor_id", createdGamingMemberIds);
+    await cleanupClient.from("authority_grants").delete().in("gaming_member_id", createdGamingMemberIds);
     await cleanupClient.from("gaming_xp_events").delete().in("gaming_member_id", createdGamingMemberIds);
     await cleanupClient.from("experience_summaries").delete().in("gaming_member_id", createdGamingMemberIds);
   }
@@ -160,6 +183,7 @@ describe("SupabasePredictionsRepository contract", () => {
     ]);
 
     const admin = await createRealGamingMember("ContractAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const alex = await createRealGamingMember("ContractAlex");
     const { home, away, mbappe, vini } = await createTeamsAndRoster();
 
@@ -250,7 +274,12 @@ describe("SupabasePredictionsRepository contract", () => {
       enteredByGamingMemberId: admin.gamingMemberId,
       supersedesMatchResultId: draft.matchResultId,
     });
-    const correctionResult = await correctMatchResult(repo, correctionDraft.matchResultId, admin.gamingMemberId);
+    const correctionResult = await correctMatchResult(
+      repo,
+      correctionDraft.matchResultId,
+      admin.gamingMemberId,
+      "Vini's goal disallowed on video review."
+    );
     expect(correctionResult.alreadyFinalized).toBe(false);
 
     const oldEvaluationStillIntact = await repo.getEvaluation(prediction.predictionId, draft.matchResultId);
@@ -292,6 +321,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("an own goal credits the opposing Team for First Team to Score, evaluated against the real database", async () => {
     const admin = await createRealGamingMember("ContractOwnGoalAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const alex = await createRealGamingMember("ContractOwnGoalAlex");
     const { home, away, vini } = await createTeamsAndRoster();
 
@@ -462,6 +492,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("Predictions-v2 acceptance gate (0100): a non-boundary official stoppage tuple (46, 1) is rejected by the real official_goal_events CHECK constraint", async () => {
     const admin = await createRealGamingMember("ContractOfficialBoundaryInvalid");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const { home, away, mbappe } = await createTeamsAndRoster();
     const match = await repo.createMatch({
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
@@ -486,6 +517,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("Predictions-v2 acceptance gate (0100): legal period-boundary stoppage tuples, including extra-time (105, 120), are accepted by the real database", async () => {
     const admin = await createRealGamingMember("ContractOfficialBoundaryValid");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const { home, away, mbappe } = await createTeamsAndRoster();
     const match = await repo.createMatch({
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
@@ -511,6 +543,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("Predictions-v2: structural Goal Minute comparison distinguishes ordinary 46 from the true (45, stoppage 1) pair against real Postgres", async () => {
     const admin = await createRealGamingMember("ContractStoppageAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const ordinaryGuesser = await createRealGamingMember("ContractStoppageOrdinary");
     const stoppageGuesser = await createRealGamingMember("ContractStoppageExact");
     const { home, away, mbappe } = await createTeamsAndRoster();
@@ -557,6 +590,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("Predictions-v2: an own goal is excluded from Any Goalscorer but included for Any Goal Minute against real Postgres", async () => {
     const admin = await createRealGamingMember("ContractOwnGoalDimensionsAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const alex = await createRealGamingMember("ContractOwnGoalDimensionsAlex");
     const { home, away, vini } = await createTeamsAndRoster();
 
@@ -592,6 +626,7 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("Predictions-v2: a cancelled Match cannot be finalized against real Postgres, and produces zero Evaluation rows", async () => {
     const admin = await createRealGamingMember("ContractCancelledAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const alex = await createRealGamingMember("ContractCancelledAlex");
     const { home, away, mbappe } = await createTeamsAndRoster();
 
@@ -674,6 +709,7 @@ describe("SupabasePredictionsRepository contract", () => {
       .insert({ category_key: "SOCCER_PREDICTIONS", consequence_class: "PARTICIPATION", performance_band_key: null, points: 5 });
 
     const admin = await createRealGamingMember("ContractXpEligAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const eligibleMember = await createRealGamingMember("ContractXpEligYes");
     const noneligibleMember = await createRealGamingMember("ContractXpEligNo");
     const { home, away, mbappe } = await createTeamsAndRoster();
@@ -768,4 +804,154 @@ describe("SupabasePredictionsRepository contract", () => {
     // rules mid-suite would risk a foreign key violation against that
     // still-standing evidence.
   }, 30000);
+});
+
+async function setupFinalizableMatch(displayNamePrefix: string) {
+  const admin = await createRealGamingMember(`${displayNamePrefix}Admin`);
+  await grantFinalizerAuthority(admin.gamingMemberId);
+  const member = await createRealGamingMember(`${displayNamePrefix}Member`);
+  const { home, away, mbappe, vini } = await createTeamsAndRoster();
+
+  const match = await repo.createMatch({
+    homeTeamId: home.teamId,
+    awayTeamId: away.teamId,
+    competition: "Contract Test — A0",
+    kickoffAt: futureIso(),
+  });
+  createdMatchIds.push(match.matchId);
+  await repo.setMatchActivityClassification(match.matchId, "RANKED");
+  await repo.setMatchXpEligibility(match.matchId, true);
+
+  const venue = await repo.createVenue({ name: "A0 Contract Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
+  createdVenueIds.push(venue.venueId);
+  const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
+
+  await submitPrediction(repo, {
+    matchId: match.matchId,
+    gamingMemberId: member.gamingMemberId,
+    venueActivationId: activation.venueActivationId,
+    predictedHomeScore: 0,
+    predictedAwayScore: 0,
+    predictedGoalscorerPlayerId: null,
+    predictedGoalMinuteRegulation: null,
+    predictedGoalMinuteStoppage: null,
+    predictedFirstTeamToScore: null,
+    geo: { latitude: 10.0001, longitude: 10.0001, accuracyMeters: 5 },
+  });
+
+  return { admin, match, mbappe, vini };
+}
+
+describe("SupabasePredictionsRepository contract — Admin Control Plane A0 First Consequential Integration against live Postgres", () => {
+  it("finalize without Consequential Finalizer authority is rejected at the RPC layer itself, not merely by the TS wrapper", async () => {
+    const notFinalizer = await createRealGamingMember("ContractA0NotFinalizer");
+    const { match } = await setupFinalizableMatch("ContractA0Unauthorized");
+    const draft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 0,
+      awayScore: 0,
+      officialGoalEvents: [],
+      enteredByGamingMemberId: notFinalizer.gamingMemberId,
+    });
+    // Calls the repository directly, bypassing the finalizeMatchResult
+    // TS command wrapper entirely, to prove enforcement lives at the
+    // RPC — the true, unbypassable boundary — not only in TypeScript.
+    await expect(repo.finalizeMatchResult(draft.matchResultId, notFinalizer.gamingMemberId, null)).rejects.toBeInstanceOf(
+      InsufficientPlatformAuthorityError
+    );
+  });
+
+  it("finalize persists the acting Consequential Finalizer's identity onto match_results", async () => {
+    const { admin, match } = await setupFinalizableMatch("ContractA0Finalize");
+    const draft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 0,
+      awayScore: 0,
+      officialGoalEvents: [],
+      enteredByGamingMemberId: admin.gamingMemberId,
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId, "Confirmed via official broadcast.");
+
+    const stored = await repo.getMatchResultById(draft.matchResultId);
+    expect(stored!.finalizedByGamingMemberId).toBe(admin.gamingMemberId);
+
+    const events = await auditRepo.listEventsForTarget("match_results", draft.matchResultId);
+    const finalizeEvents = events.filter((e) => e.actionType === "FINALIZE_RESULT");
+    expect(finalizeEvents).toHaveLength(1);
+    expect(finalizeEvents[0].actorId).toBe(admin.gamingMemberId);
+    expect(finalizeEvents[0].authorityClassUsed).toBe("CONSEQUENTIAL_FINALIZER");
+    expect(finalizeEvents[0].resultingReference).toEqual({ table: "match_results", id: draft.matchResultId });
+    expect(finalizeEvents[0].reason).toBe("Confirmed via official broadcast.");
+  });
+
+  it("correction without a reason is rejected at the RPC layer itself, before any mutation", async () => {
+    const { admin, match, mbappe } = await setupFinalizableMatch("ContractA0NoReason");
+    const draft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 1,
+      awayScore: 0,
+      officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 10 }],
+      enteredByGamingMemberId: admin.gamingMemberId,
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId);
+
+    const correctionDraft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 2,
+      awayScore: 0,
+      officialGoalEvents: [
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 10 },
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 60 },
+      ],
+      enteredByGamingMemberId: admin.gamingMemberId,
+      supersedesMatchResultId: draft.matchResultId,
+    });
+
+    // Calls the repository directly, bypassing correctMatchResult's own
+    // TS-level reason check, to prove the RPC enforces it independently.
+    await expect(repo.correctMatchResult(correctionDraft.matchResultId, admin.gamingMemberId, "")).rejects.toBeInstanceOf(
+      ReasonRequiredError
+    );
+
+    const stillDraft = await repo.getMatchResultById(correctionDraft.matchResultId);
+    expect(stillDraft!.finalizedAt).toBeNull();
+  });
+
+  it("correction persists the corrector's identity and produces one CORRECT_RESULT event referencing both Result versions", async () => {
+    const { admin, match, mbappe } = await setupFinalizableMatch("ContractA0Correct");
+    const draft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 1,
+      awayScore: 0,
+      officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 10 }],
+      enteredByGamingMemberId: admin.gamingMemberId,
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId);
+
+    const correctionDraft = await repo.saveDraftMatchResult({
+      matchId: match.matchId,
+      homeScore: 2,
+      awayScore: 0,
+      officialGoalEvents: [
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 10 },
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 60 },
+      ],
+      enteredByGamingMemberId: admin.gamingMemberId,
+      supersedesMatchResultId: draft.matchResultId,
+    });
+    await correctMatchResult(repo, correctionDraft.matchResultId, admin.gamingMemberId, "Second goal confirmed on review.");
+
+    const corrected = await repo.getMatchResultById(correctionDraft.matchResultId);
+    expect(corrected!.finalizedByGamingMemberId).toBe(admin.gamingMemberId);
+
+    const original = await repo.getMatchResultById(draft.matchResultId);
+    expect(original!.homeScore).toBe(1);
+
+    const events = await auditRepo.listEventsForTarget("match_results", correctionDraft.matchResultId);
+    const correctionEvents = events.filter((e) => e.actionType === "CORRECT_RESULT");
+    expect(correctionEvents).toHaveLength(1);
+    expect(correctionEvents[0].previousReference).toEqual({ table: "match_results", id: draft.matchResultId });
+    expect(correctionEvents[0].resultingReference).toEqual({ table: "match_results", id: correctionDraft.matchResultId });
+    expect(correctionEvents[0].reason).toBe("Second goal confirmed on review.");
+  });
 });
