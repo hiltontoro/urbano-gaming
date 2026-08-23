@@ -716,32 +716,50 @@ export interface GetSessionResult {
 }
 
 /**
- * Duel / SESSION_SUBGAME v1. GET_SESSION's own Duel projection —
- * distinct from DuelRecord, never carries correctOptionIndex, and
- * applies the read-model privacy requirement Duel_Architecture.md's
- * own "Capability Declaration"/GET_SESSION section requires: each
- * competitor always sees their own response; both competitors'
- * responses become visible to everyone only once the Duel is
- * COMPLETED, never while ACTIVE.
+ * Duel Mechanic Boundary — Narrow Backend Correction. GET_SESSION's
+ * own Duel projection for the currently-only mechanic, Multiple
+ * Choice: never carries correctOptionIndex, and applies the read-model
+ * privacy requirement Duel_Architecture.md's own "Read-Model Boundary"
+ * section requires: each competitor always sees their own response;
+ * both competitors' responses become visible to everyone only once the
+ * Duel is COMPLETED, never while ACTIVE. Nested under DuelSummary's own
+ * multipleChoice field, mirroring MultipleChoiceDuelContent — a future
+ * mechanic projects its own sibling shape under its own field, never
+ * widening this one.
  */
-export interface DuelSummary {
-  duelId: string;
-  competitorAParticipantId: string;
-  competitorBParticipantId: string;
+export interface MultipleChoiceDuelSummary {
   promptText: string;
   options: string[];
-  lifecycleState: DuelLifecycleState;
-  terminalResolution: DuelTerminalResolution | null;
-  winnerParticipantId: string | null;
-  reason: string | null;
-  startedAt: string | null;
-  endedAt: string | null;
   /** The calling competitor's own submitted option index. Null if the caller is not a competitor, or has not answered yet. */
   myResponseOptionIndex: number | null;
   /** Null while ACTIVE (privacy); populated for everyone once COMPLETED. */
   competitorAOptionIndex: number | null;
   /** Null while ACTIVE (privacy); populated for everyone once COMPLETED. */
   competitorBOptionIndex: number | null;
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. GET_SESSION's own Duel projection —
+ * distinct from DuelRecord. Generic Duel facts only at the top level;
+ * mechanicKey identifies which mechanic this Duel hosts, and that
+ * mechanic's own viewer-projected state lives in the correspondingly-
+ * named nested field (Product/Duel_Architecture.md's own "Read-Model
+ * Boundary" section — mechanic-specific state is projected according
+ * to that mechanic's own privacy/lifecycle rules, never flattened onto
+ * the shared summary).
+ */
+export interface DuelSummary {
+  duelId: string;
+  mechanicKey: DuelMechanicKey;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  lifecycleState: DuelLifecycleState;
+  terminalResolution: DuelTerminalResolution | null;
+  winnerParticipantId: string | null;
+  reason: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  multipleChoice: MultipleChoiceDuelSummary;
 }
 
 /** Raised when a generated room code collides with an active session. */
@@ -1447,14 +1465,49 @@ export type DuelExceptionalResolution =
   | "FORFEIT_A"
   | "FORFEIT_B";
 
-/** A Duel as exposed by GET_SESSION and by every Duel command's result. */
+/**
+ * Duel Mechanic Boundary — Narrow Backend Correction (Product/Duel_
+ * Architecture.md, "Duel Container vs. Mechanic" / "Mechanic
+ * Identity"). Code-owned vocabulary, not a database registry, mirroring
+ * SessionCapabilityKey's own precedent. Single member today because
+ * Multiple Choice is the only mechanic that has ever existed — this
+ * union grows only when a second mechanic is actually graduated and
+ * implemented, never speculatively.
+ */
+export type DuelMechanicKey = "MULTIPLE_CHOICE";
+
+/**
+ * Multiple Choice's own mechanic-owned content — the prompt and
+ * options a Duel competitor answers against. Duel_Architecture.md's
+ * own "Duel Container vs. Mechanic" section: these are not generic
+ * Duel facts, they belong to whichever mechanic produced them.
+ * Deliberately excludes correctOptionIndex, which never leaves the
+ * repository/resolution layer — see StartDuelResult's own doc comment.
+ */
+export interface MultipleChoiceDuelContent {
+  promptText: string;
+  options: string[];
+}
+
+/**
+ * A Duel as returned by the repository layer (getDuelById,
+ * getActiveDuelForSession, getDuelsForSession) — the internal record
+ * every command handler and the GET_SESSION projection build from.
+ * Not itself the GET_SESSION read-model shape; see DuelSummary for
+ * that. Generic Duel fields only — mechanicKey identifies which
+ * mechanic this Duel hosts; that mechanic's own content lives in the
+ * correspondingly-named nested field (multipleChoice today; a second
+ * mechanic would add its own sibling field, never widen this shape
+ * into a shared blob). Not a discriminated union yet — there is only
+ * one mechanic to discriminate against; that generalization is the
+ * second mechanic's own Slice, not this correction's.
+ */
 export interface DuelRecord {
   duelId: string;
   sessionId: string;
+  mechanicKey: DuelMechanicKey;
   competitorAParticipantId: string;
   competitorBParticipantId: string;
-  promptText: string;
-  options: string[];
   lifecycleState: DuelLifecycleState;
   terminalResolution: DuelTerminalResolution | null;
   winnerParticipantId: string | null;
@@ -1462,6 +1515,7 @@ export interface DuelRecord {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  multipleChoice: MultipleChoiceDuelContent;
 }
 
 /**
@@ -1470,10 +1524,23 @@ export interface DuelRecord {
  * requirement: the correct answer is never exposed to participants
  * before resolution, and this is the shape every caller (Host and
  * competitor alike) receives.
+ *
+ * Deliberately NOT nested like DuelRecord/DuelSummary, despite the
+ * Duel Mechanic Boundary correction: this is a command result, not a
+ * passive read-model any viewer polls regardless of what they just
+ * did. The Host who calls START_DUEL supplied promptText/options as
+ * input a moment earlier — echoing them back flat isn't the read-
+ * model coupling risk that correction addresses, since the caller
+ * already knows which mechanic they targeted. A future mechanic's own
+ * start command is expected to define its own result shape (its own
+ * config echoed back), not to force this one's shape wider — this
+ * type is Multiple Choice's own start-result, not a generic template
+ * to extend.
  */
 export interface StartDuelResult {
   duelId: string;
   sessionId: string;
+  mechanicKey: DuelMechanicKey;
   competitorAParticipantId: string;
   competitorBParticipantId: string;
   lifecycleState: DuelLifecycleState;

@@ -135,6 +135,7 @@ export async function startDuel(
   return {
     duelId: result.duelId,
     sessionId: session.sessionId,
+    mechanicKey: result.mechanicKey,
     competitorAParticipantId,
     competitorBParticipantId,
     lifecycleState: result.lifecycleState,

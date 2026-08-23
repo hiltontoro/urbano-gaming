@@ -287,7 +287,7 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       // all (read-model privacy) — only each competitor's own
       // myResponseOptionIndex is populated, and the host is not a
       // competitor.
-      expect(result.activeDuel?.competitorAOptionIndex).toBeNull();
+      expect(result.activeDuel?.multipleChoice.competitorAOptionIndex).toBeNull();
     });
 
     it("answers remain private before resolution — competitor B cannot see A's answer via GET_SESSION", async () => {
@@ -296,11 +296,11 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       await submitDuelResponse(repo, duel.duelId, a.participantToken, CORRECT_INDEX);
 
       const bView = await getSession(repo, session.sessionId, b.participantToken);
-      expect(bView.activeDuel?.competitorAOptionIndex).toBeNull();
-      expect(bView.activeDuel?.myResponseOptionIndex).toBeNull();
+      expect(bView.activeDuel?.multipleChoice.competitorAOptionIndex).toBeNull();
+      expect(bView.activeDuel?.multipleChoice.myResponseOptionIndex).toBeNull();
 
       const aView = await getSession(repo, session.sessionId, a.participantToken);
-      expect(aView.activeDuel?.myResponseOptionIndex).toBe(CORRECT_INDEX);
+      expect(aView.activeDuel?.multipleChoice.myResponseOptionIndex).toBe(CORRECT_INDEX);
     });
   });
 
@@ -404,8 +404,8 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       const cView = await getSession(repo, session.sessionId, c.participantToken);
       const resolved = cView.duelHistory.find((d) => d.duelId === duel.duelId);
       expect(resolved?.lifecycleState).toBe("COMPLETED");
-      expect(resolved?.competitorAOptionIndex).toBe(CORRECT_INDEX);
-      expect(resolved?.competitorBOptionIndex).toBe(CORRECT_INDEX + 1);
+      expect(resolved?.multipleChoice.competitorAOptionIndex).toBe(CORRECT_INDEX);
+      expect(resolved?.multipleChoice.competitorBOptionIndex).toBe(CORRECT_INDEX + 1);
       expect(resolved?.winnerParticipantId).toBe(a.participantId);
     });
   });
@@ -487,6 +487,58 @@ describe("Duel / SESSION_SUBGAME v1", () => {
     });
   });
 
+  describe("Duel Mechanic Boundary — mechanicKey (Product/Duel_Architecture.md \"Duel Container vs. Mechanic\")", () => {
+    it("START_DUEL's own result carries mechanicKey MULTIPLE_CHOICE", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      expect(duel.mechanicKey).toBe("MULTIPLE_CHOICE");
+    });
+
+    it("the active Duel summary in GET_SESSION carries mechanicKey", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      await startADuel(repo, session, a.participantId, b.participantId);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.activeDuel?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    });
+
+    it("a normally-resolved Duel's history entry retains mechanicKey", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuel(repo, duel.duelId, session.hostToken);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const resolved = result.duelHistory.find((d) => d.duelId === duel.duelId);
+      expect(resolved?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    });
+
+    it("an exceptionally-resolved (FORFEIT) Duel's history entry retains mechanicKey", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, duel.duelId, session.hostToken, "FORFEIT_A", "Left.");
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const resolved = result.duelHistory.find((d) => d.duelId === duel.duelId);
+      expect(resolved?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    });
+
+    it("a Duel VOIDed by COMPLETE_SESSION retains mechanicKey in history", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await completeSession(repo, session.sessionId, session.hostToken);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const voided = result.duelHistory.find((d) => d.duelId === duel.duelId);
+      expect(voided?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    });
+
+    it("the nested multipleChoice projection carries prompt/options and privacy-correct answer fields", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      await startADuel(repo, session, a.participantId, b.participantId);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.activeDuel?.multipleChoice.promptText).toBe("Capital of France?");
+      expect(result.activeDuel?.multipleChoice.options).toEqual(OPTIONS);
+      expect(result.activeDuel).not.toHaveProperty("promptText");
+      expect(result.activeDuel).not.toHaveProperty("options");
+    });
+  });
+
   describe("Session completion while a Duel is active", () => {
     it("COMPLETE_SESSION is not blocked by an active Duel", async () => {
       const { repo, session, a, b } = await setupDuelReadySession();
@@ -516,7 +568,7 @@ describe("Duel / SESSION_SUBGAME v1", () => {
 
       const result = await getSession(repo, session.sessionId, a.participantToken);
       const voided = result.duelHistory.find((d) => d.duelId === duel.duelId);
-      expect(voided?.competitorAOptionIndex).toBe(CORRECT_INDEX);
+      expect(voided?.multipleChoice.competitorAOptionIndex).toBe(CORRECT_INDEX);
     });
   });
 

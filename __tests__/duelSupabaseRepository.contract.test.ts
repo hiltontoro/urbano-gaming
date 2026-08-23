@@ -191,6 +191,92 @@ describe("SupabaseSessionRepository contract — Duel migration-created schema",
   });
 });
 
+describe("duels.mechanic_key — Duel Mechanic Boundary correction (0136), live Postgres", () => {
+  it("a row inserted through the unchanged start_duel_atomically RPC gets MULTIPLE_CHOICE via the column default", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const started = await startADuel(session, a.participantId, b.participantId);
+
+    const { data, error } = await cleanupClient
+      .from("duels")
+      .select("mechanic_key")
+      .eq("duel_id", started.duelId)
+      .single();
+    if (error) throw error;
+    expect(data.mechanic_key).toBe("MULTIPLE_CHOICE");
+  });
+
+  it("a pre-existing-style row, inserted with no mechanic_key column supplied at all (simulating a row from before this migration), backfills to MULTIPLE_CHOICE via the same default", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duelId = randomUUID();
+    const { error: insertError } = await cleanupClient.from("duels").insert({
+      duel_id: duelId,
+      session_id: session.sessionId,
+      competitor_a_participant_id: a.participantId,
+      competitor_b_participant_id: b.participantId,
+      prompt_text: "Legacy-shaped insert.",
+      options: OPTIONS,
+      correct_option_index: 0,
+      lifecycle_state: "COMPLETED",
+      terminal_resolution: "VOID",
+    });
+    if (insertError) throw insertError;
+
+    const record = await repository.getDuelById(duelId);
+    expect(record?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    expect(record?.multipleChoice.promptText).toBe("Legacy-shaped insert.");
+  });
+
+  it("rejects an out-of-vocabulary mechanic_key at the database level (check constraint)", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const { error } = await cleanupClient.from("duels").insert({
+      session_id: session.sessionId,
+      competitor_a_participant_id: a.participantId,
+      competitor_b_participant_id: b.participantId,
+      prompt_text: "Q?",
+      options: OPTIONS,
+      correct_option_index: 0,
+      mechanic_key: "CONNECT_FOUR",
+    });
+    expect(error).not.toBeNull();
+    expect(error?.message).toMatch(/duels_mechanic_key_valid_values/);
+  });
+
+  it("mechanicKey survives normal resolution, exceptional resolution, and Session-completion VOID unchanged", async () => {
+    const { session, participants } = await setupDuelReadySession(["DUEL"], [
+      "MechA1",
+      "MechB1",
+      "MechA2",
+      "MechB2",
+      "MechA3",
+      "MechB3",
+    ]);
+    const [p1, p2, p3, p4, p5, p6] = participants;
+
+    const normal = await startADuel(session, p1.participantId, p2.participantId);
+    const normalResolved = await repository.resolveDuel(normal.duelId, session.hostToken);
+    const normalRecord = await repository.getDuelById(normalResolved.duelId);
+    expect(normalRecord?.mechanicKey).toBe("MULTIPLE_CHOICE");
+
+    const exceptional = await startADuel(session, p3.participantId, p4.participantId);
+    await repository.resolveDuelExceptionally(exceptional.duelId, session.hostToken, "CANCELLED", null);
+    const exceptionalRecord = await repository.getDuelById(exceptional.duelId);
+    expect(exceptionalRecord?.mechanicKey).toBe("MULTIPLE_CHOICE");
+
+    const voided = await startADuel(session, p5.participantId, p6.participantId);
+    await repository.completeSession(session.sessionId, session.hostToken, {
+      sessionId: session.sessionId,
+      eventType: "SESSION_COMPLETED",
+      payload: {},
+    });
+    const voidedRecord = await repository.getDuelById(voided.duelId);
+    expect(voidedRecord?.mechanicKey).toBe("MULTIPLE_CHOICE");
+    expect(voidedRecord?.terminalResolution).toBe("VOID");
+  });
+});
+
 describe("start_duel_atomically — live Postgres", () => {
   it("creates an ACTIVE duel bound to two real competitors, with no interaction_instances row", async () => {
     const { session, participants } = await setupDuelReadySession();

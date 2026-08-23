@@ -10,6 +10,7 @@ import type {
   SegmentTarget,
   StartTurnConfig,
   DuelRecord,
+  DuelMechanicKey,
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
@@ -1546,10 +1547,13 @@ export class SupabaseSessionRepository implements SessionRepository {
     return {
       duelId: row.duel_id as string,
       sessionId: row.session_id as string,
+      // mechanic_key is NOT NULL + CHECK-constrained to the same
+      // vocabulary DuelMechanicKey declares (0136's own migration
+      // comment) — trusted the same way lifecycle_state/terminal_
+      // resolution already are below, not re-validated here.
+      mechanicKey: row.mechanic_key as DuelMechanicKey,
       competitorAParticipantId: row.competitor_a_participant_id as string,
       competitorBParticipantId: row.competitor_b_participant_id as string,
-      promptText: row.prompt_text as string,
-      options: row.options as string[],
       lifecycleState: row.lifecycle_state as DuelLifecycleState,
       terminalResolution: (row.terminal_resolution ?? null) as DuelTerminalResolution | null,
       winnerParticipantId: (row.winner_participant_id ?? null) as string | null,
@@ -1557,6 +1561,10 @@ export class SupabaseSessionRepository implements SessionRepository {
       createdAt: row.created_at as string,
       startedAt: (row.started_at ?? null) as string | null,
       endedAt: (row.ended_at ?? null) as string | null,
+      multipleChoice: {
+        promptText: row.prompt_text as string,
+        options: row.options as string[],
+      },
     };
   }
 
@@ -1570,6 +1578,7 @@ export class SupabaseSessionRepository implements SessionRepository {
     correctOptionIndex: number
   ): Promise<{
     duelId: string;
+    mechanicKey: DuelMechanicKey;
     lifecycleState: DuelLifecycleState;
     promptText: string;
     options: string[];
@@ -1621,6 +1630,11 @@ export class SupabaseSessionRepository implements SessionRepository {
 
     return {
       duelId: row.duel_id,
+      // start_duel_atomically's own INSERT never lists mechanic_key,
+      // so every row it creates gets the column default (0136) —
+      // hardcoded here rather than added to the RPC's own returns
+      // table, since there is only one mechanic to return.
+      mechanicKey: "MULTIPLE_CHOICE",
       lifecycleState: row.lifecycle_state as DuelLifecycleState,
       promptText: row.prompt_text,
       options: row.options as string[],

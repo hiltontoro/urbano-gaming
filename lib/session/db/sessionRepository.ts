@@ -8,6 +8,7 @@ import type {
   SegmentTarget,
   StartTurnConfig,
   DuelRecord,
+  DuelMechanicKey,
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
@@ -1218,6 +1219,7 @@ export interface SessionRepository {
     correctOptionIndex: number
   ): Promise<{
     duelId: string;
+    mechanicKey: DuelMechanicKey;
     lifecycleState: DuelLifecycleState;
     promptText: string;
     options: string[];

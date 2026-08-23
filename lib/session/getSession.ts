@@ -498,19 +498,22 @@ export async function getSession(
 
       return {
         duelId: duel.duelId,
+        mechanicKey: duel.mechanicKey,
         competitorAParticipantId: duel.competitorAParticipantId,
         competitorBParticipantId: duel.competitorBParticipantId,
-        promptText: duel.promptText,
-        options: duel.options,
         lifecycleState: duel.lifecycleState,
         terminalResolution: duel.terminalResolution,
         winnerParticipantId: duel.winnerParticipantId,
         reason: duel.reason,
         startedAt: duel.startedAt,
         endedAt: duel.endedAt,
-        myResponseOptionIndex,
-        competitorAOptionIndex: revealed ? responseA?.selectedOptionIndex ?? null : null,
-        competitorBOptionIndex: revealed ? responseB?.selectedOptionIndex ?? null : null,
+        multipleChoice: {
+          promptText: duel.multipleChoice.promptText,
+          options: duel.multipleChoice.options,
+          myResponseOptionIndex,
+          competitorAOptionIndex: revealed ? responseA?.selectedOptionIndex ?? null : null,
+          competitorBOptionIndex: revealed ? responseB?.selectedOptionIndex ?? null : null,
+        },
       };
     })
   );

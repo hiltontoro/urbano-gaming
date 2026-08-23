@@ -62,6 +62,7 @@ import {
 } from "../types";
 import type {
   DuelRecord,
+  DuelMechanicKey,
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
@@ -1832,6 +1833,7 @@ export class InMemorySessionRepository implements SessionRepository {
     correctOptionIndex: number
   ): Promise<{
     duelId: string;
+    mechanicKey: DuelMechanicKey;
     lifecycleState: DuelLifecycleState;
     promptText: string;
     options: string[];
@@ -1891,10 +1893,9 @@ export class InMemorySessionRepository implements SessionRepository {
     const duel: DuelRecord = {
       duelId: randomUUID(),
       sessionId,
+      mechanicKey: "MULTIPLE_CHOICE",
       competitorAParticipantId,
       competitorBParticipantId,
-      promptText: trimmedPrompt,
-      options: trimmedOptions,
       lifecycleState: "ACTIVE",
       terminalResolution: null,
       winnerParticipantId: null,
@@ -1902,6 +1903,10 @@ export class InMemorySessionRepository implements SessionRepository {
       createdAt: startedAt,
       startedAt,
       endedAt: null,
+      multipleChoice: {
+        promptText: trimmedPrompt,
+        options: trimmedOptions,
+      },
     };
     this.duels.set(duel.duelId, duel);
     // correctOptionIndex is intentionally not stored on the public
@@ -1921,9 +1926,10 @@ export class InMemorySessionRepository implements SessionRepository {
 
     return {
       duelId: duel.duelId,
+      mechanicKey: duel.mechanicKey,
       lifecycleState: duel.lifecycleState,
-      promptText: duel.promptText,
-      options: duel.options,
+      promptText: duel.multipleChoice.promptText,
+      options: duel.multipleChoice.options,
       startedAt,
     };
   }
@@ -1955,7 +1961,7 @@ export class InMemorySessionRepository implements SessionRepository {
     if (
       !Number.isInteger(selectedOptionIndex) ||
       selectedOptionIndex < 0 ||
-      selectedOptionIndex >= duel.options.length
+      selectedOptionIndex >= duel.multipleChoice.options.length
     ) {
       throw new InvalidDuelOptionSelectionError();
     }
