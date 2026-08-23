@@ -21,6 +21,7 @@ import {
   VotingSourceInteractionNotEligibleError,
   AmbiguousStartSessionTargetError,
   CapabilityNotAuthorizedError,
+  ActiveDuelExistsError,
 } from "@/lib/session/types";
 
 /**
@@ -330,6 +331,9 @@ export async function POST(
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
     if (err instanceof PreviousInteractionNotRevealedError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof ActiveDuelExistsError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
     if (err instanceof NoCurrentSegmentToContinueError) {

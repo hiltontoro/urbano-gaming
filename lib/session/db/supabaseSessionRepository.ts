@@ -9,6 +9,10 @@ import type {
   VotingResultSummary,
   SegmentTarget,
   StartTurnConfig,
+  DuelRecord,
+  DuelLifecycleState,
+  DuelTerminalResolution,
+  DuelExceptionalResolution,
 } from "../types";
 import {
   RoomCodeCollisionError,
@@ -49,6 +53,18 @@ import {
   CapabilitiesLockedError,
   SessionCapabilitiesNotDeclaredError,
   CapabilityNotAuthorizedError,
+  DuplicateDuelCompetitorError,
+  DuelCompetitorNotInSessionError,
+  ActiveDuelExistsError,
+  InteractionActiveError,
+  InvalidDuelOptionsError,
+  DuelNotFoundError,
+  DuelAccessDeniedError,
+  DuelNotActiveError,
+  InvalidDuelOptionSelectionError,
+  DuelAlreadyResolvedError,
+  InvalidDuelResolutionError,
+  DuelReasonRequiredError,
 } from "../types";
 import type {
   SessionEventRecord,
@@ -617,6 +633,14 @@ export class SupabaseSessionRepository implements SessionRepository {
         error.message.includes("LOBBY_NOT_LOCKED")
       ) {
         throw new LobbyNotLockedError(extractStateFromGuardMessage(error.message));
+      }
+
+      if (
+        error.code === "P0001" &&
+        typeof error.message === "string" &&
+        error.message.includes("ACTIVE_DUEL_EXISTS")
+      ) {
+        throw new ActiveDuelExistsError();
       }
 
       if (
@@ -1308,6 +1332,14 @@ export class SupabaseSessionRepository implements SessionRepository {
       if (
         error.code === "P0001" &&
         typeof error.message === "string" &&
+        error.message.includes("ACTIVE_DUEL_EXISTS")
+      ) {
+        throw new ActiveDuelExistsError();
+      }
+
+      if (
+        error.code === "P0001" &&
+        typeof error.message === "string" &&
         error.message.includes("CAPABILITY_NOT_AUTHORIZED")
       ) {
         throw new CapabilityNotAuthorizedError("QUIZ");
@@ -1508,5 +1540,266 @@ export class SupabaseSessionRepository implements SessionRepository {
       closesAt: data.closes_at,
       closedAt: data.closed_at,
     };
+  }
+
+  private toDuelRecord(row: Record<string, unknown>): DuelRecord {
+    return {
+      duelId: row.duel_id as string,
+      sessionId: row.session_id as string,
+      competitorAParticipantId: row.competitor_a_participant_id as string,
+      competitorBParticipantId: row.competitor_b_participant_id as string,
+      promptText: row.prompt_text as string,
+      options: row.options as string[],
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      terminalResolution: (row.terminal_resolution ?? null) as DuelTerminalResolution | null,
+      winnerParticipantId: (row.winner_participant_id ?? null) as string | null,
+      reason: (row.reason ?? null) as string | null,
+      createdAt: row.created_at as string,
+      startedAt: (row.started_at ?? null) as string | null,
+      endedAt: (row.ended_at ?? null) as string | null,
+    };
+  }
+
+  async startDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    promptText: string,
+    options: string[],
+    correctOptionIndex: number
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    promptText: string;
+    options: string[];
+    startedAt: string;
+  }> {
+    const { data, error } = await this.client.rpc("start_duel_atomically", {
+      p_session_id: sessionId,
+      p_host_token: hostToken,
+      p_competitor_a_participant_id: competitorAParticipantId,
+      p_competitor_b_participant_id: competitorBParticipantId,
+      p_prompt_text: promptText,
+      p_options: options,
+      p_correct_option_index: correctOptionIndex,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUPLICATE_DUEL_COMPETITOR")) {
+        throw new DuplicateDuelCompetitorError();
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_DUEL_OPTIONS")) {
+        throw new InvalidDuelOptionsError();
+      }
+      if (error.code === "P0001" && msg.includes("SESSION_NOT_FOUND")) {
+        throw new SessionNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("HOST_TOKEN_MISMATCH")) {
+        throw new HostTokenMismatchError();
+      }
+      if (error.code === "P0001" && msg.includes("LOBBY_NOT_LOCKED")) {
+        throw new LobbyNotLockedError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("CAPABILITY_NOT_AUTHORIZED")) {
+        throw new CapabilityNotAuthorizedError("DUEL");
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_COMPETITOR_NOT_IN_SESSION")) {
+        throw new DuelCompetitorNotInSessionError();
+      }
+      if (error.code === "P0001" && msg.includes("INTERACTION_ACTIVE")) {
+        throw new InteractionActiveError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("ACTIVE_DUEL_EXISTS")) {
+        throw new ActiveDuelExistsError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      duelId: row.duel_id,
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      promptText: row.prompt_text,
+      options: row.options as string[],
+      startedAt: row.started_at,
+    };
+  }
+
+  async submitDuelResponse(
+    duelId: string,
+    participantToken: string,
+    selectedOptionIndex: number
+  ): Promise<{ participantId: string; answeredAt: string }> {
+    const { data, error } = await this.client.rpc("submit_duel_response_atomically", {
+      p_duel_id: duelId,
+      p_participant_token: participantToken,
+      p_selected_option_index: selectedOptionIndex,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_FOUND")) {
+        throw new DuelNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_ACTIVE")) {
+        throw new DuelNotActiveError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_ACCESS_DENIED")) {
+        throw new DuelAccessDeniedError();
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_DUEL_OPTION_SELECTION")) {
+        throw new InvalidDuelOptionSelectionError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return { participantId: row.participant_id, answeredAt: row.answered_at };
+  }
+
+  async resolveDuel(
+    duelId: string,
+    hostToken: string
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }> {
+    const { data, error } = await this.client.rpc("resolve_duel_atomically", {
+      p_duel_id: duelId,
+      p_host_token: hostToken,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_FOUND")) {
+        throw new DuelNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("HOST_TOKEN_MISMATCH")) {
+        throw new HostTokenMismatchError();
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_ALREADY_RESOLVED")) {
+        throw new DuelAlreadyResolvedError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      duelId: row.duel_id,
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      terminalResolution: row.terminal_resolution as DuelTerminalResolution,
+      winnerParticipantId: row.winner_participant_id ?? null,
+    };
+  }
+
+  async resolveDuelExceptionally(
+    duelId: string,
+    hostToken: string,
+    resolution: DuelExceptionalResolution,
+    reason: string | null
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }> {
+    const { data, error } = await this.client.rpc("resolve_duel_exceptionally_atomically", {
+      p_duel_id: duelId,
+      p_host_token: hostToken,
+      p_resolution: resolution,
+      p_reason: reason,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("INVALID_DUEL_RESOLUTION")) {
+        throw new InvalidDuelResolutionError();
+      }
+      if (error.code === "P0001" && msg.includes("REASON_REQUIRED")) {
+        throw new DuelReasonRequiredError();
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_FOUND")) {
+        throw new DuelNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("HOST_TOKEN_MISMATCH")) {
+        throw new HostTokenMismatchError();
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_ALREADY_RESOLVED")) {
+        throw new DuelAlreadyResolvedError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      duelId: row.duel_id,
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      terminalResolution: row.terminal_resolution as DuelTerminalResolution,
+      winnerParticipantId: row.winner_participant_id ?? null,
+    };
+  }
+
+  async getDuelById(duelId: string): Promise<DuelRecord | null> {
+    const { data, error } = await this.client
+      .from("duels")
+      .select("*")
+      .eq("duel_id", duelId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return this.toDuelRecord(data);
+  }
+
+  async getActiveDuelForSession(sessionId: string): Promise<DuelRecord | null> {
+    const { data, error } = await this.client
+      .from("duels")
+      .select("*")
+      .eq("session_id", sessionId)
+      .eq("lifecycle_state", "ACTIVE")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return this.toDuelRecord(data);
+  }
+
+  async getDuelsForSession(sessionId: string): Promise<DuelRecord[]> {
+    const { data, error } = await this.client
+      .from("duels")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return (data ?? []).map((row) => this.toDuelRecord(row));
+  }
+
+  async getDuelResponses(
+    duelId: string
+  ): Promise<Array<{ participantId: string; selectedOptionIndex: number; answeredAt: string }>> {
+    const { data, error } = await this.client
+      .from("duel_responses")
+      .select("*")
+      .eq("duel_id", duelId);
+
+    if (error) throw error;
+
+    return (data ?? []).map((row) => ({
+      participantId: row.participant_id,
+      selectedOptionIndex: row.selected_option_index,
+      answeredAt: row.answered_at,
+    }));
   }
 }

@@ -470,6 +470,52 @@ export async function getSession(
     }
   }
 
+  // Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Read-
+  // model privacy: myResponseOptionIndex is always visible to the
+  // calling competitor (their own answer); both competitors' own
+  // answers are visible to everyone only once COMPLETED, never while
+  // ACTIVE — the exact requirement Duel_Architecture.md's own read-
+  // model section states.
+  const duelRecords = await repo.getDuelsForSession(sessionId);
+  const duelSummaries = await Promise.all(
+    duelRecords.map(async (duel) => {
+      const responses = await repo.getDuelResponses(duel.duelId);
+      const responseA = responses.find(
+        (r) => r.participantId === duel.competitorAParticipantId
+      );
+      const responseB = responses.find(
+        (r) => r.participantId === duel.competitorBParticipantId
+      );
+      const revealed = duel.lifecycleState === "COMPLETED";
+
+      const myResponseOptionIndex = callingParticipant
+        ? callingParticipant.participantId === duel.competitorAParticipantId
+          ? responseA?.selectedOptionIndex ?? null
+          : callingParticipant.participantId === duel.competitorBParticipantId
+          ? responseB?.selectedOptionIndex ?? null
+          : null
+        : null;
+
+      return {
+        duelId: duel.duelId,
+        competitorAParticipantId: duel.competitorAParticipantId,
+        competitorBParticipantId: duel.competitorBParticipantId,
+        promptText: duel.promptText,
+        options: duel.options,
+        lifecycleState: duel.lifecycleState,
+        terminalResolution: duel.terminalResolution,
+        winnerParticipantId: duel.winnerParticipantId,
+        reason: duel.reason,
+        startedAt: duel.startedAt,
+        endedAt: duel.endedAt,
+        myResponseOptionIndex,
+        competitorAOptionIndex: revealed ? responseA?.selectedOptionIndex ?? null : null,
+        competitorBOptionIndex: revealed ? responseB?.selectedOptionIndex ?? null : null,
+      };
+    })
+  );
+  const activeDuel = duelSummaries.find((d) => d.lifecycleState === "ACTIVE") ?? null;
+
   return {
     sessionId: session.sessionId,
     state: session.state,
@@ -504,5 +550,7 @@ export async function getSession(
     declaredCapabilities: session.declaredCapabilities ?? [],
     capabilitiesLocked: participants.length > 0,
     legacyUndeclared: session.declaredCapabilities === null,
+    activeDuel,
+    duelHistory: duelSummaries,
   };
 }

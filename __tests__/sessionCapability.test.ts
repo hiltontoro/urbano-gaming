@@ -121,8 +121,15 @@ describe("Session Capability Architecture v1", () => {
       const repo = new InMemorySessionRepository();
       const session = await createSession(repo);
 
+      // Duel / SESSION_SUBGAME v1: DUEL graduated from "nonexistent" to
+      // a real capability key (see duel.test.ts) — this placeholder is
+      // updated to a key that genuinely does not exist, preserving the
+      // original intent of this test rather than silently asserting
+      // something now false.
       await expect(
-        setSessionCapabilities(repo, session.sessionId, session.hostToken, ["DUEL"])
+        setSessionCapabilities(repo, session.sessionId, session.hostToken, [
+          "NONEXISTENT_CAPABILITY",
+        ])
       ).rejects.toBeInstanceOf(InvalidCapabilityKeyError);
     });
 

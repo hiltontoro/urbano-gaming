@@ -7,6 +7,10 @@ import type {
   VotingResultSummary,
   SegmentTarget,
   StartTurnConfig,
+  DuelRecord,
+  DuelLifecycleState,
+  DuelTerminalResolution,
+  DuelExceptionalResolution,
 } from "../types";
 
 export interface SessionEventRecord {
@@ -1168,4 +1172,171 @@ export interface SessionRepository {
    * state.
    */
   getQuizWindowForSegment(segmentId: string): Promise<QuizWindowRecord | null>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md).
+   * START_DUEL's atomic operation. Re-verifies the host token and
+   * LOBBY_LOCKED state, that DUEL is declared, that both competitor
+   * ids are distinct participants of this session, that no ordinary
+   * Interaction Instance is active (not yet RESULT_REVEAL), and that
+   * no other Duel is already active for this session — creating the
+   * Duel already ACTIVE, mirroring how ordinary Interaction Instances
+   * go straight to PROMPT_ACTIVE. Duel does not create an
+   * interaction_instances row; it is its own structurally separate
+   * entity (see 0128's migration comment for why).
+   *
+   * Implementations must:
+   * - re-verify the host token and session state inside the atomic
+   *   operation itself;
+   * - throw SessionNotFoundError only when no session exists;
+   * - throw HostTokenMismatchError only on a host-token mismatch;
+   * - throw LobbyNotLockedError only when the session is not
+   *   LOBBY_LOCKED;
+   * - throw CapabilityNotAuthorizedError("DUEL") only when DUEL is not
+   *   declared;
+   * - throw DuplicateDuelCompetitorError only when both competitor ids
+   *   are identical;
+   * - throw DuelCompetitorNotInSessionError only when a competitor id
+   *   does not resolve to a participant of this session;
+   * - throw InteractionActiveError only when the current Interaction
+   *   Instance (if any) is not RESULT_REVEAL;
+   * - throw ActiveDuelExistsError only when another Duel is already
+   *   ACTIVE for this session;
+   * - throw InvalidDuelOptionsError only when options/correctOptionIndex
+   *   are invalid;
+   * - persist exactly one DUEL_STARTED session event on success;
+   * - return the newly created Duel's public fields, never the correct
+   *   option index.
+   */
+  startDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    promptText: string,
+    options: string[],
+    correctOptionIndex: number
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    promptText: string;
+    options: string[];
+    startedAt: string;
+  }>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. SUBMIT_DUEL_RESPONSE's atomic
+   * operation. Participant-token authority only — resolves the caller
+   * against this session's participants, then requires that resolved
+   * participant to be one of this Duel's two bound competitors.
+   * Idempotent upsert: a second submission from the same competitor
+   * replaces the first (last write wins), mirroring submitResponse's
+   * own precedent.
+   *
+   * Implementations must:
+   * - throw DuelNotFoundError only when no Duel exists for this id;
+   * - throw DuelNotActiveError only when the Duel is not ACTIVE;
+   * - throw DuelAccessDeniedError only when the resolved participant is
+   *   not one of this Duel's two competitors (including a
+   *   non-competitor, a stranger, or the host acting outside their own
+   *   participant identity);
+   * - throw InvalidDuelOptionSelectionError only when the supplied
+   *   index is not a legal option index for this Duel;
+   * - never leak the other competitor's response.
+   */
+  submitDuelResponse(
+    duelId: string,
+    participantToken: string,
+    selectedOptionIndex: number
+  ): Promise<{ participantId: string; answeredAt: string }>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. RESOLVE_DUEL's atomic operation — the
+   * normal, mechanic-derived resolution. Host-triggered only; no
+   * timer, no background job. Deterministic winner logic exactly as
+   * documented in 0131's own migration comment — never fabricates a
+   * winner.
+   *
+   * Implementations must:
+   * - re-verify the host token inside the atomic operation itself;
+   * - throw DuelNotFoundError only when no Duel exists for this id;
+   * - throw HostTokenMismatchError only on a host-token mismatch;
+   * - throw DuelAlreadyResolvedError only when the Duel is not ACTIVE;
+   * - persist exactly one DUEL_RESOLVED session event on success.
+   */
+  resolveDuel(
+    duelId: string,
+    hostToken: string
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. RESOLVE_DUEL_EXCEPTIONALLY's atomic
+   * operation — the Host's exceptional-resolution tier (CANCELLED,
+   * VOID, or a named competitor's FORFEIT). Never callable against an
+   * already-COMPLETED Duel — a mechanic-derived or prior exceptional
+   * result is never silently overwritten.
+   *
+   * Implementations must:
+   * - re-verify the host token inside the atomic operation itself;
+   * - throw DuelNotFoundError only when no Duel exists for this id;
+   * - throw HostTokenMismatchError only on a host-token mismatch;
+   * - throw InvalidDuelResolutionError only when resolution is not one
+   *   of CANCELLED, VOID, FORFEIT_A, FORFEIT_B;
+   * - throw DuelReasonRequiredError only when resolution is a forfeit
+   *   and no reason is supplied;
+   * - throw DuelAlreadyResolvedError only when the Duel is already
+   *   COMPLETED;
+   * - persist exactly one DUEL_RESOLVED session event on success.
+   */
+  resolveDuelExceptionally(
+    duelId: string,
+    hostToken: string,
+    resolution: DuelExceptionalResolution,
+    reason: string | null
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. Look up a single Duel by id. Returns
+   * null if it doesn't exist. The fast-path lookup submitDuelResponse.ts
+   * and resolveDuel.ts/resolveDuelExceptionally.ts use, mirroring
+   * getSessionById/getPromptById's own single-entity precedent.
+   */
+  getDuelById(duelId: string): Promise<DuelRecord | null>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. The active Duel for a session, if any —
+   * at most one, per the one-active-subgame-per-session invariant.
+   * Used by GET_SESSION and by every command that must check this
+   * invariant from the read side.
+   */
+  getActiveDuelForSession(sessionId: string): Promise<DuelRecord | null>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. Every Duel that has ever run for a
+   * session, most recent first — historical evidence, readable
+   * regardless of session state, mirroring
+   * getInteractionInstancesForSession's own unfiltered contract.
+   */
+  getDuelsForSession(sessionId: string): Promise<DuelRecord[]>;
+
+  /**
+   * Duel / SESSION_SUBGAME v1. Both competitors' responses for one
+   * Duel, if submitted. Used by GET_SESSION to expose each caller only
+   * their own response before resolution, and both once resolved —
+   * privacy enforcement happens at the read-model boundary
+   * (getSession.ts), not here; this returns the raw evidence.
+   */
+  getDuelResponses(
+    duelId: string
+  ): Promise<Array<{ participantId: string; selectedOptionIndex: number; answeredAt: string }>>;
 }

@@ -9,6 +9,7 @@ import {
   EmptyQuizQuestionSetError,
   InvalidQuizDurationError,
   CapabilityNotAuthorizedError,
+  ActiveDuelExistsError,
 } from "@/lib/session/types";
 
 /**
@@ -84,7 +85,8 @@ export async function POST(
     }
     if (
       err instanceof LobbyNotLockedError ||
-      err instanceof PreviousInteractionNotRevealedError
+      err instanceof PreviousInteractionNotRevealedError ||
+      err instanceof ActiveDuelExistsError
     ) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }

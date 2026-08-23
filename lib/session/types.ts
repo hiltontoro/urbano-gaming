@@ -210,8 +210,17 @@ export interface CreateSessionResult {
  * deliberately absent: it is an internal Interaction Engine primitive,
  * never a Product capability. TRIVIA and QUIZ both compose it
  * internally but are authorized independently of one another.
+ *
+ * Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md): adds
+ * "DUEL" — unlike the other four (COMPOSABLE_INTERACTION, using the
+ * full Session roster), DUEL is a SESSION_SUBGAME, activated against
+ * exactly two Host-selected competitors via START_DUEL, never through
+ * START_SESSION/START_QUIZ. Ad-hoc composable for manual Host
+ * selection specifically — rule-driven or sequenced selection remains
+ * outside this Slice's scope, per Session_Capability_Architecture.md's
+ * own refined ad-hoc/orchestrated boundary.
  */
-export type SessionCapabilityKey = "OPEN_RESPONSE" | "VOTING" | "TRIVIA" | "QUIZ";
+export type SessionCapabilityKey = "OPEN_RESPONSE" | "VOTING" | "TRIVIA" | "QUIZ" | "DUEL";
 
 /**
  * Result of a successful SET_SESSION_CAPABILITIES.
@@ -688,6 +697,51 @@ export interface GetSessionResult {
    * `[]`, legacyUndeclared false).
    */
   legacyUndeclared: boolean;
+  /**
+   * Duel / SESSION_SUBGAME v1. This session's currently active Duel,
+   * if any — at most one, per the one-active-subgame invariant. Null
+   * whenever no Duel is ACTIVE, regardless of whether one has ever run
+   * or completed for this session (see duelHistory for that).
+   */
+  activeDuel: DuelSummary | null;
+  /**
+   * Duel / SESSION_SUBGAME v1. Every Duel that has ever run for this
+   * session, most recent first — historical evidence, readable
+   * regardless of session state. Includes the currently active one
+   * (if any), duplicated with activeDuel deliberately, mirroring how
+   * currentInteractionInstanceId's own interaction also appears within
+   * a session's broader history elsewhere in this codebase.
+   */
+  duelHistory: DuelSummary[];
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. GET_SESSION's own Duel projection —
+ * distinct from DuelRecord, never carries correctOptionIndex, and
+ * applies the read-model privacy requirement Duel_Architecture.md's
+ * own "Capability Declaration"/GET_SESSION section requires: each
+ * competitor always sees their own response; both competitors'
+ * responses become visible to everyone only once the Duel is
+ * COMPLETED, never while ACTIVE.
+ */
+export interface DuelSummary {
+  duelId: string;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  promptText: string;
+  options: string[];
+  lifecycleState: DuelLifecycleState;
+  terminalResolution: DuelTerminalResolution | null;
+  winnerParticipantId: string | null;
+  reason: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  /** The calling competitor's own submitted option index. Null if the caller is not a competitor, or has not answered yet. */
+  myResponseOptionIndex: number | null;
+  /** Null while ACTIVE (privacy); populated for everyone once COMPLETED. */
+  competitorAOptionIndex: number | null;
+  /** Null while ACTIVE (privacy); populated for everyone once COMPLETED. */
+  competitorBOptionIndex: number | null;
 }
 
 /** Raised when a generated room code collides with an active session. */
@@ -1313,7 +1367,7 @@ export class QuizExpiryNotReachedError extends Error {
  */
 export class InvalidCapabilityKeyError extends Error {
   constructor() {
-    super("Must be one of OPEN_RESPONSE, VOTING, TRIVIA, QUIZ.");
+    super("Must be one of OPEN_RESPONSE, VOTING, TRIVIA, QUIZ, DUEL.");
     this.name = "InvalidCapabilityKeyError";
   }
 }
@@ -1360,5 +1414,230 @@ export class CapabilityNotAuthorizedError extends Error {
         : "This session has not declared the required capability."
     );
     this.name = "CapabilityNotAuthorizedError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Duel's own
+ * lifecycle — CREATED is a valid value but never persisted by
+ * application code (start_duel_atomically creates a Duel already
+ * ACTIVE, mirroring how ordinary Interaction Instances go straight to
+ * PROMPT_ACTIVE on creation).
+ */
+export type DuelLifecycleState = "CREATED" | "ACTIVE" | "COMPLETED";
+
+/**
+ * Duel's terminal-resolution vocabulary, deliberately not the shared
+ * Gameplay Outcome taxonomy's victory/defeat — Duel_Architecture.md's
+ * own "Draw / Void Disposition" keeps DRAW/VOID/CANCELLED/FORFEIT
+ * SESSION_SUBGAME-local for now. WON_LOST means a real competitive
+ * result exists (see winnerParticipantId).
+ */
+export type DuelTerminalResolution =
+  | "WON_LOST"
+  | "DRAW"
+  | "VOID"
+  | "CANCELLED"
+  | "FORFEIT";
+
+/** The exceptional-resolution values RESOLVE_DUEL_EXCEPTIONALLY accepts. */
+export type DuelExceptionalResolution =
+  | "CANCELLED"
+  | "VOID"
+  | "FORFEIT_A"
+  | "FORFEIT_B";
+
+/** A Duel as exposed by GET_SESSION and by every Duel command's result. */
+export interface DuelRecord {
+  duelId: string;
+  sessionId: string;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  promptText: string;
+  options: string[];
+  lifecycleState: DuelLifecycleState;
+  terminalResolution: DuelTerminalResolution | null;
+  winnerParticipantId: string | null;
+  reason: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+/**
+ * Result of a successful START_DUEL. Deliberately omits
+ * correctOptionIndex — Duel_Architecture.md's own read-model privacy
+ * requirement: the correct answer is never exposed to participants
+ * before resolution, and this is the shape every caller (Host and
+ * competitor alike) receives.
+ */
+export interface StartDuelResult {
+  duelId: string;
+  sessionId: string;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  lifecycleState: DuelLifecycleState;
+  promptText: string;
+  options: string[];
+  startedAt: string;
+}
+
+/** Result of a successful SUBMIT_DUEL_RESPONSE. */
+export interface SubmitDuelResponseResult {
+  duelId: string;
+  participantId: string;
+  answeredAt: string;
+}
+
+/** Result of a successful RESOLVE_DUEL or RESOLVE_DUEL_EXCEPTIONALLY. */
+export interface ResolveDuelResult {
+  duelId: string;
+  lifecycleState: DuelLifecycleState;
+  terminalResolution: DuelTerminalResolution;
+  winnerParticipantId: string | null;
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by START_DUEL when the same
+ * participant id is supplied for both competitor slots.
+ */
+export class DuplicateDuelCompetitorError extends Error {
+  constructor() {
+    super("A Duel requires two distinct competitors.");
+    this.name = "DuplicateDuelCompetitorError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by START_DUEL when a supplied
+ * competitor id does not belong to this session.
+ */
+export class DuelCompetitorNotInSessionError extends Error {
+  constructor() {
+    super("Both Duel competitors must be participants of this session.");
+    this.name = "DuelCompetitorNotInSessionError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by START_DUEL when this session
+ * already has an active Duel, and by START_SESSION/START_QUIZ for the
+ * symmetric reason — the one-active-subgame-per-Session invariant.
+ */
+export class ActiveDuelExistsError extends Error {
+  constructor() {
+    super("This session already has an active Duel.");
+    this.name = "ActiveDuelExistsError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by START_DUEL when an ordinary
+ * Interaction Instance is active (not yet RESULT_REVEAL) — the
+ * symmetric half of ActiveDuelExistsError.
+ */
+export class InteractionActiveError extends Error {
+  constructor(state?: string) {
+    super(
+      state
+        ? `An ordinary interaction is in ${state} state; a Duel cannot start until it is RESULT_REVEAL.`
+        : "An ordinary interaction is active; a Duel cannot start until it resolves."
+    );
+    this.name = "InteractionActiveError";
+  }
+}
+
+/** Duel / SESSION_SUBGAME v1. Raised when a supplied options array is invalid. */
+export class InvalidDuelOptionsError extends Error {
+  constructor() {
+    super("Duel options must be at least two distinct, non-empty entries, with a valid correct option index.");
+    this.name = "InvalidDuelOptionsError";
+  }
+}
+
+/** Duel / SESSION_SUBGAME v1. Raised when no Duel exists for a given id. */
+export class DuelNotFoundError extends Error {
+  constructor() {
+    super("No Duel exists for this id.");
+    this.name = "DuelNotFoundError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by SUBMIT_DUEL_RESPONSE when the
+ * caller's participant token does not resolve to one of this Duel's
+ * two bound competitors — including a non-competitor Session
+ * participant, a stranger, or the Host.
+ */
+export class DuelAccessDeniedError extends Error {
+  constructor() {
+    super("This participant is not a competitor in this Duel.");
+    this.name = "DuelAccessDeniedError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by SUBMIT_DUEL_RESPONSE when the
+ * target Duel is not ACTIVE.
+ */
+export class DuelNotActiveError extends Error {
+  constructor(state?: string) {
+    super(
+      state
+        ? `Duel is in ${state} state, not ACTIVE.`
+        : "This Duel is not active."
+    );
+    this.name = "DuelNotActiveError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by SUBMIT_DUEL_RESPONSE when the
+ * supplied option index is not a legal index for this Duel's options.
+ */
+export class InvalidDuelOptionSelectionError extends Error {
+  constructor() {
+    super("Must be a valid option index for this Duel.");
+    this.name = "InvalidDuelOptionSelectionError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by RESOLVE_DUEL and
+ * RESOLVE_DUEL_EXCEPTIONALLY when the target Duel already has a
+ * terminal resolution — a mechanic-derived or exceptional result is
+ * never silently overwritten (Duel_Architecture.md's own "Host
+ * Authority" section). Correction/supersession of an already-terminal
+ * Duel is explicitly deferred, not implemented in v1.
+ */
+export class DuelAlreadyResolvedError extends Error {
+  constructor() {
+    super("This Duel already has a terminal resolution.");
+    this.name = "DuelAlreadyResolvedError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by RESOLVE_DUEL_EXCEPTIONALLY when
+ * the supplied resolution value is not one of CANCELLED, VOID,
+ * FORFEIT_A, FORFEIT_B.
+ */
+export class InvalidDuelResolutionError extends Error {
+  constructor() {
+    super("Must be one of CANCELLED, VOID, FORFEIT_A, FORFEIT_B.");
+    this.name = "InvalidDuelResolutionError";
+  }
+}
+
+/**
+ * Duel / SESSION_SUBGAME v1. Raised by RESOLVE_DUEL_EXCEPTIONALLY when
+ * a FORFEIT_A/FORFEIT_B resolution is requested without a reason —
+ * the one exceptional-resolution case where the outcome would
+ * otherwise be ambiguous.
+ */
+export class DuelReasonRequiredError extends Error {
+  constructor() {
+    super("A forfeit requires a reason.");
+    this.name = "DuelReasonRequiredError";
   }
 }

@@ -47,6 +47,24 @@ import {
   CapabilitiesLockedError,
   SessionCapabilitiesNotDeclaredError,
   CapabilityNotAuthorizedError,
+  DuplicateDuelCompetitorError,
+  DuelCompetitorNotInSessionError,
+  ActiveDuelExistsError,
+  InteractionActiveError,
+  InvalidDuelOptionsError,
+  DuelNotFoundError,
+  DuelAccessDeniedError,
+  DuelNotActiveError,
+  InvalidDuelOptionSelectionError,
+  DuelAlreadyResolvedError,
+  InvalidDuelResolutionError,
+  DuelReasonRequiredError,
+} from "../types";
+import type {
+  DuelRecord,
+  DuelLifecycleState,
+  DuelTerminalResolution,
+  DuelExceptionalResolution,
 } from "../types";
 
 const SESSION_CAPABILITY_KEYS: SessionCapabilityKey[] = [
@@ -54,6 +72,7 @@ const SESSION_CAPABILITY_KEYS: SessionCapabilityKey[] = [
   "VOTING",
   "TRIVIA",
   "QUIZ",
+  "DUEL",
 ];
 import type {
   SessionEventRecord,
@@ -110,6 +129,28 @@ export class InMemorySessionRepository implements SessionRepository {
    * created dynamically from host-supplied text via startSession.
    */
   private interactionInstances = new Map<string, InteractionInstanceRecord>();
+
+  /**
+   * Duel / SESSION_SUBGAME v1. Keyed by duelId. Duel is its own
+   * structurally separate entity, never an interactionInstances row —
+   * see 0128's migration comment for why.
+   */
+  private duels = new Map<string, DuelRecord>();
+
+  /** Keyed by `${duelId}:${participantId}` — mirrors duel_responses' own composite primary key. */
+  private duelResponses = new Map<
+    string,
+    { participantId: string; selectedOptionIndex: number; answeredAt: string }
+  >();
+
+  /**
+   * correctOptionIndex is intentionally not part of DuelRecord — kept
+   * on this side map, keyed by duelId, so it can never leak through
+   * getActiveDuelForSession/getDuelsForSession before resolution,
+   * mirroring how the real duels table's own column is simply never
+   * selected by the read paths GET_SESSION uses pre-resolution.
+   */
+  private duelCorrectOptionIndexes = new Map<string, number>();
 
   /**
    * Slice 008 (Segment / Turn grouping). Keyed by segmentId. No stored
@@ -509,6 +550,35 @@ export class InMemorySessionRepository implements SessionRepository {
 
     this.sessions.set(sessionId, updated);
 
+    // Duel / SESSION_SUBGAME v1: mirrors complete_session_atomically's
+    // identical side effect (0135) — Session completion is never
+    // blocked by an active Duel; it supersedes it, resolving VOID,
+    // never fabricating a winner.
+    const activeDuel = this.getActiveDuelRecordForSession(sessionId);
+    if (activeDuel) {
+      const endedAt = new Date().toISOString();
+      const voided: DuelRecord = {
+        ...activeDuel,
+        lifecycleState: "COMPLETED",
+        terminalResolution: "VOID",
+        winnerParticipantId: null,
+        reason: "Session completed while Duel was active",
+        endedAt,
+      };
+      this.duels.set(activeDuel.duelId, voided);
+
+      this.events.push({
+        sessionId,
+        eventType: "DUEL_RESOLVED",
+        payload: {
+          duelId: activeDuel.duelId,
+          terminalResolution: "VOID",
+          winnerParticipantId: null,
+          reason: "Session completed while Duel was active",
+        },
+      });
+    }
+
     this.events.push({
       sessionId: event.sessionId,
       eventType: event.eventType,
@@ -564,6 +634,13 @@ export class InMemorySessionRepository implements SessionRepository {
 
     if (session.state !== "LOBBY_LOCKED") {
       throw new LobbyNotLockedError(session.state);
+    }
+
+    // Duel / SESSION_SUBGAME v1: mirrors start_session_atomically's
+    // identical guard (0133) — symmetric half of the mutual-exclusion
+    // invariant with startDuel, below.
+    if (this.getActiveDuelRecordForSession(sessionId)) {
+      throw new ActiveDuelExistsError();
     }
 
     // Session Capability Architecture v1: mirrors
@@ -1414,6 +1491,12 @@ export class InMemorySessionRepository implements SessionRepository {
       throw new LobbyNotLockedError(session.state);
     }
 
+    // Duel / SESSION_SUBGAME v1: mirrors start_quiz_atomically's
+    // identical guard (0134), same as startSession's own guard above.
+    if (this.getActiveDuelRecordForSession(sessionId)) {
+      throw new ActiveDuelExistsError();
+    }
+
     // Session Capability Architecture v1: mirrors start_quiz_atomically's
     // identical guard (0112).
     if (!(session.declaredCapabilities ?? []).includes("QUIZ")) {
@@ -1723,6 +1806,331 @@ export class InMemorySessionRepository implements SessionRepository {
 
   async getQuizWindowForSegment(segmentId: string): Promise<QuizWindowRecord | null> {
     return this.quizWindows.get(segmentId) ?? null;
+  }
+
+  /**
+   * Duel / SESSION_SUBGAME v1. Private helper shared by startSession,
+   * startQuiz, completeSession, and the public
+   * getActiveDuelForSession — the one-active-subgame-per-session
+   * invariant, read from evidence rather than a duplicated flag.
+   */
+  private getActiveDuelRecordForSession(sessionId: string): DuelRecord | null {
+    return (
+      [...this.duels.values()].find(
+        (duel) => duel.sessionId === sessionId && duel.lifecycleState === "ACTIVE"
+      ) ?? null
+    );
+  }
+
+  async startDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    promptText: string,
+    options: string[],
+    correctOptionIndex: number
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    promptText: string;
+    options: string[];
+    startedAt: string;
+  }> {
+    if (competitorAParticipantId === competitorBParticipantId) {
+      throw new DuplicateDuelCompetitorError();
+    }
+
+    if (
+      !Array.isArray(options) ||
+      options.length < 2 ||
+      options.some((o) => o.trim().length === 0) ||
+      new Set(options.map((o) => o.trim())).size !== options.length ||
+      !Number.isInteger(correctOptionIndex) ||
+      correctOptionIndex < 0 ||
+      correctOptionIndex >= options.length
+    ) {
+      throw new InvalidDuelOptionsError();
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError();
+    }
+    if (session.hostToken !== hostToken) {
+      throw new HostTokenMismatchError();
+    }
+    if (session.state !== "LOBBY_LOCKED") {
+      throw new LobbyNotLockedError(session.state);
+    }
+    if (!(session.declaredCapabilities ?? []).includes("DUEL")) {
+      throw new CapabilityNotAuthorizedError("DUEL");
+    }
+
+    const competitorA = this.participants.get(competitorAParticipantId);
+    if (!competitorA || competitorA.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+    const competitorB = this.participants.get(competitorBParticipantId);
+    if (!competitorB || competitorB.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+
+    const previousInteraction = this.getCurrentInteractionInstance(sessionId);
+    if (previousInteraction && previousInteraction.state !== "RESULT_REVEAL") {
+      throw new InteractionActiveError(previousInteraction.state);
+    }
+
+    if (this.getActiveDuelRecordForSession(sessionId)) {
+      throw new ActiveDuelExistsError();
+    }
+
+    const startedAt = new Date().toISOString();
+    const trimmedPrompt = promptText.trim();
+    const trimmedOptions = options.map((o) => o.trim());
+    const duel: DuelRecord = {
+      duelId: randomUUID(),
+      sessionId,
+      competitorAParticipantId,
+      competitorBParticipantId,
+      promptText: trimmedPrompt,
+      options: trimmedOptions,
+      lifecycleState: "ACTIVE",
+      terminalResolution: null,
+      winnerParticipantId: null,
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      endedAt: null,
+    };
+    this.duels.set(duel.duelId, duel);
+    // correctOptionIndex is intentionally not stored on the public
+    // DuelRecord shape — kept on a side map so it never leaks through
+    // getActiveDuelForSession/getDuelsForSession before resolution.
+    this.duelCorrectOptionIndexes.set(duel.duelId, correctOptionIndex);
+
+    this.events.push({
+      sessionId,
+      eventType: "DUEL_STARTED",
+      payload: {
+        duelId: duel.duelId,
+        competitorAParticipantId,
+        competitorBParticipantId,
+      },
+    });
+
+    return {
+      duelId: duel.duelId,
+      lifecycleState: duel.lifecycleState,
+      promptText: duel.promptText,
+      options: duel.options,
+      startedAt,
+    };
+  }
+
+  async submitDuelResponse(
+    duelId: string,
+    participantToken: string,
+    selectedOptionIndex: number
+  ): Promise<{ participantId: string; answeredAt: string }> {
+    const duel = this.duels.get(duelId);
+    if (!duel) {
+      throw new DuelNotFoundError();
+    }
+    if (duel.lifecycleState !== "ACTIVE") {
+      throw new DuelNotActiveError(duel.lifecycleState);
+    }
+
+    const participant = [...this.participants.values()].find(
+      (p) => p.sessionId === duel.sessionId && p.participantToken === participantToken
+    );
+    if (
+      !participant ||
+      (participant.participantId !== duel.competitorAParticipantId &&
+        participant.participantId !== duel.competitorBParticipantId)
+    ) {
+      throw new DuelAccessDeniedError();
+    }
+
+    if (
+      !Number.isInteger(selectedOptionIndex) ||
+      selectedOptionIndex < 0 ||
+      selectedOptionIndex >= duel.options.length
+    ) {
+      throw new InvalidDuelOptionSelectionError();
+    }
+
+    const answeredAt = new Date().toISOString();
+    this.duelResponses.set(`${duelId}:${participant.participantId}`, {
+      participantId: participant.participantId,
+      selectedOptionIndex,
+      answeredAt,
+    });
+
+    return { participantId: participant.participantId, answeredAt };
+  }
+
+  async resolveDuel(
+    duelId: string,
+    hostToken: string
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }> {
+    const duel = this.duels.get(duelId);
+    if (!duel) {
+      throw new DuelNotFoundError();
+    }
+    const session = this.sessions.get(duel.sessionId);
+    if (!session || session.hostToken !== hostToken) {
+      throw new HostTokenMismatchError();
+    }
+    if (duel.lifecycleState !== "ACTIVE") {
+      throw new DuelAlreadyResolvedError();
+    }
+
+    const correctOptionIndex = this.duelCorrectOptionIndexes.get(duelId);
+    const responseA = this.duelResponses.get(`${duelId}:${duel.competitorAParticipantId}`);
+    const responseB = this.duelResponses.get(`${duelId}:${duel.competitorBParticipantId}`);
+    const aCorrect = responseA !== undefined && responseA.selectedOptionIndex === correctOptionIndex;
+    const bCorrect = responseB !== undefined && responseB.selectedOptionIndex === correctOptionIndex;
+
+    let terminalResolution: DuelTerminalResolution;
+    let winnerParticipantId: string | null;
+
+    if (responseA && responseB) {
+      if (aCorrect && !bCorrect) {
+        terminalResolution = "WON_LOST";
+        winnerParticipantId = duel.competitorAParticipantId;
+      } else if (bCorrect && !aCorrect) {
+        terminalResolution = "WON_LOST";
+        winnerParticipantId = duel.competitorBParticipantId;
+      } else if (aCorrect && bCorrect) {
+        if (responseA.answeredAt < responseB.answeredAt) {
+          terminalResolution = "WON_LOST";
+          winnerParticipantId = duel.competitorAParticipantId;
+        } else if (responseB.answeredAt < responseA.answeredAt) {
+          terminalResolution = "WON_LOST";
+          winnerParticipantId = duel.competitorBParticipantId;
+        } else {
+          terminalResolution = "DRAW";
+          winnerParticipantId = null;
+        }
+      } else {
+        terminalResolution = "DRAW";
+        winnerParticipantId = null;
+      }
+    } else if (responseA && aCorrect) {
+      terminalResolution = "WON_LOST";
+      winnerParticipantId = duel.competitorAParticipantId;
+    } else if (responseB && bCorrect) {
+      terminalResolution = "WON_LOST";
+      winnerParticipantId = duel.competitorBParticipantId;
+    } else {
+      terminalResolution = "VOID";
+      winnerParticipantId = null;
+    }
+
+    const endedAt = new Date().toISOString();
+    const resolved: DuelRecord = {
+      ...duel,
+      lifecycleState: "COMPLETED",
+      terminalResolution,
+      winnerParticipantId,
+      endedAt,
+    };
+    this.duels.set(duelId, resolved);
+
+    this.events.push({
+      sessionId: duel.sessionId,
+      eventType: "DUEL_RESOLVED",
+      payload: { duelId, terminalResolution, winnerParticipantId },
+    });
+
+    return { duelId, lifecycleState: "COMPLETED", terminalResolution, winnerParticipantId };
+  }
+
+  async resolveDuelExceptionally(
+    duelId: string,
+    hostToken: string,
+    resolution: DuelExceptionalResolution,
+    reason: string | null
+  ): Promise<{
+    duelId: string;
+    lifecycleState: DuelLifecycleState;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+  }> {
+    if (!["CANCELLED", "VOID", "FORFEIT_A", "FORFEIT_B"].includes(resolution)) {
+      throw new InvalidDuelResolutionError();
+    }
+    if ((resolution === "FORFEIT_A" || resolution === "FORFEIT_B") && (!reason || reason.trim() === "")) {
+      throw new DuelReasonRequiredError();
+    }
+
+    const duel = this.duels.get(duelId);
+    if (!duel) {
+      throw new DuelNotFoundError();
+    }
+    const session = this.sessions.get(duel.sessionId);
+    if (!session || session.hostToken !== hostToken) {
+      throw new HostTokenMismatchError();
+    }
+    if (duel.lifecycleState === "COMPLETED") {
+      throw new DuelAlreadyResolvedError();
+    }
+
+    const winnerParticipantId =
+      resolution === "FORFEIT_A"
+        ? duel.competitorBParticipantId
+        : resolution === "FORFEIT_B"
+        ? duel.competitorAParticipantId
+        : null;
+    const terminalResolution: DuelTerminalResolution =
+      resolution === "FORFEIT_A" || resolution === "FORFEIT_B" ? "FORFEIT" : resolution;
+
+    const endedAt = new Date().toISOString();
+    const resolved: DuelRecord = {
+      ...duel,
+      lifecycleState: "COMPLETED",
+      terminalResolution,
+      winnerParticipantId,
+      reason,
+      endedAt,
+    };
+    this.duels.set(duelId, resolved);
+
+    this.events.push({
+      sessionId: duel.sessionId,
+      eventType: "DUEL_RESOLVED",
+      payload: { duelId, terminalResolution, winnerParticipantId, reason },
+    });
+
+    return { duelId, lifecycleState: "COMPLETED", terminalResolution, winnerParticipantId };
+  }
+
+  async getDuelById(duelId: string): Promise<DuelRecord | null> {
+    return this.duels.get(duelId) ?? null;
+  }
+
+  async getActiveDuelForSession(sessionId: string): Promise<DuelRecord | null> {
+    return this.getActiveDuelRecordForSession(sessionId);
+  }
+
+  async getDuelsForSession(sessionId: string): Promise<DuelRecord[]> {
+    return [...this.duels.values()]
+      .filter((duel) => duel.sessionId === sessionId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getDuelResponses(
+    duelId: string
+  ): Promise<Array<{ participantId: string; selectedOptionIndex: number; answeredAt: string }>> {
+    return [...this.duelResponses.entries()]
+      .filter(([key]) => key.startsWith(`${duelId}:`))
+      .map(([, value]) => value);
   }
 
   /** Test-only helper, not part of the repository interface. */
