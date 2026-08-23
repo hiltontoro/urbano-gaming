@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quiz Playtest — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Quiz Playtest destination shell. Mechanically identical to
+   * trivia-playtest.html (Experience Discovery Slice 1) — routes
+   * invited reviewers into the already-existing, already-validated
+   * host.html/participant.html session surfaces (Quiz's own Turn Type
+   * and Start Quiz flow already exist there; see
+   * QUIZ_EXPERIENCE_IMPLEMENTATION_RECORD.md). No new session logic,
+   * no new gameplay, no changes to those two files. Deliberately styled
+   * less prominently than the Featured Soccer Predictions destination —
+   * this is an invited playtest of validated engine capability, not a
+   * finished member-facing Experience.
+   */
+  :root {
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --exp-purple: #7c3aed;
+    --exp-purple-glow: rgba(124, 58, 237, 0.45);
+    --exp-purple-bg: rgba(124, 58, 237, 0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 720px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before {
+    content: ""; position: absolute; inset: -9px;
+    background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
+    filter: blur(4px); z-index: 0;
+  }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge {
+    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .signin-btn {
+    font-size: 13px; font-weight: 600; padding: 9px 16px;
+    border-radius: 8px; border: 1px solid var(--ink); background: transparent;
+    color: var(--ink);
+  }
+  .signin-btn:hover { background: var(--surface-2); }
+  .signin-status {
+    display: none; max-width: 720px; margin: 10px auto 0; padding: 10px 20px 0;
+    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  }
+
+  .primary-nav {
+    display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    max-width: 720px; margin: 16px auto 0; padding: 0 20px 2px;
+  }
+  .primary-nav::-webkit-scrollbar { display: none; }
+  .nav-link {
+    flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted);
+    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .nav-link.is-active { color: var(--ink); border-color: var(--ink); }
+
+  .back-link {
+    max-width: 720px; margin: 18px auto 0; padding: 0 20px;
+    font-size: 13px; color: var(--muted); display: block;
+  }
+  .back-link:hover { color: var(--ink); }
+
+  .hero-card { max-width: 720px; margin: 20px auto 0; padding: 0 20px; }
+  .hero-inner {
+    border-radius: 18px; border: 1px solid var(--line); background: var(--bg-card);
+    padding: 40px 28px; text-align: center;
+  }
+  .icon { font-size: 34px; margin-bottom: 14px; display: block; }
+  .hero-inner h1 { font-size: clamp(24px, 5vw, 32px); font-weight: 800; margin: 0 0 12px; }
+  .hero-inner p {
+    color: var(--muted); font-size: 15px; line-height: 1.65; max-width: 480px; margin: 0 auto;
+  }
+  .status-row { display: flex; justify-content: center; margin-top: 22px; }
+  .status-pill {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px; background: transparent;
+    color: var(--ink); border: 1px solid var(--ink);
+  }
+
+  .actions {
+    max-width: 720px; margin: 24px auto 0; padding: 0 20px;
+    display: flex; gap: 12px;
+  }
+  .action-btn {
+    flex: 1; text-align: center; font-size: 14px; font-weight: 700;
+    padding: 14px 16px; border-radius: 10px;
+  }
+  .action-primary { background: var(--ink); color: var(--primary-ink); border: none; }
+  .action-secondary { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+
+  .info-section { max-width: 720px; margin: 20px auto 0; padding: 0 20px; }
+  .info-card {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);
+    padding: 16px 20px; font-size: 13px; color: var(--muted); line-height: 1.6;
+  }
+
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; }
+    .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
+    .primary-nav { padding: 0 16px 2px; }
+    .back-link, .hero-card, .actions, .info-section { padding-left: 16px; padding-right: 16px; }
+    .hero-inner { padding: 32px 20px; }
+    .actions { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <button class="signin-btn" id="btn-signin">Sign in with URBANO</button>
+</div>
+<p class="signin-status" id="signin-status"></p>
+
+<nav class="primary-nav">
+  <a class="nav-link" href="/">Home</a>
+  <a class="nav-link is-active" href="/#play">Play</a>
+  <a class="nav-link" href="/#experiences">Experiences</a>
+  <a class="nav-link" href="/leaderboards.html">Leaderboards</a>
+  <a class="nav-link" href="/rewards.html">Rewards</a>
+</nav>
+
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<div class="hero-card">
+  <div class="hero-inner">
+    <span class="icon">📝</span>
+    <h1>Quiz</h1>
+    <p>Host a self-paced quiz or join one already running — try the current URBANO Gaming Quiz experience. Everyone answers independently, and results reveal once time's up.</p>
+    <div class="status-row">
+      <span class="status-pill">Playtest</span>
+    </div>
+  </div>
+</div>
+
+<div class="actions">
+  <a class="action-btn action-primary" href="/host.html">Host a Quiz Session</a>
+  <a class="action-btn action-secondary" href="/participant.html">Join a Quiz Session</a>
+</div>
+
+<div class="info-section">
+  <div class="info-card">This is an early playtest of URBANO Gaming Quiz — you're trying it before everyone else, and things may still be a little rough around the edges.</div>
+</div>
+
+<script src="/urbanoAuth.js"></script>
+<script>
+  UrbanoAuth.attachSignInButton(
+    document.getElementById("btn-signin"),
+    document.getElementById("signin-status")
+  );
+</script>
+
+</body>
+</html>

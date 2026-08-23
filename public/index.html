@@ -203,7 +203,14 @@
   }
   .status-featured { background: var(--exp-purple-bg); color: var(--exp-purple); border: 1px solid var(--exp-purple); }
   .status-playtest { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  .status-building { background: rgba(245,241,232,0.05); color: var(--ink); border: 1px dashed var(--ink); }
   .status-soon { background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--line); }
+
+  /* Icon + status pill share the card's top row so the semantic emoji
+     (Founder direction: lightweight v1 icon layer, not a Brand asset)
+     reads immediately without competing with the title below it. */
+  .exp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .exp-icon { font-size: 20px; line-height: 1; }
 
   .exp-card h3 { font-size: 16px; margin: 0; font-weight: 700; }
   .exp-card .exp-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; flex: 1; }
@@ -274,7 +281,7 @@
         </div>
       </div>
     </div>
-    <p class="featured-note">Prediction experience opening soon.</p>
+    <p class="featured-note">Live now — sign in with URBANO to make your prediction.</p>
     <a class="featured-cta" href="/soccer-predictions.html">Enter Soccer Predictions →</a>
   </div>
 </div>
@@ -309,15 +316,32 @@
   // for it here would be redundant, not additive.
   const SKILL_GAMES_CATALOG = [
     {
+      icon: "🧠",
       title: "Trivia",
       sub: "Host or join a live session — try the current Trivia playtest.",
       status: "playtest",
       href: "/trivia-playtest.html",
     },
     {
-      title: "Duels",
-      sub: "Head-to-head challenges between members.",
-      status: "soon",
+      icon: "📝",
+      title: "Quiz",
+      sub: "Self-paced — everyone answers on their own time, results reveal together.",
+      status: "playtest",
+      href: "/quiz-playtest.html",
+    },
+    {
+      icon: "🃏",
+      title: "Poker",
+      sub: "Host a private No-Limit Hold'em table for your group.",
+      status: "playtest",
+      href: "/poker-host.html",
+      action: "Host →",
+    },
+    {
+      icon: "⚔️",
+      title: "Duel",
+      sub: "Head-to-head challenges between members — gameplay screen is in development.",
+      status: "building",
     },
   ];
 
@@ -334,20 +358,33 @@
     },
   ];
 
-  const STATUS_LABEL = { featured: "Featured", playtest: "Playtest", soon: "Coming Soon" };
-  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", soon: "status-soon" };
+  // Status vocabulary, deliberately kept to the smallest necessary
+  // extension: "building" was added alongside the existing Featured/
+  // Playtest/Coming Soon set specifically for Duel — its backend is
+  // real and deployed (unlike Community Voting/Level 33), but no
+  // gameplay UI exists yet to open, so it cannot honestly be Playtest
+  // either. No other new status was introduced.
+  const STATUS_LABEL = { featured: "Featured", playtest: "Playtest", building: "In Development", soon: "Coming Soon" };
+  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", building: "status-building", soon: "status-soon" };
+  const NON_ACTIONABLE_STATUSES = new Set(["building", "soon"]);
+  const NON_ACTIONABLE_LABEL = { building: "In development", soon: "Coming soon" };
 
   function renderCatalog(items, targetId) {
     const el = document.getElementById(targetId);
     el.innerHTML = items.map((item) => {
-      const locked = item.status === "soon";
+      const locked = NON_ACTIONABLE_STATUSES.has(item.status);
       const tag = locked ? "div" : "a";
       const hrefAttr = locked ? "" : ` href="${item.href}"`;
+      const iconMarkup = item.icon ? `<span class="exp-icon">${item.icon}</span>` : "<span></span>";
+      const actionText = locked ? NON_ACTIONABLE_LABEL[item.status] : (item.action || "Open →");
       return `<${tag} class="exp-card ${locked ? "is-locked" : "is-actionable"}"${hrefAttr}>
-        <span class="status-pill ${STATUS_CLASS[item.status]}">${STATUS_LABEL[item.status]}</span>
+        <div class="exp-card-top">
+          ${iconMarkup}
+          <span class="status-pill ${STATUS_CLASS[item.status]}">${STATUS_LABEL[item.status]}</span>
+        </div>
         <h3>${item.title}</h3>
         <p class="exp-sub">${item.sub}</p>
-        <span class="exp-action">${locked ? "Coming soon" : "Open →"}</span>
+        <span class="exp-action">${actionText}</span>
       </${tag}>`;
     }).join("");
   }

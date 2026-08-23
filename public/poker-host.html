@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Poker Host — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
    * Poker Gameplay Phase — host surface. Smallest responsibility:
@@ -12,53 +15,159 @@
    * unrevealed hole cards, does not approve individual actions, does
    * not manually advance streets, and does not manually settle pots —
    * the runtime self-progresses via PLAYER_ACTION alone.
+   *
+   * Shell-integration pass (Experience Discovery Slice 1): reuses the
+   * same identity tokens, brand header, and mobile-first field/button
+   * conventions already established by index.html/poker-table.html —
+   * no new design system. Every element id and every API call below
+   * is byte-identical to the pre-pass version; only presentation
+   * changed. See APPLICATION_SHELL_IMPLEMENTATION_RECORD.md's
+   * "Experience Discovery Slice 1" section.
    */
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0a0a; color: #f5f1e8; margin: 0; padding: 24px; }
-  h1 { font-size: 20px; }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
-  input { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #2a2a2a; background: #161616; color: #f5f1e8; width: 130px; }
-  button { font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: 6px; border: none; background: #f5f1e8; color: #0a0a0a; cursor: pointer; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .room-code { font-size: 40px; font-weight: 800; letter-spacing: 0.08em; margin: 12px 0; }
-  .msg { font-size: 13px; color: #9b9689; margin: 6px 0; }
-  .msg.error { color: #f87171; }
-  .msg.success { color: #4ade80; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; max-width: 560px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1c1c1c; }
-  .badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: rgba(212,175,55,0.12); color: #d4af37; margin-left: 6px; }
-  .badge.turn { background: rgba(74,222,128,0.14); color: #4ade80; }
-  .badge.allin { background: rgba(248,113,113,0.14); color: #f87171; }
-  .board { display: flex; gap: 6px; margin: 10px 0; }
-  .board .card-chip { background: #161616; border: 1px solid #2a2a2a; border-radius: 6px; padding: 6px 10px; font-weight: 700; font-size: 14px; }
-  .status-line { font-size: 13px; color: #d4af37; margin: 4px 0 12px; }
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
+    --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a;
+    --gold: #d4af37; --gold-bg: rgba(212, 175, 55, 0.12);
+    --primary-fill: #f5f1e8; --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --good: #4ade80; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 720px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before {
+    content: ""; position: absolute; inset: -9px;
+    background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
+    filter: blur(4px); z-index: 0;
+  }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge {
+    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+
+  .back-link {
+    max-width: 720px; margin: 18px auto 0; padding: 0 20px;
+    font-size: 13px; color: var(--muted); display: block;
+  }
+  .back-link:hover { color: var(--ink); }
+
+  .content { max-width: 480px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+
+  .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 16px; }
+
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .field input {
+    width: 100%; font-family: inherit; font-size: 15px; padding: 12px 14px;
+    border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink);
+    min-height: 44px;
+  }
+  .config-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .config-row .field { flex: 1 1 120px; margin-bottom: 0; }
+
+  .btn-primary {
+    font-family: inherit; font-size: 14px; font-weight: 700; padding: 13px 18px;
+    border-radius: 10px; border: none; background: var(--primary-fill); color: var(--primary-ink);
+    cursor: pointer; width: 100%; min-height: 46px; margin-top: 16px;
+  }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+
+  .room-code-card {
+    border-radius: 16px; border: 1px solid var(--exp-purple);
+    background: radial-gradient(120% 140% at 100% 0%, var(--exp-purple-bg), transparent 60%), var(--bg-card);
+    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.14), 0 0 30px var(--exp-purple-glow);
+    padding: 24px; text-align: center; margin: 0 0 16px;
+  }
+  .room-code-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--exp-purple); margin-bottom: 6px;
+  }
+  .room-code { font-size: 38px; font-weight: 800; letter-spacing: 0.08em; }
+  .room-code-hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .room-code-hint code { color: var(--ink); }
+
+  .status-line { font-size: 13px; color: var(--gold); margin: 4px 0 12px; }
+  .board { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+  .board .card-chip { background: var(--bg-card); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-weight: 700; font-size: 14px; }
+
+  .seats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .seats-table th, .seats-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  .seats-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--gold-bg); color: var(--gold); margin-right: 4px; display: inline-block; margin-bottom: 2px; }
+  .badge.turn { background: rgba(74,222,128,0.14); color: var(--good); }
+  .badge.allin { background: rgba(248,113,113,0.14); color: var(--bad); }
+
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; }
+    .brand-word { font-size: 15px; }
+    .back-link, .content { padding-left: 16px; padding-right: 16px; }
+    .room-code { font-size: 32px; }
+  }
 </style>
 </head>
 <body>
 
-<h1>Poker Table — Host</h1>
-
-<div id="pre-create">
-  <div class="row">
-    <label>Starting stack <input id="cfg-stack" type="number" value="1000" /></label>
-    <label>Small blind <input id="cfg-sb" type="number" value="5" /></label>
-    <label>Big blind <input id="cfg-bb" type="number" value="10" /></label>
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
   </div>
-  <button id="btn-create">Create Poker Table</button>
 </div>
 
-<div id="post-create" style="display:none;">
-  <div class="room-code" id="room-code-display"></div>
-  <p class="msg">Players join at <code>/poker-table.html</code> with this code.</p>
-  <div class="row">
-    <button id="btn-start-hand">Start Hand</button>
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<div class="content">
+  <h1>🃏 Poker Table — Host</h1>
+  <p class="sub">Configure the table, then start each Hand. Cards stay private to each player's own device.</p>
+
+  <div id="pre-create" class="card">
+    <div class="config-row">
+      <div class="field"><label>Starting stack</label><input id="cfg-stack" type="number" value="1000" /></div>
+      <div class="field"><label>Small blind</label><input id="cfg-sb" type="number" value="5" /></div>
+      <div class="field"><label>Big blind</label><input id="cfg-bb" type="number" value="10" /></div>
+    </div>
+    <button id="btn-create" class="btn-primary">Create Poker Table</button>
   </div>
-  <p class="msg" id="hand-msg"></p>
-  <p class="status-line" id="status-line"></p>
-  <div class="board" id="board"></div>
-  <table>
-    <thead><tr><th>Seat</th><th>Player</th><th>Stack</th><th>In hand</th><th></th></tr></thead>
-    <tbody id="seats-body"></tbody>
-  </table>
+
+  <div id="post-create" style="display:none;">
+    <div class="room-code-card">
+      <div class="room-code-label">Room Code</div>
+      <div class="room-code" id="room-code-display"></div>
+      <p class="room-code-hint">Players join at <code>/poker-table.html</code> with this code.</p>
+    </div>
+
+    <div class="card">
+      <button id="btn-start-hand" class="btn-primary" style="margin-top:0;">Start Hand</button>
+      <p class="msg" id="hand-msg"></p>
+      <p class="status-line" id="status-line"></p>
+      <div class="board" id="board"></div>
+      <table class="seats-table">
+        <thead><tr><th>Seat</th><th>Player</th><th>Stack</th><th>In hand</th><th></th></tr></thead>
+        <tbody id="seats-body"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
