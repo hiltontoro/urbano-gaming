@@ -72,14 +72,14 @@ async function setupMatchAndVenue(repo: InMemoryPredictionsRepository, kickoffAt
   // participation policy for any meaningfully-participating Prediction)
   // never hit an unconfigured-policy error in tests that don't care
   // about specific XP fixture values.
-  await setMatchActivityClassification(repo, match.matchId, "RANKED");
+  await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
   // XP-eligibility gate (Slice: XP Eligibility / Calibration Support):
   // a Match must be separately declared XP-eligible or every finalize
   // in this suite would silently produce zero XP regardless of the
   // fixture policy/rules below — this shared helper declares it
   // eligible=true so every test using it keeps exercising the same
   // XP-producing paths it always has; fixture only, not Product config.
-  await setMatchXpEligibility(repo, match.matchId, true);
+  await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
   await repo.metagameRepository.createCategoryParticipationPolicy({
     categoryKey: "SOCCER_PREDICTIONS",
     dailyParticipationAllowance: 1000,
@@ -624,7 +624,7 @@ describe("Prediction uniqueness — one per Match per Gaming Member, globally", 
     const matchB = await createMatch(repo, {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Friendly", kickoffAt: futureIso(),
     });
-    await setMatchActivityClassification(repo, matchB.matchId, "RANKED");
+    await setMatchActivityClassification(repo, matchB.matchId, "RANKED", "gm-admin");
     const activationB = await createVenueActivation(repo, { matchId: matchB.matchId, venueId: activationA.venueId });
 
     await submitPrediction(repo, {
@@ -1137,6 +1137,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
     const p1 = await attemptSubmit(repo, activation.venueActivationId, match.matchId, 1, null);
     expect(p1.predictedGoalMinuteRegulation).toBe(1);
     const repo2 = new InMemoryPredictionsRepository();
+    repo2.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match: match2, activation: activation2 } = await setupMatchAndVenue(repo2);
     const p90 = await attemptSubmit(repo2, activation2.venueActivationId, match2.matchId, 90, null);
     expect(p90.predictedGoalMinuteRegulation).toBe(90);
@@ -1177,6 +1178,7 @@ describe("Predictions-v2 — Goal-Time validation", () => {
       InvalidGoalMinuteError
     );
     const repo2 = new InMemoryPredictionsRepository();
+    repo2.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match: match2, activation: activation2 } = await setupMatchAndVenue(repo2);
     await expect(
       attemptSubmit(repo2, activation2.venueActivationId, match2.matchId, 45, -1)
@@ -1485,7 +1487,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const match = await createMatch(repo, {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "XP Test Cup", kickoffAt: futureIso(),
     });
-    await setMatchActivityClassification(repo, match.matchId, "RANKED");
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
     const venue = await createVenue(repo, { name: "XP Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
     const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
     return { home, away, scorer, match, venue, activation };
@@ -1503,7 +1505,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupUndeclaredMatch(repo);
-    const result = await setMatchXpEligibility(repo, match.matchId, true);
+    const result = await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     expect(result).toEqual({ matchId: match.matchId, xpEligible: true, locked: false });
     expect((await repo.getMatchById(match.matchId))!.xpEligible).toBe(true);
   });
@@ -1512,7 +1514,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupUndeclaredMatch(repo);
-    const result = await setMatchXpEligibility(repo, match.matchId, false);
+    const result = await setMatchXpEligibility(repo, match.matchId, false, "gm-admin");
     expect(result).toEqual({ matchId: match.matchId, xpEligible: false, locked: false });
     expect((await repo.getMatchById(match.matchId))!.xpEligible).toBe(false);
   });
@@ -1521,14 +1523,14 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 1, predictedAwayScore: 0,
       predictedGoalscorerPlayerId: scorer.playerId, predictedGoalMinuteRegulation: 10, predictedGoalMinuteStoppage: null,
       predictedFirstTeamToScore: "HOME", geo: INSIDE,
     });
-    const result = await setMatchXpEligibility(repo, match.matchId, true);
+    const result = await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     expect(result).toEqual({ matchId: match.matchId, xpEligible: true, locked: true });
   });
 
@@ -1536,41 +1538,41 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 1, predictedAwayScore: 0,
       predictedGoalscorerPlayerId: scorer.playerId, predictedGoalMinuteRegulation: 10, predictedGoalMinuteStoppage: null,
       predictedFirstTeamToScore: "HOME", geo: INSIDE,
     });
-    await expect(setMatchXpEligibility(repo, match.matchId, false)).rejects.toBeInstanceOf(XpEligibilityLockedError);
+    await expect(setMatchXpEligibility(repo, match.matchId, false, "gm-admin")).rejects.toBeInstanceOf(XpEligibilityLockedError);
   });
 
   it("eligibility cannot change once Result evidence exists, even with zero Predictions ever submitted", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, false);
+    await setMatchXpEligibility(repo, match.matchId, false, "gm-admin");
     await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 1, awayScore: 0,
       officialGoalEvents: [{ scorerPlayerId: scorer.playerId, minuteRegulation: 10 }],
       enteredByGamingMemberId: "gm-admin",
     });
-    await expect(setMatchXpEligibility(repo, match.matchId, true)).rejects.toBeInstanceOf(XpEligibilityLockedError);
+    await expect(setMatchXpEligibility(repo, match.matchId, true, "gm-admin")).rejects.toBeInstanceOf(XpEligibilityLockedError);
   });
 
   it("no retroactive not-eligible -> eligible upgrade after evidence exists", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, false);
+    await setMatchXpEligibility(repo, match.matchId, false, "gm-admin");
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 0, predictedAwayScore: 0,
       predictedGoalscorerPlayerId: null, predictedGoalMinuteRegulation: null, predictedGoalMinuteStoppage: null,
       predictedFirstTeamToScore: null, geo: INSIDE,
     });
-    await expect(setMatchXpEligibility(repo, match.matchId, true)).rejects.toBeInstanceOf(XpEligibilityLockedError);
+    await expect(setMatchXpEligibility(repo, match.matchId, true, "gm-admin")).rejects.toBeInstanceOf(XpEligibilityLockedError);
     expect((await repo.getMatchById(match.matchId))!.xpEligible).toBe(false);
   });
 
@@ -1578,7 +1580,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, venue } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     // A second, independent Venue Activation for the same Match — one
     // logical Match XP-eligibility decision must not be affected by
     // how many Venues broadcast it.
@@ -1592,7 +1594,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5 });
 
@@ -1621,7 +1623,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, false);
+    await setMatchXpEligibility(repo, match.matchId, false, "gm-admin");
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PERFORMANCE", performanceBandKey: "CORRECT_4_OF_4", points: 20 });
@@ -1679,8 +1681,8 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const home = await createTeam(repo, { name: "Training XP Home" });
     const away = await createTeam(repo, { name: "Training XP Away" });
     const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Training", kickoffAt: futureIso() });
-    await setMatchActivityClassification(repo, match.matchId, "TRAINING");
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchActivityClassification(repo, match.matchId, "TRAINING", "gm-admin");
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5 });
     const venue = await createVenue(repo, { name: "Training Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
@@ -1704,7 +1706,7 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, scorer, activation } = await setupUndeclaredMatch(repo);
-    await setMatchXpEligibility(repo, match.matchId, true);
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5 });
 

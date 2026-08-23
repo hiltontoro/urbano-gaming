@@ -3,10 +3,13 @@ import { SupabaseGamingRepository } from "../db/supabaseGamingRepository";
 import {
   resolveGamingAuth,
   SupabaseAuthUserVerifier,
-  isCurrentlyGamingAdmin,
   type GamingAuthState,
 } from "../auth";
 import { SupabasePredictionsRepository } from "./db/supabasePredictionsRepository";
+import { SupabaseAuthorityRepository } from "../authority/db/supabaseAuthorityRepository";
+import { requirePlatformAuthority, requireAnyPlatformAuthority } from "../authority/requirePlatformAuthority";
+import type { PlatformAuthorityClass } from "../authority/types";
+import { InsufficientPlatformAuthorityError } from "../authority/types";
 import {
   MatchNotFoundError,
   MatchCancelledError,
@@ -31,6 +34,8 @@ import {
   DraftResultAlreadyExistsError,
   NoFinalizedResultToCorrectError,
   ResultAlreadyBeingCorrectedError,
+  ActivityClassificationLockedError,
+  XpEligibilityLockedError,
 } from "./types";
 
 /** Maps a known Predictions domain error to its HTTP status; null if unrecognized. */
@@ -54,7 +59,9 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof QualificationSupersededError ||
     err instanceof DraftResultAlreadyExistsError ||
     err instanceof NoFinalizedResultToCorrectError ||
-    err instanceof ResultAlreadyBeingCorrectedError
+    err instanceof ResultAlreadyBeingCorrectedError ||
+    err instanceof ActivityClassificationLockedError ||
+    err instanceof XpEligibilityLockedError
   ) {
     return 409;
   }
@@ -95,12 +102,55 @@ export async function resolveRequestGamingAuth(
   return resolveGamingAuth(gamingRepo, verifier, request.headers.get("authorization"));
 }
 
+/** Any platform authority class is sufficient to read the Predictions admin surface — see requireAnyAdminAuthority below. */
+const ADMIN_READ_CLASSES: PlatformAuthorityClass[] = ["OPERATIONAL", "CONSEQUENTIAL_FINALIZER", "PRODUCT_GOVERNANCE"];
+
 /**
- * Resolves the caller as an authenticated Gaming Member, fresh-checked
- * as a Gaming admin every call — never a JWT claim. Returns either the
- * admin's gamingMemberId or a ready-to-return NextResponse rejection.
+ * Resolves the caller as an authenticated Gaming Member holding the
+ * given platform authority class, fresh-checked every call against
+ * authority_grants — never cached, mirroring the former requireGamingAdmin's
+ * own convention (retired in Predictions A1, superseded by this and
+ * requireAnyAdminAuthority below). Classes are non-hierarchical: this
+ * never passes for a caller holding only a different class.
  */
-export async function requireGamingAdmin(
+export async function requirePlatformAuthorityHttp(
+  request: Request,
+  credentials: { url: string; serviceKey: string },
+  authorityClass: PlatformAuthorityClass
+): Promise<{ gamingMemberId: string } | { errorResponse: NextResponse }> {
+  const authState = await resolveRequestGamingAuth(request, credentials);
+
+  if (authState.status !== "authenticated") {
+    return {
+      errorResponse: NextResponse.json(
+        { error: "A valid Authorization header for an authenticated Gaming Member is required." },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const authorityRepo = new SupabaseAuthorityRepository(credentials.url, credentials.serviceKey);
+  try {
+    await requirePlatformAuthority(authorityRepo, authState.gamingMember.gamingMemberId, authorityClass);
+  } catch (err) {
+    if (err instanceof InsufficientPlatformAuthorityError) {
+      return { errorResponse: NextResponse.json({ error: err.message }, { status: 403 }) };
+    }
+    throw err;
+  }
+
+  return { gamingMemberId: authState.gamingMember.gamingMemberId };
+}
+
+/**
+ * Resolves the caller as an authenticated Gaming Member holding at
+ * least one active platform authority class — the accepted bounded
+ * read-access rule (Predictions A1 classification, §5): mutation stays
+ * strictly class-specific; reads are pooled across all three classes
+ * so a Finalizer-only actor can see the evidence an Operator prepared,
+ * and vice versa.
+ */
+export async function requireAnyAdminAuthority(
   request: Request,
   credentials: { url: string; serviceKey: string }
 ): Promise<{ gamingMemberId: string } | { errorResponse: NextResponse }> {
@@ -115,15 +165,14 @@ export async function requireGamingAdmin(
     };
   }
 
-  const gamingRepo = new SupabaseGamingRepository(credentials.url, credentials.serviceKey);
-  const isAdmin = await isCurrentlyGamingAdmin(gamingRepo, authState.gamingMember.gamingMemberId);
-  if (!isAdmin) {
-    return {
-      errorResponse: NextResponse.json(
-        { error: "This action requires Gaming admin authority." },
-        { status: 403 }
-      ),
-    };
+  const authorityRepo = new SupabaseAuthorityRepository(credentials.url, credentials.serviceKey);
+  try {
+    await requireAnyPlatformAuthority(authorityRepo, authState.gamingMember.gamingMemberId, ADMIN_READ_CLASSES);
+  } catch (err) {
+    if (err instanceof InsufficientPlatformAuthorityError) {
+      return { errorResponse: NextResponse.json({ error: err.message }, { status: 403 }) };
+    }
+    throw err;
   }
 
   return { gamingMemberId: authState.gamingMember.gamingMemberId };

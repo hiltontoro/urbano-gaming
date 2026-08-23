@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import {
   getSupabaseCredentials,
   buildPredictionsRepo,
-  requireGamingAdmin,
+  requireAnyAdminAuthority,
+  requirePlatformAuthorityHttp,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createTeam, listTeams } from "@/lib/gaming/predictions/adminCatalog";
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  const admin = await requireGamingAdmin(request, credentials);
+  const admin = await requireAnyAdminAuthority(request, credentials);
   if ("errorResponse" in admin) return admin.errorResponse;
 
   const repo = buildPredictionsRepo(credentials);
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-  const admin = await requireGamingAdmin(request, credentials);
+  const admin = await requirePlatformAuthorityHttp(request, credentials, "OPERATIONAL");
   if ("errorResponse" in admin) return admin.errorResponse;
 
   let body: Record<string, unknown>;

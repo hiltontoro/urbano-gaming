@@ -1,0 +1,37 @@
+-- Migration: 0125_drop_gaming_admins
+-- Predictions A1 — Admin Authority Migration. Final step.
+--
+-- gaming_admins (0048) is retired: superseded by Admin Control Plane
+-- A0's authority_grants (0114) and its three canonical, non-hierarchical
+-- platform authority classes. Confirmed safe before this migration was
+-- written, not assumed:
+--
+--   - zero remaining runtime references anywhere in app/ or lib/ to
+--     gaming_admins, isGamingAdmin, or requireGamingAdmin (repo-wide
+--     grep, re-verified immediately before this migration);
+--   - all 14 pre-existing Predictions admin routes had already been
+--     migrated onto requirePlatformAuthorityHttp/requireAnyAdminAuthority
+--     in this same Slice;
+--   - equivalent A0 coverage already exists for every behavior the
+--     retired gaming_admins tests proved (fresh-every-call check,
+--     immediate effect on revocation, non-authorized rejection) — see
+--     __tests__/adminAuthority.test.ts and
+--     __tests__/adminAuthoritySupabaseRepository.contract.test.ts;
+--   - production has held zero gaming_admins rows since this table was
+--     first deployed — reconfirmed immediately before this Slice's own
+--     production deployment gate, no backfill or data-migration risk.
+--
+-- No compatibility bridge is included, and this migration's own
+-- deployment ordering is more load-bearing than any other migration in
+-- this Slice: unlike a function-signature change (which fails cleanly
+-- and narrowly for one action), old source still running
+-- requireGamingAdmin/isGamingAdmin against this table once it is
+-- dropped would hard-fail every one of the 14 legacy admin routes
+-- identically, for the whole OLD_SOURCE_NEW_SCHEMA window — a strictly
+-- worse blast radius than 0121's own correction-path-only gap. This
+-- migration must not be applied until source carrying this Slice's own
+-- route migration (onto requirePlatformAuthorityHttp/
+-- requireAnyAdminAuthority) is already confirmed live — a future
+-- deployment gate's own responsibility, not guaranteed by this file.
+
+drop table if exists gaming_admins;

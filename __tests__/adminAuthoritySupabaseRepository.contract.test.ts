@@ -15,6 +15,7 @@ import {
   GovernanceAuthorityRequiredError,
   AuthorityGrantNotFoundError,
 } from "../lib/gaming/authority/types";
+import { requirePlatformAuthorityHttp, requireAnyAdminAuthority } from "../lib/gaming/predictions/httpAuth";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
@@ -40,6 +41,35 @@ async function createRealGamingMember(displayName: string): Promise<string> {
   const member = await gamingRepo.createGamingMember(data.user.id, displayName);
   createdGamingMemberIds.push(member.gamingMemberId);
   return member.gamingMemberId;
+}
+
+/**
+ * Same as createRealGamingMember, but also resolves a genuine Supabase
+ * Auth access token — via magic-link + verifyOtp, mirroring the exact
+ * pattern predictionsSupabaseRepository.contract.test.ts already
+ * established for proving requireGamingAdmin end to end — so the new
+ * HTTP-shaped requirePlatformAuthorityHttp/requireAnyAdminAuthority can
+ * be proven against a real Authorization: Bearer header, not a mock.
+ */
+async function createRealGamingMemberWithToken(
+  displayName: string
+): Promise<{ gamingMemberId: string; accessToken: string }> {
+  const email = `authority-contract-${randomUUID()}@example.com`;
+  const { data, error } = await cleanupClient.auth.admin.createUser({ email, email_confirm: true });
+  if (error || !data.user) throw error ?? new Error("Failed to create test auth user.");
+  createdAuthUserIds.push(data.user.id);
+  const member = await gamingRepo.createGamingMember(data.user.id, displayName);
+  createdGamingMemberIds.push(member.gamingMemberId);
+
+  const linkResponse = await cleanupClient.auth.admin.generateLink({ type: "magiclink", email });
+  if (!linkResponse.data.properties) {
+    throw new Error("generateLink did not return properties.");
+  }
+  const verified = await cleanupClient.auth.verifyOtp({
+    token_hash: linkResponse.data.properties.hashed_token,
+    type: "email",
+  });
+  return { gamingMemberId: member.gamingMemberId, accessToken: verified.data.session!.access_token };
 }
 
 /**
@@ -236,4 +266,67 @@ describe("SupabaseAuthorityRepository contract — Admin Control Plane A0 agains
     expect(events[0].actorId).toBe(founder);
     expect(events[0].resultingReference).toEqual({ table: "authority_grants", id: granted.authorityGrantId });
   });
+});
+
+describe("HTTP-shaped authority checks (Predictions A1) — requirePlatformAuthorityHttp / requireAnyAdminAuthority against a real Authorization header", () => {
+  it("a member with no active grant is rejected by both the specific and the any-class check", async () => {
+    const { accessToken } = await createRealGamingMemberWithToken("ContractA1HttpNoGrant");
+    const request = new Request("http://localhost/test", { headers: { authorization: `Bearer ${accessToken}` } });
+
+    const specific = await requirePlatformAuthorityHttp(request, { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! }, "OPERATIONAL");
+    expect("errorResponse" in specific).toBe(true);
+    if ("errorResponse" in specific) expect(specific.errorResponse.status).toBe(403);
+
+    const any = await requireAnyAdminAuthority(request, { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! });
+    expect("errorResponse" in any).toBe(true);
+    if ("errorResponse" in any) expect(any.errorResponse.status).toBe(403);
+  });
+
+  it("an Operational-only member passes the any-class read check but fails a Consequential Finalizer-specific check", async () => {
+    const founder = await bootstrapNewGovernance("ContractA1HttpFounder");
+    const { gamingMemberId, accessToken } = await createRealGamingMemberWithToken("ContractA1HttpOperator");
+    await grantPlatformAuthority(authorityRepo, founder, gamingMemberId, "OPERATIONAL", "Onboarding operator.");
+
+    const request = new Request("http://localhost/test", { headers: { authorization: `Bearer ${accessToken}` } });
+
+    const any = await requireAnyAdminAuthority(request, { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! });
+    expect("gamingMemberId" in any).toBe(true);
+
+    const finalizerCheck = await requirePlatformAuthorityHttp(
+      request,
+      { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! },
+      "CONSEQUENTIAL_FINALIZER"
+    );
+    expect("errorResponse" in finalizerCheck).toBe(true);
+    if ("errorResponse" in finalizerCheck) expect(finalizerCheck.errorResponse.status).toBe(403);
+  });
+
+  it("a Consequential Finalizer passes both the specific check and the any-class read check; revocation removes both on the next request", async () => {
+    const founder = await bootstrapNewGovernance("ContractA1HttpFounder2");
+    const { gamingMemberId, accessToken } = await createRealGamingMemberWithToken("ContractA1HttpFinalizer");
+    await grantPlatformAuthority(authorityRepo, founder, gamingMemberId, "CONSEQUENTIAL_FINALIZER", "Onboarding finalizer.");
+
+    const request = new Request("http://localhost/test", { headers: { authorization: `Bearer ${accessToken}` } });
+
+    const finalizerCheck = await requirePlatformAuthorityHttp(
+      request,
+      { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! },
+      "CONSEQUENTIAL_FINALIZER"
+    );
+    expect("gamingMemberId" in finalizerCheck).toBe(true);
+
+    const any = await requireAnyAdminAuthority(request, { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! });
+    expect("gamingMemberId" in any).toBe(true);
+
+    await revokePlatformAuthority(authorityRepo, founder, gamingMemberId, "CONSEQUENTIAL_FINALIZER", "Role change.");
+
+    const revokedCheck = await requirePlatformAuthorityHttp(
+      request,
+      { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! },
+      "CONSEQUENTIAL_FINALIZER"
+    );
+    expect("errorResponse" in revokedCheck).toBe(true);
+    const revokedAny = await requireAnyAdminAuthority(request, { url: supabaseUrl!, serviceKey: supabaseServiceRoleKey! });
+    expect("errorResponse" in revokedAny).toBe(true);
+  }, 30000);
 });

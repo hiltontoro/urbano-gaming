@@ -54,11 +54,15 @@ export interface PredictionsRepository {
   listMatches(): Promise<MatchRecord[]>;
   setMatchActivityClassification(
     matchId: string,
-    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL"
+    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL",
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; activityClassification: string; locked: boolean }>;
   setMatchXpEligibility(
     matchId: string,
-    xpEligible: boolean
+    xpEligible: boolean,
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; xpEligible: boolean; locked: boolean }>;
 
   // Venues
@@ -191,6 +195,7 @@ export interface PredictionsRepository {
   ): Promise<PrizeQualificationRecord[]>;
   redeemPrizeQualification(
     prizeQualificationId: string,
-    redeemedByGamingMemberId: string
+    redeemedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ prizeQualificationId: string; redeemedAt: string; alreadyRedeemed: boolean }>;
 }

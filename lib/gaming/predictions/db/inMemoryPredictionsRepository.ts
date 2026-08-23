@@ -213,10 +213,15 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
 
   async setMatchActivityClassification(
     matchId: string,
-    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL"
+    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL",
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; activityClassification: string; locked: boolean }> {
     const existing = this.matches.get(matchId);
     if (!existing) throw new MatchNotFoundError();
+
+    const hasAuthority = await this.authority.hasActiveAuthority(actorGamingMemberId, "CONSEQUENTIAL_FINALIZER");
+    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
 
     const hasPredictions = [...this.predictions.values()].some((p) => p.matchId === matchId);
     const hasResults = [...this.matchResults.values()].some((r) => r.matchId === matchId);
@@ -229,15 +234,34 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     }
 
     this.matches.set(matchId, { ...existing, activityClassification });
+
+    this.auditStore.record({
+      actionType: "DECLARE_ACTIVITY_CLASSIFICATION",
+      actorKind: "GAMING_MEMBER",
+      actorId: actorGamingMemberId,
+      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+      targetType: "matches",
+      targetId: matchId,
+      previousReference: null,
+      resultingReference: { table: "matches", id: matchId },
+      outcome: "SUCCESS",
+      reason,
+    });
+
     return { matchId, activityClassification, locked: false };
   }
 
   async setMatchXpEligibility(
     matchId: string,
-    xpEligible: boolean
+    xpEligible: boolean,
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; xpEligible: boolean; locked: boolean }> {
     const existing = this.matches.get(matchId);
     if (!existing) throw new MatchNotFoundError();
+
+    const hasAuthority = await this.authority.hasActiveAuthority(actorGamingMemberId, "CONSEQUENTIAL_FINALIZER");
+    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
 
     const hasPredictions = [...this.predictions.values()].some((p) => p.matchId === matchId);
     const hasResults = [...this.matchResults.values()].some((r) => r.matchId === matchId);
@@ -250,6 +274,20 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     }
 
     this.matches.set(matchId, { ...existing, xpEligible });
+
+    this.auditStore.record({
+      actionType: "DECLARE_XP_ELIGIBILITY",
+      actorKind: "GAMING_MEMBER",
+      actorId: actorGamingMemberId,
+      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+      targetType: "matches",
+      targetId: matchId,
+      previousReference: null,
+      resultingReference: { table: "matches", id: matchId },
+      outcome: "SUCCESS",
+      reason,
+    });
+
     return { matchId, xpEligible, locked: false };
   }
 
@@ -1052,10 +1090,15 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
 
   async redeemPrizeQualification(
     prizeQualificationId: string,
-    redeemedByGamingMemberId: string
+    redeemedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ prizeQualificationId: string; redeemedAt: string; alreadyRedeemed: boolean }> {
     const existing = this.qualifications.get(prizeQualificationId);
     if (!existing) throw new PrizeQualificationNotFoundError();
+
+    const hasAuthority = await this.authority.hasActiveAuthority(redeemedByGamingMemberId, "CONSEQUENTIAL_FINALIZER");
+    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
+
     if (existing.redeemedAt) {
       return { prizeQualificationId, redeemedAt: existing.redeemedAt, alreadyRedeemed: true };
     }
@@ -1067,6 +1110,20 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
       redeemedAt,
       redeemedByGamingMemberId,
     });
+
+    this.auditStore.record({
+      actionType: "CONFIRM_PRIZE_REDEMPTION",
+      actorKind: "GAMING_MEMBER",
+      actorId: redeemedByGamingMemberId,
+      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+      targetType: "prize_qualifications",
+      targetId: prizeQualificationId,
+      previousReference: null,
+      resultingReference: { table: "prize_qualifications", id: prizeQualificationId },
+      outcome: "SUCCESS",
+      reason,
+    });
+
     return { prizeQualificationId, redeemedAt, alreadyRedeemed: false };
   }
 }

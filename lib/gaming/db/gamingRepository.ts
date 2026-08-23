@@ -24,9 +24,9 @@ import type { GamingMemberRecord } from "../types";
  *   create_gaming_member_atomically, 0047, and this interface's two
  *   implementations for how each honors that).
  *
- * isGamingAdmin is a fresh-every-call Postgres/in-memory check — never
- * cached, never derived from a JWT claim. See gaming_admins' own
- * migration comment (0048) for why.
+ * The former binary Gaming-admin authority (isGamingAdmin/gaming_admins)
+ * was retired in Predictions A1 — superseded by Admin Control Plane
+ * A0's platform authority classes (lib/gaming/authority/).
  */
 export interface GamingRepository {
   resolveGamingMemberByAuthUserId(
@@ -37,6 +37,4 @@ export interface GamingRepository {
     authUserId: string,
     displayName: string
   ): Promise<GamingMemberRecord>;
-
-  isGamingAdmin(gamingMemberId: string): Promise<boolean>;
 }

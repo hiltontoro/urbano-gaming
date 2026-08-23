@@ -22,6 +22,7 @@ import {
   createMatch,
   createVenue,
   createVenueActivation,
+  createPrizeTier,
   saveDraftResult,
   startResultCorrection,
   setMatchActivityClassification,
@@ -30,6 +31,8 @@ import {
 import { submitPrediction } from "../lib/gaming/predictions/submitPrediction";
 import { finalizeMatchResult } from "../lib/gaming/predictions/finalizeMatchResult";
 import { correctMatchResult } from "../lib/gaming/predictions/correctMatchResult";
+import { redeemPrizeQualification } from "../lib/gaming/predictions/redeemPrizeQualification";
+import { ActivityClassificationLockedError, XpEligibilityLockedError } from "../lib/gaming/predictions/types";
 
 const VENUE_LAT = 10.0;
 const VENUE_LON = 10.0;
@@ -46,6 +49,12 @@ function newAuthority() {
 }
 
 async function setupFinalizableMatch(repo: InMemoryPredictionsRepository) {
+  // Dedicated to this shared setup helper, independent of whatever
+  // actor an individual test additionally seeds for its own
+  // assertion — Activity Classification/XP Eligibility declaration
+  // here is setup plumbing, not the actor under test.
+  repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+
   const home = await createTeam(repo, { name: "Real Madrid" });
   const away = await createTeam(repo, { name: "Barcelona" });
   const mbappe = await createPlayer(repo, { teamId: home.teamId, name: "Mbappe" });
@@ -56,8 +65,8 @@ async function setupFinalizableMatch(repo: InMemoryPredictionsRepository) {
     competition: "Friendly",
     kickoffAt: futureIso(),
   });
-  await setMatchActivityClassification(repo, match.matchId, "RANKED");
-  await setMatchXpEligibility(repo, match.matchId, true);
+  await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
+  await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
   await repo.metagameRepository.createCategoryParticipationPolicy({
     categoryKey: "SOCCER_PREDICTIONS",
     dailyParticipationAllowance: 1000,
@@ -549,5 +558,272 @@ describe("Admin Control Plane A0 — Result correction authority + reason enforc
     await expect(
       correctMatchResult(repo, correctionDraft.matchResultId, "gm-operator", "Attempted correction.")
     ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+});
+
+describe("Admin Control Plane A0 — Activity Classification authority + audit (Predictions A1)", () => {
+  it("Operational alone cannot declare Activity Classification", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-operator", "OPERATIONAL");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    await expect(
+      setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-operator")
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+
+  it("a Finalizer can declare Activity Classification; first declaration produces one audit event with no reason required", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+
+    const result = await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-finalizer");
+    expect(result.locked).toBe(false);
+
+    const events = await repo.auditStoreForTests.listEventsForTarget("matches", match.matchId);
+    const declareEvents = events.filter((e) => e.actionType === "DECLARE_ACTIVITY_CLASSIFICATION");
+    expect(declareEvents).toHaveLength(1);
+    expect(declareEvents[0].actorId).toBe("gm-finalizer");
+    expect(declareEvents[0].authorityClassUsed).toBe("CONSEQUENTIAL_FINALIZER");
+    expect(declareEvents[0].resultingReference).toEqual({ table: "matches", id: match.matchId });
+    expect(declareEvents[0].reason).toBeNull();
+  });
+
+  it("a legal pre-lock re-declaration produces its own audit event; a locked change is rejected and produces none", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    const venue = await createVenue(repo, { name: "V", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+
+    await setMatchActivityClassification(repo, match.matchId, "CASUAL", "gm-finalizer", "Initial call.");
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-finalizer", "Corrected before evidence exists.");
+
+    let events = await repo.auditStoreForTests.listEventsForTarget("matches", match.matchId);
+    expect(events.filter((e) => e.actionType === "DECLARE_ACTIVITY_CLASSIFICATION")).toHaveLength(2);
+
+    await submitPrediction(repo, {
+      matchId: match.matchId,
+      gamingMemberId: "gm-1",
+      venueActivationId: activation.venueActivationId,
+      predictedHomeScore: 0,
+      predictedAwayScore: 0,
+      predictedGoalscorerPlayerId: null,
+      predictedGoalMinuteRegulation: null,
+      predictedGoalMinuteStoppage: null,
+      predictedFirstTeamToScore: null,
+      geo: INSIDE,
+    });
+
+    await expect(
+      setMatchActivityClassification(repo, match.matchId, "OFFICIAL", "gm-finalizer")
+    ).rejects.toBeInstanceOf(ActivityClassificationLockedError);
+
+    events = await repo.auditStoreForTests.listEventsForTarget("matches", match.matchId);
+    expect(events.filter((e) => e.actionType === "DECLARE_ACTIVITY_CLASSIFICATION")).toHaveLength(2);
+  });
+});
+
+describe("Admin Control Plane A0 — Match XP Eligibility authority + audit (Predictions A1)", () => {
+  it("Operational alone cannot declare Match XP Eligibility", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-operator", "OPERATIONAL");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    await expect(
+      setMatchXpEligibility(repo, match.matchId, true, "gm-operator")
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+
+  it("a Finalizer can declare XP Eligibility, producing its own distinct DECLARE_XP_ELIGIBILITY event — never merged with Activity Classification's", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-finalizer");
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-finalizer");
+
+    const events = await repo.auditStoreForTests.listEventsForTarget("matches", match.matchId);
+    expect(events.map((e) => e.actionType).sort()).toEqual([
+      "DECLARE_ACTIVITY_CLASSIFICATION",
+      "DECLARE_XP_ELIGIBILITY",
+    ]);
+  });
+
+  it("XP Eligibility declaration does not activate Gaming XP — no rule/policy/event row is touched", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-finalizer", "Calibration test Match.");
+    // This Slice adds no method to create/mutate gaming_xp_rules or
+    // gaming_category_participation_policy at all — their absence from
+    // PredictionsRepository is itself the proof Gaming XP configuration
+    // remains untouched by this action.
+    expect((repo as any).createGamingXpRule).toBeUndefined();
+  });
+
+  it("locked XP Eligibility change is rejected and produces no additional audit event", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    const venue = await createVenue(repo, { name: "V", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-finalizer");
+    await setMatchXpEligibility(repo, match.matchId, true, "gm-finalizer");
+
+    await submitPrediction(repo, {
+      matchId: match.matchId,
+      gamingMemberId: "gm-1",
+      venueActivationId: activation.venueActivationId,
+      predictedHomeScore: 0,
+      predictedAwayScore: 0,
+      predictedGoalscorerPlayerId: null,
+      predictedGoalMinuteRegulation: null,
+      predictedGoalMinuteStoppage: null,
+      predictedFirstTeamToScore: null,
+      geo: INSIDE,
+    });
+
+    await expect(
+      setMatchXpEligibility(repo, match.matchId, false, "gm-finalizer")
+    ).rejects.toBeInstanceOf(XpEligibilityLockedError);
+
+    const events = await repo.auditStoreForTests.listEventsForTarget("matches", match.matchId);
+    expect(events.filter((e) => e.actionType === "DECLARE_XP_ELIGIBILITY")).toHaveLength(1);
+  });
+});
+
+describe("Admin Control Plane A0 — Prize Redemption authority + audit (Predictions A1)", () => {
+  async function setupRedeemableQualification(repo: InMemoryPredictionsRepository) {
+    repo.authorityRepository.seedAuthority("gm-finalizer", "CONSEQUENTIAL_FINALIZER");
+    const home = await createTeam(repo, { name: "Real Madrid" });
+    const away = await createTeam(repo, { name: "Barcelona" });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId,
+      awayTeamId: away.teamId,
+      competition: "Friendly",
+      kickoffAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-finalizer");
+    const venue = await createVenue(repo, { name: "V", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+
+    const prediction = await submitPrediction(repo, {
+      matchId: match.matchId,
+      gamingMemberId: "gm-1",
+      venueActivationId: activation.venueActivationId,
+      predictedHomeScore: 0,
+      predictedAwayScore: 0,
+      predictedGoalscorerPlayerId: null,
+      predictedGoalMinuteRegulation: null,
+      predictedGoalMinuteStoppage: null,
+      predictedFirstTeamToScore: null,
+      geo: INSIDE,
+    });
+    const draft = await saveDraftResult(repo, {
+      matchId: match.matchId,
+      homeScore: 0,
+      awayScore: 0,
+      officialGoalEvents: [],
+      enteredByGamingMemberId: "gm-finalizer",
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, "gm-finalizer");
+    const evaluation = await repo.getCurrentEvaluationForPrediction(prediction.predictionId);
+    const qualification = await repo.getQualificationForEvaluation(evaluation!.evaluationId);
+    return qualification!;
+  }
+
+  it("Operational alone cannot redeem a Prize Qualification", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    const qualification = await setupRedeemableQualification(repo);
+    repo.authorityRepository.seedAuthority("gm-operator", "OPERATIONAL");
+    await expect(
+      redeemPrizeQualification(repo, qualification.prizeQualificationId, "gm-operator")
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+
+  it("a Finalizer can redeem, preserving domain provenance and producing exactly one CONFIRM_PRIZE_REDEMPTION event", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    const qualification = await setupRedeemableQualification(repo);
+
+    const result = await redeemPrizeQualification(
+      repo,
+      qualification.prizeQualificationId,
+      "gm-finalizer",
+      "Verified at venue counter."
+    );
+    expect(result.alreadyRedeemed).toBe(false);
+
+    const events = await repo.auditStoreForTests.listEventsForTarget(
+      "prize_qualifications",
+      qualification.prizeQualificationId
+    );
+    const redemptionEvents = events.filter((e) => e.actionType === "CONFIRM_PRIZE_REDEMPTION");
+    expect(redemptionEvents).toHaveLength(1);
+    expect(redemptionEvents[0].actorId).toBe("gm-finalizer");
+    expect(redemptionEvents[0].reason).toBe("Verified at venue counter.");
+  });
+
+  it("a repeated redemption attempt does not fabricate duplicate successful history", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    const qualification = await setupRedeemableQualification(repo);
+
+    await redeemPrizeQualification(repo, qualification.prizeQualificationId, "gm-finalizer");
+    const second = await redeemPrizeQualification(repo, qualification.prizeQualificationId, "gm-finalizer");
+    expect(second.alreadyRedeemed).toBe(true);
+
+    const events = await repo.auditStoreForTests.listEventsForTarget(
+      "prize_qualifications",
+      qualification.prizeQualificationId
+    );
+    expect(events.filter((e) => e.actionType === "CONFIRM_PRIZE_REDEMPTION")).toHaveLength(1);
   });
 });

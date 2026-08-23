@@ -388,11 +388,15 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async setMatchActivityClassification(
     matchId: string,
-    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL"
+    activityClassification: "TRAINING" | "CASUAL" | "RANKED" | "OFFICIAL",
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; activityClassification: string; locked: boolean }> {
     const { data, error } = await this.client.rpc("set_match_activity_classification_atomically", {
       p_match_id: matchId,
       p_activity_classification: activityClassification,
+      p_actor_gaming_member_id: actorGamingMemberId,
+      p_reason: reason,
     });
     if (error) {
       const translated = translateNamedError(error);
@@ -404,11 +408,15 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async setMatchXpEligibility(
     matchId: string,
-    xpEligible: boolean
+    xpEligible: boolean,
+    actorGamingMemberId: string,
+    reason: string | null
   ): Promise<{ matchId: string; xpEligible: boolean; locked: boolean }> {
     const { data, error } = await this.client.rpc("set_match_xp_eligibility_atomically", {
       p_match_id: matchId,
       p_xp_eligible: xpEligible,
+      p_actor_gaming_member_id: actorGamingMemberId,
+      p_reason: reason,
     });
     if (error) {
       const translated = translateNamedError(error);
@@ -910,11 +918,13 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async redeemPrizeQualification(
     prizeQualificationId: string,
-    redeemedByGamingMemberId: string
+    redeemedByGamingMemberId: string,
+    reason: string | null
   ): Promise<{ prizeQualificationId: string; redeemedAt: string; alreadyRedeemed: boolean }> {
     const { data, error } = await this.client.rpc("redeem_prize_qualification_atomically", {
       p_prize_qualification_id: prizeQualificationId,
       p_redeemed_by_gaming_member_id: redeemedByGamingMemberId,
+      p_reason: reason,
     });
     if (error) {
       const translated = translateNamedError(error);

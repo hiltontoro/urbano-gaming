@@ -20,7 +20,6 @@ import {
 } from "../lib/gaming/types";
 import {
   resolveGamingAuth,
-  isCurrentlyGamingAdmin,
   type AuthUserVerifier,
 } from "../lib/gaming/auth";
 
@@ -158,54 +157,11 @@ describe("Gaming Auth — resolveGamingAuth", () => {
   });
 });
 
-describe("Gaming Admin — fresh-every-call authorization, no JWT claim dependency", () => {
-  it("returns false for a Gaming Member not in gaming_admins", async () => {
-    const repo = new InMemoryGamingRepository();
-    const member = await createGamingMember(repo, "auth-10", "NotAdmin");
-
-    expect(await isCurrentlyGamingAdmin(repo, member.gamingMemberId)).toBe(
-      false
-    );
-  });
-
-  it("returns true immediately after an admin row is inserted", async () => {
-    const repo = new InMemoryGamingRepository();
-    const member = await createGamingMember(repo, "auth-11", "SoonAdmin");
-
-    repo.seedAdmin(member.gamingMemberId);
-
-    expect(await isCurrentlyGamingAdmin(repo, member.gamingMemberId)).toBe(
-      true
-    );
-  });
-
-  it("returns false immediately after the admin row is deleted — no token-lifetime lag", async () => {
-    const repo = new InMemoryGamingRepository();
-    const member = await createGamingMember(repo, "auth-12", "RevokedAdmin");
-    repo.seedAdmin(member.gamingMemberId);
-    expect(await isCurrentlyGamingAdmin(repo, member.gamingMemberId)).toBe(
-      true
-    );
-
-    repo.revokeAdmin(member.gamingMemberId);
-
-    expect(await isCurrentlyGamingAdmin(repo, member.gamingMemberId)).toBe(
-      false
-    );
-  });
-
-  it("checks the repository directly by gamingMemberId — no token or claim is ever consulted", async () => {
-    const repo = new InMemoryGamingRepository();
-    repo.seedAdmin("gaming-member-with-no-associated-session-token");
-
-    expect(
-      await isCurrentlyGamingAdmin(
-        repo,
-        "gaming-member-with-no-associated-session-token"
-      )
-    ).toBe(true);
-  });
-});
+// The former "Gaming Admin" binary authority (isGamingAdmin/gaming_admins)
+// was retired in Predictions A1 — superseded by Admin Control Plane A0's
+// platform authority classes (see __tests__/adminAuthority.test.ts and
+// __tests__/adminAuthoritySupabaseRepository.contract.test.ts for the
+// equivalent fresh-every-call, immediate-revocation coverage).
 
 describe("Participant linkage — JOIN_SESSION with a Gaming Member", () => {
   it("Guest join leaves gamingMemberId null — the exact pre-Identity-Foundation path, unchanged", async () => {

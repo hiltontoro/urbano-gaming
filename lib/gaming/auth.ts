@@ -100,17 +100,3 @@ export async function resolveGamingAuth(
 
   return { status: "authenticated", gamingMember };
 }
-
-/**
- * "Is this currently-resolved Gaming Member an active Gaming admin?" —
- * checked fresh from the repository on every call, never cached, never
- * derived from a JWT claim. See gaming_admins' own migration comment
- * (0048) for why: row deletion must take effect on the very next
- * request, which a cached/claim-based answer cannot guarantee.
- */
-export async function isCurrentlyGamingAdmin(
-  repo: GamingRepository,
-  gamingMemberId: string
-): Promise<boolean> {
-  return repo.isGamingAdmin(gamingMemberId);
-}

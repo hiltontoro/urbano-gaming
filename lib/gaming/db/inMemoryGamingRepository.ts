@@ -6,12 +6,10 @@ import type { GamingMemberRecord } from "../types";
  * In-memory GamingRepository for behavioral tests — mirrors
  * lib/session/db/inMemorySessionRepository.ts's role: fast, dependency-
  * free, and independently authoritative for the same invariants the
- * real database enforces (idempotent create, admin revocation takes
- * effect immediately).
+ * real database enforces (idempotent create).
  */
 export class InMemoryGamingRepository implements GamingRepository {
   private membersByAuthUserId = new Map<string, GamingMemberRecord>();
-  private admins = new Set<string>();
 
   async resolveGamingMemberByAuthUserId(
     authUserId: string
@@ -41,19 +39,5 @@ export class InMemoryGamingRepository implements GamingRepository {
 
     this.membersByAuthUserId.set(authUserId, record);
     return record;
-  }
-
-  async isGamingAdmin(gamingMemberId: string): Promise<boolean> {
-    return this.admins.has(gamingMemberId);
-  }
-
-  /** Test-only seam: grants admin without going through any command. */
-  seedAdmin(gamingMemberId: string): void {
-    this.admins.add(gamingMemberId);
-  }
-
-  /** Test-only seam: revokes admin without going through any command. */
-  revokeAdmin(gamingMemberId: string): void {
-    this.admins.delete(gamingMemberId);
   }
 }

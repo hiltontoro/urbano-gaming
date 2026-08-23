@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getSupabaseCredentials,
   buildPredictionsRepo,
-  requireGamingAdmin,
+  requirePlatformAuthorityHttp,
 } from "@/lib/gaming/predictions/httpAuth";
 import { editVenue } from "@/lib/gaming/predictions/adminCatalog";
 
@@ -17,7 +17,7 @@ export async function PATCH(
       { status: 500 }
     );
   }
-  const admin = await requireGamingAdmin(request, credentials);
+  const admin = await requirePlatformAuthorityHttp(request, credentials, "OPERATIONAL");
   if ("errorResponse" in admin) return admin.errorResponse;
 
   let body: Record<string, unknown>;

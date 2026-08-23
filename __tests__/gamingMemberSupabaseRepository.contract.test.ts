@@ -115,9 +115,8 @@ afterAll(async () => {
       .in("session_id", createdSessionIds);
   }
 
-  // Cascades to gaming_members (0045) and gaming_admins (0048)
-  // automatically — this is itself part of what several tests below
-  // prove, not just cleanup.
+  // Cascades to gaming_members (0045) automatically — this is itself
+  // part of what several tests below prove, not just cleanup.
   for (const authUserId of createdAuthUserIds) {
     await cleanupClient.auth.admin.deleteUser(authUserId);
   }
@@ -201,36 +200,10 @@ describe("SupabaseGamingRepository contract", () => {
     expect(resolved).toBeNull();
   });
 
-  it("gaming_admins: false when absent, true immediately after insert, false immediately after delete", async () => {
-    const authUserId = await createRealAuthUser();
-    const member = await gamingRepository.createGamingMember(
-      authUserId,
-      "Admin Candidate"
-    );
-
-    expect(await gamingRepository.isGamingAdmin(member.gamingMemberId)).toBe(
-      false
-    );
-
-    const { error: insertError } = await cleanupClient
-      .from("gaming_admins")
-      .insert({ gaming_member_id: member.gamingMemberId });
-    expect(insertError).toBeNull();
-
-    expect(await gamingRepository.isGamingAdmin(member.gamingMemberId)).toBe(
-      true
-    );
-
-    const { error: deleteError } = await cleanupClient
-      .from("gaming_admins")
-      .delete()
-      .eq("gaming_member_id", member.gamingMemberId);
-    expect(deleteError).toBeNull();
-
-    expect(await gamingRepository.isGamingAdmin(member.gamingMemberId)).toBe(
-      false
-    );
-  });
+  // The former gaming_admins/isGamingAdmin binary authority was retired
+  // in Predictions A1 — superseded by Admin Control Plane A0's
+  // authority_grants (see __tests__/adminAuthoritySupabaseRepository.
+  // contract.test.ts for the equivalent live-Postgres coverage).
 
   it("join_participant_atomically links a real Gaming Member to a new Participant", async () => {
     const authUserId = await createRealAuthUser();

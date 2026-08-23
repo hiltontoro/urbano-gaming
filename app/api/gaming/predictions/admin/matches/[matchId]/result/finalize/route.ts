@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getSupabaseCredentials,
   buildPredictionsRepo,
-  requireGamingAdmin,
+  requirePlatformAuthorityHttp,
   statusForPredictionsError,
 } from "@/lib/gaming/predictions/httpAuth";
 import { finalizeMatchResult } from "@/lib/gaming/predictions/finalizeMatchResult";
@@ -30,7 +30,7 @@ export async function POST(
       { status: 500 }
     );
   }
-  const admin = await requireGamingAdmin(request, credentials);
+  const admin = await requirePlatformAuthorityHttp(request, credentials, "CONSEQUENTIAL_FINALIZER");
   if ("errorResponse" in admin) return admin.errorResponse;
 
   const repo = buildPredictionsRepo(credentials);

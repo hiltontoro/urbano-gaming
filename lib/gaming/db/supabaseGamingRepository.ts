@@ -81,15 +81,4 @@ export class SupabaseGamingRepository implements GamingRepository {
       createdAt: row.created_at,
     };
   }
-
-  async isGamingAdmin(gamingMemberId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from("gaming_admins")
-      .select("gaming_member_id")
-      .eq("gaming_member_id", gamingMemberId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data !== null;
-  }
 }

@@ -10,7 +10,6 @@ import { submitPrediction } from "../lib/gaming/predictions/submitPrediction";
 import { finalizeMatchResult } from "../lib/gaming/predictions/finalizeMatchResult";
 import { correctMatchResult } from "../lib/gaming/predictions/correctMatchResult";
 import { redeemPrizeQualification } from "../lib/gaming/predictions/redeemPrizeQualification";
-import { requireGamingAdmin } from "../lib/gaming/predictions/httpAuth";
 import { cancelMatch } from "../lib/gaming/predictions/adminCatalog";
 import { InvalidGoalscorerSelectionError, InvalidGoalMinuteError, MatchCancelledError, XpEligibilityLockedError } from "../lib/gaming/predictions/types";
 import { SupabaseAuditRepository } from "../lib/gaming/audit/db/supabaseAuditRepository";
@@ -48,11 +47,9 @@ async function createRealGamingMember(displayName: string): Promise<{ authUserId
 }
 
 /**
- * Admin Control Plane A0. Direct authority_grants insert — the same
- * fixture posture this file already uses for gaming_admins (see the
- * "already Gaming admin" test below) — for tests that need an already-
- * authorized Consequential Finalizer and are not themselves proving the
- * grant/revoke workflow.
+ * Admin Control Plane A0. Direct authority_grants insert, for tests that
+ * need an already-authorized Consequential Finalizer and are not
+ * themselves proving the grant/revoke workflow.
  */
 async function grantFinalizerAuthority(gamingMemberId: string): Promise<void> {
   const { error } = await cleanupClient
@@ -194,12 +191,12 @@ describe("SupabasePredictionsRepository contract", () => {
       kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     // XP-eligibility gate (Slice: XP Eligibility / Calibration Support):
     // fixture only, not Product config — without this, the real
     // finalize/correct RPCs now correctly produce zero XP regardless
     // of the fixture rules below.
-    await repo.setMatchXpEligibility(match.matchId, true);
+    await repo.setMatchXpEligibility(match.matchId, true, admin.gamingMemberId, null);
 
     const venue = await repo.createVenue({
       name: "Contract Venue",
@@ -332,7 +329,7 @@ describe("SupabasePredictionsRepository contract", () => {
       kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
 
     const venue = await repo.createVenue({ name: "Own Goal Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
@@ -366,6 +363,8 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("rejects a goalscorer who does not belong to either Match Team via the real database check", async () => {
     const alex = await createRealGamingMember("ContractRosterMismatch");
+    const admin = await createRealGamingMember("ContractRosterMismatchAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const { home, away } = await createTeamsAndRoster();
     const outsiderTeam = await repo.createTeam({ name: `Outsiders ${randomUUID().slice(0, 8)}` });
     createdTeamIds.push(outsiderTeam.teamId);
@@ -375,7 +374,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     const venue = await repo.createVenue({ name: "V", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -395,82 +394,26 @@ describe("SupabasePredictionsRepository contract", () => {
     ).rejects.toBeInstanceOf(InvalidGoalscorerSelectionError);
   });
 
-  it("admin authority: non-admin rejected, admin accepted, revocation takes effect immediately", async () => {
-    const nonAdmin = await createRealGamingMember("ContractNonAdmin");
-    const soonAdmin = await createRealGamingMember("ContractSoonAdmin");
-
-    const nonAdminLinkResponse = await cleanupClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: (await cleanupClient.auth.admin.getUserById(nonAdmin.authUserId)).data.user!.email!,
-    });
-    if (!nonAdminLinkResponse.data.properties) {
-      throw new Error("generateLink did not return properties.");
-    }
-    // generateLink does not return a usable access token directly in
-    // this local stack; resolve a real session via verifyOtp against
-    // the link's own token_hash instead, mirroring how the browser
-    // adapter itself verifies a magic-link/OTP token.
-    const verifyNonAdmin = await cleanupClient.auth.verifyOtp({
-      token_hash: nonAdminLinkResponse.data.properties.hashed_token,
-      type: "email",
-    });
-    const nonAdminToken = verifyNonAdmin.data.session!.access_token;
-
-    const fakeRequestNonAdmin = new Request("http://localhost/test", {
-      headers: { authorization: `Bearer ${nonAdminToken}` },
-    });
-    const nonAdminResult = await requireGamingAdmin(fakeRequestNonAdmin, {
-      url: supabaseUrl!,
-      serviceKey: supabaseServiceRoleKey!,
-    });
-    expect("errorResponse" in nonAdminResult).toBe(true);
-    if ("errorResponse" in nonAdminResult) {
-      expect(nonAdminResult.errorResponse.status).toBe(403);
-    }
-
-    await cleanupClient.from("gaming_admins").insert({ gaming_member_id: soonAdmin.gamingMemberId });
-
-    const adminLinkResponse = await cleanupClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: (await cleanupClient.auth.admin.getUserById(soonAdmin.authUserId)).data.user!.email!,
-    });
-    if (!adminLinkResponse.data.properties) {
-      throw new Error("generateLink did not return properties.");
-    }
-    const verifyAdmin = await cleanupClient.auth.verifyOtp({
-      token_hash: adminLinkResponse.data.properties.hashed_token,
-      type: "email",
-    });
-    const adminToken = verifyAdmin.data.session!.access_token;
-
-    const fakeRequestAdmin = new Request("http://localhost/test", {
-      headers: { authorization: `Bearer ${adminToken}` },
-    });
-    const adminResult = await requireGamingAdmin(fakeRequestAdmin, {
-      url: supabaseUrl!,
-      serviceKey: supabaseServiceRoleKey!,
-    });
-    expect("gamingMemberId" in adminResult).toBe(true);
-
-    // Revocation takes effect on the very next check.
-    await cleanupClient.from("gaming_admins").delete().eq("gaming_member_id", soonAdmin.gamingMemberId);
-    const revokedResult = await requireGamingAdmin(fakeRequestAdmin, {
-      url: supabaseUrl!,
-      serviceKey: supabaseServiceRoleKey!,
-    });
-    expect("errorResponse" in revokedResult).toBe(true);
-  }, 30000);
+  // The former "admin authority" test against requireGamingAdmin/
+  // gaming_admins was retired in Predictions A1 — every admin route now
+  // uses requirePlatformAuthorityHttp/requireAnyAdminAuthority against
+  // authority_grants; see __tests__/adminAuthoritySupabaseRepository.
+  // contract.test.ts's "HTTP-shaped authority checks" block for the
+  // equivalent non-authorized-rejected / authorized-accepted /
+  // revocation-immediate coverage against a real Authorization header.
 
   // --- PREDICTIONS-V2 -------------------------------------------------
 
   it("Predictions-v2: an invalid Goal-Time shape (stoppage without a 45/90 base) is rejected by the real database CHECK constraint", async () => {
     const alex = await createRealGamingMember("ContractGoalTimeInvalid");
+    const admin = await createRealGamingMember("ContractGoalTimeInvalidAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const { home, away } = await createTeamsAndRoster();
     const match = await repo.createMatch({
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     const venue = await repo.createVenue({ name: "V", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -498,7 +441,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
 
     // Calling repo.saveDraftMatchResult directly, bypassing
     // adminCatalog.ts's own TS-level guard entirely, so this proves
@@ -523,7 +466,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
 
     const draft = await repo.saveDraftMatchResult({
       matchId: match.matchId,
@@ -552,7 +495,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     const venue = await repo.createVenue({ name: "Stoppage Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -598,7 +541,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     const venue = await repo.createVenue({ name: "Own Goal Dimensions Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -634,7 +577,7 @@ describe("SupabasePredictionsRepository contract", () => {
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
     const venue = await repo.createVenue({ name: "Cancelled Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
     createdVenueIds.push(venue.venueId);
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -667,17 +610,19 @@ describe("SupabasePredictionsRepository contract", () => {
 
   it("XP eligibility: declaration succeeds pre-evidence, locks after a Prediction exists, and rejects a change against the real database", async () => {
     const alex = await createRealGamingMember("ContractXpEligLock");
+    const admin = await createRealGamingMember("ContractXpEligLockAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
     const { home, away } = await createTeamsAndRoster();
     const match = await repo.createMatch({
       homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
     });
     createdMatchIds.push(match.matchId);
-    await repo.setMatchActivityClassification(match.matchId, "RANKED");
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
 
     const fetchedBeforeDeclaration = await repo.getMatchById(match.matchId);
     expect(fetchedBeforeDeclaration!.xpEligible).toBeNull();
 
-    const declared = await repo.setMatchXpEligibility(match.matchId, true);
+    const declared = await repo.setMatchXpEligibility(match.matchId, true, admin.gamingMemberId, null);
     expect(declared).toEqual({ matchId: match.matchId, xpEligible: true, locked: false });
 
     const venue = await repo.createVenue({ name: "V", latitude: 10, longitude: 10, radiusMeters: 100 });
@@ -693,11 +638,13 @@ describe("SupabasePredictionsRepository contract", () => {
     });
 
     // Idempotent redeclaration of the now-locked value succeeds.
-    const redeclared = await repo.setMatchXpEligibility(match.matchId, true);
+    const redeclared = await repo.setMatchXpEligibility(match.matchId, true, admin.gamingMemberId, null);
     expect(redeclared).toEqual({ matchId: match.matchId, xpEligible: true, locked: true });
 
     // A change is rejected by the real database.
-    await expect(repo.setMatchXpEligibility(match.matchId, false)).rejects.toBeInstanceOf(XpEligibilityLockedError);
+    await expect(
+      repo.setMatchXpEligibility(match.matchId, false, admin.gamingMemberId, null)
+    ).rejects.toBeInstanceOf(XpEligibilityLockedError);
   }, 30000);
 
   it("XP eligibility: a non-eligible Match produces zero XP against the real database even with real fixture policy/rules configured; an eligible Match produces the applicable XP, and the Summary round-trips the fact", async () => {
@@ -719,8 +666,8 @@ describe("SupabasePredictionsRepository contract", () => {
         homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test", kickoffAt: futureIso(),
       });
       createdMatchIds.push(match.matchId);
-      await repo.setMatchActivityClassification(match.matchId, "RANKED");
-      await repo.setMatchXpEligibility(match.matchId, xpEligible);
+      await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
+      await repo.setMatchXpEligibility(match.matchId, xpEligible, admin.gamingMemberId, null);
       const venue = await repo.createVenue({ name: "V", latitude: 10, longitude: 10, radiusMeters: 100 });
       createdVenueIds.push(venue.venueId);
       const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
@@ -819,8 +766,8 @@ async function setupFinalizableMatch(displayNamePrefix: string) {
     kickoffAt: futureIso(),
   });
   createdMatchIds.push(match.matchId);
-  await repo.setMatchActivityClassification(match.matchId, "RANKED");
-  await repo.setMatchXpEligibility(match.matchId, true);
+  await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
+  await repo.setMatchXpEligibility(match.matchId, true, admin.gamingMemberId, null);
 
   const venue = await repo.createVenue({ name: "A0 Contract Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
   createdVenueIds.push(venue.venueId);
@@ -953,5 +900,127 @@ describe("SupabasePredictionsRepository contract — Admin Control Plane A0 Firs
     expect(correctionEvents[0].previousReference).toEqual({ table: "match_results", id: draft.matchResultId });
     expect(correctionEvents[0].resultingReference).toEqual({ table: "match_results", id: correctionDraft.matchResultId });
     expect(correctionEvents[0].reason).toBe("Second goal confirmed on review.");
+  });
+
+  it("Activity Classification declaration without Consequential Finalizer authority is rejected at the RPC layer", async () => {
+    const notFinalizer = await createRealGamingMember("ContractA1ClassNotFinalizer");
+    const { home, away } = await createTeamsAndRoster();
+    const match = await repo.createMatch({
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test — A1", kickoffAt: futureIso(),
+    });
+    createdMatchIds.push(match.matchId);
+
+    await expect(
+      repo.setMatchActivityClassification(match.matchId, "RANKED", notFinalizer.gamingMemberId, null)
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+
+  it("Activity Classification declaration by a Finalizer produces exactly one DECLARE_ACTIVITY_CLASSIFICATION audit event", async () => {
+    const admin = await createRealGamingMember("ContractA1ClassAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
+    const { home, away } = await createTeamsAndRoster();
+    const match = await repo.createMatch({
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test — A1", kickoffAt: futureIso(),
+    });
+    createdMatchIds.push(match.matchId);
+
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, "Friendly exhibition.");
+
+    const events = await auditRepo.listEventsForTarget("matches", match.matchId);
+    const declareEvents = events.filter((e) => e.actionType === "DECLARE_ACTIVITY_CLASSIFICATION");
+    expect(declareEvents).toHaveLength(1);
+    expect(declareEvents[0].actorId).toBe(admin.gamingMemberId);
+    expect(declareEvents[0].authorityClassUsed).toBe("CONSEQUENTIAL_FINALIZER");
+    expect(declareEvents[0].reason).toBe("Friendly exhibition.");
+  });
+
+  it("XP Eligibility declaration without Consequential Finalizer authority is rejected at the RPC layer", async () => {
+    const notFinalizer = await createRealGamingMember("ContractA1XpNotFinalizer");
+    const { home, away } = await createTeamsAndRoster();
+    const match = await repo.createMatch({
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test — A1", kickoffAt: futureIso(),
+    });
+    createdMatchIds.push(match.matchId);
+
+    await expect(
+      repo.setMatchXpEligibility(match.matchId, true, notFinalizer.gamingMemberId, null)
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+  });
+
+  it("XP Eligibility declaration by a Finalizer produces exactly one DECLARE_XP_ELIGIBILITY audit event, distinct from Activity Classification's", async () => {
+    const admin = await createRealGamingMember("ContractA1XpAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
+    const { home, away } = await createTeamsAndRoster();
+    const match = await repo.createMatch({
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test — A1", kickoffAt: futureIso(),
+    });
+    createdMatchIds.push(match.matchId);
+
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
+    await repo.setMatchXpEligibility(match.matchId, true, admin.gamingMemberId, null);
+
+    const events = await auditRepo.listEventsForTarget("matches", match.matchId);
+    expect(events.map((e) => e.actionType).sort()).toEqual([
+      "DECLARE_ACTIVITY_CLASSIFICATION",
+      "DECLARE_XP_ELIGIBILITY",
+    ]);
+    // Gaming XP remains untouched by this declaration.
+    const { count } = await cleanupClient
+      .from("gaming_xp_events")
+      .select("gaming_xp_event_id", { count: "exact", head: true })
+      .eq("gaming_member_id", admin.gamingMemberId);
+    expect(count).toBe(0);
+  });
+
+  it("Prize redemption without Consequential Finalizer authority is rejected at the RPC layer", async () => {
+    const admin = await createRealGamingMember("ContractA1RedeemAdmin");
+    await grantFinalizerAuthority(admin.gamingMemberId);
+    const alex = await createRealGamingMember("ContractA1RedeemAlex");
+    const { home, away, mbappe, vini } = await createTeamsAndRoster();
+
+    const match = await repo.createMatch({
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Contract Test — A1", kickoffAt: futureIso(),
+    });
+    createdMatchIds.push(match.matchId);
+    await repo.setMatchActivityClassification(match.matchId, "RANKED", admin.gamingMemberId, null);
+
+    const venue = await repo.createVenue({ name: "A1 Redeem Venue", latitude: 10, longitude: 10, radiusMeters: 100 });
+    createdVenueIds.push(venue.venueId);
+    const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });
+    await repo.createPrizeTier({ venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+
+    const prediction = await submitPrediction(repo, {
+      matchId: match.matchId, gamingMemberId: alex.gamingMemberId, venueActivationId: activation.venueActivationId,
+      predictedHomeScore: 0, predictedAwayScore: 0,
+      predictedGoalscorerPlayerId: null, predictedGoalMinuteRegulation: null, predictedGoalMinuteStoppage: null,
+      predictedFirstTeamToScore: null,
+      geo: { latitude: 10.0001, longitude: 10.0001, accuracyMeters: 5 },
+    });
+    const draft = await repo.saveDraftMatchResult({
+      matchId: match.matchId, homeScore: 0, awayScore: 0, officialGoalEvents: [],
+      enteredByGamingMemberId: admin.gamingMemberId,
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, admin.gamingMemberId);
+    const evaluation = await repo.getEvaluation(prediction.predictionId, draft.matchResultId);
+    const qualification = await repo.getQualificationForEvaluation(evaluation!.evaluationId);
+
+    const notFinalizer = await createRealGamingMember("ContractA1RedeemNotFinalizer");
+    await expect(
+      repo.redeemPrizeQualification(qualification!.prizeQualificationId, notFinalizer.gamingMemberId, null)
+    ).rejects.toBeInstanceOf(InsufficientPlatformAuthorityError);
+
+    const finalized = await redeemPrizeQualification(
+      repo,
+      qualification!.prizeQualificationId,
+      admin.gamingMemberId,
+      "Collected at venue counter."
+    );
+    expect(finalized.alreadyRedeemed).toBe(false);
+
+    const events = await auditRepo.listEventsForTarget("prize_qualifications", qualification!.prizeQualificationId);
+    const redemptionEvents = events.filter((e) => e.actionType === "CONFIRM_PRIZE_REDEMPTION");
+    expect(redemptionEvents).toHaveLength(1);
+    expect(redemptionEvents[0].actorId).toBe(admin.gamingMemberId);
+    expect(redemptionEvents[0].reason).toBe("Collected at venue counter.");
   });
 });

@@ -154,12 +154,19 @@ type ActivityClassificationInput = (typeof ACTIVITY_CLASSIFICATIONS)[number];
 export async function setMatchActivityClassification(
   repo: PredictionsRepository,
   matchId: string,
-  activityClassification: string
+  activityClassification: string,
+  actorGamingMemberId: string,
+  reason?: string | null
 ): Promise<{ matchId: string; activityClassification: string; locked: boolean }> {
   if (!ACTIVITY_CLASSIFICATIONS.includes(activityClassification as ActivityClassificationInput)) {
     throw new Error("activityClassification must be one of TRAINING, CASUAL, RANKED, OFFICIAL.");
   }
-  return repo.setMatchActivityClassification(matchId, activityClassification as ActivityClassificationInput);
+  return repo.setMatchActivityClassification(
+    matchId,
+    activityClassification as ActivityClassificationInput,
+    actorGamingMemberId,
+    reason ?? null
+  );
 }
 
 /**
@@ -176,17 +183,18 @@ export async function setMatchActivityClassification(
  * currently-eligible Match must never be quietly un-curated after
  * members have already earned real recognition under it.
  *
- * No HTTP admin route exists for this, matching Activity
- * Classification's own established precedent exactly (Phase 1 has no
- * admin route for that either) — this is the same "test/fixture seam,
- * called directly" posture, not an oversight.
+ * Predictions A1 exposes this through an authorized admin route
+ * (CONSEQUENTIAL_FINALIZER) — see app/api/gaming/predictions/admin/
+ * matches/[matchId]/xp-eligibility/route.ts.
  */
 export async function setMatchXpEligibility(
   repo: PredictionsRepository,
   matchId: string,
-  xpEligible: boolean
+  xpEligible: boolean,
+  actorGamingMemberId: string,
+  reason?: string | null
 ): Promise<{ matchId: string; xpEligible: boolean; locked: boolean }> {
-  return repo.setMatchXpEligibility(matchId, xpEligible);
+  return repo.setMatchXpEligibility(matchId, xpEligible, actorGamingMemberId, reason ?? null);
 }
 
 export async function createVenue(

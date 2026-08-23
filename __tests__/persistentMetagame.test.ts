@@ -39,11 +39,11 @@ async function setupRankedMatch(repo: InMemoryPredictionsRepository, kickoffAt =
   const away = await createTeam(repo, { name: "Away FC" });
   const striker = await createPlayer(repo, { teamId: home.teamId, name: "Striker" });
   const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Test Cup", kickoffAt });
-  await setMatchActivityClassification(repo, match.matchId, "RANKED");
+  await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
   // XP-eligibility gate (Slice: XP Eligibility / Calibration Support) —
   // fixture only, not Product config; without this, finalize would
   // silently produce zero XP regardless of the fixture rules below.
-  await setMatchXpEligibility(repo, match.matchId, true);
+  await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
   await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
   await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 5 });
   const venue = await createVenue(repo, { name: "Test Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
@@ -61,8 +61,8 @@ async function setupRankedMatchNoXpConfig(repo: InMemoryPredictionsRepository, k
   const away = await createTeam(repo, { name: "Away FC" });
   const striker = await createPlayer(repo, { teamId: home.teamId, name: "Striker" });
   const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Test Cup", kickoffAt });
-  await setMatchActivityClassification(repo, match.matchId, "RANKED");
-  await setMatchXpEligibility(repo, match.matchId, true);
+  await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
+  await setMatchXpEligibility(repo, match.matchId, true, "gm-admin");
   const venue = await createVenue(repo, { name: "Test Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
   const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
   return { home, away, striker, match, venue, activation };
@@ -154,7 +154,7 @@ describe("Predictions-v2 — dimension fact contract", () => {
     const scorer = await createPlayer(repo, { teamId: home.teamId, name: "Scorer" });
     const decoy = await createPlayer(repo, { teamId: home.teamId, name: "Decoy" });
     const match = await createMatch(repo, { homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Test Cup", kickoffAt: futureIso() });
-    await setMatchActivityClassification(repo, match.matchId, "RANKED");
+    await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
     await repo.metagameRepository.createCategoryParticipationPolicy({ categoryKey: "SOCCER_PREDICTIONS", dailyParticipationAllowance: 1000 });
     await repo.metagameRepository.createGamingXpRule({ categoryKey: "SOCCER_PREDICTIONS", consequenceClass: "PARTICIPATION", performanceBandKey: null, points: 1 });
     const venue = await createVenue(repo, { name: "Test Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
@@ -451,7 +451,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupRankedMatch(repo);
-    const changed = await setMatchActivityClassification(repo, match.matchId, "CASUAL");
+    const changed = await setMatchActivityClassification(repo, match.matchId, "CASUAL", "gm-admin");
     expect(changed.activityClassification).toBe("CASUAL");
     expect(changed.locked).toBe(false);
   });
@@ -465,11 +465,11 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
       predictedHomeScore: 0, predictedAwayScore: 0,
       predictedGoalscorerPlayerId: null, predictedGoalMinuteRegulation: null, predictedGoalMinuteStoppage: null, predictedFirstTeamToScore: null, geo: INSIDE,
     });
-    await expect(setMatchActivityClassification(repo, match.matchId, "CASUAL")).rejects.toBeInstanceOf(
+    await expect(setMatchActivityClassification(repo, match.matchId, "CASUAL", "gm-admin")).rejects.toBeInstanceOf(
       ActivityClassificationLockedError
     );
     // Re-declaring the SAME value is idempotent, not an error.
-    const same = await setMatchActivityClassification(repo, match.matchId, "RANKED");
+    const same = await setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin");
     expect(same.locked).toBe(true);
   });
 
@@ -478,7 +478,7 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match } = await setupRankedMatch(repo);
     await saveDraftResult(repo, { matchId: match.matchId, homeScore: 0, awayScore: 0, officialGoalEvents: [], enteredByGamingMemberId: "gm-admin" });
-    await expect(setMatchActivityClassification(repo, match.matchId, "CASUAL")).rejects.toBeInstanceOf(
+    await expect(setMatchActivityClassification(repo, match.matchId, "CASUAL", "gm-admin")).rejects.toBeInstanceOf(
       ActivityClassificationLockedError
     );
   });
@@ -487,13 +487,13 @@ describe("Activity Classification — Match-level, predeclared, locked", () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, activation } = await setupRankedMatch(repo);
-    await setMatchActivityClassification(repo, match.matchId, "CASUAL");
+    await setMatchActivityClassification(repo, match.matchId, "CASUAL", "gm-admin");
     await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 0, predictedAwayScore: 0,
       predictedGoalscorerPlayerId: null, predictedGoalMinuteRegulation: null, predictedGoalMinuteStoppage: null, predictedFirstTeamToScore: null, geo: INSIDE,
     });
-    await expect(setMatchActivityClassification(repo, match.matchId, "RANKED")).rejects.toBeInstanceOf(
+    await expect(setMatchActivityClassification(repo, match.matchId, "RANKED", "gm-admin")).rejects.toBeInstanceOf(
       ActivityClassificationLockedError
     );
   });
