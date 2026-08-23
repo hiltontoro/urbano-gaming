@@ -120,6 +120,34 @@ re-checking against the first real second engine, not as settled.
 
 **When to reach for it**: a future engine whose result at reveal is a pure function of data that the same reveal-time state transition already write-locks.
 
+## Root-authority RPC privilege hardening must survive function recreation
+
+**Origin**: Migration `0126_restrict_root_authority_rpcs_to_service_role.sql` (Platform Governance Root Bootstrap Security Hardening), discovered while auditing readiness for browser Auth restoration — not yet exercised a second time by any later migration.
+
+**The pattern**: `bootstrap_governance_authority_atomically`, `grant_platform_authority_atomically`, and `revoke_platform_authority_atomically` were each created under this project's own standing `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role` rule — the same default every function in this schema receives at creation time, including `finalize_match_result_atomically`/`correct_match_result_atomically`/`redeem_prize_qualification_atomically`. That default is harmless for those other functions because each carries its own independent, RLS-independent in-SQL authority check before doing anything consequential. These three do not have that same margin: `grant`/`revoke` check the acting member's own active `PRODUCT_GOVERNANCE` grant, a real second layer, but `bootstrap` has no equivalent check at all, by necessity — establishing the very first Governance authority cannot require pre-existing authority. `0126` closed the resulting gap with an explicit `revoke execute ... from public, anon, authenticated`, leaving `service_role` untouched.
+
+**Any future migration that recreates one of these three functions must reassert that same `revoke execute` in the same migration** — no `EXECUTE` for `PUBLIC`, `anon`, or `authenticated`; `service_role` execution remains available; before that migration is considered complete.
+
+**Why it matters — the PostgreSQL distinction is exact, not approximate**: privileges (grants and revokes alike) attach to the function *object* itself, not to its name or signature in the abstract.
+
+- **`CREATE OR REPLACE FUNCTION`** on an existing signature reuses the same object (same OID) — its ACL, including `0126`'s `REVOKE`, survives untouched. No reassertion is needed here.
+- **`DROP FUNCTION` followed by `CREATE FUNCTION`** — the convention this repository actually uses for every one of these three functions' own prior signature changes (confirmed: `grant`/`revoke`/`bootstrap`-shaped signature evolution elsewhere in this schema consistently uses `drop function if exists ...; create function ...;`, not `CREATE OR REPLACE`) — destroys the old object and its ACL entirely. The new object is a fresh creation, and the project's standing default-privilege rule applies to it exactly as it did the first time, silently restoring `anon`/`authenticated` `EXECUTE` unless the migration explicitly revokes it again.
+
+A signature change to any of these three (a new parameter, a changed return shape) that follows this repository's own established `drop`-then-`create` convention is exactly the case that reopens the gap. RLS remaining enabled on `authority_grants`/`admin_audit_events`/`gaming_members` with zero policies is real defense-in-depth, but it is an emergent property of this project's own platform-level auto-RLS-enable behavior, never declared or depended on by these functions' own migrations — it must not be treated as the sole boundary for root-authority RPCs. Privilege hardening and function evolution must stay coupled by discipline, not by an automated guard.
+
+**Migration-author checklist, when modifying `bootstrap_governance_authority_atomically`, `grant_platform_authority_atomically`, or `revoke_platform_authority_atomically`**:
+
+1. Preserve canonical authority semantics (`Product/Authority_and_Audit_Foundation.md`, ADR-037) — this is a privilege-durability rule, not license to redesign the authority model.
+2. Preserve `security invoker` unless a separately authorized decision changes it.
+3. Recreate/replace the function using whichever of the two forms above the change actually requires.
+4. If the form used was `DROP`/`CREATE` (or any other path that creates a new function object), reassert `revoke execute ... from public, anon, authenticated` for that function in the same migration.
+5. Verify `anon` → permission denied (`42501`), never reaching domain validation.
+6. Verify `authenticated` → the same permission denial, proven with a real bearer token, not merely the anon key.
+7. Verify `service_role` → reaches real domain validation, not permission denial.
+8. Verify the proving steps above created zero unintended `authority_grants`/`admin_audit_events` rows.
+
+**When to reach for it**: any future migration that touches the definition of one of these three specific functions. This is not a general rule for every RPC in the schema — the other consequential RPCs (`finalize`/`correct`/`redeem`) are intentionally left on the standing default because their own in-SQL authority check is independent of it; broadening this pattern to every function without the same "no independent check possible" reasoning `bootstrap` has would be over-generalizing past what repository evidence supports.
+
 ## Deliberately not included here
 
 The core "generic Interaction Instance + engine-specific extension
