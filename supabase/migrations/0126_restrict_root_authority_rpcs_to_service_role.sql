@@ -1,0 +1,61 @@
+-- Migration: 0126_restrict_root_authority_rpcs_to_service_role
+-- Platform Governance Activation / Auth Dependency — Root Bootstrap
+-- Security Hardening.
+--
+-- Privilege-only correction, discovered while auditing readiness for
+-- browser Auth restoration. `bootstrap_governance_authority_atomically`
+-- (0116), `grant_platform_authority_atomically` (0117), and
+-- `revoke_platform_authority_atomically` (0118) were each created under
+-- this project's own standing `ALTER DEFAULT PRIVILEGES ... GRANT ALL
+-- ON FUNCTIONS TO anon, authenticated, service_role` rule — the same
+-- default every function in this schema receives, including
+-- finalize/correct/redeem. That default is otherwise harmless for
+-- those other functions because each carries its own independent,
+-- RLS-independent in-SQL authority check. These three do not have that
+-- same margin:
+--
+--   - grant/revoke DO check the acting member's own active
+--     PRODUCT_GOVERNANCE grant before doing anything else — a real,
+--     RLS-independent second layer — but Product/Authority_and_Audit_
+--     Foundation.md's own framing ("Root/platform Governance mutation
+--     is trusted platform authority, not browser-client authority")
+--     means direct PostgREST execution from an ordinary bearer-token
+--     holder should never have been a legitimate path to begin with,
+--     independent of whether today's RLS posture happens to also block
+--     it.
+--   - bootstrap has no equivalent check at all, by necessity — its
+--     entire purpose is establishing the first Governance authority
+--     when none yet exists, so it cannot require pre-existing
+--     authority the way grant/revoke can. Its only current protection
+--     is that authority_grants/gaming_members/admin_audit_events carry
+--     `ENABLE ROW LEVEL SECURITY` with zero defined policies (confirmed
+--     via a fresh production schema dump: zero `CREATE POLICY`
+--     statements anywhere in the schema) — a RLS posture this project
+--     auto-enables on every new table via its own platform-level event
+--     trigger, entirely outside this repository's migration history,
+--     and never declared or relied upon explicitly by 0116/0117/0118
+--     themselves. A single future policy addition for an unrelated,
+--     entirely reasonable reason (e.g. "authenticated users may read
+--     their own gaming_members row") would silently reopen this
+--     exposure for bootstrap without whoever adds that policy having
+--     any reason to know it also touches root Governance bootstrap.
+--
+-- This migration makes the intended trust boundary explicit and
+-- durable instead of an emergent side effect of an unrelated RLS
+-- posture: EXECUTE is revoked from `anon`/`authenticated` (and,
+-- defensively, `PUBLIC`, matching Supabase's own convention of already
+-- revoking PUBLIC execute on functions at the platform level — a
+-- REVOKE against a role that never held the privilege is a harmless
+-- no-op) on exactly these three functions. `service_role` keeps
+-- EXECUTE, unchanged — the trusted server-side path these functions
+-- were always meant to be reached through remains fully functional.
+--
+-- No function body changes. No table changes. No RLS policy changes.
+-- No Product data mutation. Purely additive/restrictive privilege
+-- statements, safe to apply independently of migration `0125`
+-- (gaming_admins drop), which remains a wholly separate, still-
+-- unapplied concern this migration does not touch or depend on.
+
+revoke execute on function bootstrap_governance_authority_atomically(uuid, text) from public, anon, authenticated;
+revoke execute on function grant_platform_authority_atomically(uuid, uuid, text, text) from public, anon, authenticated;
+revoke execute on function revoke_platform_authority_atomically(uuid, uuid, text, text) from public, anon, authenticated;
