@@ -566,6 +566,50 @@
         <button class="btn-primary" id="btn-close-quiz" onclick="closeQuiz()" style="margin-top:10px;">Close Quiz</button>
       </div>
 
+      <!-- Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md).
+           Two internal states inside one card, mirroring quizCard's own
+           precedent above: duelSetupState (competitor picker + the
+           current Multiple Choice mechanic's own authoring form) while
+           no Duel is ACTIVE, duelActiveState once one is. Visibility is
+           computed entirely in renderDuelCard() — see that function's
+           own comment for why it deliberately does not duplicate
+           resolvePrimaryAction()'s idle-state logic. This card's own
+           heading always names the generic container (⚔️ Duel)
+           separately from the current mechanic (🧠 Multiple Choice) —
+           Duel_Architecture.md's own "Duel Container vs. Mechanic"
+           boundary, load-bearing even at the UI layer: a future second
+           mechanic must be able to add its own case to the branch in
+           renderDuelActiveState() without this heading, or anything
+           else generic here, needing to change. -->
+      <div class="card" id="duelCard" style="display:none;">
+        <div id="duelSetupState">
+          <h2>⚔️ Duel</h2>
+          <div class="room-code-hint" style="margin-bottom:8px;">Select two competitors from this session's roster.</div>
+          <div id="duelLastResult" style="display:none; margin-bottom:12px;"></div>
+          <div class="row" style="gap:8px; margin-bottom:8px;">
+            <div style="flex:1;">
+              <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Competitor A</label>
+              <select id="duelCompetitorA" onchange="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line);"></select>
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Competitor B</label>
+              <select id="duelCompetitorB" onchange="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line);"></select>
+            </div>
+          </div>
+          <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">🧠 Multiple Choice</div>
+          <textarea id="duelPromptInput" rows="2" oninput="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" placeholder="Duel question…"></textarea>
+          <div id="duelOptionsInputs"></div>
+          <button class="btn-ghost" type="button" onclick="addDuelOption()" style="margin-bottom:8px;">+ Add option</button>
+          <div class="room-code-hint" id="duelSetupHint" style="margin-bottom:8px;"></div>
+          <button class="btn-primary" id="btn-start-duel" onclick="startDuel()" disabled>Start Duel</button>
+        </div>
+        <div id="duelActiveState" style="display:none;">
+          <h2>⚔️ Duel <span style="font-size:12px; font-weight:600; color:var(--muted);">🧠 Multiple Choice</span></h2>
+          <div id="duelActiveBody"></div>
+          <div id="duelExceptionalControls" style="margin-top:14px;"></div>
+        </div>
+      </div>
+
       <div class="secondary-actions">
         <button class="btn-ghost" onclick="sessionSync.refreshNow()" title="Manual refresh — the game normally syncs automatically; use this if you suspect it's stalled.">Check for updates</button>
         <button class="btn-danger" id="btn-complete" onclick="completeSession()">End Session</button>
@@ -803,6 +847,20 @@ let currentEngineType = null;
 // source's own ≥2 floor needs the current count outside that render
 // call, at the moment the host is choosing a Turn Type.
 let lastKnownParticipants = [];
+// Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Mirrors
+// currentQuiz's own pattern exactly: activeDuel is this session's
+// single currently-ACTIVE Duel (at most one, per the v1 concurrency
+// limitation), null whenever none is active; duelHistory is every
+// Duel that has ever run, most recent first, used only to show the
+// most recently completed Duel's result once activeDuel goes back to
+// null. No new persisted client state — both are taken verbatim from
+// GET_SESSION.
+let activeDuel = null;
+let duelHistory = [];
+// How many Multiple Choice option input rows the Duel setup form
+// currently renders — local-only UI state, reset to 2 (the minimum
+// valid option count) after each successful Start Duel.
+let duelOptionRowCount = 2;
 // Host-only field from GET_SESSION: the session's full prepared
 // Multiple Choice question queue, including correct answers not yet
 // asked — never sent to a participant.
@@ -938,6 +996,14 @@ const KNOWN_ERRORS = [
   { test: (m) => m === "This prepared question has already been started.", text: "That question was already asked — refreshing the queue." },
   { test: (m) => m.startsWith("Predecessor session is"), text: "This session hasn't ended yet — end it before creating a rematch." },
   { test: (m) => m === "This session already has a successor session.", text: "A new session was already created from this one." },
+  { test: (m) => m === "A Duel requires two distinct competitors.", text: "Select two different competitors." },
+  { test: (m) => m === "Both Duel competitors must be participants of this session.", text: "Both competitors must be part of this session." },
+  { test: (m) => m === "This session already has an active Duel.", text: "A Duel is already in progress for this session." },
+  { test: (m) => m === "Duel options must be at least two distinct, non-empty entries, with a valid correct option index.", text: "Enter at least two distinct answer options and mark the correct one." },
+  { test: (m) => m === "No Duel exists for this id.", text: "That Duel could not be found — try refreshing." },
+  { test: (m) => m === "This Duel already has a terminal resolution.", text: "That Duel has already been resolved." },
+  { test: (m) => m === "Must be one of CANCELLED, VOID, FORFEIT_A, FORFEIT_B.", text: "That resolution isn't recognized — try refreshing." },
+  { test: (m) => m === "A forfeit requires a reason.", text: "Enter a reason before resolving a forfeit." },
 ];
 
 function translateKnownError(raw) {
@@ -1709,6 +1775,19 @@ function resolvePrimaryAction() {
     return;
   }
 
+  // Duel / SESSION_SUBGAME v1: while a Duel is ACTIVE, duelCard (see
+  // renderDuelCard) owns the relevant host action surface, mirroring
+  // the Quiz guard immediately above — the backend's own v1
+  // concurrency limitation already forbids starting an ordinary
+  // Interaction while a Duel is active (InteractionActiveError), so
+  // hiding Choose Turn Type here is UI truthfully reflecting a real
+  // backend constraint, not inventing a new one.
+  if (activeDuel) {
+    hideTurnTypeUI();
+    bar.style.display = "none";
+    return;
+  }
+
   bar.style.display = "block";
 
   if (sessionLifecycleState === "LOBBY_OPEN") {
@@ -2240,6 +2319,12 @@ function applySessionSnapshot(data) {
   if ("segmentNumber" in data) segmentNumber = data.segmentNumber;
   if ("questionProgress" in data) questionProgress = data.questionProgress;
   if ("currentQuiz" in data) currentQuiz = data.currentQuiz;
+  // Duel / SESSION_SUBGAME v1: set before updateActionAvailability()
+  // (→ resolvePrimaryAction()) below, which reads activeDuel to decide
+  // whether to hide Choose Turn Type — mirrors currentQuiz's own
+  // ordering immediately above.
+  if ("activeDuel" in data) activeDuel = data.activeDuel;
+  if ("duelHistory" in data) duelHistory = data.duelHistory;
   renderQuizCard();
   renderStepper();
   renderInteractionLabel();
@@ -2250,6 +2335,13 @@ function applySessionSnapshot(data) {
   if ("submissions" in data) renderResults(data.submissions);
   if ("votingResults" in data) renderVotingResults(data.votingResults);
   if ("standings" in data) renderStandings(data.standings);
+  // Duel / SESSION_SUBGAME v1: deliberately called last, after
+  // renderParticipants (competitor <select> options need
+  // lastKnownParticipants) and after updateActionAvailability (its own
+  // idle-state visibility check reads turnTypeSelector's now-final
+  // display style — see renderDuelCard()'s own comment for why it
+  // reuses that computed value instead of re-deriving it).
+  renderDuelCard();
   updateExperienceLayer();
 }
 
@@ -2286,6 +2378,9 @@ function switchToNewSession(json) {
   selectedTurnType = null;
   selectedVotingSource = "HOST_AUTHORED";
   lastKnownParticipants = [];
+  activeDuel = null;
+  duelHistory = [];
+  duelOptionRowCount = 2;
   expLastInteractionState = null;
   expCelebrationPlayed = false;
   document.getElementById("authoringWorkspaceBody").classList.remove("collapsed");
@@ -2522,6 +2617,319 @@ function renderQuizCard() {
           `<div class="standing-row"><div class="standing-name">${p.displayName}</div><div class="standing-score">${p.answered} / ${p.total}</div></div>`
       )
       .join("");
+  }
+}
+
+// ===================== Duel / SESSION_SUBGAME v1 =====================
+// Product/Duel_Architecture.md. Everything below is the generic Duel
+// container's own UI (competitor selection, lifecycle, exceptional
+// resolution) plus exactly one mechanic-specific rendering branch for
+// the only mechanic that exists today, Multiple Choice — inside
+// renderDuelActiveState(). A future second mechanic adds its own
+// branch there; nothing else in this section is mechanic-aware, per
+// Duel_Architecture.md's own "Duel Container vs. Mechanic" boundary.
+
+// Resolves a participantId to a display name using the roster
+// GET_SESSION already returns to every viewer (host and participant
+// alike) — see this file's lastKnownParticipants declaration. Falls
+// back to a safe, non-breaking label rather than a raw UUID if the
+// roster hasn't loaded yet or the id is somehow unknown.
+function participantDisplayName(participantId) {
+  const match = lastKnownParticipants.find((p) => p.participantId === participantId);
+  return match ? match.displayName : "Unknown participant";
+}
+
+// Deliberately does NOT re-derive "is it a valid moment to start
+// something new" itself. resolvePrimaryAction() (called via
+// updateActionAvailability(), immediately before this function runs —
+// see applySessionSnapshot()) already computes exactly that decision
+// for the Choose Turn Type selector, including every edge case this
+// file's own history has accumulated (Trivia continuation, Quiz
+// closure, session lifecycle). Reusing turnTypeSelector's own resulting
+// display style is the smallest correct way to agree with that
+// decision without duplicating it a second time and risking the two
+// silently drifting apart.
+function renderDuelCard() {
+  const card = document.getElementById("duelCard");
+  const setupState = document.getElementById("duelSetupState");
+  const activeState = document.getElementById("duelActiveState");
+
+  if (activeDuel) {
+    card.style.display = "block";
+    setupState.style.display = "none";
+    activeState.style.display = "block";
+    renderDuelActiveState();
+    return;
+  }
+
+  activeState.style.display = "none";
+
+  const turnTypeVisible =
+    document.getElementById("turnTypeSelector").style.display !== "none";
+  if (!turnTypeVisible) {
+    card.style.display = "none";
+    return;
+  }
+
+  card.style.display = "block";
+  setupState.style.display = "block";
+  renderDuelLastResult();
+  renderDuelCompetitorSelects();
+  if (document.getElementById("duelOptionsInputs").children.length === 0) {
+    renderDuelOptionInputs();
+  }
+  updateDuelStartAvailability();
+}
+
+// Small, non-load-bearing convenience: shows the most recently
+// completed Duel's result above the setup form, so the host sees
+// confirmation of what just happened before starting the next one —
+// purely a read of duelHistory[0]; no new state, no persistent match
+// history (explicitly out of scope for this Slice).
+function renderDuelLastResult() {
+  const el = document.getElementById("duelLastResult");
+  const last = duelHistory && duelHistory.length > 0 ? duelHistory[0] : null;
+  if (!last) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+  el.innerHTML =
+    `<div class="room-code-hint">Last Duel: ${duelTerminalSummaryText(last)}</div>`;
+}
+
+// The one piece of copy shared between the host's "last result" strip
+// and the terminal state a competitor/spectator eventually sees —
+// factored out so the two can never say something different about the
+// same Duel. Never fabricates a winner: WON_LOST/FORFEIT name one from
+// winnerParticipantId (always non-null for those two resolutions, per
+// Duel_Architecture.md's own terminal envelope requirements); every
+// other resolution states plainly that there is none.
+function duelTerminalSummaryText(duel) {
+  const nameA = participantDisplayName(duel.competitorAParticipantId);
+  const nameB = participantDisplayName(duel.competitorBParticipantId);
+  if (duel.terminalResolution === "WON_LOST") {
+    const winnerName = participantDisplayName(duel.winnerParticipantId);
+    return `${winnerName} won (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "FORFEIT") {
+    const winnerName = participantDisplayName(duel.winnerParticipantId);
+    return `${winnerName} won by forfeit (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "DRAW") {
+    return `Draw (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "VOID") {
+    return `Void — no result (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "CANCELLED") {
+    return `Cancelled (${nameA} vs ${nameB}).`;
+  }
+  return `${nameA} vs ${nameB}.`;
+}
+
+function renderDuelCompetitorSelects() {
+  const selectA = document.getElementById("duelCompetitorA");
+  const selectB = document.getElementById("duelCompetitorB");
+  const optionsHtml =
+    `<option value="">Select…</option>` +
+    lastKnownParticipants
+      .map((p) => `<option value="${p.participantId}">${p.displayName}</option>`)
+      .join("");
+  const prevA = selectA.value;
+  const prevB = selectB.value;
+  selectA.innerHTML = optionsHtml;
+  selectB.innerHTML = optionsHtml;
+  // Preserve the host's own in-progress picks across a routine poll
+  // refresh, exactly as the option-authoring workspace already does
+  // for its own draft state — only reset explicitly, after a
+  // successful Start Duel (see startDuel()).
+  if ([...selectA.options].some((o) => o.value === prevA)) selectA.value = prevA;
+  if ([...selectB.options].some((o) => o.value === prevB)) selectB.value = prevB;
+}
+
+// Founder Visual Review correction: rebuilding the row list must not
+// discard option text the Host already typed, or which radio they
+// already marked correct — this function is called not only from
+// renderDuelCard()'s own empty-container guard (nothing to preserve
+// there) but also directly from addDuelOption(), where rows may
+// already hold real, in-progress authoring input. Preserving it here
+// mirrors renderDuelCompetitorSelects()'s own prevA/prevB precedent
+// just above.
+function renderDuelOptionInputs() {
+  const container = document.getElementById("duelOptionsInputs");
+  const previousValues = Array.from(container.querySelectorAll(".duel-option-input")).map((i) => i.value);
+  const previousChecked = container.querySelector('input[name="duelCorrectOption"]:checked');
+  const previousCheckedIndex = previousChecked ? parseInt(previousChecked.value, 10) : 0;
+
+  container.innerHTML = "";
+  for (let i = 0; i < duelOptionRowCount; i++) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.cssText = "gap:8px; margin-bottom:6px; align-items:center;";
+    row.innerHTML =
+      `<input type="radio" name="duelCorrectOption" value="${i}" ${i === previousCheckedIndex ? "checked" : ""} title="Correct answer" onchange="updateDuelStartAvailability()" />` +
+      `<input type="text" class="duel-option-input" data-index="${i}" placeholder="Option ${i + 1}" oninput="updateDuelStartAvailability()" style="flex:1; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line);" />`;
+    container.appendChild(row);
+  }
+
+  const restoredInputs = container.querySelectorAll(".duel-option-input");
+  previousValues.forEach((value, i) => {
+    if (restoredInputs[i]) restoredInputs[i].value = value;
+  });
+}
+
+function addDuelOption() {
+  if (duelOptionRowCount >= MAX_OPTIONS) return;
+  duelOptionRowCount += 1;
+  renderDuelOptionInputs();
+  updateDuelStartAvailability();
+}
+
+// The single source of truth for whether Start Duel may be clicked —
+// every validation here mirrors a real constraint START_DUEL's own
+// route enforces server-side (DuplicateDuelCompetitorError,
+// DuelCompetitorNotInSessionError, InvalidDuelOptionsError), so a
+// disabled button here means the same request would also be rejected
+// by the backend, not a stricter client-only rule invented on top of
+// it.
+function updateDuelStartAvailability() {
+  const btn = document.getElementById("btn-start-duel");
+  const hint = document.getElementById("duelSetupHint");
+  if (!btn || !hint) return;
+
+  const a = document.getElementById("duelCompetitorA").value;
+  const b = document.getElementById("duelCompetitorB").value;
+  const prompt = document.getElementById("duelPromptInput").value.trim();
+  const rows = Array.from(document.querySelectorAll(".duel-option-input"));
+  const filledCount = rows.filter((i) => i.value.trim().length > 0).length;
+  const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
+  const correctRow = correctRadio ? rows[parseInt(correctRadio.value, 10)] : null;
+  const correctFilled = !!correctRow && correctRow.value.trim().length > 0;
+
+  let problem = null;
+  if (!a || !b) problem = "Select both competitors.";
+  else if (a === b) problem = "Competitors must be two different people.";
+  else if (!prompt) problem = "Enter a question.";
+  else if (filledCount < 2) problem = "Enter at least two answer options.";
+  else if (!correctFilled) problem = "Mark the correct answer.";
+
+  hint.textContent = problem || "";
+  btn.disabled = !!problem;
+}
+
+async function startDuel() {
+  const competitorAParticipantId = document.getElementById("duelCompetitorA").value;
+  const competitorBParticipantId = document.getElementById("duelCompetitorB").value;
+  const promptText = document.getElementById("duelPromptInput").value.trim();
+  const rows = Array.from(document.querySelectorAll(".duel-option-input"));
+  const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
+  const correctRawIndex = correctRadio ? parseInt(correctRadio.value, 10) : -1;
+
+  // Maps the checked radio's raw row index to its position within the
+  // final, empty-row-filtered options array — the row a host marks
+  // correct may not be options[0] once blank rows are dropped.
+  const options = [];
+  let correctOptionIndex = -1;
+  rows.forEach((input, i) => {
+    const value = input.value.trim();
+    if (value.length === 0) return;
+    if (i === correctRawIndex) correctOptionIndex = options.length;
+    options.push(value);
+  });
+
+  const r = await postJson(`/api/sessions/${hostState.sessionId}/duel/start`, {
+    hostToken: hostState.hostToken,
+    competitorAParticipantId,
+    competitorBParticipantId,
+    promptText,
+    options,
+    correctOptionIndex,
+  });
+  show("START_DUEL (" + r.status + ")", r.json);
+  if (r.status === 201) {
+    renderNotice(null);
+    document.getElementById("duelPromptInput").value = "";
+    document.getElementById("duelCompetitorA").value = "";
+    document.getElementById("duelCompetitorB").value = "";
+    duelOptionRowCount = 2;
+    renderDuelOptionInputs();
+    await hostRefresh();
+  } else {
+    renderNotice(classifyError(r));
+  }
+}
+
+// The current, only mechanic's own active-state rendering. Never
+// renders competitorAOptionIndex/competitorBOptionIndex — GET_SESSION
+// nulls both for every viewer, host included, until the Duel is
+// COMPLETED (Duel_Architecture.md's own Read-Model Boundary), so there
+// is truthfully nothing to show the host about who answered what
+// before resolution. Resolve is enabled unconditionally while ACTIVE:
+// direct inspection of resolveDuel's own backend implementation
+// confirms it already handles zero, one, or two responses correctly
+// (WON_LOST/DRAW/VOID as appropriate) — gating this button on "both
+// answered" would invent a stricter rule than the backend itself
+// enforces, contradicting Duel_Architecture.md's own "Host-triggered
+// closure/resolution" v1 design.
+function renderDuelActiveState() {
+  const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
+  const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+
+  const body = document.getElementById("duelActiveBody");
+  body.innerHTML =
+    `<div style="font-weight:600; margin-bottom:8px;">${nameA} <span style="color:var(--muted); font-weight:400;">vs</span> ${nameB}</div>` +
+    `<div class="prompt-text" style="margin-bottom:10px;">${activeDuel.multipleChoice.promptText}</div>` +
+    `<div class="room-code-hint" style="margin-bottom:10px;">Waiting for responses — resolve whenever you're ready.</div>` +
+    `<button class="btn-primary" onclick="resolveDuel()">Resolve Duel</button>`;
+
+  const exceptional = document.getElementById("duelExceptionalControls");
+  exceptional.innerHTML =
+    `<div class="room-code-hint" style="margin-bottom:6px;">Exceptional resolution</div>` +
+    `<input type="text" id="duelExceptionalReason" placeholder="Reason (required for forfeit)" style="width:100%; font-family:inherit; font-size:13px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" />` +
+    `<div class="row" style="gap:8px; flex-wrap:wrap;">` +
+    `<button class="btn-ghost" onclick="resolveDuelExceptionally('CANCELLED')">Cancel Duel</button>` +
+    `<button class="btn-ghost" onclick="resolveDuelExceptionally('VOID')">Void Duel</button>` +
+    `<button class="btn-danger" onclick="resolveDuelExceptionally('FORFEIT_A')">Forfeit ${nameA}</button>` +
+    `<button class="btn-danger" onclick="resolveDuelExceptionally('FORFEIT_B')">Forfeit ${nameB}</button>` +
+    `</div>`;
+}
+
+async function resolveDuel() {
+  const r = await postJson(`/api/sessions/${hostState.sessionId}/duel/resolve`, {
+    hostToken: hostState.hostToken,
+    duelId: activeDuel.duelId,
+  });
+  show("RESOLVE_DUEL (" + r.status + ")", r.json);
+  if (r.status === 200) {
+    renderNotice(null);
+    await hostRefresh();
+  } else {
+    renderNotice(classifyError(r));
+  }
+}
+
+async function resolveDuelExceptionally(resolution) {
+  const reasonInput = document.getElementById("duelExceptionalReason");
+  const reason = reasonInput.value.trim() || null;
+  if ((resolution === "FORFEIT_A" || resolution === "FORFEIT_B") && !reason) {
+    renderNotice({ category: "validation", message: "Enter a reason before resolving a forfeit." });
+    return;
+  }
+
+  const r = await postJson(`/api/sessions/${hostState.sessionId}/duel/resolve-exceptionally`, {
+    hostToken: hostState.hostToken,
+    duelId: activeDuel.duelId,
+    resolution,
+    reason,
+  });
+  show("RESOLVE_DUEL_EXCEPTIONALLY (" + r.status + ")", r.json);
+  if (r.status === 200) {
+    renderNotice(null);
+    reasonInput.value = "";
+    await hostRefresh();
+  } else {
+    renderNotice(classifyError(r));
   }
 }
 

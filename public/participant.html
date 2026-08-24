@@ -304,6 +304,27 @@
     <div id="quizCompleteWaiting" style="color:var(--muted); margin-top:14px;"></div>
   </div>
 
+  <!-- Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Mirrors
+       host.html's own duelCard precedent: a self-contained card owning
+       the entire screen whenever activeDuel is non-null (see the guards
+       added to renderPrompt/renderResults/renderVotingResults below),
+       plus a short post-completion window driven by duelHistory[0] —
+       the same "last result" convenience host.html's own
+       renderDuelLastResult provides. Three internal views computed
+       entirely in renderDuelCard(): competitor (this participant is
+       named in the Duel and may answer), spectator (any other
+       participant — sees both names and the prompt, never the options
+       as clickable, per the readiness gate's "showing the prompt is
+       permissible, not private" finding), and terminal (COMPLETED,
+       reveals both competitors' picks by name — correctOptionIndex is
+       never sent to this file at all, so there is truthfully nothing
+       "is-correct" to style here, unlike optionsList's own Trivia
+       buttons above). -->
+  <div class="card" id="duelCard" style="display:none;">
+    <h2>⚔️ Duel</h2>
+    <div id="duelBody"></div>
+  </div>
+
   <div class="card" id="submitCard" style="display:none;">
     <div class="submitted-note" id="submittedNote" style="display:none;">Response submitted — you can revise it until submissions close.</div>
     <label>Your response</label>
@@ -495,6 +516,19 @@ const sessionSync = createSessionSync(function () {
 
 let participantState = { sessionId: null, participantId: null, participantToken: null, displayName: null };
 let hasSubmittedThisPageLoad = false;
+// Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Mirrors
+// currentQuiz's own pattern: activeDuel is this session's single
+// currently-ACTIVE Duel (null when none); duelHistory is every Duel
+// that has ever run, most recent first — used only to show the most
+// recently completed Duel's result for a short window after
+// activeDuel goes back to null (see renderDuelCard()). Neither is
+// mirrored client state; both come verbatim from GET_SESSION, which
+// this file had never previously needed to cache locally — the roster
+// itself was never shown to a participant before Duel required naming
+// two other Session members.
+let activeDuel = null;
+let duelHistory = [];
+let lastKnownParticipants = [];
 // Slice 001 (Session / Interaction separation): tracks the last
 // interactionNumber seen from GET_SESSION, so a newly started
 // interaction can be detected and hasSubmittedThisPageLoad (and the
@@ -642,6 +676,10 @@ const KNOWN_ERRORS = [
   { test: (m) => m === "Response cannot exceed 1000 characters.", text: "That response is too long — please shorten it." },
   { test: (m) => m === "This token does not grant access to this session.", text: "You don't have access to this session." },
   { test: (m) => m === "Selected option is not valid for this question.", text: "That option isn't valid for this question — try refreshing." },
+  { test: (m) => m === "No Duel exists for this id.", text: "That Duel could not be found — try refreshing." },
+  { test: (m) => m === "This participant is not a competitor in this Duel.", text: "You're not a competitor in this Duel." },
+  { test: (m) => m === "Must be a valid option index for this Duel.", text: "That option isn't valid for this Duel — try refreshing." },
+  { test: (m) => m === "This Duel is not active." || m.endsWith("state, not ACTIVE."), text: "This Duel is no longer active — try refreshing." },
 ];
 
 function translateKnownError(raw) {
@@ -715,6 +753,24 @@ function renderStepper(currentState) {
 
 function renderStateCard(state) {
   const el = document.getElementById("state-card");
+  // Duel / SESSION_SUBGAME v1: a Duel runs orthogonally to the session's
+  // own lifecycle — Duel_Architecture.md's Duel Container never advances
+  // `state` itself, so `state` stays LOBBY_LOCKED for the entire time a
+  // Duel is ACTIVE. Without this guard, LOBBY_LOCKED's own "Waiting for
+  // the host to start the game…" message would render directly above
+  // duelCard while a Duel the participant can already see and answer is
+  // genuinely in progress — a real, materially confusing contradiction,
+  // not merely a stale-looking screen. Scoped to activeDuel only, not a
+  // general "any subgame" guard — this Duel Gameplay UI gate is
+  // explicitly scoped to Duel and forbidden from touching Quiz behavior,
+  // even though direct inspection of startQuiz's own LOBBY_LOCKED
+  // precondition suggests the identical contradiction likely also
+  // affects an active Quiz; that is a separate, out-of-scope finding,
+  // reported alongside this implementation rather than fixed here.
+  if (activeDuel) {
+    el.style.display = "none";
+    return;
+  }
   const messages = {
     LOBBY_OPEN: ["🕒", `You're in as <strong>${participantState.displayName}</strong>. Waiting for the host to lock the lobby…`],
     LOBBY_LOCKED: ["🔒", "Lobby locked. Waiting for the host to start the game…"],
@@ -751,6 +807,21 @@ function renderPrompt(state, currentPrompt, votingCandidates, questionProgress) 
   // active Trivia question by the branches below. Distinct rendering
   // branch, not forced through this single-current-prompt renderer.
   if (currentQuiz) {
+    promptCard.style.display = "none";
+    submitCard.style.display = "none";
+    optionsCard.style.display = "none";
+    votingCard.style.display = "none";
+    document.getElementById("questionProgressLabel").style.display = "none";
+    return;
+  }
+
+  // Duel / SESSION_SUBGAME v1: while a Duel is ACTIVE, duelCard (see
+  // renderDuelCard) owns the screen instead — mirrors the currentQuiz
+  // guard immediately above. START_DUEL is itself blocked server-side
+  // while an ordinary Interaction is active (InteractionActiveError),
+  // so this guard exists for the reverse: a stale ordinary Turn must
+  // not remain on screen once a Duel starts.
+  if (activeDuel) {
     promptCard.style.display = "none";
     submitCard.style.display = "none";
     optionsCard.style.display = "none";
@@ -869,6 +940,15 @@ async function castVote(candidateId) {
 // identical decision.
 function renderVotingResults(votingResults) {
   const card = document.getElementById("votingResultsCard");
+  // Duel / SESSION_SUBGAME v1: no pre-existing Quiz guard to mirror here
+  // (Voting predates Duel), but the same staleness-prevention reasoning
+  // as renderResults' own currentQuiz/activeDuel guard applies — without
+  // this, a stale ordinary Voting round's results could show alongside
+  // the new duelCard.
+  if (activeDuel) {
+    card.style.display = "none";
+    return;
+  }
   const effective = votingResults ?? (currentSessionState === "SESSION_COMPLETE" ? lastKnownVotingResults : null);
   if (votingResults) lastKnownVotingResults = votingResults;
 
@@ -1270,7 +1350,7 @@ function renderResults(submissions, sessionState) {
   // Final Results view already shows this participant's own answer and
   // correctness, safely, once closed — this card is never the right
   // display for a Quiz's last question, open or closed.
-  if (currentQuiz) {
+  if (currentQuiz || activeDuel) {
     card.style.display = "none";
     return;
   }
@@ -1379,6 +1459,202 @@ function renderWinnerBanner(sortedStandings) {
       : `Winner: ${names} (${maxScore} pts)`;
 }
 
+// ===================== Duel / SESSION_SUBGAME v1 =====================
+// Product/Duel_Architecture.md. Mirrors host.html's own Duel section:
+// generic Duel container UI (competitor names, lifecycle, terminal
+// result) plus exactly one mechanic-specific rendering branch for the
+// only mechanic that exists today, Multiple Choice — inside
+// renderDuelCard() itself, since (unlike host.html) there is no
+// separate setup/active split here — a participant never authors or
+// resolves a Duel, only competes in or observes one.
+// postJson/classifyError/KNOWN_ERRORS are already duplicated between
+// this file and host.html rather than shared (see this file's own
+// existing duplication of those exact three) — duelTerminalSummaryText
+// and participantDisplayName below follow that same established
+// per-file-independence convention rather than introducing a shared
+// module for just this one feature.
+
+// Resolves a participantId to a display name using the roster
+// GET_SESSION already returns to every viewer (host and participant
+// alike) — see this file's lastKnownParticipants declaration, newly
+// added for exactly this purpose (the roster was never needed by this
+// file before Duel required naming two other Session members). Falls
+// back to a safe, non-breaking label rather than a raw UUID if the
+// roster hasn't loaded yet or the id is somehow unknown.
+function participantDisplayName(participantId) {
+  const match = lastKnownParticipants.find((p) => p.participantId === participantId);
+  return match ? match.displayName : "Unknown participant";
+}
+
+// The one piece of copy shared between this card's own terminal view
+// and, functionally, host.html's identical "last result" strip — kept
+// as an independent copy per this codebase's own established
+// per-file-independence convention (see this section's own opening
+// comment), not literally shared code, but deliberately worded
+// identically so the two files can never say something different about
+// the same Duel. Never fabricates a winner: WON_LOST/FORFEIT name one
+// from winnerParticipantId (always non-null for those two resolutions,
+// per Duel_Architecture.md's own terminal envelope requirements); every
+// other resolution states plainly that there is none.
+function duelTerminalSummaryText(duel) {
+  const nameA = participantDisplayName(duel.competitorAParticipantId);
+  const nameB = participantDisplayName(duel.competitorBParticipantId);
+  if (duel.terminalResolution === "WON_LOST") {
+    const winnerName = participantDisplayName(duel.winnerParticipantId);
+    return `${winnerName} won (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "FORFEIT") {
+    const winnerName = participantDisplayName(duel.winnerParticipantId);
+    return `${winnerName} won by forfeit (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "DRAW") {
+    return `Draw (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "VOID") {
+    return `Void — no result (${nameA} vs ${nameB}).`;
+  }
+  if (duel.terminalResolution === "CANCELLED") {
+    return `Cancelled (${nameA} vs ${nameB}).`;
+  }
+  return `${nameA} vs ${nameB}.`;
+}
+
+// Owns the entire duelCard: three mutually exclusive views (competitor,
+// spectator, terminal-via-duelHistory), computed here rather than
+// duplicated per-caller — mirrors renderQuizCard's own "this card owns
+// itself" precedent. Called unconditionally from applySessionSnapshot,
+// same as renderQuizCard; self-guards to "display:none" when there is
+// truthfully nothing Duel-related to show (never active, and nothing
+// in duelHistory).
+function renderDuelCard() {
+  const card = document.getElementById("duelCard");
+  const body = document.getElementById("duelBody");
+
+  if (activeDuel) {
+    card.style.display = "block";
+    const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
+    const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+    const isCompetitorA = participantState.participantId === activeDuel.competitorAParticipantId;
+    const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
+    const mc = activeDuel.multipleChoice;
+
+    if (isCompetitorA || isCompetitorB) {
+      const opponentName = isCompetitorA ? nameB : nameA;
+      const myIndex = mc.myResponseOptionIndex;
+      body.innerHTML =
+        `<div class="room-code-hint" style="margin-bottom:8px;">You vs ${opponentName}</div>` +
+        `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
+        (myIndex !== null
+          ? `<div class="submitted-note" style="display:block;">Answer submitted — tap another option to change it until the Duel is resolved.</div>`
+          : "") +
+        `<div class="option-btn-list" id="duelOptionsList"></div>`;
+      renderDuelOptionButtons(mc.options, myIndex);
+    } else {
+      // Spectator: per the readiness gate's own finding, showing the
+      // prompt and both competitor names is permissible (not private) —
+      // options render disabled, with no click handler and no
+      // "selected"/"is-correct" styling, since a spectator has no
+      // response of their own and correctOptionIndex is never sent to
+      // this file regardless of role.
+      body.innerHTML =
+        `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+        `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
+        `<div class="waiting">Watching — waiting for the Duel to resolve…</div>`;
+    }
+    return;
+  }
+
+  // No active Duel: show the most recently completed one, for the same
+  // short post-completion window host.html's own renderDuelLastResult
+  // provides, then hide once nothing Duel-related has ever happened for
+  // this session.
+  const last = duelHistory && duelHistory.length > 0 ? duelHistory[0] : null;
+  if (!last) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "block";
+  const nameA = participantDisplayName(last.competitorAParticipantId);
+  const nameB = participantDisplayName(last.competitorBParticipantId);
+  const mc = last.multipleChoice;
+
+  // Duel_Architecture.md's own Read-Model Boundary: both competitors'
+  // picks become visible to everyone, not merely to the two competitors
+  // themselves, once the Duel is COMPLETED — confirmed by direct
+  // inspection of GET_SESSION's projection (competitorAOptionIndex/
+  // competitorBOptionIndex are populated identically for every caller
+  // post-resolution). Gating this on isCompetitor would invent a
+  // stricter privacy rule than the backend itself enforces — the same
+  // mistake the resolveDuel comment in host.html warns against making
+  // in the opposite direction. Still gated on both being non-null: a
+  // VOID resolved by session completion mid-Duel may carry only one
+  // competitor's partial response (see completeSession's own
+  // behavior), and showing one pick without its opponent's would imply
+  // a comparison that never actually happened.
+  let picksHtml = "";
+  if (mc.competitorAOptionIndex !== null && mc.competitorBOptionIndex !== null) {
+    const pickA = mc.options[mc.competitorAOptionIndex];
+    const pickB = mc.options[mc.competitorBOptionIndex];
+    const isOwnA = participantState.participantId === last.competitorAParticipantId;
+    const isOwnB = participantState.participantId === last.competitorBParticipantId;
+    picksHtml =
+      `<div class="result-card ${isOwnA ? "own" : ""}" style="margin-top:8px;"><div class="result-name">${nameA}${isOwnA ? ' <span class="you">(you)</span>' : ""}</div><div class="result-text">${pickA}</div></div>` +
+      `<div class="result-card ${isOwnB ? "own" : ""}" style="margin-top:8px;"><div class="result-name">${nameB}${isOwnB ? ' <span class="you">(you)</span>' : ""}</div><div class="result-text">${pickB}</div></div>`;
+  }
+
+  body.innerHTML =
+    `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+    `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
+    `<div class="winner-banner">${duelTerminalSummaryText(last)}</div>` +
+    picksHtml;
+}
+
+// Mirrors renderOptionButtons' shape and CSS classes (.option-btn /
+// .option-index-badge) exactly, minus any "is-correct" state —
+// correctOptionIndex is never sent to this file for a Duel, at any
+// lifecycle stage (see MultipleChoiceDuelSummary in lib/session/types.ts),
+// so there is truthfully nothing to style that way here, unlike the
+// Trivia optionsList this pattern is borrowed from.
+function renderDuelOptionButtons(options, myResponseOptionIndex) {
+  const list = document.getElementById("duelOptionsList");
+  list.innerHTML = options
+    .map((option, i) => {
+      const cls = "option-btn" + (myResponseOptionIndex === i ? " selected" : "");
+      return `<button class="${cls}" onclick="submitDuelResponse(${i})">
+        <span class="option-index-badge">${i + 1}</span><span>${option}</span>
+      </button>`;
+    })
+    .join("");
+}
+
+// Resubmission is deliberately permitted, not a one-shot lock — direct
+// inspection of the backend's submitDuelResponse (a plain Map.set()
+// overwrite, no guard against re-answering while ACTIVE) confirms this
+// is real backend behavior, not a UI invention. Optimistically updates
+// activeDuel.multipleChoice.myResponseOptionIndex so the selected state
+// re-renders immediately, exactly the same pattern selectOption() above
+// already uses for the ordinary Trivia case — reconciled against the
+// server's own authoritative value moments later by participantRefresh().
+async function submitDuelResponse(index) {
+  const previous = activeDuel.multipleChoice.myResponseOptionIndex;
+  activeDuel.multipleChoice.myResponseOptionIndex = index;
+  renderDuelCard();
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/respond`,
+    { duelId: activeDuel.duelId, selectedOptionIndex: index },
+    participantState.participantToken
+  );
+  show("SUBMIT_DUEL_RESPONSE (" + r.status + ")", r.json);
+  if (r.status === 200) {
+    renderNotice(null);
+  } else {
+    renderNotice(classifyError(r));
+    activeDuel.multipleChoice.myResponseOptionIndex = previous;
+    renderDuelCard();
+  }
+  await participantRefresh();
+}
+
 // Slice 001: GET_SESSION's `state` is now only the session's own
 // narrower lifecycle (LOBBY_OPEN | LOBBY_LOCKED | SESSION_COMPLETE) —
 // the PROMPT_ACTIVE / SUBMISSIONS_CLOSED / RESULT_REVEAL stages that
@@ -1451,11 +1727,24 @@ function applySessionSnapshot(data) {
   }
   if ("standings" in data) lastKnownQuizStandings = data.standings || [];
 
+  // Duel / SESSION_SUBGAME v1: set before renderPrompt/renderResults/
+  // renderVotingResults/renderDuelCard below, all of which read
+  // activeDuel synchronously — mirrors myVoteCandidateId's and
+  // currentQuiz's own "set first" discipline just above. participants
+  // (this session's roster) is likewise cached here, newly needed only
+  // for Duel's own competitor-name resolution (see
+  // participantDisplayName) — the roster was never shown to a
+  // participant before Duel required naming two other Session members.
+  if ("activeDuel" in data) activeDuel = data.activeDuel;
+  if ("duelHistory" in data) duelHistory = data.duelHistory;
+  if ("participants" in data) lastKnownParticipants = data.participants;
+
   const effectiveState = computeEffectiveState(data.state, data.interactionState);
   renderStepper(effectiveState);
   renderStateCard(effectiveState);
   renderPrompt(effectiveState, data.currentPrompt, data.currentVotingCandidates, data.questionProgress);
   renderQuizCard();
+  renderDuelCard();
   if ("submittedCount" in data) renderProgress(data.submittedCount, data.eligibleParticipantCount);
   if ("submissions" in data) {
     renderResults(data.submissions, data.state);
@@ -1506,6 +1795,13 @@ function updateCompletionScreen(effectiveState) {
   document.getElementById("progressCard").style.display = "none";
   document.getElementById("resultsCard").style.display = "none";
   document.getElementById("votingResultsCard").style.display = "none";
+  // Duel / SESSION_SUBGAME v1: a Duel cannot outlive its session (Duel
+  // Container lifecycle per Duel_Architecture.md), so duelCard has no
+  // legitimate reason to remain visible once SESSION_COMPLETE — the
+  // dedicated completion screen (winnerBanner/standingsCard/
+  // continuationCard) is the terminal experience here too, mirroring
+  // every other card in this hide-list.
+  document.getElementById("duelCard").style.display = "none";
 }
 
 // Experience Layer (hypothesis, not constitutional). See host.html's
@@ -1574,6 +1870,9 @@ function switchToJoinedSession(json) {
   continuationPrefilled = false;
   expLastInteractionState = null;
   expCelebrationPlayed = false;
+  activeDuel = null;
+  duelHistory = [];
+  lastKnownParticipants = [];
   document.getElementById("p-text").value = "";
   document.getElementById("jn-displayName").value = "";
   document.getElementById("ja-roomCode").value = "";
