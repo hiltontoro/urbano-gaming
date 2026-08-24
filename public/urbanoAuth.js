@@ -300,12 +300,23 @@ const UrbanoAuth = (() => {
 
 /**
  * Builds and wires the minimal inline sign-in panel: email -> Send Code
- * -> 6-digit code -> verify -> (first-time only) display name -> signed
- * in. Kept as a plain function outside the UrbanoAuth object (rather
- * than a method) so it can freely close over its own panel-local DOM
- * state without polluting the public API surface.
+ * -> verification code -> verify -> (first-time only) display name ->
+ * signed in. Kept as a plain function outside the UrbanoAuth object
+ * (rather than a method) so it can freely close over its own
+ * panel-local DOM state without polluting the public API surface.
  */
 function createSignInPanel(auth, buttonEl, statusEl) {
+  // Resolving the real Auth state takes two network round-trips
+  // (GET /api/gaming/config, then loading the Supabase client from its
+  // CDN) before getState() can even check the — otherwise instant —
+  // local session. Rather than let the button sit on its static HTML
+  // default ("Sign in with URBANO") for that whole window only to flip
+  // to "Hi, {name}" once resolved, hide it immediately and reveal the
+  // correct state once known. visibility (not display) keeps its
+  // layout space reserved, so nothing else in the header reflows when
+  // it reappears.
+  buttonEl.style.visibility = "hidden";
+
   const panel = document.createElement("div");
   panel.setAttribute("data-urbano-signin-panel", "");
   panel.style.cssText = [
@@ -392,7 +403,7 @@ function createSignInPanel(auth, buttonEl, statusEl) {
       panel.innerHTML = `
         <div style="margin-bottom:8px;font-weight:600;">Enter your code</div>
         <div style="margin-bottom:8px;color:#555;">Sent to ${email}</div>
-        <input data-code type="text" inputmode="numeric" placeholder="6-digit code"
+        <input data-code type="text" inputmode="numeric" placeholder="Verification code"
           style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:8px;border:1px solid #ccc;border-radius:6px;" />
         <button data-verify style="width:100%;padding:8px;border-radius:6px;border:none;background:#111;color:#fff;cursor:pointer;">Verify</button>
         <div style="display:flex;justify-content:space-between;margin-top:8px;">
@@ -464,6 +475,7 @@ function createSignInPanel(auth, buttonEl, statusEl) {
 
   function renderSignedIn(state) {
     buttonEl.textContent = `Hi, ${state.displayName}`;
+    buttonEl.style.visibility = "";
     buttonEl.onclick = null;
     let signOutLink = buttonEl.parentElement.querySelector(
       "[data-urbano-signout]"
@@ -490,6 +502,7 @@ function createSignInPanel(auth, buttonEl, statusEl) {
 
   function renderSignedOut() {
     buttonEl.textContent = "Sign in with URBANO";
+    buttonEl.style.visibility = "";
     const signOutLink = buttonEl.parentElement.querySelector(
       "[data-urbano-signout]"
     );
@@ -521,10 +534,15 @@ function createSignInPanel(auth, buttonEl, statusEl) {
     .then((state) => {
       if (state.status === "authenticated") {
         renderSignedIn(state);
+      } else {
+        renderSignedOut();
       }
     })
     .catch((err) => {
       console.error("UrbanoAuth: failed to resolve initial state:", err);
+      // Fail open to the signed-out control rather than leaving the
+      // button permanently hidden if state resolution itself errors.
+      renderSignedOut();
     });
 
   auth.onAuthStateChange(() => {
