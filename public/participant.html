@@ -1638,6 +1638,26 @@ function renderMultipleChoiceDuelTerminal(body, last) {
 // all to accidentally render, not merely content this function
 // chooses not to show. Spectator: names + phase only, no challenge
 // content, mirroring Multiple Choice's own spectator treatment.
+//
+// Active Input Preservation Invariant (ENGINEERING_PATTERNS.md):
+// this card is re-rendered on every ~2s poll regardless of whether
+// anything material changed. The original implementation rebuilt the
+// entire card body — including the live answer <input> — via one
+// `innerHTML` assignment on every call, destroying whatever a
+// competitor had typed (and their focus) before they could finish. The
+// fix separates two concerns that were previously conflated in one
+// template string: (1) chrome that is genuinely safe to refresh on
+// every poll (opponent name, phase, progress label, submitted-note —
+// none of it is ever mid-edit), built once into a stable shell and
+// thereafter updated only via textContent/style, never rebuilt; and
+// (2) the answer area itself, rebuilt only when the challenge it
+// represents actually changes — detected by comparing the live input's
+// own `data-ordinal` (the DOM's own record of which challenge it is
+// currently showing, read fresh every call rather than cached in a
+// module variable, so it can never drift out of sync with reality)
+// against the newly-authorized challenge's ordinal. A routine poll
+// where nothing about the current challenge changed leaves the input
+// node — and therefore its value and focus — completely untouched.
 function renderMathDuelActive(body) {
   const md = activeDuel.mathDuel;
   const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
@@ -1646,46 +1666,106 @@ function renderMathDuelActive(body) {
   const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
   const phaseLabel = md.phase === "SUDDEN_DEATH" ? "Sudden Death" : "Standard";
 
-  if (isCompetitorA || isCompetitorB) {
-    const opponentName = isCompetitorA ? nameB : nameA;
-    // The last visible challenge is "current" only if it's genuinely
-    // unanswered — once a competitor finishes the standard phase
-    // ahead of their opponent, the read-model caps them at ordinal 5
-    // (see getSession.ts's own identical cap), so the last visible
-    // entry there is ch.5, already answered: that must render as
-    // "waiting for the opponent," never as an answerable challenge.
-    const lastVisible = md.challenges.at(-1);
-    const current = lastVisible && lastVisible.myAnswer === null ? lastVisible : null;
-    const answeredList = current ? md.challenges.slice(0, -1) : md.challenges;
-    const progressLabel =
-      md.phase === "SUDDEN_DEATH" && current
-        ? `Sudden Death — Round ${current.challengeOrdinal - 5}`
-        : `Challenge ${md.myProgress.answered} of ${md.myProgress.total}`;
-
-    let stateHtml;
-    if (current) {
-      stateHtml =
-        `<div class="prompt-text" style="margin-bottom:12px;">${current.questionText}</div>` +
-        `<label>Your answer</label>` +
-        `<input type="number" id="mathDuelAnswerInput" inputmode="numeric" placeholder="Enter a whole number" />` +
-        `<button class="btn-primary" onclick="submitMathDuelAnswer()">Submit Answer</button>`;
-    } else if (md.myProgress.answered >= md.myProgress.total) {
-      stateHtml = `<div class="waiting">You've finished the standard phase — waiting for ${opponentName} to finish…</div>`;
-    } else {
-      stateHtml = `<div class="waiting">Waiting for the next challenge…</div>`;
-    }
-
-    body.innerHTML =
-      `<div class="room-code-hint" style="margin-bottom:8px;">You vs ${opponentName} — ${phaseLabel}</div>` +
-      `<div class="room-code-hint" id="mathDuelProgressLabel" style="margin-bottom:8px;">${progressLabel}</div>` +
-      (answeredList.length > 0
-        ? `<div class="submitted-note" style="display:block;">${answeredList.length} answered — correctness revealed once the Duel resolves.</div>`
-        : "") +
-      stateHtml;
-  } else {
+  if (!(isCompetitorA || isCompetitorB)) {
+    // Spectator: no editable control ever appears here — a full
+    // rebuild on every poll is harmless, nothing to preserve.
     body.innerHTML =
       `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB} — ${phaseLabel}</div>` +
       `<div class="waiting">Watching — waiting for the Duel to resolve…</div>`;
+    return;
+  }
+
+  const opponentName = isCompetitorA ? nameB : nameA;
+  // The last visible challenge is "current" only if it's genuinely
+  // unanswered — once a competitor finishes the standard phase ahead
+  // of their opponent, the read-model caps them at ordinal 5 (see
+  // getSession.ts's own identical cap), so the last visible entry
+  // there is ch.5, already answered: that must render as "waiting for
+  // the opponent," never as an answerable challenge.
+  const lastVisible = md.challenges.at(-1);
+  const current = lastVisible && lastVisible.myAnswer === null ? lastVisible : null;
+  const answeredList = current ? md.challenges.slice(0, -1) : md.challenges;
+
+  // Off-by-one correction: this used to read
+  // `Challenge ${md.myProgress.answered} of ${md.myProgress.total}`
+  // unconditionally — showing "Challenge 0 of 5" while challenge 1
+  // was already visible and answerable, because it labeled the
+  // *completed* count as if it were the *current* challenge number.
+  // While actively answering, the label now names the challenge on
+  // screen (its own ordinal), matching ordinary "step X of N"
+  // convention. The two waiting branches also now say something
+  // genuinely true for the phase they describe — the sudden-death
+  // waiting case previously fell through to the same "finished the
+  // standard phase" wording even mid-sudden-death, which was already
+  // stale/incorrect the moment a sudden-death round started.
+  let progressLabel;
+  if (current) {
+    progressLabel =
+      md.phase === "SUDDEN_DEATH"
+        ? `Sudden Death — Round ${current.challengeOrdinal - 5}`
+        : `Challenge ${current.challengeOrdinal} of ${md.myProgress.total}`;
+  } else if (md.phase === "SUDDEN_DEATH") {
+    progressLabel = `Sudden Death — waiting for ${opponentName}…`;
+  } else if (md.myProgress.answered >= md.myProgress.total) {
+    progressLabel = `${md.myProgress.answered} of ${md.myProgress.total} submitted — waiting for ${opponentName}…`;
+  } else {
+    progressLabel = `Challenge ${md.myProgress.answered} of ${md.myProgress.total}`;
+  }
+
+  // Shell built once per Duel — #mathDuelAnswerArea is its own stable
+  // marker. A new Duel always reaches this function with no such node
+  // in the DOM (the terminal/gap view in between fully replaces
+  // duelBody's contents via a different render path), so this
+  // naturally rebuilds fresh for each new Duel without needing an
+  // explicit duelId check the way the Host's exceptional-reason fix
+  // does (see host.html's renderDuelExceptionalControls).
+  let answerArea = document.getElementById("mathDuelAnswerArea");
+  if (!answerArea) {
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">You vs <span id="mathDuelOpponentName"></span> — <span id="mathDuelPhaseLabel"></span></div>` +
+      `<div class="room-code-hint" id="mathDuelProgressLabel" style="margin-bottom:8px;"></div>` +
+      `<div class="submitted-note" id="mathDuelSubmittedNote" style="display:none;"></div>` +
+      `<div id="mathDuelAnswerArea"></div>`;
+    answerArea = document.getElementById("mathDuelAnswerArea");
+  }
+
+  // Chrome: safe to refresh unconditionally every poll — none of it
+  // is ever mid-edit, and text/style updates never touch focus.
+  document.getElementById("mathDuelOpponentName").textContent = opponentName;
+  document.getElementById("mathDuelPhaseLabel").textContent = phaseLabel;
+  document.getElementById("mathDuelProgressLabel").textContent = progressLabel;
+  const noteEl = document.getElementById("mathDuelSubmittedNote");
+  if (answeredList.length > 0) {
+    noteEl.style.display = "block";
+    noteEl.textContent = `${answeredList.length} answered — correctness revealed once the Duel resolves.`;
+  } else {
+    noteEl.style.display = "none";
+  }
+
+  // Answer area: rebuilt only when the challenge it represents
+  // genuinely changes — a real submission advanced the ordinal, or
+  // there is no longer a current challenge to answer at all (Duel
+  // reached a waiting state). A routine poll where the competitor's
+  // own current challenge is unchanged leaves this subtree — and any
+  // in-progress typing and focus inside it — completely alone.
+  const existingInput = document.getElementById("mathDuelAnswerInput");
+  const existingOrdinal = existingInput ? Number(existingInput.dataset.ordinal) : null;
+  const alreadyShowingCurrentChallenge = current && existingOrdinal === current.challengeOrdinal;
+
+  if (!alreadyShowingCurrentChallenge) {
+    if (current) {
+      answerArea.innerHTML =
+        `<div class="prompt-text" style="margin-bottom:12px;">${current.questionText}</div>` +
+        `<label>Your answer</label>` +
+        `<input type="number" id="mathDuelAnswerInput" inputmode="numeric" placeholder="Enter a whole number" data-ordinal="${current.challengeOrdinal}" />` +
+        `<button class="btn-primary" onclick="submitMathDuelAnswer()">Submit Answer</button>`;
+    } else if (md.phase === "SUDDEN_DEATH") {
+      answerArea.innerHTML = `<div class="waiting">Waiting for ${opponentName} to answer this round…</div>`;
+    } else if (md.myProgress.answered >= md.myProgress.total) {
+      answerArea.innerHTML = `<div class="waiting">You've finished the standard phase — waiting for ${opponentName} to finish…</div>`;
+    } else {
+      answerArea.innerHTML = `<div class="waiting">Waiting for the next challenge…</div>`;
+    }
   }
 }
 

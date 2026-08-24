@@ -2966,8 +2966,24 @@ function renderDuelActiveState() {
   renderDuelExceptionalControls(nameA, nameB);
 }
 
+// Active Input Preservation Invariant (ENGINEERING_PATTERNS.md): this
+// is called on every ~2s poll for as long as a Duel stays ACTIVE, but
+// nothing in this block — the two competitor names, the four buttons
+// — ever changes during one Duel's own ACTIVE lifetime. The original
+// implementation rebuilt it via `innerHTML` unconditionally on every
+// call regardless, destroying an in-progress Forfeit reason (and
+// focus) before the Host could finish typing it — mirrors exactly the
+// defect this file's own renderDuelOptionInputs() guard already
+// solved correctly for Duel authoring, just not yet applied here.
+// Guarded on the specific Duel's own id, not merely "has this ever
+// been built": a bare "already has children" check would let a new
+// Duel silently inherit a previous Duel's stale, never-submitted
+// reason text — this must start fresh every time a *different* Duel
+// becomes ACTIVE, while surviving every poll *within* the same one.
 function renderDuelExceptionalControls(nameA, nameB) {
   const exceptional = document.getElementById("duelExceptionalControls");
+  if (exceptional.dataset.duelId === activeDuel.duelId) return;
+  exceptional.dataset.duelId = activeDuel.duelId;
   exceptional.innerHTML =
     `<div class="room-code-hint" style="margin-bottom:6px;">Exceptional resolution</div>` +
     `<input type="text" id="duelExceptionalReason" placeholder="Reason (required for forfeit)" style="width:100%; font-family:inherit; font-size:13px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" />` +
