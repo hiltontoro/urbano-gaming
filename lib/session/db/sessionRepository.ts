@@ -15,7 +15,7 @@ import type {
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
 } from "../types";
-import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
+import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 
 export interface SessionEventRecord {
   sessionId: string;
@@ -1355,10 +1355,14 @@ export interface SessionRepository {
    * startDuel() (see that method's own doc comment for the exact
    * error vocabulary shared by both); the mechanic-specific work is
    * persisting the already-selected challenge snapshot as immutable
-   * duel_math_challenges rows, standard phase first (ordinals 1..5),
-   * then the full sudden-death supply — see
-   * mathDuelFixture.ts/0140's own comments for why the entire supply
-   * is materialized upfront rather than created lazily.
+   * duel_math_challenges rows.
+   *
+   * Pre-Deployment Product-Invariant Correction: challenges is now
+   * exactly the 5 STANDARD challenges — sudden death is created
+   * lazily by submitMathDuelAnswer (see that method's own doc comment)
+   * rather than pre-materialized here, correcting a confirmed
+   * functional cap on tied sudden-death rounds that contradicted the
+   * Founder-confirmed "no round cap" requirement.
    *
    * Implementations must:
    * - apply every mutual-exclusion/authorization check startDuel()
@@ -1372,7 +1376,7 @@ export interface SessionRepository {
     hostToken: string,
     competitorAParticipantId: string,
     competitorBParticipantId: string,
-    challenges: SelectedMathDuelChallenge[]
+    challenges: MathDuelFixtureChallenge[]
   ): Promise<{
     duelId: string;
     mechanicKey: DuelMechanicKey;
@@ -1389,8 +1393,16 @@ export interface SessionRepository {
    * submitDuelResponse()'s own "last write wins." When the answer just
    * recorded is the one that completes a shared condition (both
    * competitors have now answered the same challenge), normal
-   * resolution happens inline, in the same atomic operation — see
-   * 0141's own migration comment for the exact win/continue logic.
+   * resolution happens inline, in the same atomic operation.
+   *
+   * Pre-Deployment Product-Invariant Correction: nextChallengeCandidate
+   * is the domain layer's always-computed, deterministic content for
+   * challengeOrdinal + 1 (mathDuelFixture.ts's own
+   * generateSuddenDeathChallenge) — used to lazily create the next
+   * sudden-death round's duel_math_challenges row, atomically, only if
+   * this specific call is the one that confirms a genuine tie at
+   * challengeOrdinal; ignored otherwise. This is what makes sudden
+   * death genuinely uncapped (0145's own migration comment).
    *
    * Implementations must:
    * - throw DuelNotFoundError only when no Math Duel exists for this
@@ -1402,29 +1414,39 @@ export interface SessionRepository {
    *   is ahead of this participant's own next-authorized challenge;
    * - throw InvalidMathDuelAnswerError only when the supplied answer is
    *   not a non-negative integer;
-   * - throw MathDuelChallengesExhaustedError only when no
-   *   duel_math_challenges row exists for the authorized ordinal (the
-   *   honest, disclosed Slice 001 supply-exhaustion edge case);
+   * - throw InvalidMathDuelChallengesError only when a tie is confirmed
+   *   and nextChallengeCandidate is missing or malformed (a defensive,
+   *   should-never-happen guard, since the domain layer always
+   *   supplies it);
+   * - throw MathDuelChallengesExhaustedError only in the defensive,
+   *   should-never-happen case where no duel_math_challenges row
+   *   exists for an already-authorized ordinal;
    * - never leak correctness in the return value;
    * - persist exactly one DUEL_RESOLVED session event, only when this
-   *   call is the one that determines a winner.
+   *   call is the one that determines a winner;
+   * - set activated_at on the newly-created next challenge row, and
+   *   forward-activate the STANDARD phase's own next ordinal (2-5) the
+   *   moment either competitor first reaches it.
    */
   submitMathDuelAnswer(
     duelId: string,
     participantToken: string,
     challengeOrdinal: number,
-    submittedAnswer: number
+    submittedAnswer: number,
+    nextChallengeCandidate: MathDuelFixtureChallenge
   ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }>;
 
   /**
-   * Math Duel Slice 001. Every challenge ever materialized for this
-   * Duel, ordinal ascending — the full pre-materialized set
-   * (implementation-readiness's own "no lazy creation" simplification
-   * — see 0140's own comment), including sudden-death rounds never
-   * actually reached. The read-model projection (getSession.ts) is
-   * responsible for filtering this down to what a given viewer is
-   * actually authorized to see; this method itself applies no privacy
-   * filtering.
+   * Math Duel Slice 001. Every challenge ever created for this Duel,
+   * ordinal ascending. Pre-Deployment Product-Invariant Correction:
+   * with lazy sudden-death creation, this set now only ever contains
+   * challenges that were actually activated or are the 5 pre-created
+   * (but not necessarily yet reached) STANDARD challenges — never a
+   * large untouched reserve. The read-model projection (getSession.ts)
+   * remains responsible for filtering this down to what a given
+   * viewer is actually authorized to see, and now also for filtering
+   * the terminal reveal to activatedAt-not-null rows; this method
+   * itself applies no privacy or activation filtering.
    */
   getMathDuelChallenges(duelId: string): Promise<MathDuelChallengeRecord[]>;
 

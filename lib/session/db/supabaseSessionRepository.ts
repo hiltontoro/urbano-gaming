@@ -17,7 +17,7 @@ import type {
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
 } from "../types";
-import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
+import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 import {
   RoomCodeCollisionError,
   DisplayNameTakenError,
@@ -1841,7 +1841,7 @@ export class SupabaseSessionRepository implements SessionRepository {
     hostToken: string,
     competitorAParticipantId: string,
     competitorBParticipantId: string,
-    challenges: SelectedMathDuelChallenge[]
+    challenges: MathDuelFixtureChallenge[]
   ): Promise<{
     duelId: string;
     mechanicKey: DuelMechanicKey;
@@ -1902,13 +1902,15 @@ export class SupabaseSessionRepository implements SessionRepository {
     duelId: string,
     participantToken: string,
     challengeOrdinal: number,
-    submittedAnswer: number
+    submittedAnswer: number,
+    nextChallengeCandidate: MathDuelFixtureChallenge
   ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }> {
     const { data, error } = await this.client.rpc("submit_math_duel_answer_atomically", {
       p_duel_id: duelId,
       p_participant_token: participantToken,
       p_challenge_ordinal: challengeOrdinal,
       p_submitted_answer: submittedAnswer,
+      p_next_challenge: nextChallengeCandidate,
     });
 
     if (error) {
@@ -1931,6 +1933,9 @@ export class SupabaseSessionRepository implements SessionRepository {
       }
       if (error.code === "P0001" && msg.includes("INVALID_MATH_DUEL_ANSWER")) {
         throw new InvalidMathDuelAnswerError();
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_MATH_DUEL_CHALLENGES")) {
+        throw new InvalidMathDuelChallengesError();
       }
       throw error;
     }
@@ -1964,6 +1969,7 @@ export class SupabaseSessionRepository implements SessionRepository {
       phase: row.phase as "STANDARD" | "SUDDEN_DEATH",
       questionText: row.question_text,
       createdAt: row.created_at,
+      activatedAt: row.activated_at,
     }));
   }
 

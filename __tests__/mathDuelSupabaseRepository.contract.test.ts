@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SupabaseSessionRepository } from "../lib/session/db/supabaseSessionRepository";
 import type { ParticipantRecord } from "../lib/session/db/sessionRepository";
 import { type SessionRecord, DuelNotActiveError } from "../lib/session/types";
-import { selectMathDuelChallenges, MATH_DUEL_STANDARD_COUNT } from "../lib/session/mathDuelFixture";
+import { selectMathDuelChallenges, generateSuddenDeathChallenge } from "../lib/session/mathDuelFixture";
 
 const env = loadEnv("development", process.cwd(), "");
 
@@ -21,19 +21,24 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 }
 
 /**
- * Math Duel Slice 001 — Supabase contract suite. Structurally
- * identical to duelSupabaseRepository.contract.test.ts (same builders,
- * same cleanup discipline). Exercises exactly what
+ * Math Duel Slice 001 — Supabase contract suite, rewritten by the
+ * Pre-Deployment Product-Invariant Correction gate for lazy sudden-
+ * death creation. Structurally identical to
+ * duelSupabaseRepository.contract.test.ts (same builders, same
+ * cleanup discipline). Exercises exactly what
  * InMemorySessionRepository (__tests__/mathDuel.test.ts) cannot: the
  * real start_math_duel_atomically / submit_math_duel_answer_atomically
  * functions against live Postgres, real FK/check-constraint
  * enforcement on duel_math_challenges/duel_math_responses, first-
- * write-wins under genuine concurrent INSERT, the sessions-then-duels
- * lock order under genuine concurrent races (mirroring
- * duelSupabaseRepository.contract.test.ts's own proven RESOLVE_DUEL-
- * vs-COMPLETE_SESSION scenario), and — explicitly — that the
- * unmodified Multiple Choice RPCs remain byte-identical in behavior
- * after these migrations.
+ * write-wins under genuine concurrent INSERT, the new lazy-creation
+ * race (two competitors confirming the same tie concurrently must
+ * still create exactly one next-round row), the sessions-then-duels
+ * lock order under genuine concurrent races, live structural proof
+ * that sudden death has no round-count ceiling (Issue A), live proof
+ * that activated-but-unanswered evidence survives an exceptional
+ * termination (Issue B), and — explicitly — that the unmodified
+ * Multiple Choice RPCs remain byte-identical in behavior after these
+ * migrations.
  */
 const repository = new SupabaseSessionRepository(supabaseUrl, supabaseServiceRoleKey);
 const cleanupClient = createClient(supabaseUrl, supabaseServiceRoleKey);
@@ -99,8 +104,22 @@ function buildJoinedEvent(record: ParticipantRecord) {
 }
 
 const zeroRandom = () => 0;
-const EXPECTED_CHALLENGES = selectMathDuelChallenges(zeroRandom);
-const STANDARD = EXPECTED_CHALLENGES.slice(0, MATH_DUEL_STANDARD_COUNT);
+const STANDARD = selectMathDuelChallenges(zeroRandom);
+
+/** The deterministic content one specific sudden-death ordinal will have for a given Duel. */
+function suddenDeathContent(duelId: string, ordinal: number) {
+  return generateSuddenDeathChallenge(duelId, ordinal);
+}
+
+/**
+ * Mirrors submitMathDuelAnswer.ts's own always-compute-the-candidate
+ * discipline — every call in this suite goes directly through the
+ * repository (bypassing the domain layer), so each call site
+ * reproduces exactly what that domain layer would have passed.
+ */
+function withNextCandidate(duelId: string, challengeOrdinal: number) {
+  return suddenDeathContent(duelId, challengeOrdinal + 1);
+}
 
 async function setupDuelReadySession(
   capabilities: string[] = ["DUEL"],
@@ -130,13 +149,20 @@ async function setupDuelReadySession(
 }
 
 async function startAMathDuel(session: SessionRecord, aId: string, bId: string) {
-  return repository.startMathDuel(
-    session.sessionId,
-    session.hostToken,
-    aId,
-    bId,
-    EXPECTED_CHALLENGES
-  );
+  return repository.startMathDuel(session.sessionId, session.hostToken, aId, bId, STANDARD);
+}
+
+/** Answers ordinals 1..5 for one participant with the fixture's own correct STANDARD values. */
+async function answerAllStandardCorrect(duelId: string, token: string) {
+  for (let ord = 1; ord <= 5; ord++) {
+    await repository.submitMathDuelAnswer(
+      duelId,
+      token,
+      ord,
+      STANDARD[ord - 1].correctAnswer,
+      withNextCandidate(duelId, ord)
+    );
+  }
 }
 
 afterAll(async () => {
@@ -196,6 +222,14 @@ describe("SupabaseSessionRepository contract — Math Duel migration-created sch
     expect(responsesProbe.error).toBeNull();
   });
 
+  it("duel_math_challenges_reached view is reachable and excludes non-activated rows", async () => {
+    const probe = await cleanupClient
+      .from("duel_math_challenges_reached")
+      .select("duel_id")
+      .limit(1);
+    expect(probe.error).toBeNull();
+  });
+
   it("rejects a math response with no corresponding challenge (composite FK)", async () => {
     const { session, participants } = await setupDuelReadySession();
     const [a, b] = participants;
@@ -223,7 +257,7 @@ describe("SupabaseSessionRepository contract — Math Duel migration-created sch
     expect(error?.message).toMatch(/duels_mechanic_key_valid_values/);
   });
 
-  it("start_math_duel_atomically persists exactly 5 STANDARD challenges plus the full sudden-death supply, with mechanic_key MATH_DUEL and null legacy MC columns", async () => {
+  it("start_math_duel_atomically persists exactly 5 STANDARD challenges — no sudden-death rows pre-materialized — with mechanic_key MATH_DUEL and null legacy MC columns", async () => {
     const { session, participants } = await setupDuelReadySession();
     const [a, b] = participants;
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
@@ -240,8 +274,18 @@ describe("SupabaseSessionRepository contract — Math Duel migration-created sch
     expect(duelRow.correct_option_index).toBeNull();
 
     const challenges = await repository.getMathDuelChallenges(duel.duelId);
-    expect(challenges.filter((c) => c.phase === "STANDARD")).toHaveLength(5);
-    expect(challenges.length).toBe(EXPECTED_CHALLENGES.length);
+    expect(challenges).toHaveLength(5);
+    expect(challenges.every((c) => c.phase === "STANDARD")).toBe(true);
+    expect(challenges[0].activatedAt).not.toBeNull();
+    expect(challenges.slice(1).every((c) => c.activatedAt === null)).toBe(true);
+  });
+
+  it("rejects a challenge set that is not exactly 5 entries", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    await expect(
+      repository.startMathDuel(session.sessionId, session.hostToken, a.participantId, b.participantId, STANDARD.slice(0, 4))
+    ).rejects.toThrow();
   });
 });
 
@@ -252,8 +296,8 @@ describe("SUBMIT_MATH_DUEL_ANSWER — first-write-wins under genuine concurrency
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
 
     const results = await Promise.allSettled([
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer),
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer, withNextCandidate(duel.duelId, 1)),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer, withNextCandidate(duel.duelId, 1)),
     ]);
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
@@ -273,13 +317,13 @@ describe("SUBMIT_MATH_DUEL_ANSWER — first-write-wins under genuine concurrency
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
 
     for (let ord = 1; ord <= 4; ord++) {
-      await repository.submitMathDuelAnswer(duel.duelId, a.participantToken, ord, STANDARD[ord - 1].correctAnswer);
-      await repository.submitMathDuelAnswer(duel.duelId, b.participantToken, ord, STANDARD[ord - 1].correctAnswer + 1);
+      await repository.submitMathDuelAnswer(duel.duelId, a.participantToken, ord, STANDARD[ord - 1].correctAnswer, withNextCandidate(duel.duelId, ord));
+      await repository.submitMathDuelAnswer(duel.duelId, b.participantToken, ord, STANDARD[ord - 1].correctAnswer + 1, withNextCandidate(duel.duelId, ord));
     }
 
     const results = await Promise.allSettled([
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 5, STANDARD[4].correctAnswer),
-      repository.submitMathDuelAnswer(duel.duelId, b.participantToken, 5, STANDARD[4].correctAnswer + 1),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 5, STANDARD[4].correctAnswer, withNextCandidate(duel.duelId, 5)),
+      repository.submitMathDuelAnswer(duel.duelId, b.participantToken, 5, STANDARD[4].correctAnswer + 1, withNextCandidate(duel.duelId, 5)),
     ]);
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
@@ -295,30 +339,55 @@ describe("SUBMIT_MATH_DUEL_ANSWER — first-write-wins under genuine concurrency
       .eq("event_type", "DUEL_RESOLVED");
     if (error) throw error;
     expect(events).toHaveLength(1);
+
+    // Decisive, not tied — no sudden-death round should ever have been
+    // created.
+    const challenges = await repository.getMathDuelChallenges(duel.duelId);
+    expect(challenges).toHaveLength(5);
   });
 
-  it("both competitors submitting the same tied sudden-death round concurrently never creates a duplicate next round", async () => {
+  it("both competitors confirming the same tied round concurrently creates exactly one next-round row — the core lazy-creation race", async () => {
     const { session, participants } = await setupDuelReadySession();
     const [a, b] = participants;
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    await answerAllStandardCorrect(duel.duelId, b.participantToken);
 
-    for (let ord = 1; ord <= 5; ord++) {
-      await repository.submitMathDuelAnswer(duel.duelId, a.participantToken, ord, STANDARD[ord - 1].correctAnswer);
-      await repository.submitMathDuelAnswer(duel.duelId, b.participantToken, ord, STANDARD[ord - 1].correctAnswer);
-    }
-
-    const round6 = EXPECTED_CHALLENGES[5];
+    // At this point ordinal 5 was answered by both (tied), sequentially
+    // — round 6 already exists. Push into round 6 itself, tied again,
+    // this time via genuinely concurrent calls: both competitors'
+    // SUBMIT_MATH_DUEL_ANSWER for round 6 fire at once, each carrying
+    // its own independently-computed (but identical, since it's a pure
+    // function of the same duelId+ordinal) candidate for round 7. Only
+    // one of the two calls may ever actually perform the INSERT for
+    // round 7 — the duels-row lock this function already holds for its
+    // entire execution serializes them, exactly as it already does for
+    // normal resolution.
+    const round6 = suddenDeathContent(duel.duelId, 6);
     const results = await Promise.allSettled([
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 6, round6.correctAnswer),
-      repository.submitMathDuelAnswer(duel.duelId, b.participantToken, 6, round6.correctAnswer),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 6, round6.correctAnswer, withNextCandidate(duel.duelId, 6)),
+      repository.submitMathDuelAnswer(duel.duelId, b.participantToken, 6, round6.correctAnswer, withNextCandidate(duel.duelId, 6)),
     ]);
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
 
     const finalDuel = await repository.getDuelById(duel.duelId);
     expect(finalDuel?.lifecycleState).toBe("ACTIVE");
 
-    const view = await repository.getMathDuelResponses(duel.duelId);
-    expect(view.filter((r) => r.challengeOrdinal === 6)).toHaveLength(2);
+    const responses = await repository.getMathDuelResponses(duel.duelId);
+    expect(responses.filter((r) => r.challengeOrdinal === 6)).toHaveLength(2);
+
+    // The actual race this test exists to prove: exactly one round-7
+    // row, never two, never a unique-constraint error surfaced to
+    // either caller (both settled "fulfilled" above already confirms
+    // no error reached the caller).
+    const { data: round7Rows, error } = await cleanupClient
+      .from("duel_math_challenges")
+      .select("challenge_ordinal, question_text, correct_answer, activated_at")
+      .eq("duel_id", duel.duelId)
+      .eq("challenge_ordinal", 7);
+    if (error) throw error;
+    expect(round7Rows).toHaveLength(1);
+    expect(round7Rows![0].activated_at).not.toBeNull();
   });
 });
 
@@ -329,7 +398,7 @@ describe("SUBMIT_MATH_DUEL_ANSWER races COMPLETE_SESSION and Forfeit — live Po
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
 
     const results = await Promise.allSettled([
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer, withNextCandidate(duel.duelId, 1)),
       repository.completeSession(session.sessionId, session.hostToken, {
         sessionId: session.sessionId,
         eventType: "SESSION_COMPLETED",
@@ -354,7 +423,7 @@ describe("SUBMIT_MATH_DUEL_ANSWER races COMPLETE_SESSION and Forfeit — live Po
     const duel = await startAMathDuel(session, a.participantId, b.participantId);
 
     const results = await Promise.allSettled([
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer),
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer, withNextCandidate(duel.duelId, 1)),
       repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "FORFEIT_A", "Disconnected"),
     ]);
 
@@ -378,8 +447,71 @@ describe("SUBMIT_MATH_DUEL_ANSWER races COMPLETE_SESSION and Forfeit — live Po
     await repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "VOID", null);
 
     await expect(
-      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer)
+      repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 1, STANDARD[0].correctAnswer, withNextCandidate(duel.duelId, 1))
     ).rejects.toThrow(DuelNotActiveError);
+  });
+
+  it("Issue B — a sudden-death round activated by a tie but cut short by exceptional resolution before either answers is honestly preserved in duel_math_challenges_reached", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    await answerAllStandardCorrect(duel.duelId, b.participantToken);
+
+    // The 5-5 tie lazily created round 6, activated for both — cut
+    // short by Cancel before either answers it.
+    await repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "CANCELLED", null);
+
+    const { data: reached, error } = await cleanupClient
+      .from("duel_math_challenges_reached")
+      .select("challenge_ordinal")
+      .eq("duel_id", duel.duelId)
+      .order("challenge_ordinal", { ascending: true });
+    if (error) throw error;
+    expect(reached!.map((r) => r.challenge_ordinal)).toEqual([1, 2, 3, 4, 5, 6]);
+
+    const responses = await repository.getMathDuelResponses(duel.duelId);
+    expect(responses.filter((r) => r.challengeOrdinal === 6)).toHaveLength(0);
+  });
+});
+
+describe("Issue A — sudden death has no round-count ceiling, proven live against real Postgres", () => {
+  it("continues cleanly past the old 25-round pre-materialized reserve boundary with no exhaustion error", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    await answerAllStandardCorrect(duel.duelId, b.participantToken);
+
+    // Old design: exactly 25 sudden-death rows (ordinals 6-30)
+    // pre-materialized; ordinal 31 had no row and
+    // MATH_DUEL_CHALLENGES_EXHAUSTED fired permanently. Drive 28
+    // consecutive tied rounds here (ordinals 6..33) — past that old
+    // ordinal-31 boundary — against real Postgres, sequentially (not
+    // parallel, so each round's lazy-creation happens deterministically
+    // before the next is attempted).
+    for (let round = 6; round <= 33; round++) {
+      const challenge = suddenDeathContent(duel.duelId, round);
+      await repository.submitMathDuelAnswer(duel.duelId, a.participantToken, round, challenge.correctAnswer, withNextCandidate(duel.duelId, round));
+      await repository.submitMathDuelAnswer(duel.duelId, b.participantToken, round, challenge.correctAnswer, withNextCandidate(duel.duelId, round));
+    }
+
+    const midDuel = await repository.getDuelById(duel.duelId);
+    expect(midDuel?.lifecycleState).toBe("ACTIVE");
+    expect(midDuel?.terminalResolution).toBeNull();
+
+    const challenges = await repository.getMathDuelChallenges(duel.duelId);
+    expect(challenges).toHaveLength(34); // 5 standard + rounds 6..34 (34 lazily created by round 33's tie)
+    expect(challenges.at(-1)?.challengeOrdinal).toBe(34);
+
+    // Decide it, well past the old cap.
+    const decisive = suddenDeathContent(duel.duelId, 34);
+    await repository.submitMathDuelAnswer(duel.duelId, a.participantToken, 34, decisive.correctAnswer, withNextCandidate(duel.duelId, 34));
+    await repository.submitMathDuelAnswer(duel.duelId, b.participantToken, 34, decisive.correctAnswer + 1, withNextCandidate(duel.duelId, 34));
+
+    const resolved = await repository.getDuelById(duel.duelId);
+    expect(resolved?.lifecycleState).toBe("COMPLETED");
+    expect(resolved?.winnerParticipantId).toBe(a.participantId);
   });
 });
 

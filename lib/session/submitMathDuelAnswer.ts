@@ -6,8 +6,10 @@ import {
   DuelAccessDeniedError,
   InvalidMathDuelOrdinalError,
   InvalidMathDuelAnswerError,
+  InvalidMathDuelChallengesError,
   MathDuelChallengesExhaustedError,
 } from "./types";
+import { generateSuddenDeathChallenge } from "./mathDuelFixture";
 
 /**
  * SUBMIT_MATH_DUEL_ANSWER command handler.
@@ -28,6 +30,18 @@ import {
  * state, competitor authorization, ordinal authorization) inside the
  * same atomic operation that records the response and, if this is the
  * answer that completes a shared condition, resolves the Duel.
+ *
+ * Pre-Deployment Product-Invariant Correction: sudden death is no
+ * longer pre-materialized (see mathDuelFixture.ts's own top comment),
+ * so every call speculatively computes the *candidate* content for
+ * challengeOrdinal + 1 and passes it through — used by the repository
+ * only if this specific submission turns out to be the one that
+ * confirms a tie at challengeOrdinal; discarded otherwise. Computing
+ * it unconditionally rather than only "when needed" mirrors
+ * startMathDuel's own precedent of always selecting content up front
+ * in the domain layer, never inside the RPC — content only ever gets
+ * persisted once, atomically, at the exact moment the repository
+ * confirms it is actually required.
  */
 export async function submitMathDuelAnswer(
   repo: SessionRepository,
@@ -45,11 +59,17 @@ export async function submitMathDuelAnswer(
     throw new DuelNotActiveError(duel.lifecycleState);
   }
 
+  const nextChallengeCandidate = generateSuddenDeathChallenge(
+    duelId,
+    challengeOrdinal + 1
+  );
+
   const result = await repo.submitMathDuelAnswer(
     duelId,
     participantToken,
     challengeOrdinal,
-    submittedAnswer
+    submittedAnswer,
+    nextChallengeCandidate
   );
 
   return {
@@ -68,5 +88,6 @@ export {
   DuelAccessDeniedError,
   InvalidMathDuelOrdinalError,
   InvalidMathDuelAnswerError,
+  InvalidMathDuelChallengesError,
   MathDuelChallengesExhaustedError,
 };

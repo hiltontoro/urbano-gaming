@@ -541,21 +541,21 @@ export async function getSession(
         let visibleChallenges: MathDuelChallengeSummary[];
         if (revealed) {
           // Full symmetric reveal — but only of challenges the Duel
-          // actually reached, never the unused remainder of the pre-
-          // materialized sudden-death supply (0140's own "no lazy
-          // creation" simplification means most Duels leave dozens of
-          // never-asked challenge rows behind — those must never
-          // appear here, or a terminal reveal would misleadingly imply
-          // rounds were played that never happened). The highest
-          // ordinal with any recorded response is exactly the Duel's
-          // own deciding challenge, since resolution only ever happens
-          // the moment both competitors answer it.
-          const maxAnsweredOrdinal = responses.reduce(
-            (max, r) => Math.max(max, r.challengeOrdinal),
-            0
-          );
+          // actually reached, never an unauthorized future ordinal.
+          // Pre-Deployment Product-Invariant Correction: filtered on
+          // activatedAt, not on whether a response exists — a
+          // challenge genuinely shown to competitors and then cut
+          // short by Cancel/Void/Forfeit before either answered is
+          // still honestly part of the played Duel (Issue B), unlike
+          // an ordinal nobody was ever authorized into at all. Lazy
+          // sudden-death creation (0144/0145) means challenges here is
+          // already bounded to what was created — no large unreached
+          // reserve to filter out any more — but the activatedAt
+          // filter is still the correct, non-response-dependent truth
+          // for the STANDARD phase's own pre-created-but-not-yet-
+          // reached ordinals 2-5.
           visibleChallenges = challenges
-            .filter((c) => c.challengeOrdinal <= maxAnsweredOrdinal)
+            .filter((c) => c.activatedAt !== null)
             .map((c) => {
             const a = responseFor(c.challengeOrdinal, duel.competitorAParticipantId);
             const b = responseFor(c.challengeOrdinal, duel.competitorBParticipantId);

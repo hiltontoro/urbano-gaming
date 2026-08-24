@@ -73,7 +73,7 @@ import type {
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
 } from "../types";
-import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
+import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 
 const SESSION_CAPABILITY_KEYS: SessionCapabilityKey[] = [
   "OPEN_RESPONSE",
@@ -171,6 +171,7 @@ export class InMemorySessionRepository implements SessionRepository {
       questionText: string;
       correctAnswer: number;
       createdAt: string;
+      activatedAt: string | null;
     }
   >();
 
@@ -2187,7 +2188,7 @@ export class InMemorySessionRepository implements SessionRepository {
     hostToken: string,
     competitorAParticipantId: string,
     competitorBParticipantId: string,
-    challenges: SelectedMathDuelChallenge[]
+    challenges: MathDuelFixtureChallenge[]
   ): Promise<{
     duelId: string;
     mechanicKey: DuelMechanicKey;
@@ -2198,11 +2199,13 @@ export class InMemorySessionRepository implements SessionRepository {
       throw new DuplicateDuelCompetitorError();
     }
 
+    // Pre-Deployment Product-Invariant Correction: exactly the 5
+    // STANDARD challenges now — sudden death is created lazily by
+    // submitMathDuelAnswer (see that method's own comment), never
+    // pre-materialized here.
     if (
       !Array.isArray(challenges) ||
-      challenges.length < 5 ||
-      challenges.slice(0, 5).some((c) => c.phase !== "STANDARD") ||
-      challenges.slice(5).some((c) => c.phase !== "SUDDEN_DEATH") ||
+      challenges.length !== 5 ||
       challenges.some(
         (c) =>
           !c.questionText ||
@@ -2268,10 +2271,15 @@ export class InMemorySessionRepository implements SessionRepository {
       this.mathDuelChallenges.set(`${duel.duelId}:${challengeOrdinal}`, {
         duelId: duel.duelId,
         challengeOrdinal,
-        phase: challenge.phase,
+        phase: "STANDARD",
         questionText: challenge.questionText.trim(),
         correctAnswer: challenge.correctAnswer,
         createdAt: startedAt,
+        // Ordinal 1 is authorized to both competitors from the
+        // instant the Duel starts; ordinals 2-5 are activated lazily,
+        // in submitMathDuelAnswer, the moment either competitor first
+        // reaches them.
+        activatedAt: challengeOrdinal === 1 ? startedAt : null,
       });
     });
 
@@ -2298,7 +2306,8 @@ export class InMemorySessionRepository implements SessionRepository {
     duelId: string,
     participantToken: string,
     challengeOrdinal: number,
-    submittedAnswer: number
+    submittedAnswer: number,
+    nextChallengeCandidate: MathDuelFixtureChallenge
   ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }> {
     const duel = this.duels.get(duelId);
     if (!duel || duel.mechanicKey !== "MATH_DUEL") {
@@ -2386,6 +2395,23 @@ export class InMemorySessionRepository implements SessionRepository {
       answeredAt,
     });
 
+    // Forward-activate the STANDARD phase's own next ordinal (2-5),
+    // the instant either competitor is first authorized into it —
+    // mirrors 0145's own identical forward-activation. A no-op if
+    // challengeOrdinal is 5 (the next ordinal is SUDDEN_DEATH
+    // territory, activated separately below, only if a tie actually
+    // creates it) or if it was already activated by the other
+    // competitor reaching it first.
+    if (challengeOrdinal < 5) {
+      const nextStandard = this.mathDuelChallenges.get(`${duelId}:${challengeOrdinal + 1}`);
+      if (nextStandard && nextStandard.activatedAt === null) {
+        this.mathDuelChallenges.set(`${duelId}:${challengeOrdinal + 1}`, {
+          ...nextStandard,
+          activatedAt: answeredAt,
+        });
+      }
+    }
+
     const otherResponse = this.mathDuelResponses.get(
       `${duelId}:${challengeOrdinal}:${otherParticipantId}`
     );
@@ -2393,6 +2419,7 @@ export class InMemorySessionRepository implements SessionRepository {
     if (otherResponse) {
       let resolution: DuelTerminalResolution | null = null;
       let winner: string | null = null;
+      let tied = false;
 
       if (challenge.phase === "STANDARD" && challengeOrdinal === 5) {
         const correctCount = (pid: string) =>
@@ -2404,10 +2431,9 @@ export class InMemorySessionRepository implements SessionRepository {
         if (aCount !== bCount) {
           resolution = "WON_LOST";
           winner = aCount > bCount ? duel.competitorAParticipantId : duel.competitorBParticipantId;
+        } else {
+          tied = true;
         }
-        // Equal counts: no resolution yet — the Duel continues into
-        // whichever pre-materialized sudden-death challenge ordinal 6
-        // already is. Nothing to create, nothing to write here.
       } else if (challenge.phase === "SUDDEN_DEATH") {
         if (isCorrect && !otherResponse.isCorrect) {
           resolution = "WON_LOST";
@@ -2415,9 +2441,9 @@ export class InMemorySessionRepository implements SessionRepository {
         } else if (otherResponse.isCorrect && !isCorrect) {
           resolution = "WON_LOST";
           winner = otherParticipantId;
+        } else {
+          tied = true;
         }
-        // Both correct or both wrong: another tied round — the next
-        // pre-materialized ordinal already exists; nothing to do.
       }
 
       if (resolution) {
@@ -2433,6 +2459,36 @@ export class InMemorySessionRepository implements SessionRepository {
           sessionId: duel.sessionId,
           eventType: "DUEL_RESOLVED",
           payload: { duelId, terminalResolution: resolution, winnerParticipantId: winner },
+        });
+      } else if (tied) {
+        // A genuine tie at the deciding challenge (standard or sudden
+        // death): create the next sudden-death round lazily. Only
+        // this call ever reaches this branch for this ordinal
+        // boundary — the same "otherResponse must exist" mutual-
+        // exclusion already used for resolution above ensures only
+        // the second-to-answer call ever gets here, mirroring
+        // 0145's own duels-row-lock-based serialization guarantee (the
+        // in-memory repository has no real concurrency to race in the
+        // first place, but the logic itself matches exactly).
+        if (
+          !nextChallengeCandidate ||
+          !nextChallengeCandidate.questionText ||
+          nextChallengeCandidate.questionText.trim().length === 0 ||
+          !Number.isInteger(nextChallengeCandidate.correctAnswer) ||
+          nextChallengeCandidate.correctAnswer < 0
+        ) {
+          throw new InvalidMathDuelChallengesError();
+        }
+        const nextOrdinal = challengeOrdinal + 1;
+        const createdAt = new Date().toISOString();
+        this.mathDuelChallenges.set(`${duelId}:${nextOrdinal}`, {
+          duelId,
+          challengeOrdinal: nextOrdinal,
+          phase: "SUDDEN_DEATH",
+          questionText: nextChallengeCandidate.questionText.trim(),
+          correctAnswer: nextChallengeCandidate.correctAnswer,
+          createdAt,
+          activatedAt: createdAt,
         });
       }
     }
@@ -2450,6 +2506,7 @@ export class InMemorySessionRepository implements SessionRepository {
         phase: c.phase,
         questionText: c.questionText,
         createdAt: c.createdAt,
+        activatedAt: c.activatedAt,
       }));
   }
 

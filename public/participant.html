@@ -1689,6 +1689,19 @@ function renderMathDuelActive(body) {
   }
 }
 
+// Pre-Deployment Product-Invariant Correction: a challenge that was
+// genuinely activated/shown to competitors but then cut short by
+// Cancel/Void/Forfeit before either (or one) answered can now
+// truthfully appear in md.challenges with a null answer for one or
+// both competitors — rendering the raw value would show a misleading
+// literal "null ✗" (falsy correctness read as "wrong"). "No answer"
+// states plainly that nothing was ever submitted, distinct from a
+// genuine incorrect answer.
+function formatMathDuelAnswer(answer, correct) {
+  if (answer === null) return `<span style="color:var(--muted);">no answer</span>`;
+  return `${answer} ${correct ? "✓" : "✗"}`;
+}
+
 function renderMathDuelTerminal(body, last) {
   const md = last.mathDuel;
   const nameA = participantDisplayName(last.competitorAParticipantId);
@@ -1707,8 +1720,8 @@ function renderMathDuelTerminal(body, last) {
       return (
         `<div class="result-card" style="margin-top:8px;">` +
         `<div class="result-name">Challenge ${c.challengeOrdinal}${phaseTag} — ${c.questionText}</div>` +
-        `<div class="result-text ${isOwnA ? "own" : ""}">${nameA}${isOwnA ? " (you)" : ""}: ${c.competitorAAnswer} ${c.competitorACorrect ? "✓" : "✗"}</div>` +
-        `<div class="result-text ${isOwnB ? "own" : ""}">${nameB}${isOwnB ? " (you)" : ""}: ${c.competitorBAnswer} ${c.competitorBCorrect ? "✓" : "✗"}</div>` +
+        `<div class="result-text ${isOwnA ? "own" : ""}">${nameA}${isOwnA ? " (you)" : ""}: ${formatMathDuelAnswer(c.competitorAAnswer, c.competitorACorrect)}</div>` +
+        `<div class="result-text ${isOwnB ? "own" : ""}">${nameB}${isOwnB ? " (you)" : ""}: ${formatMathDuelAnswer(c.competitorBAnswer, c.competitorBCorrect)}</div>` +
         `</div>`
       );
     })

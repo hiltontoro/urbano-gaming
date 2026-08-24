@@ -1575,6 +1575,19 @@ export interface MathDuelChallengeRecord {
   phase: "STANDARD" | "SUDDEN_DEATH";
   questionText: string;
   createdAt: string;
+  /**
+   * Pre-Deployment Product-Invariant Correction. Non-derivable
+   * evidence of when this challenge first became authorized/presented
+   * to a competitor, independent of whether anyone ever answered it —
+   * see 0143's own migration comment. Null only for a STANDARD
+   * ordinal 2-5 no competitor has reached yet; every SUDDEN_DEATH row
+   * is activated at the exact moment it is created (0145), so it is
+   * never observably null for those. getSession.ts's terminal reveal
+   * filters on this, not on duel_math_responses existence, so an
+   * activated-but-never-answered final round (Cancel/Void/Forfeit cut
+   * short before a response) is still honestly included in history.
+   */
+  activatedAt: string | null;
 }
 
 /** One competitor's answer to one Math Duel challenge. */
@@ -1895,13 +1908,17 @@ export class InvalidMathDuelAnswerError extends Error {
 }
 
 /**
- * Math Duel Slice 001. Raised by SUBMIT_MATH_DUEL_ANSWER in the honest
- * edge case where a Duel has exhausted its pre-materialized sudden-
- * death supply (implementation-readiness's own disclosed Slice 001
- * limit — see 0140's own migration comment). Never silently fabricates
- * a winner or a new challenge; Host exceptional resolution (Cancel/
- * Void/Forfeit) remains the operational escape path, exactly as it
- * already is for every other stalled-Duel case.
+ * Math Duel Slice 001. Pre-Deployment Product-Invariant Correction:
+ * with lazy sudden-death creation (0144/0145), a genuinely tied
+ * challenge always creates its own successor before returning, so
+ * this should never fire in normal operation any more — retained as a
+ * defensive invariant guard (an unreachable-in-correct-operation
+ * state), not an expected/disclosed Slice 001 limit the way it was
+ * under the prior pre-materialized-reserve design. Never silently
+ * fabricates a winner or a new challenge if it does somehow fire; Host
+ * exceptional resolution (Cancel/Void/Forfeit) remains the
+ * operational escape path, exactly as it already is for every other
+ * stalled-Duel case.
  */
 export class MathDuelChallengesExhaustedError extends Error {
   constructor() {
