@@ -680,6 +680,9 @@ const KNOWN_ERRORS = [
   { test: (m) => m === "This participant is not a competitor in this Duel.", text: "You're not a competitor in this Duel." },
   { test: (m) => m === "Must be a valid option index for this Duel.", text: "That option isn't valid for this Duel — try refreshing." },
   { test: (m) => m === "This Duel is not active." || m.endsWith("state, not ACTIVE."), text: "This Duel is no longer active — try refreshing." },
+  { test: (m) => m.startsWith("That challenge is not yet authorized"), text: "That challenge isn't available yet — try refreshing." },
+  { test: (m) => m === "Submitted answer must be a non-negative integer.", text: "Enter a whole, non-negative number." },
+  { test: (m) => m === "No further challenges remain for this Duel.", text: "This Duel has run out of challenges — ask the Host to resolve it." },
 ];
 
 function translateKnownError(raw) {
@@ -1526,40 +1529,19 @@ function duelTerminalSummaryText(duel) {
 // same as renderQuizCard; self-guards to "display:none" when there is
 // truthfully nothing Duel-related to show (never active, and nothing
 // in duelHistory).
+// Math Duel Slice 001: dispatches on mechanicKey, both for the active
+// case and the just-completed case — mirrors host.html's own
+// renderDuelActiveState() dispatch pattern.
 function renderDuelCard() {
   const card = document.getElementById("duelCard");
   const body = document.getElementById("duelBody");
 
   if (activeDuel) {
     card.style.display = "block";
-    const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
-    const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
-    const isCompetitorA = participantState.participantId === activeDuel.competitorAParticipantId;
-    const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
-    const mc = activeDuel.multipleChoice;
-
-    if (isCompetitorA || isCompetitorB) {
-      const opponentName = isCompetitorA ? nameB : nameA;
-      const myIndex = mc.myResponseOptionIndex;
-      body.innerHTML =
-        `<div class="room-code-hint" style="margin-bottom:8px;">You vs ${opponentName}</div>` +
-        `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
-        (myIndex !== null
-          ? `<div class="submitted-note" style="display:block;">Answer submitted — tap another option to change it until the Duel is resolved.</div>`
-          : "") +
-        `<div class="option-btn-list" id="duelOptionsList"></div>`;
-      renderDuelOptionButtons(mc.options, myIndex);
+    if (activeDuel.mechanicKey === "MATH_DUEL") {
+      renderMathDuelActive(body);
     } else {
-      // Spectator: per the readiness gate's own finding, showing the
-      // prompt and both competitor names is permissible (not private) —
-      // options render disabled, with no click handler and no
-      // "selected"/"is-correct" styling, since a spectator has no
-      // response of their own and correctOptionIndex is never sent to
-      // this file regardless of role.
-      body.innerHTML =
-        `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
-        `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
-        `<div class="waiting">Watching — waiting for the Duel to resolve…</div>`;
+      renderMultipleChoiceDuelActive(body);
     }
     return;
   }
@@ -1574,6 +1556,46 @@ function renderDuelCard() {
     return;
   }
   card.style.display = "block";
+  if (last.mechanicKey === "MATH_DUEL") {
+    renderMathDuelTerminal(body, last);
+  } else {
+    renderMultipleChoiceDuelTerminal(body, last);
+  }
+}
+
+function renderMultipleChoiceDuelActive(body) {
+  const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
+  const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+  const isCompetitorA = participantState.participantId === activeDuel.competitorAParticipantId;
+  const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
+  const mc = activeDuel.multipleChoice;
+
+  if (isCompetitorA || isCompetitorB) {
+    const opponentName = isCompetitorA ? nameB : nameA;
+    const myIndex = mc.myResponseOptionIndex;
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">You vs ${opponentName}</div>` +
+      `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
+      (myIndex !== null
+        ? `<div class="submitted-note" style="display:block;">Answer submitted — tap another option to change it until the Duel is resolved.</div>`
+        : "") +
+      `<div class="option-btn-list" id="duelOptionsList"></div>`;
+    renderDuelOptionButtons(mc.options, myIndex);
+  } else {
+    // Spectator: per the readiness gate's own finding, showing the
+    // prompt and both competitor names is permissible (not private) —
+    // options render disabled, with no click handler and no
+    // "selected"/"is-correct" styling, since a spectator has no
+    // response of their own and correctOptionIndex is never sent to
+    // this file regardless of role.
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+      `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
+      `<div class="waiting">Watching — waiting for the Duel to resolve…</div>`;
+  }
+}
+
+function renderMultipleChoiceDuelTerminal(body, last) {
   const nameA = participantDisplayName(last.competitorAParticipantId);
   const nameB = participantDisplayName(last.competitorBParticipantId);
   const mc = last.multipleChoice;
@@ -1607,6 +1629,135 @@ function renderDuelCard() {
     `<div class="prompt-text" style="margin-bottom:12px;">${mc.promptText}</div>` +
     `<div class="winner-banner">${duelTerminalSummaryText(last)}</div>` +
     picksHtml;
+}
+
+// Math Duel Slice 001. Competitor: current authorized challenge only
+// (numeric input, explicit Submit), own progress, no correctness — the
+// server-side sequential-authorization boundary means there is
+// genuinely no future-challenge content in `activeDuel.mathDuel` at
+// all to accidentally render, not merely content this function
+// chooses not to show. Spectator: names + phase only, no challenge
+// content, mirroring Multiple Choice's own spectator treatment.
+function renderMathDuelActive(body) {
+  const md = activeDuel.mathDuel;
+  const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
+  const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+  const isCompetitorA = participantState.participantId === activeDuel.competitorAParticipantId;
+  const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
+  const phaseLabel = md.phase === "SUDDEN_DEATH" ? "Sudden Death" : "Standard";
+
+  if (isCompetitorA || isCompetitorB) {
+    const opponentName = isCompetitorA ? nameB : nameA;
+    // The last visible challenge is "current" only if it's genuinely
+    // unanswered — once a competitor finishes the standard phase
+    // ahead of their opponent, the read-model caps them at ordinal 5
+    // (see getSession.ts's own identical cap), so the last visible
+    // entry there is ch.5, already answered: that must render as
+    // "waiting for the opponent," never as an answerable challenge.
+    const lastVisible = md.challenges.at(-1);
+    const current = lastVisible && lastVisible.myAnswer === null ? lastVisible : null;
+    const answeredList = current ? md.challenges.slice(0, -1) : md.challenges;
+    const progressLabel =
+      md.phase === "SUDDEN_DEATH" && current
+        ? `Sudden Death — Round ${current.challengeOrdinal - 5}`
+        : `Challenge ${md.myProgress.answered} of ${md.myProgress.total}`;
+
+    let stateHtml;
+    if (current) {
+      stateHtml =
+        `<div class="prompt-text" style="margin-bottom:12px;">${current.questionText}</div>` +
+        `<label>Your answer</label>` +
+        `<input type="number" id="mathDuelAnswerInput" inputmode="numeric" placeholder="Enter a whole number" />` +
+        `<button class="btn-primary" onclick="submitMathDuelAnswer()">Submit Answer</button>`;
+    } else if (md.myProgress.answered >= md.myProgress.total) {
+      stateHtml = `<div class="waiting">You've finished the standard phase — waiting for ${opponentName} to finish…</div>`;
+    } else {
+      stateHtml = `<div class="waiting">Waiting for the next challenge…</div>`;
+    }
+
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">You vs ${opponentName} — ${phaseLabel}</div>` +
+      `<div class="room-code-hint" id="mathDuelProgressLabel" style="margin-bottom:8px;">${progressLabel}</div>` +
+      (answeredList.length > 0
+        ? `<div class="submitted-note" style="display:block;">${answeredList.length} answered — correctness revealed once the Duel resolves.</div>`
+        : "") +
+      stateHtml;
+  } else {
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB} — ${phaseLabel}</div>` +
+      `<div class="waiting">Watching — waiting for the Duel to resolve…</div>`;
+  }
+}
+
+function renderMathDuelTerminal(body, last) {
+  const md = last.mathDuel;
+  const nameA = participantDisplayName(last.competitorAParticipantId);
+  const nameB = participantDisplayName(last.competitorBParticipantId);
+  const isOwnA = participantState.participantId === last.competitorAParticipantId;
+  const isOwnB = participantState.participantId === last.competitorBParticipantId;
+
+  const scoreLine =
+    md.standardCorrectCountA !== null
+      ? `<div class="room-code-hint" style="margin-bottom:8px;">Standard phase: ${nameA} ${md.standardCorrectCountA}/5 · ${nameB} ${md.standardCorrectCountB}/5</div>`
+      : "";
+
+  const challengeRows = md.challenges
+    .map((c) => {
+      const phaseTag = c.phase === "SUDDEN_DEATH" ? " (sudden death)" : "";
+      return (
+        `<div class="result-card" style="margin-top:8px;">` +
+        `<div class="result-name">Challenge ${c.challengeOrdinal}${phaseTag} — ${c.questionText}</div>` +
+        `<div class="result-text ${isOwnA ? "own" : ""}">${nameA}${isOwnA ? " (you)" : ""}: ${c.competitorAAnswer} ${c.competitorACorrect ? "✓" : "✗"}</div>` +
+        `<div class="result-text ${isOwnB ? "own" : ""}">${nameB}${isOwnB ? " (you)" : ""}: ${c.competitorBAnswer} ${c.competitorBCorrect ? "✓" : "✗"}</div>` +
+        `</div>`
+      );
+    })
+    .join("");
+
+  body.innerHTML =
+    `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+    `<div class="winner-banner">${duelTerminalSummaryText(last)}</div>` +
+    scoreLine +
+    challengeRows;
+}
+
+// Math Duel Slice 001. Unlike submitDuelResponse()'s optimistic local
+// mutation, this does not try to hand-simulate the read-model's own
+// sequential-authorization/reveal-timing logic client-side — that
+// logic is genuinely non-trivial (see getSession.ts's own comments)
+// and duplicating it here would risk exactly the kind of client/
+// server drift this codebase avoids elsewhere. Instead: disable the
+// input immediately for responsiveness, then let the authoritative
+// participantRefresh() that already always follows every action
+// reconcile the real next state, the same "server decides, client
+// reflects" discipline every other Duel action already follows for
+// anything beyond a single boolean/index flip.
+async function submitMathDuelAnswer() {
+  const input = document.getElementById("mathDuelAnswerInput");
+  const button = document.querySelector('#duelBody button[onclick="submitMathDuelAnswer()"]');
+  const value = input ? parseInt(input.value, 10) : NaN;
+  if (!Number.isInteger(value) || value < 0) {
+    renderNotice({ category: "validation", message: "Enter a whole, non-negative number." });
+    return;
+  }
+  if (input) input.disabled = true;
+  if (button) button.disabled = true;
+
+  const current = activeDuel.mathDuel.challenges.at(-1);
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/submit-math-answer`,
+    { duelId: activeDuel.duelId, challengeOrdinal: current.challengeOrdinal, submittedAnswer: value },
+    participantState.participantToken
+  );
+  show("SUBMIT_MATH_DUEL_ANSWER (" + r.status + ")", r.json);
+  if (r.status === 200) {
+    renderNotice(null);
+  } else {
+    renderNotice(classifyError(r));
+    if (input) input.disabled = false;
+    if (button) button.disabled = false;
+  }
+  await participantRefresh();
 }
 
 // Mirrors renderOptionButtons' shape and CSS classes (.option-btn /

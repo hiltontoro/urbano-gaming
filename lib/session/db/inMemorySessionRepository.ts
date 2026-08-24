@@ -59,6 +59,10 @@ import {
   DuelAlreadyResolvedError,
   InvalidDuelResolutionError,
   DuelReasonRequiredError,
+  InvalidMathDuelChallengesError,
+  InvalidMathDuelOrdinalError,
+  InvalidMathDuelAnswerError,
+  MathDuelChallengesExhaustedError,
 } from "../types";
 import type {
   DuelRecord,
@@ -66,7 +70,10 @@ import type {
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
+  MathDuelChallengeRecord,
+  MathDuelResponseRecord,
 } from "../types";
+import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
 
 const SESSION_CAPABILITY_KEYS: SessionCapabilityKey[] = [
   "OPEN_RESPONSE",
@@ -143,6 +150,32 @@ export class InMemorySessionRepository implements SessionRepository {
     string,
     { participantId: string; selectedOptionIndex: number; answeredAt: string }
   >();
+
+  /**
+   * Math Duel Slice 001. Keyed by `${duelId}:${challengeOrdinal}` —
+   * mirrors duel_math_challenges' own composite primary key. Stores
+   * correctAnswer internally (unlike the public MathDuelChallengeRecord
+   * shape, which never carries it) — getMathDuelChallenges() strips it
+   * on the way out, the same "kept on the full internal record, never
+   * on what a caller receives" discipline duelCorrectOptionIndexes
+   * already established for Multiple Choice, just inlined here instead
+   * of on a separate side map, since correctAnswer belongs to the
+   * challenge itself rather than the Duel as a whole.
+   */
+  private mathDuelChallenges = new Map<
+    string,
+    {
+      duelId: string;
+      challengeOrdinal: number;
+      phase: "STANDARD" | "SUDDEN_DEATH";
+      questionText: string;
+      correctAnswer: number;
+      createdAt: string;
+    }
+  >();
+
+  /** Math Duel Slice 001. Keyed by `${duelId}:${challengeOrdinal}:${participantId}` — mirrors duel_math_responses' own composite primary key. */
+  private mathDuelResponses = new Map<string, MathDuelResponseRecord>();
 
   /**
    * correctOptionIndex is intentionally not part of DuelRecord — kept
@@ -1928,8 +1961,8 @@ export class InMemorySessionRepository implements SessionRepository {
       duelId: duel.duelId,
       mechanicKey: duel.mechanicKey,
       lifecycleState: duel.lifecycleState,
-      promptText: duel.multipleChoice.promptText,
-      options: duel.multipleChoice.options,
+      promptText: duel.multipleChoice!.promptText,
+      options: duel.multipleChoice!.options,
       startedAt,
     };
   }
@@ -1961,7 +1994,7 @@ export class InMemorySessionRepository implements SessionRepository {
     if (
       !Number.isInteger(selectedOptionIndex) ||
       selectedOptionIndex < 0 ||
-      selectedOptionIndex >= duel.multipleChoice.options.length
+      selectedOptionIndex >= duel.multipleChoice!.options.length
     ) {
       throw new InvalidDuelOptionSelectionError();
     }
@@ -2137,6 +2170,291 @@ export class InMemorySessionRepository implements SessionRepository {
     return [...this.duelResponses.entries()]
       .filter(([key]) => key.startsWith(`${duelId}:`))
       .map(([, value]) => value);
+  }
+
+  // ===================== Math Duel Slice 001 =====================
+  // Mirrors submit_math_duel_answer_atomically's own SQL logic step by
+  // step (0141's own migration comment documents the exact win/
+  // continue truth table this implementation must match) — the two
+  // implementations are tested against the same contract
+  // (duel.test.ts's in-memory suite and mathDuelSupabaseRepository.
+  // contract.test.ts's real-Postgres suite), so behavioral drift
+  // between them is a genuine defect, not an acceptable implementation
+  // difference.
+
+  async startMathDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    challenges: SelectedMathDuelChallenge[]
+  ): Promise<{
+    duelId: string;
+    mechanicKey: DuelMechanicKey;
+    lifecycleState: DuelLifecycleState;
+    startedAt: string;
+  }> {
+    if (competitorAParticipantId === competitorBParticipantId) {
+      throw new DuplicateDuelCompetitorError();
+    }
+
+    if (
+      !Array.isArray(challenges) ||
+      challenges.length < 5 ||
+      challenges.slice(0, 5).some((c) => c.phase !== "STANDARD") ||
+      challenges.slice(5).some((c) => c.phase !== "SUDDEN_DEATH") ||
+      challenges.some(
+        (c) =>
+          !c.questionText ||
+          c.questionText.trim().length === 0 ||
+          !Number.isInteger(c.correctAnswer) ||
+          c.correctAnswer < 0
+      )
+    ) {
+      throw new InvalidMathDuelChallengesError();
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError();
+    }
+    if (session.hostToken !== hostToken) {
+      throw new HostTokenMismatchError();
+    }
+    if (session.state !== "LOBBY_LOCKED") {
+      throw new LobbyNotLockedError(session.state);
+    }
+    if (!(session.declaredCapabilities ?? []).includes("DUEL")) {
+      throw new CapabilityNotAuthorizedError("DUEL");
+    }
+
+    const competitorA = this.participants.get(competitorAParticipantId);
+    if (!competitorA || competitorA.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+    const competitorB = this.participants.get(competitorBParticipantId);
+    if (!competitorB || competitorB.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+
+    const previousInteraction = this.getCurrentInteractionInstance(sessionId);
+    if (previousInteraction && previousInteraction.state !== "RESULT_REVEAL") {
+      throw new InteractionActiveError(previousInteraction.state);
+    }
+
+    if (this.getActiveDuelRecordForSession(sessionId)) {
+      throw new ActiveDuelExistsError();
+    }
+
+    const startedAt = new Date().toISOString();
+    const duel: DuelRecord = {
+      duelId: randomUUID(),
+      sessionId,
+      mechanicKey: "MATH_DUEL",
+      competitorAParticipantId,
+      competitorBParticipantId,
+      lifecycleState: "ACTIVE",
+      terminalResolution: null,
+      winnerParticipantId: null,
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      endedAt: null,
+    };
+    this.duels.set(duel.duelId, duel);
+
+    challenges.forEach((challenge, index) => {
+      const challengeOrdinal = index + 1;
+      this.mathDuelChallenges.set(`${duel.duelId}:${challengeOrdinal}`, {
+        duelId: duel.duelId,
+        challengeOrdinal,
+        phase: challenge.phase,
+        questionText: challenge.questionText.trim(),
+        correctAnswer: challenge.correctAnswer,
+        createdAt: startedAt,
+      });
+    });
+
+    this.events.push({
+      sessionId,
+      eventType: "DUEL_STARTED",
+      payload: {
+        duelId: duel.duelId,
+        mechanicKey: "MATH_DUEL",
+        competitorAParticipantId,
+        competitorBParticipantId,
+      },
+    });
+
+    return {
+      duelId: duel.duelId,
+      mechanicKey: duel.mechanicKey,
+      lifecycleState: duel.lifecycleState,
+      startedAt,
+    };
+  }
+
+  async submitMathDuelAnswer(
+    duelId: string,
+    participantToken: string,
+    challengeOrdinal: number,
+    submittedAnswer: number
+  ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }> {
+    const duel = this.duels.get(duelId);
+    if (!duel || duel.mechanicKey !== "MATH_DUEL") {
+      throw new DuelNotFoundError();
+    }
+    if (duel.lifecycleState !== "ACTIVE") {
+      throw new DuelNotActiveError(duel.lifecycleState);
+    }
+
+    const participant = [...this.participants.values()].find(
+      (p) => p.sessionId === duel.sessionId && p.participantToken === participantToken
+    );
+    if (
+      !participant ||
+      (participant.participantId !== duel.competitorAParticipantId &&
+        participant.participantId !== duel.competitorBParticipantId)
+    ) {
+      throw new DuelAccessDeniedError();
+    }
+    const participantId = participant.participantId;
+    const otherParticipantId =
+      participantId === duel.competitorAParticipantId
+        ? duel.competitorBParticipantId
+        : duel.competitorAParticipantId;
+
+    if (!Number.isInteger(challengeOrdinal) || challengeOrdinal < 1) {
+      throw new InvalidMathDuelOrdinalError();
+    }
+    if (!Number.isInteger(submittedAnswer) || submittedAnswer < 0) {
+      throw new InvalidMathDuelAnswerError();
+    }
+
+    const myAnsweredCount = [...this.mathDuelResponses.values()].filter(
+      (r) => r.duelId === duelId && r.participantId === participantId
+    ).length;
+    const expectedOrdinal = myAnsweredCount + 1;
+
+    if (challengeOrdinal < expectedOrdinal) {
+      // Idempotent retry of an already-answered challenge — the first
+      // successful write is authoritative forever, regardless of what
+      // this retry's own submittedAnswer says.
+      const existing = this.mathDuelResponses.get(
+        `${duelId}:${challengeOrdinal}:${participantId}`
+      );
+      return {
+        participantId,
+        challengeOrdinal,
+        answeredAt: existing!.answeredAt,
+      };
+    }
+
+    if (challengeOrdinal > expectedOrdinal) {
+      throw new InvalidMathDuelOrdinalError(expectedOrdinal);
+    }
+
+    // A competitor who independently finishes the standard phase
+    // first must not be authorized into sudden-death territory
+    // (ordinal 6+) until the opponent has also finished all 5
+    // standard challenges — see 0141's own migration comment for the
+    // full reasoning (a fast competitor pre-answering an unneeded
+    // sudden-death round would otherwise leave an orphaned, one-sided
+    // response the terminal reveal could misleadingly show).
+    if (challengeOrdinal > 5) {
+      const otherStandardCount = [1, 2, 3, 4, 5].filter(
+        (ord) => this.mathDuelResponses.get(`${duelId}:${ord}:${otherParticipantId}`)
+      ).length;
+      if (otherStandardCount < 5) {
+        throw new InvalidMathDuelOrdinalError();
+      }
+    }
+
+    const challenge = this.mathDuelChallenges.get(`${duelId}:${challengeOrdinal}`);
+    if (!challenge) {
+      throw new MathDuelChallengesExhaustedError();
+    }
+
+    const isCorrect = submittedAnswer === challenge.correctAnswer;
+    const answeredAt = new Date().toISOString();
+    this.mathDuelResponses.set(`${duelId}:${challengeOrdinal}:${participantId}`, {
+      duelId,
+      challengeOrdinal,
+      participantId,
+      submittedAnswer,
+      isCorrect,
+      answeredAt,
+    });
+
+    const otherResponse = this.mathDuelResponses.get(
+      `${duelId}:${challengeOrdinal}:${otherParticipantId}`
+    );
+
+    if (otherResponse) {
+      let resolution: DuelTerminalResolution | null = null;
+      let winner: string | null = null;
+
+      if (challenge.phase === "STANDARD" && challengeOrdinal === 5) {
+        const correctCount = (pid: string) =>
+          [1, 2, 3, 4, 5].filter(
+            (ord) => this.mathDuelResponses.get(`${duelId}:${ord}:${pid}`)?.isCorrect
+          ).length;
+        const aCount = correctCount(duel.competitorAParticipantId);
+        const bCount = correctCount(duel.competitorBParticipantId);
+        if (aCount !== bCount) {
+          resolution = "WON_LOST";
+          winner = aCount > bCount ? duel.competitorAParticipantId : duel.competitorBParticipantId;
+        }
+        // Equal counts: no resolution yet — the Duel continues into
+        // whichever pre-materialized sudden-death challenge ordinal 6
+        // already is. Nothing to create, nothing to write here.
+      } else if (challenge.phase === "SUDDEN_DEATH") {
+        if (isCorrect && !otherResponse.isCorrect) {
+          resolution = "WON_LOST";
+          winner = participantId;
+        } else if (otherResponse.isCorrect && !isCorrect) {
+          resolution = "WON_LOST";
+          winner = otherParticipantId;
+        }
+        // Both correct or both wrong: another tied round — the next
+        // pre-materialized ordinal already exists; nothing to do.
+      }
+
+      if (resolution) {
+        const endedAt = new Date().toISOString();
+        this.duels.set(duelId, {
+          ...duel,
+          lifecycleState: "COMPLETED",
+          terminalResolution: resolution,
+          winnerParticipantId: winner,
+          endedAt,
+        });
+        this.events.push({
+          sessionId: duel.sessionId,
+          eventType: "DUEL_RESOLVED",
+          payload: { duelId, terminalResolution: resolution, winnerParticipantId: winner },
+        });
+      }
+    }
+
+    return { participantId, challengeOrdinal, answeredAt };
+  }
+
+  async getMathDuelChallenges(duelId: string): Promise<MathDuelChallengeRecord[]> {
+    return [...this.mathDuelChallenges.values()]
+      .filter((c) => c.duelId === duelId)
+      .sort((a, b) => a.challengeOrdinal - b.challengeOrdinal)
+      .map((c) => ({
+        duelId: c.duelId,
+        challengeOrdinal: c.challengeOrdinal,
+        phase: c.phase,
+        questionText: c.questionText,
+        createdAt: c.createdAt,
+      }));
+  }
+
+  async getMathDuelResponses(duelId: string): Promise<MathDuelResponseRecord[]> {
+    return [...this.mathDuelResponses.values()].filter((r) => r.duelId === duelId);
   }
 
   /** Test-only helper, not part of the repository interface. */

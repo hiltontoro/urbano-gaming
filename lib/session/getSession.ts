@@ -3,8 +3,10 @@ import type {
   GetSessionResult,
   QuizQuestionSummary,
   QuizParticipantProgressSummary,
+  MathDuelChallengeSummary,
 } from "./types";
 import { SessionNotFoundError, SessionAccessDeniedError } from "./types";
+import { MATH_DUEL_STANDARD_COUNT } from "./mathDuelFixture";
 
 /**
  * GET_SESSION command handler.
@@ -479,6 +481,180 @@ export async function getSession(
   const duelRecords = await repo.getDuelsForSession(sessionId);
   const duelSummaries = await Promise.all(
     duelRecords.map(async (duel) => {
+      const genericFields = {
+        duelId: duel.duelId,
+        mechanicKey: duel.mechanicKey,
+        competitorAParticipantId: duel.competitorAParticipantId,
+        competitorBParticipantId: duel.competitorBParticipantId,
+        lifecycleState: duel.lifecycleState,
+        terminalResolution: duel.terminalResolution,
+        winnerParticipantId: duel.winnerParticipantId,
+        reason: duel.reason,
+        startedAt: duel.startedAt,
+        endedAt: duel.endedAt,
+      };
+
+      // Math Duel Slice 001. See MathDuelSummary's own doc comment for
+      // the exact sequential-authorization and reveal-timing rules
+      // this branch implements — enforced here, in the projection
+      // itself, not merely by the UI: a not-yet-authorized challenge's
+      // questionText is genuinely absent from this response.
+      if (duel.mechanicKey === "MATH_DUEL") {
+        const challenges = await repo.getMathDuelChallenges(duel.duelId);
+        const responses = await repo.getMathDuelResponses(duel.duelId);
+        const revealed = duel.lifecycleState === "COMPLETED";
+
+        const responseFor = (ordinal: number, participantId: string) =>
+          responses.find(
+            (r) => r.challengeOrdinal === ordinal && r.participantId === participantId
+          );
+
+        const isCompetitor =
+          callingParticipant !== undefined &&
+          (callingParticipant.participantId === duel.competitorAParticipantId ||
+            callingParticipant.participantId === duel.competitorBParticipantId);
+
+        const aAnsweredCount = responses.filter(
+          (r) => r.participantId === duel.competitorAParticipantId
+        ).length;
+        const bAnsweredCount = responses.filter(
+          (r) => r.participantId === duel.competitorBParticipantId
+        ).length;
+        const myAnsweredCount =
+          callingParticipant && isCompetitor
+            ? responses.filter((r) => r.participantId === callingParticipant.participantId)
+                .length
+            : 0;
+
+        // The Duel's own "current" phase, from the perspective of
+        // whichever competitor is behind — the Duel cannot itself
+        // transition phases until BOTH have answered, so the slower
+        // competitor's own next challenge is the honest single
+        // "where is this Duel right now" signal for Host/spectator.
+        const currentOrdinal = Math.min(
+          Math.min(aAnsweredCount, bAnsweredCount) + 1,
+          challenges.length || 1
+        );
+        const phase =
+          challenges.find((c) => c.challengeOrdinal === currentOrdinal)?.phase ?? "STANDARD";
+
+        let visibleChallenges: MathDuelChallengeSummary[];
+        if (revealed) {
+          // Full symmetric reveal — but only of challenges the Duel
+          // actually reached, never the unused remainder of the pre-
+          // materialized sudden-death supply (0140's own "no lazy
+          // creation" simplification means most Duels leave dozens of
+          // never-asked challenge rows behind — those must never
+          // appear here, or a terminal reveal would misleadingly imply
+          // rounds were played that never happened). The highest
+          // ordinal with any recorded response is exactly the Duel's
+          // own deciding challenge, since resolution only ever happens
+          // the moment both competitors answer it.
+          const maxAnsweredOrdinal = responses.reduce(
+            (max, r) => Math.max(max, r.challengeOrdinal),
+            0
+          );
+          visibleChallenges = challenges
+            .filter((c) => c.challengeOrdinal <= maxAnsweredOrdinal)
+            .map((c) => {
+            const a = responseFor(c.challengeOrdinal, duel.competitorAParticipantId);
+            const b = responseFor(c.challengeOrdinal, duel.competitorBParticipantId);
+            const mine =
+              callingParticipant && isCompetitor
+                ? responseFor(c.challengeOrdinal, callingParticipant.participantId)
+                : undefined;
+            return {
+              challengeOrdinal: c.challengeOrdinal,
+              phase: c.phase,
+              questionText: c.questionText,
+              myAnswer: mine?.submittedAnswer ?? null,
+              myCorrect: mine?.isCorrect ?? null,
+              competitorAAnswer: a?.submittedAnswer ?? null,
+              competitorACorrect: a?.isCorrect ?? null,
+              competitorBAnswer: b?.submittedAnswer ?? null,
+              competitorBCorrect: b?.isCorrect ?? null,
+            };
+          });
+        } else if (callingParticipant && isCompetitor) {
+          // A competitor sees their own already-answered challenges
+          // plus their own current authorized one — never a future
+          // ordinal, never any correctness, never the opponent's
+          // answers. Capped at the standard phase's own last ordinal
+          // until the opponent has also finished all 5 standard
+          // challenges — mirrors submit_math_duel_answer_atomically's
+          // own identical guard (0141's own comment): a fast
+          // competitor must not be shown, let alone allowed to answer,
+          // a sudden-death challenge that may never actually be
+          // needed.
+          const otherParticipantId =
+            callingParticipant.participantId === duel.competitorAParticipantId
+              ? duel.competitorBParticipantId
+              : duel.competitorAParticipantId;
+          const otherStandardCount = responses.filter(
+            (r) =>
+              r.participantId === otherParticipantId &&
+              r.challengeOrdinal <= MATH_DUEL_STANDARD_COUNT
+          ).length;
+          let maxAuthorizedOrdinal = Math.min(myAnsweredCount + 1, challenges.length);
+          if (
+            maxAuthorizedOrdinal > MATH_DUEL_STANDARD_COUNT &&
+            otherStandardCount < MATH_DUEL_STANDARD_COUNT
+          ) {
+            maxAuthorizedOrdinal = MATH_DUEL_STANDARD_COUNT;
+          }
+          visibleChallenges = challenges
+            .filter((c) => c.challengeOrdinal <= maxAuthorizedOrdinal)
+            .map((c) => {
+              const mine = responseFor(c.challengeOrdinal, callingParticipant.participantId);
+              return {
+                challengeOrdinal: c.challengeOrdinal,
+                phase: c.phase,
+                questionText: c.questionText,
+                myAnswer: mine?.submittedAnswer ?? null,
+                myCorrect: null,
+                competitorAAnswer: null,
+                competitorACorrect: null,
+                competitorBAnswer: null,
+                competitorBCorrect: null,
+              };
+            });
+        } else {
+          // Host or spectator, pre-completion: no challenge content at
+          // all — only the coarse fields below.
+          visibleChallenges = [];
+        }
+
+        return {
+          ...genericFields,
+          mathDuel: {
+            phase,
+            challenges: visibleChallenges,
+            myProgress:
+              callingParticipant && isCompetitor
+                ? { answered: myAnsweredCount, total: MATH_DUEL_STANDARD_COUNT }
+                : null,
+            competitorASubmittedCount: aAnsweredCount,
+            competitorBSubmittedCount: bAnsweredCount,
+            standardCorrectCountA: revealed
+              ? responses.filter(
+                  (r) =>
+                    r.participantId === duel.competitorAParticipantId &&
+                    r.challengeOrdinal <= MATH_DUEL_STANDARD_COUNT &&
+                    r.isCorrect
+                ).length
+              : null,
+            standardCorrectCountB: revealed
+              ? responses.filter(
+                  (r) =>
+                    r.participantId === duel.competitorBParticipantId &&
+                    r.challengeOrdinal <= MATH_DUEL_STANDARD_COUNT &&
+                    r.isCorrect
+                ).length
+              : null,
+          },
+        };
+      }
+
       const responses = await repo.getDuelResponses(duel.duelId);
       const responseA = responses.find(
         (r) => r.participantId === duel.competitorAParticipantId
@@ -497,19 +673,10 @@ export async function getSession(
         : null;
 
       return {
-        duelId: duel.duelId,
-        mechanicKey: duel.mechanicKey,
-        competitorAParticipantId: duel.competitorAParticipantId,
-        competitorBParticipantId: duel.competitorBParticipantId,
-        lifecycleState: duel.lifecycleState,
-        terminalResolution: duel.terminalResolution,
-        winnerParticipantId: duel.winnerParticipantId,
-        reason: duel.reason,
-        startedAt: duel.startedAt,
-        endedAt: duel.endedAt,
+        ...genericFields,
         multipleChoice: {
-          promptText: duel.multipleChoice.promptText,
-          options: duel.multipleChoice.options,
+          promptText: duel.multipleChoice!.promptText,
+          options: duel.multipleChoice!.options,
           myResponseOptionIndex,
           competitorAOptionIndex: revealed ? responseA?.selectedOptionIndex ?? null : null,
           competitorBOptionIndex: revealed ? responseB?.selectedOptionIndex ?? null : null,

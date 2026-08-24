@@ -739,6 +739,73 @@ export interface MultipleChoiceDuelSummary {
 }
 
 /**
+ * Math Duel Slice 001's own read-model projection of a single
+ * challenge — never carries the correct answer itself, only each
+ * competitor's own submitted value and its already-computed
+ * correctness (a stronger cut than strictly required: implementation-
+ * readiness explicitly noted correctness can be represented without
+ * ever re-exposing correct_answer, so this type doesn't carry it even
+ * post-COMPLETED). questionText is present only once this specific
+ * viewer is authorized to see it — see MathDuelSummary's own doc
+ * comment for the exact sequential-authorization rule this implements.
+ */
+export interface MathDuelChallengeSummary {
+  challengeOrdinal: number;
+  phase: "STANDARD" | "SUDDEN_DEATH";
+  questionText: string;
+  /** This viewer's own answer, if this viewer is a competitor and has answered this challenge. */
+  myAnswer: number | null;
+  myCorrect: boolean | null;
+  /** Null until the whole Duel reaches COMPLETED (privacy) — never revealed merely because this one challenge, or even this one phase, has been answered by both. */
+  competitorAAnswer: number | null;
+  competitorACorrect: boolean | null;
+  competitorBAnswer: number | null;
+  competitorBCorrect: boolean | null;
+}
+
+/**
+ * Math Duel Slice 001's own GET_SESSION projection, nested under
+ * DuelSummary's own mathDuel field exactly the way MultipleChoiceDuelSummary
+ * nests under multipleChoice — Duel_Architecture.md's own "Read-Model
+ * Boundary": mechanic-specific state is projected per that mechanic's
+ * own privacy/lifecycle rules, never flattened onto the shared
+ * summary.
+ *
+ * Sequential-authorization rule (Founder decision, Math Duel Founder
+ * Product Confirmation gate): `challenges` includes only what this
+ * specific viewer is currently authorized to see — a competitor sees
+ * their own already-answered challenges plus their own current
+ * challenge, never a future one; a Host or spectator sees none at all
+ * while ACTIVE; every viewer sees every challenge, fully revealed,
+ * once the Duel reaches COMPLETED. This is enforced by the read-model
+ * projection function itself (getSession.ts), not merely hidden by the
+ * UI — a future challenge's questionText is genuinely absent from the
+ * JSON payload, not present-but-unrendered.
+ *
+ * Reveal-timing correction (implementation-readiness §16, revising an
+ * earlier draft of this Slice): the STANDARD→SUDDEN_DEATH phase
+ * transition is explicitly NOT a reveal boundary — no correctness or
+ * opponent content is exposed at that boundary, only once the Duel is
+ * genuinely COMPLETED. `phase` itself is always visible as a fact
+ * (everyone needs to know the format changed), but never accompanied
+ * by content.
+ */
+export interface MathDuelSummary {
+  /** The phase of whichever challenge is currently authorized/current for this Duel overall — derived, not separately persisted (see 0141's own migration comment: there is no duels.current_phase column). */
+  phase: "STANDARD" | "SUDDEN_DEATH";
+  /** See this interface's own sequential-authorization doc comment above for exactly which challenges appear here for which viewer. */
+  challenges: MathDuelChallengeSummary[];
+  /** This competitor's own progress. Null if the caller is not a competitor in this Duel. */
+  myProgress: { answered: number; total: number } | null;
+  /** Coarse, correctness-free completion counts — safe for Host/spectator viewing, satisfying the explicit "no running score" requirement. */
+  competitorASubmittedCount: number;
+  competitorBSubmittedCount: number;
+  /** Populated only once COMPLETED. */
+  standardCorrectCountA: number | null;
+  standardCorrectCountB: number | null;
+}
+
+/**
  * Duel / SESSION_SUBGAME v1. GET_SESSION's own Duel projection —
  * distinct from DuelRecord. Generic Duel facts only at the top level;
  * mechanicKey identifies which mechanic this Duel hosts, and that
@@ -746,7 +813,11 @@ export interface MultipleChoiceDuelSummary {
  * named nested field (Product/Duel_Architecture.md's own "Read-Model
  * Boundary" section — mechanic-specific state is projected according
  * to that mechanic's own privacy/lifecycle rules, never flattened onto
- * the shared summary).
+ * the shared summary). multipleChoice/mathDuel are both optional,
+ * mirroring DuelRecord's own two-optional-sibling-fields shape (see
+ * that interface's doc comment for why this was chosen over a strict
+ * discriminated union) — exactly one is populated for any valid Duel,
+ * selected by mechanicKey.
  */
 export interface DuelSummary {
   duelId: string;
@@ -759,7 +830,8 @@ export interface DuelSummary {
   reason: string | null;
   startedAt: string | null;
   endedAt: string | null;
-  multipleChoice: MultipleChoiceDuelSummary;
+  multipleChoice?: MultipleChoiceDuelSummary;
+  mathDuel?: MathDuelSummary;
 }
 
 /** Raised when a generated room code collides with an active session. */
@@ -1469,12 +1541,13 @@ export type DuelExceptionalResolution =
  * Duel Mechanic Boundary — Narrow Backend Correction (Product/Duel_
  * Architecture.md, "Duel Container vs. Mechanic" / "Mechanic
  * Identity"). Code-owned vocabulary, not a database registry, mirroring
- * SessionCapabilityKey's own precedent. Single member today because
- * Multiple Choice is the only mechanic that has ever existed — this
- * union grows only when a second mechanic is actually graduated and
- * implemented, never speculatively.
+ * SessionCapabilityKey's own precedent. Grows only when a mechanic is
+ * actually graduated and implemented, never speculatively — MATH_DUEL
+ * is Math Duel Slice 001's own graduated second mechanic (Product
+ * Definition confirmed across two Founder reconciliation gates; see
+ * MATH_DUEL_IMPLEMENTATION_RECORD.md).
  */
-export type DuelMechanicKey = "MULTIPLE_CHOICE";
+export type DuelMechanicKey = "MULTIPLE_CHOICE" | "MATH_DUEL";
 
 /**
  * Multiple Choice's own mechanic-owned content — the prompt and
@@ -1490,17 +1563,48 @@ export interface MultipleChoiceDuelContent {
 }
 
 /**
+ * Math Duel Slice 001's own mechanic-owned content, mirroring
+ * MultipleChoiceDuelContent's own shape and privacy discipline exactly
+ * — deliberately excludes correctAnswer, which never leaves the
+ * repository/resolution layer, the same boundary
+ * correctOptionIndex/StartDuelResult already established.
+ */
+export interface MathDuelChallengeRecord {
+  duelId: string;
+  challengeOrdinal: number;
+  phase: "STANDARD" | "SUDDEN_DEATH";
+  questionText: string;
+  createdAt: string;
+}
+
+/** One competitor's answer to one Math Duel challenge. */
+export interface MathDuelResponseRecord {
+  duelId: string;
+  challengeOrdinal: number;
+  participantId: string;
+  submittedAnswer: number;
+  isCorrect: boolean;
+  answeredAt: string;
+}
+
+/**
  * A Duel as returned by the repository layer (getDuelById,
  * getActiveDuelForSession, getDuelsForSession) — the internal record
  * every command handler and the GET_SESSION projection build from.
  * Not itself the GET_SESSION read-model shape; see DuelSummary for
  * that. Generic Duel fields only — mechanicKey identifies which
  * mechanic this Duel hosts; that mechanic's own content lives in the
- * correspondingly-named nested field (multipleChoice today; a second
- * mechanic would add its own sibling field, never widen this shape
- * into a shared blob). Not a discriminated union yet — there is only
- * one mechanic to discriminate against; that generalization is the
- * second mechanic's own Slice, not this correction's.
+ * correspondingly-named nested field. multipleChoice is optional as of
+ * Math Duel Slice 001 (a Math Duel row never populates it) — two
+ * optional sibling fields, not a strict discriminated union: the
+ * smaller change against every already-deployed call site currently
+ * reading `duel.multipleChoice.promptText` directly, deferred to a
+ * future stricter refactor only if a third mechanic ever makes this
+ * pattern unwieldy (implementation-readiness §15's own reasoning).
+ * Math Duel's own content is deliberately NOT nested here the same
+ * way — its challenges/responses live in their own tables, fetched
+ * separately (getMathDuelChallenges/getMathDuelResponses), mirroring
+ * how duel_responses already works for Multiple Choice today.
  */
 export interface DuelRecord {
   duelId: string;
@@ -1515,7 +1619,7 @@ export interface DuelRecord {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  multipleChoice: MultipleChoiceDuelContent;
+  multipleChoice?: MultipleChoiceDuelContent;
 }
 
 /**
@@ -1553,6 +1657,43 @@ export interface StartDuelResult {
 export interface SubmitDuelResponseResult {
   duelId: string;
   participantId: string;
+  answeredAt: string;
+}
+
+/**
+ * Result of a successful START_MATH_DUEL. Deliberately minimal — no
+ * challenge content echoed back, unlike StartDuelResult's own
+ * prompt/options echo. The Host supplied no mechanic content (Math
+ * Duel's own Product Definition: the Host must not manually author
+ * challenges), so there is nothing of the Host's own input to echo;
+ * the Host's own next GET_SESSION poll (via the same hostRefresh()
+ * pattern every other Duel action already triggers) is the read path.
+ */
+export interface StartMathDuelResult {
+  duelId: string;
+  sessionId: string;
+  mechanicKey: DuelMechanicKey;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  lifecycleState: DuelLifecycleState;
+  startedAt: string;
+}
+
+/**
+ * Result of a successful SUBMIT_MATH_DUEL_ANSWER. Deliberately
+ * excludes correctness — unlike the read-model's own eventual reveal,
+ * a command result the calling competitor could inspect directly on
+ * every submission would silently defeat the entire pre-completion
+ * privacy boundary (Math Duel Founder Product Confirmation gate's own
+ * explicit "no correctness feedback during standard phase"
+ * requirement). challengeOrdinal is echoed back so a genuine retry and
+ * a fresh submission are distinguishable by the caller without needing
+ * a separate read.
+ */
+export interface SubmitMathDuelAnswerResult {
+  duelId: string;
+  participantId: string;
+  challengeOrdinal: number;
   answeredAt: string;
 }
 
@@ -1706,5 +1847,65 @@ export class DuelReasonRequiredError extends Error {
   constructor() {
     super("A forfeit requires a reason.");
     this.name = "DuelReasonRequiredError";
+  }
+}
+
+/**
+ * Math Duel Slice 001. Raised by START_MATH_DUEL when the supplied
+ * challenge set is not exactly 5 valid {questionText, correctAnswer}
+ * entries. A domain-layer validation failure — the challenges
+ * themselves come from the server's own fixture selection, never
+ * client input, so this guards a genuine implementation bug, not a
+ * caller-facing input error.
+ */
+export class InvalidMathDuelChallengesError extends Error {
+  constructor() {
+    super("Exactly 5 standard-phase challenges are required.");
+    this.name = "InvalidMathDuelChallengesError";
+  }
+}
+
+/**
+ * Math Duel Slice 001. Raised by SUBMIT_MATH_DUEL_ANSWER when the
+ * supplied ordinal is not this competitor's own currently-authorized
+ * challenge — either a future ordinal (rejected outright) is being
+ * requested. A retry of an already-answered ordinal is never an
+ * error — see SubmitMathDuelAnswerResult's own doc comment.
+ */
+export class InvalidMathDuelOrdinalError extends Error {
+  constructor(nextExpectedOrdinal?: number) {
+    super(
+      nextExpectedOrdinal
+        ? `That challenge is not yet authorized; the next challenge is ${nextExpectedOrdinal}.`
+        : "That challenge is not yet authorized."
+    );
+    this.name = "InvalidMathDuelOrdinalError";
+  }
+}
+
+/**
+ * Math Duel Slice 001. Raised by SUBMIT_MATH_DUEL_ANSWER when the
+ * supplied answer is not a non-negative integer.
+ */
+export class InvalidMathDuelAnswerError extends Error {
+  constructor() {
+    super("Submitted answer must be a non-negative integer.");
+    this.name = "InvalidMathDuelAnswerError";
+  }
+}
+
+/**
+ * Math Duel Slice 001. Raised by SUBMIT_MATH_DUEL_ANSWER in the honest
+ * edge case where a Duel has exhausted its pre-materialized sudden-
+ * death supply (implementation-readiness's own disclosed Slice 001
+ * limit — see 0140's own migration comment). Never silently fabricates
+ * a winner or a new challenge; Host exceptional resolution (Cancel/
+ * Void/Forfeit) remains the operational escape path, exactly as it
+ * already is for every other stalled-Duel case.
+ */
+export class MathDuelChallengesExhaustedError extends Error {
+  constructor() {
+    super("No further challenges remain for this Duel.");
+    this.name = "MathDuelChallengesExhaustedError";
   }
 }

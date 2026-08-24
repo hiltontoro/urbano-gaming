@@ -225,7 +225,7 @@ describe("duels.mechanic_key — Duel Mechanic Boundary correction (0136), live 
 
     const record = await repository.getDuelById(duelId);
     expect(record?.mechanicKey).toBe("MULTIPLE_CHOICE");
-    expect(record?.multipleChoice.promptText).toBe("Legacy-shaped insert.");
+    expect(record?.multipleChoice!.promptText).toBe("Legacy-shaped insert.");
   });
 
   it("rejects an out-of-vocabulary mechanic_key at the database level (check constraint)", async () => {

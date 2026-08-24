@@ -596,15 +596,34 @@
               <select id="duelCompetitorB" onchange="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line);"></select>
             </div>
           </div>
-          <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">🧠 Multiple Choice</div>
-          <textarea id="duelPromptInput" rows="2" oninput="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" placeholder="Duel question…"></textarea>
-          <div id="duelOptionsInputs"></div>
-          <button class="btn-ghost" type="button" onclick="addDuelOption()" style="margin-bottom:8px;">+ Add option</button>
+          <!-- Math Duel Slice 001. Mechanic selection is a generic Duel-
+               initiation concern (Duel_Architecture.md's own "Duel
+               Container vs. Mechanic" boundary), so it lives here,
+               above either mechanic's own fields — never inside either
+               mechanic's own authoring block. Multiple Choice stays the
+               default (selectedDuelMechanic's own initial value),
+               preserving the exact prior Start Duel flow unchanged for
+               anyone who never touches this control. -->
+          <div class="row" style="gap:8px; margin-bottom:10px;">
+            <button type="button" class="btn-ghost" id="duelMechanicBtnMultipleChoice" onclick="selectDuelMechanic('MULTIPLE_CHOICE')" style="flex:1;">🧠 Multiple Choice</button>
+            <button type="button" class="btn-ghost" id="duelMechanicBtnMathDuel" onclick="selectDuelMechanic('MATH_DUEL')" style="flex:1;">🔢 Math Duel</button>
+          </div>
+          <div id="duelMultipleChoiceFields">
+            <textarea id="duelPromptInput" rows="2" oninput="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" placeholder="Duel question…"></textarea>
+            <div id="duelOptionsInputs"></div>
+            <button class="btn-ghost" type="button" onclick="addDuelOption()" style="margin-bottom:8px;">+ Add option</button>
+          </div>
+          <!-- Math Duel's own Product Definition: the Host does not
+               author challenges — the system selects them. No form
+               fields here at all, only an explanation. -->
+          <div id="duelMathDuelFields" style="display:none;">
+            <div class="room-code-hint" style="margin-bottom:8px;">5 challenges, automatically selected — no authoring needed. If tied after 5, sudden death continues one challenge at a time until decided.</div>
+          </div>
           <div class="room-code-hint" id="duelSetupHint" style="margin-bottom:8px;"></div>
           <button class="btn-primary" id="btn-start-duel" onclick="startDuel()" disabled>Start Duel</button>
         </div>
         <div id="duelActiveState" style="display:none;">
-          <h2>⚔️ Duel <span style="font-size:12px; font-weight:600; color:var(--muted);">🧠 Multiple Choice</span></h2>
+          <h2>⚔️ Duel <span id="duelActiveMechanicLabel" style="font-size:12px; font-weight:600; color:var(--muted);">🧠 Multiple Choice</span></h2>
           <div id="duelActiveBody"></div>
           <div id="duelExceptionalControls" style="margin-top:14px;"></div>
         </div>
@@ -861,6 +880,12 @@ let duelHistory = [];
 // currently renders — local-only UI state, reset to 2 (the minimum
 // valid option count) after each successful Start Duel.
 let duelOptionRowCount = 2;
+// Math Duel Slice 001. Which mechanic the setup form is currently
+// authoring for — local-only UI state, mirroring duelOptionRowCount's
+// own draft-state pattern. Multiple Choice is the default, preserving
+// the exact prior Start Duel flow unchanged for a Host who never
+// touches the mechanic selector.
+let selectedDuelMechanic = "MULTIPLE_CHOICE";
 // Host-only field from GET_SESSION: the session's full prepared
 // Multiple Choice question queue, including correct answers not yet
 // asked — never sent to a participant.
@@ -1004,6 +1029,7 @@ const KNOWN_ERRORS = [
   { test: (m) => m === "This Duel already has a terminal resolution.", text: "That Duel has already been resolved." },
   { test: (m) => m === "Must be one of CANCELLED, VOID, FORFEIT_A, FORFEIT_B.", text: "That resolution isn't recognized — try refreshing." },
   { test: (m) => m === "A forfeit requires a reason.", text: "Enter a reason before resolving a forfeit." },
+  { test: (m) => m === "Exactly 5 standard-phase challenges are required.", text: "Something went wrong selecting Math Duel challenges — try again." },
 ];
 
 function translateKnownError(raw) {
@@ -2381,6 +2407,7 @@ function switchToNewSession(json) {
   activeDuel = null;
   duelHistory = [];
   duelOptionRowCount = 2;
+  selectedDuelMechanic = "MULTIPLE_CHOICE";
   expLastInteractionState = null;
   expCelebrationPlayed = false;
   document.getElementById("authoringWorkspaceBody").classList.remove("collapsed");
@@ -2678,6 +2705,30 @@ function renderDuelCard() {
   if (document.getElementById("duelOptionsInputs").children.length === 0) {
     renderDuelOptionInputs();
   }
+  syncDuelMechanicSelector();
+  updateDuelStartAvailability();
+}
+
+// Math Duel Slice 001. Keeps the mechanic toggle's own visual state
+// (which button looks selected, which fields block is shown) in sync
+// with selectedDuelMechanic — called both from the click handler below
+// and from renderDuelCard() itself, so a routine poll re-render never
+// silently reverts the Host's own in-progress mechanic choice.
+function syncDuelMechanicSelector() {
+  const mcBtn = document.getElementById("duelMechanicBtnMultipleChoice");
+  const mathBtn = document.getElementById("duelMechanicBtnMathDuel");
+  const mcFields = document.getElementById("duelMultipleChoiceFields");
+  const mathFields = document.getElementById("duelMathDuelFields");
+  const isMath = selectedDuelMechanic === "MATH_DUEL";
+  mcBtn.style.borderColor = isMath ? "" : "var(--accent)";
+  mathBtn.style.borderColor = isMath ? "var(--accent)" : "";
+  mcFields.style.display = isMath ? "none" : "block";
+  mathFields.style.display = isMath ? "block" : "none";
+}
+
+function selectDuelMechanic(mechanic) {
+  selectedDuelMechanic = mechanic;
+  syncDuelMechanicSelector();
   updateDuelStartAvailability();
 }
 
@@ -2800,52 +2851,67 @@ function updateDuelStartAvailability() {
 
   const a = document.getElementById("duelCompetitorA").value;
   const b = document.getElementById("duelCompetitorB").value;
-  const prompt = document.getElementById("duelPromptInput").value.trim();
-  const rows = Array.from(document.querySelectorAll(".duel-option-input"));
-  const filledCount = rows.filter((i) => i.value.trim().length > 0).length;
-  const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
-  const correctRow = correctRadio ? rows[parseInt(correctRadio.value, 10)] : null;
-  const correctFilled = !!correctRow && correctRow.value.trim().length > 0;
 
   let problem = null;
   if (!a || !b) problem = "Select both competitors.";
   else if (a === b) problem = "Competitors must be two different people.";
-  else if (!prompt) problem = "Enter a question.";
-  else if (filledCount < 2) problem = "Enter at least two answer options.";
-  else if (!correctFilled) problem = "Mark the correct answer.";
+
+  // Math Duel Slice 001: no authoring content to validate at all — the
+  // system selects the challenges. Multiple Choice's own additional
+  // requirements (a question, at least two filled options, a marked
+  // correct answer) apply only when that mechanic is selected.
+  if (!problem && selectedDuelMechanic === "MULTIPLE_CHOICE") {
+    const prompt = document.getElementById("duelPromptInput").value.trim();
+    const rows = Array.from(document.querySelectorAll(".duel-option-input"));
+    const filledCount = rows.filter((i) => i.value.trim().length > 0).length;
+    const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
+    const correctRow = correctRadio ? rows[parseInt(correctRadio.value, 10)] : null;
+    const correctFilled = !!correctRow && correctRow.value.trim().length > 0;
+
+    if (!prompt) problem = "Enter a question.";
+    else if (filledCount < 2) problem = "Enter at least two answer options.";
+    else if (!correctFilled) problem = "Mark the correct answer.";
+  }
 
   hint.textContent = problem || "";
   btn.disabled = !!problem;
 }
 
+// Math Duel Slice 001: one Start Duel action for the Host, dispatching
+// on selectedDuelMechanic — mirrors the single Product-facing
+// /duel/start route's own dispatch-by-mechanicKey design, rather than
+// a second button/command the Host would have to discover separately.
 async function startDuel() {
   const competitorAParticipantId = document.getElementById("duelCompetitorA").value;
   const competitorBParticipantId = document.getElementById("duelCompetitorB").value;
-  const promptText = document.getElementById("duelPromptInput").value.trim();
-  const rows = Array.from(document.querySelectorAll(".duel-option-input"));
-  const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
-  const correctRawIndex = correctRadio ? parseInt(correctRadio.value, 10) : -1;
 
-  // Maps the checked radio's raw row index to its position within the
-  // final, empty-row-filtered options array — the row a host marks
-  // correct may not be options[0] once blank rows are dropped.
-  const options = [];
-  let correctOptionIndex = -1;
-  rows.forEach((input, i) => {
-    const value = input.value.trim();
-    if (value.length === 0) return;
-    if (i === correctRawIndex) correctOptionIndex = options.length;
-    options.push(value);
-  });
+  const body = { hostToken: hostState.hostToken, competitorAParticipantId, competitorBParticipantId };
+  if (selectedDuelMechanic === "MATH_DUEL") {
+    body.mechanicKey = "MATH_DUEL";
+  } else {
+    const promptText = document.getElementById("duelPromptInput").value.trim();
+    const rows = Array.from(document.querySelectorAll(".duel-option-input"));
+    const correctRadio = document.querySelector('input[name="duelCorrectOption"]:checked');
+    const correctRawIndex = correctRadio ? parseInt(correctRadio.value, 10) : -1;
 
-  const r = await postJson(`/api/sessions/${hostState.sessionId}/duel/start`, {
-    hostToken: hostState.hostToken,
-    competitorAParticipantId,
-    competitorBParticipantId,
-    promptText,
-    options,
-    correctOptionIndex,
-  });
+    // Maps the checked radio's raw row index to its position within
+    // the final, empty-row-filtered options array — the row a host
+    // marks correct may not be options[0] once blank rows are dropped.
+    const options = [];
+    let correctOptionIndex = -1;
+    rows.forEach((input, i) => {
+      const value = input.value.trim();
+      if (value.length === 0) return;
+      if (i === correctRawIndex) correctOptionIndex = options.length;
+      options.push(value);
+    });
+
+    body.promptText = promptText;
+    body.options = options;
+    body.correctOptionIndex = correctOptionIndex;
+  }
+
+  const r = await postJson(`/api/sessions/${hostState.sessionId}/duel/start`, body);
   show("START_DUEL (" + r.status + ")", r.json);
   if (r.status === 201) {
     renderNotice(null);
@@ -2854,6 +2920,8 @@ async function startDuel() {
     document.getElementById("duelCompetitorB").value = "";
     duelOptionRowCount = 2;
     renderDuelOptionInputs();
+    selectedDuelMechanic = "MULTIPLE_CHOICE";
+    syncDuelMechanicSelector();
     await hostRefresh();
   } else {
     renderNotice(classifyError(r));
@@ -2872,17 +2940,33 @@ async function startDuel() {
 // answered" would invent a stricter rule than the backend itself
 // enforces, contradicting Duel_Architecture.md's own "Host-triggered
 // closure/resolution" v1 design.
+// Math Duel Slice 001: dispatches on mechanicKey. The exceptional-
+// resolution block below is written once and reused unchanged by both
+// branches — Cancel/Void/Forfeit are generic Duel container authority,
+// per Duel_Architecture.md's own "Duel Container vs. Mechanic"
+// boundary, not owned by either mechanic.
 function renderDuelActiveState() {
   const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
   const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+  const mechanicLabel = document.getElementById("duelActiveMechanicLabel");
 
-  const body = document.getElementById("duelActiveBody");
-  body.innerHTML =
-    `<div style="font-weight:600; margin-bottom:8px;">${nameA} <span style="color:var(--muted); font-weight:400;">vs</span> ${nameB}</div>` +
-    `<div class="prompt-text" style="margin-bottom:10px;">${activeDuel.multipleChoice.promptText}</div>` +
-    `<div class="room-code-hint" style="margin-bottom:10px;">Waiting for responses — resolve whenever you're ready.</div>` +
-    `<button class="btn-primary" onclick="resolveDuel()">Resolve Duel</button>`;
+  if (activeDuel.mechanicKey === "MATH_DUEL") {
+    mechanicLabel.textContent = "🔢 Math Duel";
+    renderMathDuelActiveState(nameA, nameB);
+  } else {
+    mechanicLabel.textContent = "🧠 Multiple Choice";
+    const body = document.getElementById("duelActiveBody");
+    body.innerHTML =
+      `<div style="font-weight:600; margin-bottom:8px;">${nameA} <span style="color:var(--muted); font-weight:400;">vs</span> ${nameB}</div>` +
+      `<div class="prompt-text" style="margin-bottom:10px;">${activeDuel.multipleChoice.promptText}</div>` +
+      `<div class="room-code-hint" style="margin-bottom:10px;">Waiting for responses — resolve whenever you're ready.</div>` +
+      `<button class="btn-primary" onclick="resolveDuel()">Resolve Duel</button>`;
+  }
 
+  renderDuelExceptionalControls(nameA, nameB);
+}
+
+function renderDuelExceptionalControls(nameA, nameB) {
   const exceptional = document.getElementById("duelExceptionalControls");
   exceptional.innerHTML =
     `<div class="room-code-hint" style="margin-bottom:6px;">Exceptional resolution</div>` +
@@ -2893,6 +2977,25 @@ function renderDuelActiveState() {
     `<button class="btn-danger" onclick="resolveDuelExceptionally('FORFEIT_A')">Forfeit ${nameA}</button>` +
     `<button class="btn-danger" onclick="resolveDuelExceptionally('FORFEIT_B')">Forfeit ${nameB}</button>` +
     `</div>`;
+}
+
+// Math Duel Slice 001. No "Resolve" button — normal resolution is
+// mechanic-automatic, folded into each competitor's own answer
+// submission (MATH_DUEL_IMPLEMENTATION_RECORD.md's own §6/§10). The
+// Host sees only coarse, correctness-free submission-count progress
+// (mathDuel.competitorASubmittedCount/BSubmittedCount) — never a
+// per-challenge answer or correctness, the same privacy boundary the
+// read-model itself enforces, not merely hidden here.
+function renderMathDuelActiveState(nameA, nameB) {
+  const md = activeDuel.mathDuel;
+  const phaseLabel = md.phase === "SUDDEN_DEATH" ? "Sudden Death" : "Standard";
+  const body = document.getElementById("duelActiveBody");
+  body.innerHTML =
+    `<div style="font-weight:600; margin-bottom:8px;">${nameA} <span style="color:var(--muted); font-weight:400;">vs</span> ${nameB}</div>` +
+    `<div class="room-code-hint" style="margin-bottom:10px;">${phaseLabel} phase</div>` +
+    `<div class="room-code-hint" style="margin-bottom:4px;">${nameA}: ${md.competitorASubmittedCount} answered</div>` +
+    `<div class="room-code-hint" style="margin-bottom:10px;">${nameB}: ${md.competitorBSubmittedCount} answered</div>` +
+    `<div class="room-code-hint">Resolves automatically once both competitors answer.</div>`;
 }
 
 async function resolveDuel() {

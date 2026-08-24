@@ -14,7 +14,10 @@ import type {
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
+  MathDuelChallengeRecord,
+  MathDuelResponseRecord,
 } from "../types";
+import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
 import {
   RoomCodeCollisionError,
   DisplayNameTakenError,
@@ -66,6 +69,10 @@ import {
   DuelAlreadyResolvedError,
   InvalidDuelResolutionError,
   DuelReasonRequiredError,
+  InvalidMathDuelChallengesError,
+  InvalidMathDuelOrdinalError,
+  InvalidMathDuelAnswerError,
+  MathDuelChallengesExhaustedError,
 } from "../types";
 import type {
   SessionEventRecord,
@@ -1561,10 +1568,20 @@ export class SupabaseSessionRepository implements SessionRepository {
       createdAt: row.created_at as string,
       startedAt: (row.started_at ?? null) as string | null,
       endedAt: (row.ended_at ?? null) as string | null,
-      multipleChoice: {
-        promptText: row.prompt_text as string,
-        options: row.options as string[],
-      },
+      // Math Duel Slice 001: prompt_text/options are nullable as of
+      // 0137 — a Math Duel row leaves them null, and multipleChoice is
+      // correspondingly omitted rather than built from null values.
+      // Math Duel's own content is fetched separately
+      // (getMathDuelChallenges/getMathDuelResponses), never nested
+      // here — see DuelRecord's own doc comment.
+      ...(row.prompt_text !== null
+        ? {
+            multipleChoice: {
+              promptText: row.prompt_text as string,
+              options: row.options as string[],
+            },
+          }
+        : {}),
     };
   }
 
@@ -1813,6 +1830,157 @@ export class SupabaseSessionRepository implements SessionRepository {
     return (data ?? []).map((row) => ({
       participantId: row.participant_id,
       selectedOptionIndex: row.selected_option_index,
+      answeredAt: row.answered_at,
+    }));
+  }
+
+  // ===================== Math Duel Slice 001 =====================
+
+  async startMathDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    challenges: SelectedMathDuelChallenge[]
+  ): Promise<{
+    duelId: string;
+    mechanicKey: DuelMechanicKey;
+    lifecycleState: DuelLifecycleState;
+    startedAt: string;
+  }> {
+    const { data, error } = await this.client.rpc("start_math_duel_atomically", {
+      p_session_id: sessionId,
+      p_host_token: hostToken,
+      p_competitor_a_participant_id: competitorAParticipantId,
+      p_competitor_b_participant_id: competitorBParticipantId,
+      p_challenges: challenges,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUPLICATE_DUEL_COMPETITOR")) {
+        throw new DuplicateDuelCompetitorError();
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_MATH_DUEL_CHALLENGES")) {
+        throw new InvalidMathDuelChallengesError();
+      }
+      if (error.code === "P0001" && msg.includes("SESSION_NOT_FOUND")) {
+        throw new SessionNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("HOST_TOKEN_MISMATCH")) {
+        throw new HostTokenMismatchError();
+      }
+      if (error.code === "P0001" && msg.includes("LOBBY_NOT_LOCKED")) {
+        throw new LobbyNotLockedError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("CAPABILITY_NOT_AUTHORIZED")) {
+        throw new CapabilityNotAuthorizedError("DUEL");
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_COMPETITOR_NOT_IN_SESSION")) {
+        throw new DuelCompetitorNotInSessionError();
+      }
+      if (error.code === "P0001" && msg.includes("INTERACTION_ACTIVE")) {
+        throw new InteractionActiveError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("ACTIVE_DUEL_EXISTS")) {
+        throw new ActiveDuelExistsError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      duelId: row.duel_id,
+      mechanicKey: "MATH_DUEL",
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      startedAt: row.started_at,
+    };
+  }
+
+  async submitMathDuelAnswer(
+    duelId: string,
+    participantToken: string,
+    challengeOrdinal: number,
+    submittedAnswer: number
+  ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }> {
+    const { data, error } = await this.client.rpc("submit_math_duel_answer_atomically", {
+      p_duel_id: duelId,
+      p_participant_token: participantToken,
+      p_challenge_ordinal: challengeOrdinal,
+      p_submitted_answer: submittedAnswer,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_FOUND")) {
+        throw new DuelNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_NOT_ACTIVE")) {
+        throw new DuelNotActiveError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_ACCESS_DENIED")) {
+        throw new DuelAccessDeniedError();
+      }
+      if (error.code === "P0001" && msg.includes("MATH_DUEL_CHALLENGES_EXHAUSTED")) {
+        throw new MathDuelChallengesExhaustedError();
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_MATH_DUEL_ORDINAL")) {
+        const match = msg.match(/next challenge is (\d+)/);
+        throw new InvalidMathDuelOrdinalError(match ? Number(match[1]) : undefined);
+      }
+      if (error.code === "P0001" && msg.includes("INVALID_MATH_DUEL_ANSWER")) {
+        throw new InvalidMathDuelAnswerError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      participantId: row.participant_id,
+      challengeOrdinal: row.challenge_ordinal,
+      answeredAt: row.answered_at,
+    };
+  }
+
+  async getMathDuelChallenges(duelId: string): Promise<MathDuelChallengeRecord[]> {
+    const { data, error } = await this.client
+      .from("duel_math_challenges")
+      .select("*")
+      .eq("duel_id", duelId)
+      .order("challenge_ordinal", { ascending: true });
+
+    if (error) throw error;
+
+    // question_text/correct_answer both exist on every row; only
+    // correct_answer is deliberately omitted from the returned shape —
+    // MathDuelChallengeRecord never carries it, the same read-model
+    // privacy boundary correctOptionIndex already established for
+    // Multiple Choice.
+    return (data ?? []).map((row) => ({
+      duelId: row.duel_id,
+      challengeOrdinal: row.challenge_ordinal,
+      phase: row.phase as "STANDARD" | "SUDDEN_DEATH",
+      questionText: row.question_text,
+      createdAt: row.created_at,
+    }));
+  }
+
+  async getMathDuelResponses(duelId: string): Promise<MathDuelResponseRecord[]> {
+    const { data, error } = await this.client
+      .from("duel_math_responses")
+      .select("*")
+      .eq("duel_id", duelId);
+
+    if (error) throw error;
+
+    return (data ?? []).map((row) => ({
+      duelId: row.duel_id,
+      challengeOrdinal: row.challenge_ordinal,
+      participantId: row.participant_id,
+      submittedAnswer: row.submitted_answer,
+      isCorrect: row.is_correct,
       answeredAt: row.answered_at,
     }));
   }

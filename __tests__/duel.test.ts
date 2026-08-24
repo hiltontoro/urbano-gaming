@@ -287,7 +287,7 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       // all (read-model privacy) — only each competitor's own
       // myResponseOptionIndex is populated, and the host is not a
       // competitor.
-      expect(result.activeDuel?.multipleChoice.competitorAOptionIndex).toBeNull();
+      expect(result.activeDuel?.multipleChoice!.competitorAOptionIndex).toBeNull();
     });
 
     it("answers remain private before resolution — competitor B cannot see A's answer via GET_SESSION", async () => {
@@ -296,11 +296,11 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       await submitDuelResponse(repo, duel.duelId, a.participantToken, CORRECT_INDEX);
 
       const bView = await getSession(repo, session.sessionId, b.participantToken);
-      expect(bView.activeDuel?.multipleChoice.competitorAOptionIndex).toBeNull();
-      expect(bView.activeDuel?.multipleChoice.myResponseOptionIndex).toBeNull();
+      expect(bView.activeDuel?.multipleChoice!.competitorAOptionIndex).toBeNull();
+      expect(bView.activeDuel?.multipleChoice!.myResponseOptionIndex).toBeNull();
 
       const aView = await getSession(repo, session.sessionId, a.participantToken);
-      expect(aView.activeDuel?.multipleChoice.myResponseOptionIndex).toBe(CORRECT_INDEX);
+      expect(aView.activeDuel?.multipleChoice!.myResponseOptionIndex).toBe(CORRECT_INDEX);
     });
   });
 
@@ -404,8 +404,8 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       const cView = await getSession(repo, session.sessionId, c.participantToken);
       const resolved = cView.duelHistory.find((d) => d.duelId === duel.duelId);
       expect(resolved?.lifecycleState).toBe("COMPLETED");
-      expect(resolved?.multipleChoice.competitorAOptionIndex).toBe(CORRECT_INDEX);
-      expect(resolved?.multipleChoice.competitorBOptionIndex).toBe(CORRECT_INDEX + 1);
+      expect(resolved?.multipleChoice!.competitorAOptionIndex).toBe(CORRECT_INDEX);
+      expect(resolved?.multipleChoice!.competitorBOptionIndex).toBe(CORRECT_INDEX + 1);
       expect(resolved?.winnerParticipantId).toBe(a.participantId);
     });
   });
@@ -532,8 +532,8 @@ describe("Duel / SESSION_SUBGAME v1", () => {
       const { repo, session, a, b } = await setupDuelReadySession();
       await startADuel(repo, session, a.participantId, b.participantId);
       const result = await getSession(repo, session.sessionId, session.hostToken);
-      expect(result.activeDuel?.multipleChoice.promptText).toBe("Capital of France?");
-      expect(result.activeDuel?.multipleChoice.options).toEqual(OPTIONS);
+      expect(result.activeDuel?.multipleChoice!.promptText).toBe("Capital of France?");
+      expect(result.activeDuel?.multipleChoice!.options).toEqual(OPTIONS);
       expect(result.activeDuel).not.toHaveProperty("promptText");
       expect(result.activeDuel).not.toHaveProperty("options");
     });
@@ -568,7 +568,7 @@ describe("Duel / SESSION_SUBGAME v1", () => {
 
       const result = await getSession(repo, session.sessionId, a.participantToken);
       const voided = result.duelHistory.find((d) => d.duelId === duel.duelId);
-      expect(voided?.multipleChoice.competitorAOptionIndex).toBe(CORRECT_INDEX);
+      expect(voided?.multipleChoice!.competitorAOptionIndex).toBe(CORRECT_INDEX);
     });
   });
 

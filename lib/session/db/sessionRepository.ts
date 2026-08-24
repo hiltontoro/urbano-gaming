@@ -12,7 +12,10 @@ import type {
   DuelLifecycleState,
   DuelTerminalResolution,
   DuelExceptionalResolution,
+  MathDuelChallengeRecord,
+  MathDuelResponseRecord,
 } from "../types";
+import type { SelectedMathDuelChallenge } from "../mathDuelFixture";
 
 export interface SessionEventRecord {
   sessionId: string;
@@ -1341,4 +1344,94 @@ export interface SessionRepository {
   getDuelResponses(
     duelId: string
   ): Promise<Array<{ participantId: string; selectedOptionIndex: number; answeredAt: string }>>;
+
+  /**
+   * Math Duel Slice 001. START_MATH_DUEL's atomic operation — a
+   * sibling to startDuel(), not a replacement or generalization of it
+   * (implementation-readiness's own explicit disposition: extending
+   * the existing startDuel() signature would force a generic payload
+   * blob onto a method that already has a perfectly fine, narrower
+   * shape). Same generic Duel-initiation mutual-exclusion contract as
+   * startDuel() (see that method's own doc comment for the exact
+   * error vocabulary shared by both); the mechanic-specific work is
+   * persisting the already-selected challenge snapshot as immutable
+   * duel_math_challenges rows, standard phase first (ordinals 1..5),
+   * then the full sudden-death supply — see
+   * mathDuelFixture.ts/0140's own comments for why the entire supply
+   * is materialized upfront rather than created lazily.
+   *
+   * Implementations must:
+   * - apply every mutual-exclusion/authorization check startDuel()
+   *   documents, with the same error vocabulary;
+   * - throw InvalidMathDuelChallengesError only when challenges is not
+   *   exactly 5 valid entries;
+   * - never return correctAnswer for any challenge.
+   */
+  startMathDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string,
+    challenges: SelectedMathDuelChallenge[]
+  ): Promise<{
+    duelId: string;
+    mechanicKey: DuelMechanicKey;
+    lifecycleState: DuelLifecycleState;
+    startedAt: string;
+  }>;
+
+  /**
+   * Math Duel Slice 001. SUBMIT_MATH_DUEL_ANSWER's atomic operation.
+   * Participant-token authority only. First-write-wins: a call for an
+   * ordinal this participant has already answered is idempotent replay
+   * (the existing row is returned, the supplied answer is never
+   * applied or compared) — never an upsert, the deliberate opposite of
+   * submitDuelResponse()'s own "last write wins." When the answer just
+   * recorded is the one that completes a shared condition (both
+   * competitors have now answered the same challenge), normal
+   * resolution happens inline, in the same atomic operation — see
+   * 0141's own migration comment for the exact win/continue logic.
+   *
+   * Implementations must:
+   * - throw DuelNotFoundError only when no Math Duel exists for this
+   *   id (including a real Duel of a different mechanic);
+   * - throw DuelNotActiveError only when the Duel is not ACTIVE;
+   * - throw DuelAccessDeniedError only when the resolved participant is
+   *   not one of this Duel's two competitors;
+   * - throw InvalidMathDuelOrdinalError only when the supplied ordinal
+   *   is ahead of this participant's own next-authorized challenge;
+   * - throw InvalidMathDuelAnswerError only when the supplied answer is
+   *   not a non-negative integer;
+   * - throw MathDuelChallengesExhaustedError only when no
+   *   duel_math_challenges row exists for the authorized ordinal (the
+   *   honest, disclosed Slice 001 supply-exhaustion edge case);
+   * - never leak correctness in the return value;
+   * - persist exactly one DUEL_RESOLVED session event, only when this
+   *   call is the one that determines a winner.
+   */
+  submitMathDuelAnswer(
+    duelId: string,
+    participantToken: string,
+    challengeOrdinal: number,
+    submittedAnswer: number
+  ): Promise<{ participantId: string; challengeOrdinal: number; answeredAt: string }>;
+
+  /**
+   * Math Duel Slice 001. Every challenge ever materialized for this
+   * Duel, ordinal ascending — the full pre-materialized set
+   * (implementation-readiness's own "no lazy creation" simplification
+   * — see 0140's own comment), including sudden-death rounds never
+   * actually reached. The read-model projection (getSession.ts) is
+   * responsible for filtering this down to what a given viewer is
+   * actually authorized to see; this method itself applies no privacy
+   * filtering.
+   */
+  getMathDuelChallenges(duelId: string): Promise<MathDuelChallengeRecord[]>;
+
+  /**
+   * Math Duel Slice 001. Every response ever recorded for this Duel,
+   * across both competitors and both phases — mirrors
+   * getDuelResponses()'s own unfiltered contract exactly.
+   */
+  getMathDuelResponses(duelId: string): Promise<MathDuelResponseRecord[]>;
 }
