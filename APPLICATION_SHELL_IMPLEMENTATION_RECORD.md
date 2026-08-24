@@ -226,3 +226,29 @@ No change to `app/route.ts`, `app/api/**` (any route), `lib/**`, any migration, 
 - `git diff --stat -- public/index.html public/poker-host.html` plus `git status --short -- public/quiz-playtest.html`: confirmed exactly these three files changed; `.env.local`, `supabase/migrations/`, `app/api/`, and `lib/` all show zero changes.
 
 Not staged, not committed, not pushed, not deployed, per instruction — left for Founder visual review.
+
+## Experience Discovery Slice 1 — Production Deployment (2026-08-24)
+
+**What changed since local acceptance.** The candidate accepted above (commit `5dcdabb5442766fee5e91a4b0c6917c0b4b41ca4`, parent `099b3823d5d9914d93d8707e102e4838fefc7888`) underwent one additional local-acceptance pass — a fresh line-by-line diff review that found and corrected two minor factual inaccuracies (a dangling code-comment reference in `poker-host.html` to a nonexistent file, and stale diff-line counts in this record's own "Files changed" list, both fixed to match `git diff --numstat` exactly) — before a Founder-authorized production readiness gate and this deployment gate.
+
+**Push and deployment.** `git push origin HEAD:main` performed as a clean fast-forward (`69522ef..5dcdabb`, no force, no rebase, no history rewrite), confirmed via a pre-push `git merge-base --is-ancestor origin/main HEAD` check. Vercel deployment of `5dcdabb` confirmed successful via GitHub's commit-status API (`"state":"success","description":"Deployment has completed"`). Deployed SHA verified two ways: (1) the live homepage no longer shows the stale "opening soon" copy and does show all five approved icons; (2) `curl`-fetched production `index.html` and `poker-host.html` are **byte-identical** to the local candidate files — the same rigor used at every prior deployment gate in this engagement.
+
+**Discovery inventory verified live**, via direct DOM inspection (not just visual review): Trivia/Quiz/Poker render as real `<a>` elements with `href="/trivia-playtest.html"` / `/quiz-playtest.html"` / `/poker-host.html"` respectively; Duel/Community Voting/Level 33 render as inert `<div>`s with `href: null` and `onclick: null`. Duel's status pill and action text read "In Development" / "In development" exactly as designed — no internal terminology reached the page. The Featured card's `.featured-note` reads "Live now — sign in with URBANO to make your prediction," and `Sign in with URBANO` itself is untouched.
+
+**Poker Host production proving.** `GET /poker-host.html` → `200`, shell branding confirmed rendered (brand header, purple room-code accent, Montserrat). One bounded smoke-test table was created through the page's own real UI flow — no custom name field exists in the Poker schema (the room code is the only system-generated identifier), so the smoke evidence is identified by its live-generated room code `582W96` rather than a custom label, consistent with every prior Poker proving case in this engagement. `POST /api/gaming/poker/tables` → `201`; room code rendered; the polling `GET` returned a clean `200` ("No hand in progress"); `btn-start-hand` confirmed present, enabled, and correctly labeled. `/poker-table.html` confirmed healthy with zero console errors. This table was intentionally left in its pre-hand state — no hand was started, since the smoke-test plan only required proving the create → poll path.
+
+**Quiz route production proving.** `GET /quiz-playtest.html` → `200` (previously `404`, now correctly live). Both actions confirmed pointing at `/host.html`/`/participant.html`, both independently confirmed `200`.
+
+**Desktop production proving.** Homepage screenshotted live at 1280×900: corrected Featured copy, all four Skill Games cards (Trivia/Quiz/Poker/Duel) visible in one row with icons and correct statuses, matching the local pass exactly.
+
+**Mobile production proving.** Verified directly on the live URL, not assumed from the local pass: `document.documentElement.scrollWidth === window.innerWidth` at 375px on the homepage (zero horizontal overflow); homepage and Poker Host (pre-create and the smoke-test's post-create state) both screenshotted at 375×812 and confirmed visually clean.
+
+**Backend regression, verified live:** `GET /api/gaming/predictions/matches` → `200`; `GET /api/gaming/leaderboard` → `200`, honestly empty (`{"entries":[]}`); `GET /api/gaming/config` → `200` (unchanged environment state, not investigated further, not reopened). `host.html`, `participant.html`, `trivia-playtest.html`, `soccer-predictions.html`, `leaderboards.html`, `rewards.html` all confirmed `200`.
+
+**Zero automatic consequence, confirmed by direct row counts before and after this deployment:** `duels` = 10, `duel_responses` = 8 — both **unchanged** from the prior Duel Mechanic Boundary deployment's own final figures, proving this frontend-only Slice touched zero Duel backend state. `authority_grants` = 0, `admin_audit_events` = 0 — **PLATFORM GOVERNANCE NOT ACTIVATED**. `gaming_members` = 0, `gaming_xp_events` = 0 — **GAMING XP NOT ACTIVATED**. `poker_tables` rose by exactly one (the bounded smoke-test table above) — the only production data mutation this deployment caused.
+
+**Schema state, unchanged:** production remains at migration `0136` applied, `0125` still deliberately unapplied — this Slice contained no migration and required none.
+
+**Final regression, re-run after production proving:** 641/641 behavioral, 144/144 contract, `tsc --noEmit` clean, `npm run build` clean.
+
+**Duel release boundary, confirmed live:** Duel remains genuinely non-playable in production — no href, no onclick, no competitor picker, no participant controls, no mechanic renderer exist anywhere in the deployed page. The backend correction from the prior Slice remains live and untouched; only the discovery card's own honesty changed.

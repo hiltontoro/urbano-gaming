@@ -420,3 +420,29 @@ Full live regression: homepage, Poker table creation, Predictions public match l
 **Context only, not implemented, not authorized by this deployment.** Informal Founder UI direction recorded for that future Experience Discovery / UI Integration track: Trivia → 🧠, Poker → 🃏, Duel → ⚔️, Soccer → ⚽, Puzzle → 🧩, Karaoke/Music → 🎤 / 🎵, Impersonator → 🕵️. That future gate should convert this into a consistent Experience/category iconography system rather than scattered one-off emoji choices — not designed here.
 
 Final local validation, re-run after all production work: **641/641** behavioral, **144/144** contract, Duel contract suite re-run 3× clean, clean typecheck and build.
+
+## Experience Discovery Slice 1 — Discovery Truthfulness + Poker/Quiz Integration + Semantic Iconography (2026-08-24)
+
+| Phase | What it delivered | Status |
+|---|---|---|
+| Experience Discovery Slice 1 | Corrected two stale/misleading discovery states (Soccer Predictions' Featured card, Poker's zero discovery presence) and two real gaps (no Quiz entry, Duel indistinguishable from genuinely-nothing-built Coming Soon); added a lightweight emoji icon layer and a Poker Host shell-branding pass | **DEPLOYED. FRONTEND-ONLY. NO BACKEND/SCHEMA/API/AUTH CHANGE. DUEL STILL NOT PLAYABLE.** See `APPLICATION_SHELL_IMPLEMENTATION_RECORD.md`'s "Experience Discovery Slice 1" sections for full evidence. |
+
+This is a purely presentational deployment — no migration, no `app/api` route, no `lib/` file, and no Auth code changed anywhere in the pushed diff (`public/index.html`, `public/poker-host.html`, `public/quiz-playtest.html` (new), plus this record). Production schema ceiling remains **`0136`**; **`0125`** remains deliberately unapplied — this Slice required no database mutation and caused none.
+
+Commit `5dcdabb5442766fee5e91a4b0c6917c0b4b41ca4` (carrying `099b3823d5d9914d93d8707e102e4838fefc7888`, the Duel Mechanic Boundary documentation-closure commit, naturally along in ancestry) fast-forward pushed to `origin/main` (`69522ef..5dcdabb`) and confirmed deployed via GitHub's Vercel deployment-status check for this exact SHA, plus a byte-identical content match between the live production `index.html`/`poker-host.html` and the local candidate files.
+
+**Discovery inventory verified live** via direct DOM inspection: Trivia (🧠), Quiz (📝), Poker (🃏) all render as real, correctly-`href`ed `<a>` elements, Playtest status; Duel (⚔️) renders as an inert `<div>` — no `href`, no `onclick` — reading "In Development," visually distinct from Community Voting/Level 33's unchanged "Coming Soon." The Featured Soccer Predictions card now reads "Live now — sign in with URBANO to make your prediction," replacing the previously stale "opening soon" copy; `Sign in with URBANO` itself is untouched.
+
+**Poker Host production proving.** `/poker-host.html` confirmed rendering with full shell branding (brand header, purple room-code accent). One bounded smoke-test table created through the page's own real flow (room code `582W96` — Poker has no name field, the room code is the only system-generated identifier, matching every prior Poker proving case in this engagement): `POST /api/gaming/poker/tables` → `201`, room code rendered, polling `GET` → `200` ("No hand in progress"), `Start Hand` confirmed present/enabled/correctly wired. No hand was started — the smoke plan required only the create→poll path. `/poker-table.html` confirmed healthy, zero console errors.
+
+**Quiz route now live**: `GET /quiz-playtest.html` → `200` (previously `404`). Both actions confirmed reaching `/host.html`/`/participant.html`, both independently `200`.
+
+**Desktop and mobile production proving**, both verified on the live URL directly: homepage screenshotted at 1280×900 (corrected Featured copy, all four Skill Games cards with icons and correct statuses, one row); zero horizontal overflow on the homepage at 375px; homepage and Poker Host (both pre- and post-create states) screenshotted at 375×812 and confirmed clean.
+
+Zero automatic consequence, confirmed by direct count before/after: `duels` = 10, `duel_responses` = 8 — **unchanged** from the prior deployment's own final figures. `gaming_members`, `authority_grants`, `admin_audit_events`, and every Gaming XP table remained at their pre-deployment zero. **PLATFORM GOVERNANCE NOT ACTIVATED.** **GAMING XP NOT ACTIVATED.** `poker_tables` rose by exactly one — the smoke-test table above, the only production data mutation this deployment caused.
+
+Full live regression: homepage, `host.html`, `participant.html`, `trivia-playtest.html`, `soccer-predictions.html`, `leaderboards.html`, `rewards.html`, Predictions public match list, and Global Leaderboard all confirmed healthy — **PRODUCTION REGRESSION PASSED**.
+
+**Duel UI disposition, still unchanged.** Duel's discovery card is now honest about the backend's real state, but remains genuinely non-playable — no competitor picker, Host controls, participant answer card, or mechanic rendering exist anywhere. The dedicated Duel Gameplay UI gate remains the next track.
+
+Final local validation, re-run after production proving: **641/641** behavioral, **144/144** contract, clean typecheck and build.
