@@ -1522,6 +1522,52 @@ function duelTerminalSummaryText(duel) {
   return `${nameA} vs ${nameB}.`;
 }
 
+// Math Duel Experience Evolution Slice 002 — Terminal Experience.
+// Deliberately scoped to Math Duel's own terminal card only:
+// duelTerminalSummaryText() above stays byte-for-byte unchanged and
+// keeps serving Multiple Choice Duel's own terminal view and every
+// spectator view here unmodified — personalizing MC Duel's own
+// terminal text was never proposed or authorized in this Slice, and
+// bundling it in would be exactly the "adjacent improvement" scope
+// creep this Slice's own gate explicitly forbids. A genuine spectator
+// (participantState.participantId matches neither competitor) always
+// falls through to the same truthful third-person summary every other
+// Duel terminal view already uses.
+//
+// FORFEIT's own winner is always the non-forfeiting competitor
+// (resolve_duel_exceptionally_atomically's own FORFEIT_A/FORFEIT_B
+// branches, 0128's check constraint) — so for a caller already
+// confirmed to be one of the two competitors, "not the winner" and
+// "the one who forfeited" are the same fact; there is no third case.
+function mathDuelTerminalBanner(duel) {
+  const isCompetitorA = participantState.participantId === duel.competitorAParticipantId;
+  const isCompetitorB = participantState.participantId === duel.competitorBParticipantId;
+  if (!isCompetitorA && !isCompetitorB) {
+    return { headline: duelTerminalSummaryText(duel), secondary: null, celebrate: false };
+  }
+  const iWon = duel.winnerParticipantId === participantState.participantId;
+  if (duel.terminalResolution === "WON_LOST") {
+    return iWon
+      ? { headline: "YOU WON", secondary: "+10 points", celebrate: true }
+      : { headline: "YOU LOST", secondary: null, celebrate: false };
+  }
+  if (duel.terminalResolution === "FORFEIT") {
+    return iWon
+      ? { headline: "YOU WON", secondary: "+10 points — opponent forfeited", celebrate: true }
+      : { headline: "YOU FORFEITED", secondary: null, celebrate: false };
+  }
+  if (duel.terminalResolution === "DRAW") {
+    return { headline: "DRAW", secondary: null, celebrate: false };
+  }
+  if (duel.terminalResolution === "CANCELLED") {
+    return { headline: "DUEL CANCELLED", secondary: null, celebrate: false };
+  }
+  if (duel.terminalResolution === "VOID") {
+    return { headline: "DUEL VOIDED", secondary: null, celebrate: false };
+  }
+  return { headline: duelTerminalSummaryText(duel), secondary: null, celebrate: false };
+}
+
 // Owns the entire duelCard: three mutually exclusive views (competitor,
 // spectator, terminal-via-duelHistory), computed here rather than
 // duplicated per-caller — mirrors renderQuizCard's own "this card owns
@@ -1724,6 +1770,12 @@ function renderMathDuelActive(body) {
     body.innerHTML =
       `<div class="room-code-hint" style="margin-bottom:8px;">You vs <span id="mathDuelOpponentName"></span> — <span id="mathDuelPhaseLabel"></span></div>` +
       `<div class="room-code-hint" id="mathDuelProgressLabel" style="margin-bottom:8px;"></div>` +
+      `<div id="mathDuelRace" style="margin-bottom:8px;">` +
+      `<div class="progress-label" id="mathDuelRaceLabelMine"></div>` +
+      `<div class="progress-bar"><div class="progress-fill" id="mathDuelRaceFillMine" style="width:0%"></div></div>` +
+      `<div class="progress-label" id="mathDuelRaceLabelOpp"></div>` +
+      `<div class="progress-bar"><div class="progress-fill" id="mathDuelRaceFillOpp" style="width:0%"></div></div>` +
+      `</div>` +
       `<div class="submitted-note" id="mathDuelSubmittedNote" style="display:none;"></div>` +
       `<div id="mathDuelAnswerArea"></div>`;
     answerArea = document.getElementById("mathDuelAnswerArea");
@@ -1740,6 +1792,50 @@ function renderMathDuelActive(body) {
     noteEl.textContent = `${answeredList.length} answered — correctness revealed once the Duel resolves.`;
   } else {
     noteEl.style.display = "none";
+  }
+
+  // Experience Evolution Slice 002 — progress race. STANDARD phase
+  // only: competitorASubmittedCount/competitorBSubmittedCount are raw,
+  // unbounded response totals (see getSession.ts), not capped at 5 —
+  // once SUDDEN_DEATH begins they can exceed 5, which would render a
+  // false "6/5" bar. The already-existing, already-Founder-validated
+  // phaseLabel/progressLabel treatment above already communicates
+  // sudden-death state truthfully, so the race bars simply retire
+  // rather than inventing a second sudden-death metaphor. Completion
+  // count only — never correctness, never which answer was right,
+  // never a running score. Chrome, exactly like the fields above: pure
+  // text/style updates on non-focusable elements, safe every poll.
+  const raceEl = document.getElementById("mathDuelRace");
+  if (md.phase === "STANDARD") {
+    raceEl.style.display = "block";
+    const myCount = isCompetitorA ? md.competitorASubmittedCount : md.competitorBSubmittedCount;
+    const oppCount = isCompetitorA ? md.competitorBSubmittedCount : md.competitorASubmittedCount;
+    const applyRaceBar = (labelEl, fillEl, name, count) => {
+      const finished = count >= 5;
+      labelEl.textContent = `${name}  ${count}/5${finished ? " — Finished" : ""}`;
+      fillEl.style.width = `${Math.min(count, 5) * 20}%`;
+      fillEl.style.background = finished ? "var(--gold)" : "var(--exp-purple)";
+      const bar = fillEl.parentElement;
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "5");
+      bar.setAttribute("aria-valuenow", String(count));
+      bar.setAttribute("aria-label", `${name}: ${count} of 5 challenges submitted`);
+    };
+    applyRaceBar(
+      document.getElementById("mathDuelRaceLabelMine"),
+      document.getElementById("mathDuelRaceFillMine"),
+      "You",
+      myCount
+    );
+    applyRaceBar(
+      document.getElementById("mathDuelRaceLabelOpp"),
+      document.getElementById("mathDuelRaceFillOpp"),
+      opponentName,
+      oppCount
+    );
+  } else {
+    raceEl.style.display = "none";
   }
 
   // Answer area: rebuilt only when the challenge it represents
@@ -1789,6 +1885,8 @@ function renderMathDuelTerminal(body, last) {
   const isOwnA = participantState.participantId === last.competitorAParticipantId;
   const isOwnB = participantState.participantId === last.competitorBParticipantId;
 
+  const banner = mathDuelTerminalBanner(last);
+
   const scoreLine =
     md.standardCorrectCountA !== null
       ? `<div class="room-code-hint" style="margin-bottom:8px;">Standard phase: ${nameA} ${md.standardCorrectCountA}/5 · ${nameB} ${md.standardCorrectCountB}/5</div>`
@@ -1807,11 +1905,38 @@ function renderMathDuelTerminal(body, last) {
     })
     .join("");
 
+  // Experience Evolution Slice 002 — terminal hierarchy: the viewer-
+  // relative headline dominates; every existing evidentiary field
+  // (standard-phase correct counts, full per-challenge history) is
+  // preserved byte-for-byte, just moved behind a closed-by-default
+  // native <details> disclosure rather than deleted or thinned.
+  //
+  // Defect found during this Slice's own operational simulation: this
+  // whole card is rebuilt from scratch on every routine poll (the
+  // Duel's own terminal state never changes, but applySessionSnapshot
+  // still calls renderDuelCard unconditionally), so a reader who taps
+  // the disclosure open had it silently snapped shut again within one
+  // poll cycle — never actually readable. Fixed the same way Active
+  // Input Preservation already established for in-progress typing:
+  // read back whatever open/closed state the existing node already
+  // has for this exact duelId before replacing it, and re-apply that
+  // state to the freshly-built node. A newly-displayed Duel (different
+  // duelId, or none rendered yet) still starts closed by default.
+  const existingDetails = body.querySelector("details[data-duel-id]");
+  const wasOpen =
+    !!existingDetails && existingDetails.dataset.duelId === last.duelId && existingDetails.open;
+
   body.innerHTML =
     `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
-    `<div class="winner-banner">${duelTerminalSummaryText(last)}</div>` +
+    `<div class="winner-banner${banner.celebrate ? " exp-celebrate" : ""}">${banner.headline}` +
+    (banner.secondary
+      ? `<div style="font-weight:400; font-size:13px; margin-top:4px;">${banner.secondary}</div>`
+      : "") +
+    `</div>` +
+    `<details data-duel-id="${last.duelId}" style="margin-top:12px;"${wasOpen ? " open" : ""}><summary>View Duel Results</summary>` +
     scoreLine +
-    challengeRows;
+    challengeRows +
+    `</details>`;
 }
 
 // Math Duel Slice 001. Unlike submitDuelResponse()'s optimistic local
