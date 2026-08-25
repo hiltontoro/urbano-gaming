@@ -566,21 +566,41 @@
         <button class="btn-primary" id="btn-close-quiz" onclick="closeQuiz()" style="margin-top:10px;">Close Quiz</button>
       </div>
 
-      <!-- Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md).
-           Two internal states inside one card, mirroring quizCard's own
-           precedent above: duelSetupState (competitor picker + the
-           current Multiple Choice mechanic's own authoring form) while
-           no Duel is ACTIVE, duelActiveState once one is. Visibility is
-           computed entirely in renderDuelCard() — see that function's
-           own comment for why it deliberately does not duplicate
-           resolvePrimaryAction()'s idle-state logic. This card's own
-           heading always names the generic container (⚔️ Duel)
-           separately from the current mechanic (🧠 Multiple Choice) —
-           Duel_Architecture.md's own "Duel Container vs. Mechanic"
-           boundary, load-bearing even at the UI layer: a future second
-           mechanic must be able to add its own case to the branch in
-           renderDuelActiveState() without this heading, or anything
-           else generic here, needing to change. -->
+      <!-- Duel / SESSION_SUBGAME v1: relocated to .control-grid-main —
+           see that column's own opening comment for why. -->
+
+      <div class="secondary-actions">
+        <button class="btn-ghost" onclick="sessionSync.refreshNow()" title="Manual refresh — the game normally syncs automatically; use this if you suspect it's stalled.">Check for updates</button>
+        <button class="btn-danger" id="btn-complete" onclick="completeSession()">End Session</button>
+        <button class="btn-primary" id="btn-new-session" onclick="createSession()" style="display:none;">Create New Session</button>
+        <button class="btn-primary" id="btn-rematch" onclick="createSuccessorSession()" style="display:none;">Create Rematch</button>
+        <div id="rematchHint" class="room-code-hint" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="control-grid-main">
+      <!-- Session Shell Duel-Awareness Slice: relocated from
+           .control-grid-side. Duel is a live-operation control surface,
+           not persistent context — grouped here with the other
+           operational-activity cards (Current Turn, Progress, Results),
+           which it is mutually exclusive with at the domain level
+           (Duel_Architecture.md's own "Concurrency" section: an active
+           Duel excludes overlapping ordinary Interaction activation for
+           the same Session), so the two never compete for attention in
+           practice. Pure DOM relocation — no id, show/hide rule, or
+           capability check below changed; visibility is still computed
+           entirely in renderDuelCard(), unmodified. Duel / SESSION_SUBGAME
+           v1 (Product/Duel_Architecture.md). Two internal states inside
+           one card, mirroring quizCard's own precedent: duelSetupState
+           (competitor picker + the current Multiple Choice mechanic's
+           own authoring form) while no Duel is ACTIVE, duelActiveState
+           once one is. This card's own heading always names the generic
+           container (⚔️ Duel) separately from the current mechanic
+           (🧠 Multiple Choice) — Duel_Architecture.md's own "Duel
+           Container vs. Mechanic" boundary, load-bearing even at the UI
+           layer: a future second mechanic must be able to add its own
+           case to the branch in renderDuelActiveState() without this
+           heading, or anything else generic here, needing to change. -->
       <div class="card" id="duelCard" style="display:none;">
         <div id="duelSetupState">
           <h2>⚔️ Duel</h2>
@@ -635,16 +655,6 @@
         </div>
       </div>
 
-      <div class="secondary-actions">
-        <button class="btn-ghost" onclick="sessionSync.refreshNow()" title="Manual refresh — the game normally syncs automatically; use this if you suspect it's stalled.">Check for updates</button>
-        <button class="btn-danger" id="btn-complete" onclick="completeSession()">End Session</button>
-        <button class="btn-primary" id="btn-new-session" onclick="createSession()" style="display:none;">Create New Session</button>
-        <button class="btn-primary" id="btn-rematch" onclick="createSuccessorSession()" style="display:none;">Create Rematch</button>
-        <div id="rematchHint" class="room-code-hint" style="display:none;"></div>
-      </div>
-    </div>
-
-    <div class="control-grid-main">
       <div class="card" id="promptCard" style="display:none;">
         <h2>Current Turn<span id="engineTag"></span></h2>
         <div class="prompt-text" id="promptText"></div>

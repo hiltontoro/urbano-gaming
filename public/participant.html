@@ -64,6 +64,18 @@
   h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
   .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 20px; font-size: 14px; }
 
+  /* Session Shell Duel-Awareness Slice: once joined, the H1/subtitle
+     duplicate identity the .brand mark/wordmark already establish —
+     visually redundant chrome pushing actual gameplay down the mobile
+     viewport. Visually hidden rather than display:none so the H1 stays
+     in the accessibility tree as the page's one heading landmark; only
+     its visual footprint is removed. Standard, well-known technique —
+     not a new component system. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+
   /* Trivia Game composition correction (post-Slice-009). */
   .room-code-hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 8px; }
 
@@ -232,8 +244,8 @@
   <span class="brand-word">URBANO</span>
   <span class="brand-badge">Gaming</span>
 </div>
-<h1>URBANO Gaming</h1>
-<p class="subtitle">Plays the game; does not control the session.</p>
+<h1 id="pageTitle">URBANO Gaming</h1>
+<p class="subtitle" id="pageSubtitle">Plays the game; does not control the session.</p>
 
 <div id="status-banner" class="notice" style="display:none;" role="alert"></div>
 
@@ -734,9 +746,21 @@ function renderNotice(notice) {
   el.className = "notice notice-" + notice.category;
 }
 
+// Session Shell Duel-Awareness Slice: the join screen itself is
+// unchanged — this only fires once the participant has actually
+// joined, exactly like the two lines above it always have. The H1/
+// subtitle duplicate identity the .brand mark/wordmark above them
+// already establish; compacting them once gameplay is the focus moves
+// the actual game materially higher on a mobile viewport. The H1 keeps
+// its accessibility-tree presence (sr-only, not display:none) so
+// screen-reader heading navigation is unaffected; the subtitle is pure
+// decorative/explanatory copy with no landmark role, so it can hide
+// outright.
 function showGamePanels() {
   document.getElementById("join-panel").style.display = "none";
   document.getElementById("game-panels").style.display = "block";
+  document.getElementById("pageTitle").classList.add("sr-only");
+  document.getElementById("pageSubtitle").style.display = "none";
 }
 
 function renderStepper(currentState) {
@@ -770,7 +794,27 @@ function renderStateCard(state) {
   // precondition suggests the identical contradiction likely also
   // affects an active Quiz; that is a separate, out-of-scope finding,
   // reported alongside this implementation rather than fixed here.
+  //
+  // Session Shell Duel-Awareness Slice: the guard above only covered the
+  // Duel-ACTIVE half of the same contradiction — the moment a Duel
+  // resolves, activeDuel goes back to null (Duel_Architecture.md's own
+  // Parent-Return Invariant: control returns to the parent Session, the
+  // Session itself is not implied complete) and this same LOBBY_LOCKED
+  // message reappeared directly beside the Duel's own fresh terminal
+  // banner (e.g. "YOU WON"). Deliberately scoped to state === "LOBBY_LOCKED"
+  // specifically, not "any state whenever duelHistory is non-empty": a
+  // Duel can only ever coexist with LOBBY_LOCKED (Duel never advances
+  // `state`; only an ordinary Interaction does), so this exact
+  // combination is the only place the contradiction can occur. A
+  // broader duelHistory-only guard would incorrectly suppress a later,
+  // fully legitimate message (e.g. SUBMISSIONS_CLOSED) for an ordinary
+  // Interaction the Host starts sometime after the Duel — that message
+  // has nothing to do with the earlier Duel and must render normally.
   if (activeDuel) {
+    el.style.display = "none";
+    return;
+  }
+  if (state === "LOBBY_LOCKED" && duelHistory && duelHistory.length > 0) {
     el.style.display = "none";
     return;
   }
@@ -2134,8 +2178,21 @@ function applySessionSnapshot(data) {
 // context that matters before and after, not during. Runs last in
 // applySessionSnapshot so it can override renderStandings()'s own
 // visibility decision, made moments earlier in the same pass.
+//
+// Session Shell Duel-Awareness Slice: a Duel never reaches PROMPT_ACTIVE
+// (it runs orthogonally to the ordinary-Interaction state machine —
+// Duel_Architecture.md), so this mechanism, despite already existing
+// for exactly this purpose, was never extended to cover it. Generic to
+// Duel, not Math-Duel-specific — activeDuel is the same shared flag
+// Multiple Choice Duel and Math Duel both populate. Deliberately
+// mirrors the "during, not before/after" philosophy already established
+// above: once the Duel is terminal, activeDuel goes back to null and
+// this function naturally stops forcing focus mode on its own, on the
+// very next render — no separate "just resolved" tracking needed here
+// (unlike renderStateCard's own guard, which does need that distinction
+// because its own underlying state literally does not change).
 function updateFocusMode(effectiveState) {
-  const inFocusMode = effectiveState === "PROMPT_ACTIVE" && !hasSubmittedThisPageLoad;
+  const inFocusMode = (effectiveState === "PROMPT_ACTIVE" && !hasSubmittedThisPageLoad) || !!activeDuel;
   document.getElementById("stepper").style.display = inFocusMode ? "none" : "flex";
   if (inFocusMode) {
     document.getElementById("standingsCard").style.display = "none";
