@@ -326,14 +326,23 @@ export interface ResultsRevealedEventRecord extends SessionEventRecord {
  * same participant in the same interaction, and this generic ledger
  * should not encode a business rule that belongs to the experience,
  * not to Shared Game State.
+ *
+ * Ordinary Duel Session Scoring Slice 001: a scoring event now has
+ * exactly one of two sources, never both — interactionInstanceId for
+ * an ordinary Interaction (Multiple Choice automatic scoring, Open
+ * Response Host manual award), duelId for a Duel's automatic winner
+ * award. duelId is not null is the direct, single-column provenance
+ * signal for "this award came from a Duel" — no separate source-type
+ * field is introduced.
  */
 export interface PointAwardRecord {
   pointAwardId: string;
   sessionId: string;
-  interactionInstanceId: string;
+  interactionInstanceId: string | null;
   participantId: string;
   points: number;
   createdAt: string;
+  duelId: string | null;
 }
 
 export interface PointsAwardedEventRecord extends SessionEventRecord {

@@ -1006,6 +1006,7 @@ export class SupabaseSessionRepository implements SessionRepository {
       participantId: row.participant_id,
       points: row.points,
       createdAt: row.created_at,
+      duelId: row.duel_id ?? null,
     };
   }
 
@@ -1024,6 +1025,7 @@ export class SupabaseSessionRepository implements SessionRepository {
       participantId: row.participant_id,
       points: row.points,
       createdAt: row.created_at,
+      duelId: row.duel_id ?? null,
     }));
   }
 
@@ -1568,6 +1570,9 @@ export class SupabaseSessionRepository implements SessionRepository {
       createdAt: row.created_at as string,
       startedAt: (row.started_at ?? null) as string | null,
       endedAt: (row.ended_at ?? null) as string | null,
+      // Ordinary Duel Session Scoring Slice 001. NOT NULL DEFAULT 10
+      // (0147) — every row always has a value, trusted directly.
+      winnerPoints: row.winner_points as number,
       // Math Duel Slice 001: prompt_text/options are nullable as of
       // 0137 — a Math Duel row leaves them null, and multipleChoice is
       // correspondingly omitted rather than built from null values.

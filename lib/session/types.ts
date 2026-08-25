@@ -1633,6 +1633,16 @@ export interface DuelRecord {
   startedAt: string | null;
   endedAt: string | null;
   multipleChoice?: MultipleChoiceDuelContent;
+  /**
+   * Ordinary Duel Session Scoring Slice 001. The Session-scoring
+   * configuration snapshot captured for this Duel instance — not an
+   * intrinsic universal property of "winning a Duel" (mirrors
+   * PreparedQuestionRecord.pointsForCorrect's own per-instance-
+   * configuration relationship to correctness). Always 10 for a Duel
+   * created through the ordinary Host start path; no current caller
+   * can set it to anything else.
+   */
+  winnerPoints: number;
 }
 
 /**

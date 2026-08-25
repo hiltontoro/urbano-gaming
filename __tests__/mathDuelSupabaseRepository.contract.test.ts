@@ -542,3 +542,170 @@ describe("Legacy Multiple Choice compatibility after Math Duel migrations — li
     expect(record?.multipleChoice?.promptText).toBe("Legacy MC still works?");
   });
 });
+
+describe("Ordinary Duel Session Scoring Slice 001 — Math Duel, live Postgres", () => {
+  it("a fresh Math Duel persists winner_points = 10", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    const record = await repository.getDuelById(duel.duelId);
+    expect(record?.winnerPoints).toBe(10);
+  });
+
+  it("a normal standard-phase WON_LOST resolution awards the winner 10 points as a duel_id-sourced row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    for (let ord = 1; ord <= 5; ord++) {
+      await repository.submitMathDuelAnswer(
+        duel.duelId,
+        b.participantToken,
+        ord,
+        STANDARD[ord - 1].correctAnswer + 1,
+        withNextCandidate(duel.duelId, ord)
+      );
+    }
+
+    const resolved = await repository.getDuelById(duel.duelId);
+    expect(resolved?.terminalResolution).toBe("WON_LOST");
+    expect(resolved?.winnerParticipantId).toBe(a.participantId);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+    expect(awards[0].participantId).toBe(a.participantId);
+    expect(awards[0].points).toBe(10);
+    expect(awards[0].duelId).toBe(duel.duelId);
+    expect(awards[0].interactionInstanceId).toBeNull();
+  });
+
+  it("a sudden-death WON_LOST resolution awards the winner 10 points", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    await answerAllStandardCorrect(duel.duelId, b.participantToken);
+
+    const round6 = suddenDeathContent(duel.duelId, 6);
+    await repository.submitMathDuelAnswer(
+      duel.duelId,
+      a.participantToken,
+      6,
+      round6.correctAnswer,
+      withNextCandidate(duel.duelId, 6)
+    );
+    await repository.submitMathDuelAnswer(
+      duel.duelId,
+      b.participantToken,
+      6,
+      round6.correctAnswer + 1,
+      withNextCandidate(duel.duelId, 6)
+    );
+
+    const resolved = await repository.getDuelById(duel.duelId);
+    expect(resolved?.terminalResolution).toBe("WON_LOST");
+    expect(resolved?.winnerParticipantId).toBe(a.participantId);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+    expect(awards[0].participantId).toBe(a.participantId);
+    expect(awards[0].points).toBe(10);
+  });
+
+  it("FORFEIT_A awards the non-forfeiting competitor B 10 points", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "FORFEIT_A", "Disconnected");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+    expect(awards[0].participantId).toBe(b.participantId);
+    expect(awards[0].points).toBe(10);
+  });
+
+  it("CANCELLED creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "CANCELLED", null);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("a Math Duel VOIDed by COMPLETE_SESSION creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+    await repository.submitMathDuelAnswer(
+      duel.duelId,
+      a.participantToken,
+      1,
+      STANDARD[0].correctAnswer,
+      withNextCandidate(duel.duelId, 1)
+    );
+
+    await repository.completeSession(session.sessionId, session.hostToken, {
+      sessionId: session.sessionId,
+      eventType: "SESSION_COMPLETED",
+      payload: {},
+    });
+
+    const voided = await repository.getDuelById(duel.duelId);
+    expect(voided?.terminalResolution).toBe("VOID");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("a genuine concurrent tie-confirmation at the standard boundary never double-awards", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startAMathDuel(session, a.participantId, b.participantId);
+
+    await answerAllStandardCorrect(duel.duelId, a.participantToken);
+    for (let ord = 1; ord <= 4; ord++) {
+      await repository.submitMathDuelAnswer(
+        duel.duelId,
+        b.participantToken,
+        ord,
+        STANDARD[ord - 1].correctAnswer,
+        withNextCandidate(duel.duelId, ord)
+      );
+    }
+
+    // Both submit ordinal 5 correctly, concurrently -> a genuine tie
+    // (5-5), which lazily creates sudden-death round 6. Exactly one
+    // of the two calls must be the one that resolves the tie logic;
+    // the point-award boundary this test cares about is that no
+    // WON_LOST/award can be produced by a tie at all.
+    await Promise.all([
+      repository.submitMathDuelAnswer(
+        duel.duelId,
+        a.participantToken,
+        5,
+        STANDARD[4].correctAnswer,
+        withNextCandidate(duel.duelId, 5)
+      ),
+      repository.submitMathDuelAnswer(
+        duel.duelId,
+        b.participantToken,
+        5,
+        STANDARD[4].correctAnswer,
+        withNextCandidate(duel.duelId, 5)
+      ),
+    ]);
+
+    const record = await repository.getDuelById(duel.duelId);
+    expect(record?.lifecycleState).toBe("ACTIVE");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+
+    const challenges = await repository.getMathDuelChallenges(duel.duelId);
+    expect(challenges).toHaveLength(6);
+  });
+});

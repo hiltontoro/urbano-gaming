@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { describe, expect, it } from "vitest";
 
 import { createSession } from "../lib/session/createSession";
@@ -7,6 +8,10 @@ import { lockLobby } from "../lib/session/lockLobby";
 import { startSession } from "../lib/session/startSession";
 import { startQuiz } from "../lib/session/startQuiz";
 import { prepareQuestions } from "../lib/session/prepareQuestions";
+import { submitResponse } from "../lib/session/submitResponse";
+import { closeSubmissions } from "../lib/session/closeSubmissions";
+import { revealResults } from "../lib/session/revealResults";
+import { awardPoints } from "../lib/session/awardPoints";
 import { completeSession } from "../lib/session/completeSession";
 import { createSuccessorSession } from "../lib/session/createSuccessorSession";
 import { getSession } from "../lib/session/getSession";
@@ -573,13 +578,139 @@ describe("Duel / SESSION_SUBGAME v1", () => {
   });
 
   describe("Session scoring boundary", () => {
-    it("a Duel resolves with no automatic Session points", async () => {
+    it("a normal WON_LOST resolution awards the winner 10 Session points, the loser 0", async () => {
       const { repo, session, a, b } = await setupDuelReadySession();
       const duel = await startADuel(repo, session, a.participantId, b.participantId);
       await submitDuelResponse(repo, duel.duelId, a.participantToken, CORRECT_INDEX);
       await resolveDuel(repo, duel.duelId, session.hostToken);
       const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      expect(aStanding?.score).toBe(10);
+      expect(bStanding?.score).toBe(0);
+    });
+
+    it("a DRAW resolution awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await submitDuelResponse(repo, duel.duelId, a.participantToken, 1);
+      await submitDuelResponse(repo, duel.duelId, b.participantToken, 2);
+      await resolveDuel(repo, duel.duelId, session.hostToken);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
       expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+
+    it("a VOID resolution awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuel(repo, duel.duelId, session.hostToken);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+
+    it("a CANCELLED resolution awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, duel.duelId, session.hostToken, "CANCELLED", null);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+
+    it("FORFEIT_A awards the non-forfeiting competitor B 10 Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, duel.duelId, session.hostToken, "FORFEIT_A", "left mid-Duel");
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      expect(bStanding?.score).toBe(10);
+      expect(aStanding?.score).toBe(0);
+    });
+
+    it("FORFEIT_B awards the non-forfeiting competitor A 10 Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, duel.duelId, session.hostToken, "FORFEIT_B", "left mid-Duel");
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      expect(aStanding?.score).toBe(10);
+    });
+
+    it("a Duel VOIDed by COMPLETE_SESSION awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      await startADuel(repo, session, a.participantId, b.participantId);
+      await completeSession(repo, session.sessionId, session.hostToken);
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+
+    it("a fresh Duel's winnerPoints configuration snapshot is 10, with no Host input available to change it", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      await startADuel(repo, session, a.participantId, b.participantId);
+      const active = await repo.getActiveDuelForSession(session.sessionId);
+      expect(active?.winnerPoints).toBe(10);
+    });
+
+    it("resolving an already-COMPLETED Duel a second time is rejected and never awards a second time", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await submitDuelResponse(repo, duel.duelId, a.participantToken, CORRECT_INDEX);
+      await resolveDuel(repo, duel.duelId, session.hostToken);
+      await expect(resolveDuel(repo, duel.duelId, session.hostToken)).rejects.toThrow(
+        DuelAlreadyResolvedError
+      );
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      expect(aStanding?.score).toBe(10);
+    });
+
+    it("Duel-sourced and Interaction-sourced Session points coexist additively, and a Duel's winner may differ from the eventual Session winner", async () => {
+      const repo = new InMemorySessionRepository();
+      const session = await createSession(repo);
+      await setSessionCapabilities(repo, session.sessionId, session.hostToken, [
+        "DUEL",
+        "OPEN_RESPONSE",
+      ]);
+      const a = await joinSession(repo, session.roomCode, "Alex");
+      const b = await joinSession(repo, session.roomCode, "Blair");
+      const c = await joinSession(repo, session.roomCode, "Casey");
+      await lockLobby(repo, session.sessionId, session.hostToken);
+
+      // Alex wins a Duel against Blair: +10.
+      const duel = await startADuel(repo, session, a.participantId, b.participantId);
+      await submitDuelResponse(repo, duel.duelId, a.participantToken, CORRECT_INDEX);
+      await resolveDuel(repo, duel.duelId, session.hostToken);
+
+      // Casey separately receives a larger Host-adjudicated Open
+      // Response award for an ordinary Interaction: +15.
+      const interaction = await startSession(repo, session.sessionId, session.hostToken, {
+        engineType: "OPEN_RESPONSE",
+        promptText: "Prompt text",
+      });
+      await submitResponse(repo, session.sessionId, c.participantToken, "Casey answer");
+      await closeSubmissions(repo, session.sessionId, session.hostToken);
+      await revealResults(repo, session.sessionId, session.hostToken);
+      await awardPoints(
+        repo,
+        session.sessionId,
+        session.hostToken,
+        interaction.interactionInstanceId,
+        c.participantId,
+        15,
+        randomUUID()
+      );
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      const cStanding = result.standings.find((s) => s.participantId === c.participantId);
+      expect(aStanding?.score).toBe(10);
+      expect(bStanding?.score).toBe(0);
+      expect(cStanding?.score).toBe(15);
+      // Alex won the Duel; Casey is the overall Session leader — the
+      // two are genuinely independent facts.
+      expect(duel.competitorAParticipantId).toBe(a.participantId);
+      expect(Math.max(aStanding!.score, bStanding!.score, cStanding!.score)).toBe(cStanding!.score);
     });
   });
 

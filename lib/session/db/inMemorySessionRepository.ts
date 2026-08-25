@@ -1099,6 +1099,7 @@ export class InMemorySessionRepository implements SessionRepository {
           participantId: submission.participantId,
           points: details.pointsForCorrect,
           createdAt: new Date().toISOString(),
+          duelId: null,
         };
 
         this.pointAwards.set(pointAwardId, award);
@@ -1200,6 +1201,7 @@ export class InMemorySessionRepository implements SessionRepository {
       participantId,
       points,
       createdAt: new Date().toISOString(),
+      duelId: null,
     };
 
     this.pointAwards.set(pointAwardId, record);
@@ -1212,6 +1214,52 @@ export class InMemorySessionRepository implements SessionRepository {
     });
 
     return record;
+  }
+
+  /**
+   * Ordinary Duel Session Scoring Slice 001. Shared by resolveDuel,
+   * resolveDuelExceptionally, and submitMathDuelAnswer — the three
+   * terminal paths that can ever produce a Duel-sourced automatic
+   * award. Mirrors submit_math_duel_answer_atomically's own single
+   * per-Duel scoring namespace: md5-free here since this in-memory
+   * double has no uuid-column constraint to satisfy, but the readable
+   * key is scoped identically (one key per duelId, shared by every
+   * caller), so a second award for the same Duel is exactly as
+   * impossible here as the real unique(session_id, idempotency_key)
+   * constraint makes it in Postgres.
+   */
+  private awardDuelPoints(
+    sessionId: string,
+    duelId: string,
+    winnerParticipantId: string,
+    points: number
+  ) {
+    const idempotencyKey = `duel-score:${duelId}`;
+    const indexKey = `${sessionId}:${idempotencyKey}`;
+
+    if (this.pointAwardIdempotencyIndex.has(indexKey)) {
+      return;
+    }
+
+    const pointAwardId = randomUUID();
+    const award: PointAwardRecord = {
+      pointAwardId,
+      sessionId,
+      interactionInstanceId: null,
+      participantId: winnerParticipantId,
+      points,
+      createdAt: new Date().toISOString(),
+      duelId,
+    };
+
+    this.pointAwards.set(pointAwardId, award);
+    this.pointAwardIdempotencyIndex.set(indexKey, pointAwardId);
+
+    this.events.push({
+      sessionId,
+      eventType: "POINTS_AWARDED",
+      payload: { pointAwardId, duelId, participantId: winnerParticipantId, points },
+    });
   }
 
   async getPointAwardsForSession(sessionId: string): Promise<PointAwardRecord[]> {
@@ -1806,6 +1854,7 @@ export class InMemorySessionRepository implements SessionRepository {
           participantId: submission.participantId,
           points: details.pointsForCorrect,
           createdAt: new Date().toISOString(),
+          duelId: null,
         });
         this.pointAwardIdempotencyIndex.set(indexKey, pointAwardId);
 
@@ -1941,6 +1990,7 @@ export class InMemorySessionRepository implements SessionRepository {
         promptText: trimmedPrompt,
         options: trimmedOptions,
       },
+      winnerPoints: 10,
     };
     this.duels.set(duel.duelId, duel);
     // correctOptionIndex is intentionally not stored on the public
@@ -2089,6 +2139,10 @@ export class InMemorySessionRepository implements SessionRepository {
       payload: { duelId, terminalResolution, winnerParticipantId },
     });
 
+    if (terminalResolution === "WON_LOST" && winnerParticipantId) {
+      this.awardDuelPoints(duel.sessionId, duelId, winnerParticipantId, duel.winnerPoints);
+    }
+
     return { duelId, lifecycleState: "COMPLETED", terminalResolution, winnerParticipantId };
   }
 
@@ -2147,6 +2201,10 @@ export class InMemorySessionRepository implements SessionRepository {
       eventType: "DUEL_RESOLVED",
       payload: { duelId, terminalResolution, winnerParticipantId, reason },
     });
+
+    if (terminalResolution === "FORFEIT" && winnerParticipantId) {
+      this.awardDuelPoints(duel.sessionId, duelId, winnerParticipantId, duel.winnerPoints);
+    }
 
     return { duelId, lifecycleState: "COMPLETED", terminalResolution, winnerParticipantId };
   }
@@ -2263,6 +2321,7 @@ export class InMemorySessionRepository implements SessionRepository {
       createdAt: startedAt,
       startedAt,
       endedAt: null,
+      winnerPoints: 10,
     };
     this.duels.set(duel.duelId, duel);
 
@@ -2460,6 +2519,10 @@ export class InMemorySessionRepository implements SessionRepository {
           eventType: "DUEL_RESOLVED",
           payload: { duelId, terminalResolution: resolution, winnerParticipantId: winner },
         });
+
+        if (resolution === "WON_LOST" && winner) {
+          this.awardDuelPoints(duel.sessionId, duelId, winner, duel.winnerPoints);
+        }
       } else if (tied) {
         // A genuine tie at the deciding challenge (standard or sudden
         // death): create the next sudden-death round lazily. Only

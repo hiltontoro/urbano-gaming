@@ -709,6 +709,91 @@ describe("Math Duel Slice 001", () => {
     });
   });
 
+  describe("Session scoring (Ordinary Duel Session Scoring Slice 001)", () => {
+    it("a fresh Math Duel's winnerPoints configuration snapshot is 10", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      await startAMathDuel(repo, session, a.participantId, b.participantId);
+      const active = await repo.getActiveDuelForSession(session.sessionId);
+      expect(active?.winnerPoints).toBe(10);
+    });
+
+    it("a normal standard-phase WON_LOST resolution awards the winner 10 Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const started = await startAMathDuel(repo, session, a.participantId, b.participantId);
+      await answerAllCorrect(repo, started.duelId, a.participantToken, MATH_DUEL_STANDARD_COUNT);
+      await answerAllWrong(repo, started.duelId, b.participantToken, MATH_DUEL_STANDARD_COUNT);
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      expect(aStanding?.score).toBe(10);
+      expect(bStanding?.score).toBe(0);
+    });
+
+    it("a sudden-death WON_LOST resolution awards the winner 10 Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const started = await startAMathDuel(repo, session, a.participantId, b.participantId);
+      // Tie the standard phase 5-5 to force sudden death.
+      await answerAllCorrect(repo, started.duelId, a.participantToken, MATH_DUEL_STANDARD_COUNT);
+      await answerAllCorrect(repo, started.duelId, b.participantToken, MATH_DUEL_STANDARD_COUNT);
+
+      const round6 = suddenDeathContent(started.duelId, 6);
+      await submitMathDuelAnswer(
+        repo,
+        started.duelId,
+        a.participantToken,
+        6,
+        round6.correctAnswer
+      );
+      await submitMathDuelAnswer(
+        repo,
+        started.duelId,
+        b.participantToken,
+        6,
+        round6.correctAnswer + 1
+      );
+
+      const duel = await repo.getDuelById(started.duelId);
+      expect(duel?.terminalResolution).toBe("WON_LOST");
+      expect(duel?.winnerParticipantId).toBe(a.participantId);
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const aStanding = result.standings.find((s) => s.participantId === a.participantId);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      expect(aStanding?.score).toBe(10);
+      expect(bStanding?.score).toBe(0);
+    });
+
+    it("FORFEIT_A awards the non-forfeiting competitor B 10 Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const started = await startAMathDuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, started.duelId, session.hostToken, "FORFEIT_A", "Alex disconnected");
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      const bStanding = result.standings.find((s) => s.participantId === b.participantId);
+      expect(bStanding?.score).toBe(10);
+    });
+
+    it("CANCELLED awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const started = await startAMathDuel(repo, session, a.participantId, b.participantId);
+      await resolveDuelExceptionally(repo, started.duelId, session.hostToken, "CANCELLED", null);
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+
+    it("a Math Duel VOIDed by COMPLETE_SESSION awards no Session points", async () => {
+      const { repo, session, a, b } = await setupDuelReadySession();
+      const started = await startAMathDuel(repo, session, a.participantId, b.participantId);
+      await submitMathDuelAnswer(repo, started.duelId, a.participantToken, 1, STANDARD[0].correctAnswer);
+      await completeSession(repo, session.sessionId, session.hostToken);
+
+      const result = await getSession(repo, session.sessionId, session.hostToken);
+      expect(result.standings.every((s) => s.score === 0)).toBe(true);
+    });
+  });
+
   describe("Mutual exclusion with ordinary Session capabilities", () => {
     it("blocks starting a Math Duel while an ordinary Interaction is active", async () => {
       const { repo, session, a, b } = await setupDuelReadySession(["DUEL", "OPEN_RESPONSE"]);

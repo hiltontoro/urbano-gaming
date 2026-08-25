@@ -46,7 +46,11 @@ export async function awardPoints(
   return {
     pointAwardId: result.pointAwardId,
     sessionId: result.sessionId,
-    interactionInstanceId: result.interactionInstanceId,
+    // AWARD_POINTS only ever creates or replays an Interaction-sourced
+    // award (repo.awardPoints's own signature requires
+    // interactionInstanceId) — never null, unlike a Duel-sourced
+    // PointAwardRecord (Ordinary Duel Session Scoring Slice 001).
+    interactionInstanceId: result.interactionInstanceId!,
     participantId: result.participantId,
     points: result.points,
     createdAt: result.createdAt,

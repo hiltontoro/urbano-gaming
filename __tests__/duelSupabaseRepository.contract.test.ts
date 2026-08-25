@@ -536,3 +536,208 @@ describe("Session-completion voids an active Duel — live Postgres", () => {
     expect(responses[0].participantId).toBe(a.participantId);
   });
 });
+
+describe("Ordinary Duel Session Scoring Slice 001 — live Postgres", () => {
+  it("a fresh Duel persists winner_points = 10 with no caller-supplied override path", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    const active = await repository.getDuelById(duel.duelId);
+    expect(active?.winnerPoints).toBe(10);
+  });
+
+  it("WON_LOST awards the winner 10 points as a duel_id-sourced row, never an interaction_instance_id row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX);
+    await repository.submitDuelResponse(duel.duelId, b.participantToken, CORRECT_INDEX + 1);
+    await repository.resolveDuel(duel.duelId, session.hostToken);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+    expect(awards[0].participantId).toBe(a.participantId);
+    expect(awards[0].points).toBe(10);
+    expect(awards[0].duelId).toBe(duel.duelId);
+    expect(awards[0].interactionInstanceId).toBeNull();
+
+    // Direct row-level confirmation, independent of the TS mapping layer.
+    const { data: row } = await cleanupClient
+      .from("point_awards")
+      .select("interaction_instance_id, duel_id, points")
+      .eq("duel_id", duel.duelId)
+      .single();
+    expect(row?.interaction_instance_id).toBeNull();
+    expect(row?.duel_id).toBe(duel.duelId);
+    expect(row?.points).toBe(10);
+  });
+
+  it("a DRAW resolution creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    // Both wrong -> DRAW (0131's own truth table).
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX + 1);
+    await repository.submitDuelResponse(duel.duelId, b.participantToken, CORRECT_INDEX + 2);
+    const result = await repository.resolveDuel(duel.duelId, session.hostToken);
+    expect(result.terminalResolution).toBe("DRAW");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("a VOID resolution (neither competitor responded) creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    const result = await repository.resolveDuel(duel.duelId, session.hostToken);
+    expect(result.terminalResolution).toBe("VOID");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("CANCELLED creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.resolveDuelExceptionally(duel.duelId, session.hostToken, "CANCELLED", null);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("FORFEIT_A awards the non-forfeiting competitor B 10 points", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.resolveDuelExceptionally(
+      duel.duelId,
+      session.hostToken,
+      "FORFEIT_A",
+      "Alex disconnected"
+    );
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+    expect(awards[0].participantId).toBe(b.participantId);
+    expect(awards[0].points).toBe(10);
+    expect(awards[0].duelId).toBe(duel.duelId);
+  });
+
+  it("a Duel VOIDed by COMPLETE_SESSION creates no point_awards row", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX);
+
+    await repository.completeSession(session.sessionId, session.hostToken, {
+      sessionId: session.sessionId,
+      eventType: "SESSION_COMPLETED",
+      payload: {},
+    });
+
+    const voided = await repository.getDuelById(duel.duelId);
+    expect(voided?.terminalResolution).toBe("VOID");
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(0);
+  });
+
+  it("a duplicate/retried resolve_duel_atomically call never creates a second award", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX);
+    await repository.submitDuelResponse(duel.duelId, b.participantToken, CORRECT_INDEX + 1);
+    await repository.resolveDuel(duel.duelId, session.hostToken);
+
+    await expect(repository.resolveDuel(duel.duelId, session.hostToken)).rejects.toBeInstanceOf(
+      DuelAlreadyResolvedError
+    );
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    expect(awards).toHaveLength(1);
+  });
+
+  it("Duel-sourced and Interaction-sourced points coexist additively on live Postgres standings", async () => {
+    const { session, participants } = await setupDuelReadySession(["DUEL", "OPEN_RESPONSE"]);
+    const [a, b, c] = participants;
+
+    // Alex beats Blair in a Duel: +10.
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX);
+    await repository.submitDuelResponse(duel.duelId, b.participantToken, CORRECT_INDEX + 1);
+    await repository.resolveDuel(duel.duelId, session.hostToken);
+
+    // Casey separately receives a larger Host-adjudicated Open Response
+    // award for an ordinary Interaction: +15.
+    const interaction = await repository.startSession(session.sessionId, session.hostToken, {
+      engineType: "OPEN_RESPONSE",
+      promptText: "Prompt text",
+    });
+    await repository.submitResponse(
+      session.sessionId,
+      c.participantId,
+      c.participantToken,
+      "Casey answer"
+    );
+    await repository.closeSubmissions(session.sessionId, session.hostToken, {
+      sessionId: session.sessionId,
+      eventType: "SUBMISSIONS_CLOSED",
+      payload: {},
+    });
+    await repository.revealResults(session.sessionId, session.hostToken, {
+      sessionId: session.sessionId,
+      eventType: "RESULTS_REVEALED",
+      payload: {},
+    });
+    await repository.awardPoints(
+      session.sessionId,
+      session.hostToken,
+      interaction.interactionInstanceId,
+      c.participantId,
+      15,
+      randomUUID()
+    );
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    const totalByParticipant = new Map<string, number>();
+    for (const award of awards) {
+      totalByParticipant.set(
+        award.participantId,
+        (totalByParticipant.get(award.participantId) ?? 0) + award.points
+      );
+    }
+    expect(totalByParticipant.get(a.participantId)).toBe(10);
+    expect(totalByParticipant.get(b.participantId) ?? 0).toBe(0);
+    expect(totalByParticipant.get(c.participantId)).toBe(15);
+  });
+
+  it("resolve_duel_atomically racing COMPLETE_SESSION never produces two awards for the same Duel", async () => {
+    const { session, participants } = await setupDuelReadySession();
+    const [a, b] = participants;
+    const duel = await startADuel(session, a.participantId, b.participantId);
+    await repository.submitDuelResponse(duel.duelId, a.participantToken, CORRECT_INDEX);
+
+    await Promise.allSettled([
+      repository.resolveDuel(duel.duelId, session.hostToken),
+      repository.completeSession(session.sessionId, session.hostToken, {
+        sessionId: session.sessionId,
+        eventType: "SESSION_COMPLETED",
+        payload: {},
+      }),
+    ]);
+
+    const awards = await repository.getPointAwardsForSession(session.sessionId);
+    // Whichever side won the race: WON_LOST -> exactly one award;
+    // VOID -> zero awards. Never two.
+    expect(awards.length).toBeLessThanOrEqual(1);
+    const finalDuel = await repository.getDuelById(duel.duelId);
+    if (finalDuel?.terminalResolution === "WON_LOST") {
+      expect(awards).toHaveLength(1);
+    } else {
+      expect(awards).toHaveLength(0);
+    }
+  });
+});
