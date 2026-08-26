@@ -60,8 +60,29 @@
     margin: 24px auto;
     padding: 0 16px 60px;
   }
+  /* Frontend Shell Refinement Slice: .brand became a full-width row so
+     a role badge (HOST) can sit at the far right without disturbing
+     the mark/word/badge group's own tight spacing — that group now
+     lives in .brand-identity, the only thing space-between separates
+     from the role badge. Mirrors participant.html's identical
+     correction. */
   .brand {
-    display: inline-flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; margin-bottom: 10px;
+  }
+  .brand-identity { display: inline-flex; align-items: center; gap: 10px; }
+  .identity-role-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  /* Same visually-hidden technique participant.html already
+     established for its own <h1> — keeps it in the accessibility tree
+     as the page's one heading landmark while removing its visual
+     footprint, which now duplicates .brand's own identity above it. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
   /* URBANO Gaming logo (production playtest refinement): the
      constitutional U mark and gold dot are unchanged — only a purple
@@ -400,12 +421,24 @@
 <body>
 
 <div class="brand">
-  <img class="brand-mark" src="/urbano-mark.svg" alt="" />
-  <span class="brand-word">URBANO</span>
-  <span class="brand-badge">Gaming</span>
+  <div class="brand-identity">
+    <img class="brand-mark" src="/urbano-mark.svg" alt="" />
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <span class="identity-role-badge" aria-label="Host — drives the session forward, does not participate">Host</span>
 </div>
-<h1>URBANO Gaming — Host</h1>
-<p class="subtitle">Drives the session forward; does not participate.</p>
+<!-- Frontend Shell Refinement Slice: "URBANO Gaming — Host" duplicates
+     the identity .brand above it already establishes, and "Drives the
+     session forward; does not participate" is now carried as an
+     aria-label on the Host role badge instead — sr-only rather than
+     display:none for the H1 specifically, so it stays in the
+     accessibility tree as the page's one heading landmark. Unlike
+     participant.html's identical compaction, this is unconditional
+     from first paint: Host has no join-gated "before/after" state for
+     this identity to transition across. -->
+<h1 class="sr-only">URBANO Gaming — Host</h1>
+<p class="subtitle" style="display:none;">Drives the session forward; does not participate.</p>
 
 <div id="status-banner" class="notice" style="display:none;" role="alert"></div>
 
@@ -428,6 +461,14 @@
     <h2>Room Code</h2>
     <div class="room-code" id="roomCodeDisplay">——————</div>
     <div class="room-code-hint">Share this with participants at <strong>/participant.html</strong></div>
+    <!-- Frontend Shell Refinement Slice: a dedicated, LOBBY_OPEN-only
+         compact Lock Lobby action living next to the Room Code, rather
+         than the large standalone primaryActionBar. Calls the exact
+         same lockLobby() the shared primary-action system already
+         uses — visibility (and only visibility) is owned by
+         resolvePrimaryAction()'s own LOBBY_OPEN branch; no separate
+         state machine was introduced. -->
+    <button class="btn-primary" id="btn-lock-lobby-compact" onclick="lockLobby()" style="display:none; width:100%; margin-top:10px;">Lock Lobby</button>
   </div>
 
   <div class="card" id="devInfoCard" style="display:none;">
@@ -454,10 +495,28 @@
         <ul class="participant-list" id="participantList"></ul>
       </div>
 
+      <!-- Frontend Shell Refinement Slice: renderStandings()/
+           renderWinnerBanner() (see below) only ever mutate
+           #standingsList's innerHTML and #winnerBanner's own
+           properties in place — confirmed by direct search before this
+           change — neither ever recreates this <details> wrapper, so
+           its open/closed state survives every ~2s poll automatically,
+           with no read-back-before-replace code needed (unlike Math
+           Duel's own disclosure, which needs that trick specifically
+           because its wrapper DOES get swept up in a wholesale
+           innerHTML replacement each poll). Starts closed by default
+           via plain HTML (no "open" attribute) — matches the Founder's
+           own "especially at Session start when scores are 0"
+           complaint. #winnerBanner stays outside/above the <details>
+           so the final Session winner is never hidden behind a
+           disclosure the host would have to think to open. -->
       <div class="card" id="standingsCard" style="display:none;">
         <h2>Standings</h2>
-        <div id="standingsList"></div>
         <div id="winnerBanner" class="winner-banner" style="display:none;"></div>
+        <details id="standingsDisclosure">
+          <summary>View Standings</summary>
+          <div id="standingsList"></div>
+        </details>
       </div>
 
       <!-- Session Controls: the single, state-driven primary action.
@@ -569,8 +628,14 @@
       <!-- Duel / SESSION_SUBGAME v1: relocated to .control-grid-main —
            see that column's own opening comment for why. -->
 
+      <!-- Frontend Shell Refinement Slice: the visible "Check for
+           updates" button was removed from normal UX — automatic
+           synchronization (sessionSync.js: polling, visibilitychange/
+           pageshow/focus recovery) is unaffected. Manual refresh
+           remains reachable for development/diagnosis via the console
+           (sessionSync.refreshNow()) or the existing, already
+           hidden-by-default #syncDebugPanel above. -->
       <div class="secondary-actions">
-        <button class="btn-ghost" onclick="sessionSync.refreshNow()" title="Manual refresh — the game normally syncs automatically; use this if you suspect it's stalled.">Check for updates</button>
         <button class="btn-danger" id="btn-complete" onclick="completeSession()">End Session</button>
         <button class="btn-primary" id="btn-new-session" onclick="createSession()" style="display:none;">Create New Session</button>
         <button class="btn-primary" id="btn-rematch" onclick="createSuccessorSession()" style="display:none;">Create Rematch</button>
@@ -1747,8 +1812,12 @@ function updateRoomCodeDisplayMode() {
 function updateManageContentDisclosure() {
   const toggle = document.getElementById("manageContentToggle");
   const body = document.getElementById("authoringWorkspaceBody");
-  const sessionIsRunning = sessionLifecycleState && sessionLifecycleState !== "LOBBY_OPEN";
-  toggle.style.display = sessionIsRunning ? "inline-block" : "none";
+  // Frontend Shell Refinement Slice: previously excluded LOBBY_OPEN
+  // (sessionIsRunning), which made the toggle unreachable during the
+  // one state Authoring Workspace now starts collapsed in — a host
+  // would have had no way to reopen it to author questions before
+  // locking the lobby. Visible whenever any session exists at all.
+  toggle.style.display = sessionLifecycleState ? "inline-block" : "none";
 
   if (sessionLifecycleState === "LOBBY_LOCKED" && !manageContentAutoCollapsed) {
     body.classList.add("collapsed");
@@ -1781,6 +1850,14 @@ function toggleManageContent() {
 function resolvePrimaryAction() {
   const bar = document.getElementById("primaryActionBar");
   const btn = document.getElementById("btn-primary-action");
+  // Frontend Shell Refinement Slice: reset to hidden on every call,
+  // mirroring hideTurnTypeUI()'s own "reset then let the one relevant
+  // branch reassert" idiom — only the LOBBY_OPEN branch below ever
+  // re-shows this, so every other state (including the three early
+  // returns just below) correctly leaves it hidden without needing its
+  // own explicit line.
+  const compactLockBtn = document.getElementById("btn-lock-lobby-compact");
+  compactLockBtn.style.display = "none";
   const turnTypeSelector = document.getElementById("turnTypeSelector");
   const openResponseForm = document.getElementById("openResponseStartForm");
   const triviaForm = document.getElementById("triviaStartForm");
@@ -1834,8 +1911,18 @@ function resolvePrimaryAction() {
 
   if (sessionLifecycleState === "LOBBY_OPEN") {
     hideTurnTypeUI();
+    // The dedicated compact control (see #roomCodeCard) owns
+    // LOBBY_OPEN's presentation now — suppress the large shared bar's
+    // redundant presentation for this one state only. btn's own
+    // textContent/onclick are still assigned, unused while hidden,
+    // so the shared primary-action system needs no other change and
+    // resumes normal responsibility the instant sessionLifecycleState
+    // advances past LOBBY_OPEN.
+    bar.style.display = "none";
     btn.textContent = "Lock Lobby";
     btn.onclick = lockLobby;
+    compactLockBtn.style.display = "block";
+    compactLockBtn.disabled = false;
     return;
   }
 
@@ -2416,7 +2503,18 @@ function switchToNewSession(json) {
   successorSessionId = null;
   successorRoomCode = null;
   awardInFlight = {};
-  manageContentAutoCollapsed = false;
+  // Frontend Shell Refinement Slice: starts true, not false — Authoring
+  // Workspace now starts collapsed from the very first LOBBY_OPEN
+  // render (see the .classList.add("collapsed") replacing the old
+  // .remove(...) below), so the one-time auto-collapse this flag
+  // guards has already effectively happened. Setting it here (not just
+  // adding the class) matters: updateManageContentDisclosure()'s own
+  // LOBBY_LOCKED-time auto-collapse check must not fire a second time
+  // and re-collapse content the host may have manually reopened during
+  // LOBBY_OPEN to author questions before locking — exactly the
+  // "never re-collapse a manual reopen" guarantee that check already
+  // documents for itself, just extended one state earlier.
+  manageContentAutoCollapsed = true;
   selectedTurnType = null;
   selectedVotingSource = "HOST_AUTHORED";
   lastKnownParticipants = [];
@@ -2426,7 +2524,7 @@ function switchToNewSession(json) {
   selectedDuelMechanic = "MULTIPLE_CHOICE";
   expLastInteractionState = null;
   expCelebrationPlayed = false;
-  document.getElementById("authoringWorkspaceBody").classList.remove("collapsed");
+  document.getElementById("authoringWorkspaceBody").classList.add("collapsed");
   renderCreateItemFields();
   renderItemQueue();
 
@@ -2468,10 +2566,27 @@ async function createSuccessorSession() {
 }
 
 async function lockLobby() {
+  // Frontend Shell Refinement Slice: the compact Room-Code-adjacent
+  // Lock Lobby control is the only reachable trigger for this command
+  // during LOBBY_OPEN now (resolvePrimaryAction() hides the large
+  // shared primaryActionBar for that state — see its own LOBBY_OPEN
+  // branch), so a synchronous disable here fully covers the real double-
+  // click surface without needing to touch #btn-primary-action's own
+  // disabled state, which is a long-lived node reused across every
+  // other lifecycle state and does not get a matching re-enable
+  // anywhere — disabling it here could leak into a future, unrelated
+  // primary-action state. resolvePrimaryAction() explicitly resets the
+  // compact button back to enabled every time it re-shows it, so a
+  // failed attempt self-heals on the very next poll/render pass.
+  const compactBtn = document.getElementById("btn-lock-lobby-compact");
+  if (compactBtn) compactBtn.disabled = true;
   const r = await postJson(`/api/sessions/${hostState.sessionId}/lock`, { hostToken: hostState.hostToken });
   show("LOCK_LOBBY (" + r.status + ")", r.json);
   if (r.status === 200) { renderNotice(null); applySessionSnapshot(r.json); }
-  else renderNotice(classifyError(r));
+  else {
+    renderNotice(classifyError(r));
+    if (compactBtn) compactBtn.disabled = false;
+  }
 }
 
 // Slice 009 (Engine Selection + PARTICIPANTS Voting). Single START_SESSION

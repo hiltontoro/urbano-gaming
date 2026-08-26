@@ -43,8 +43,22 @@
     margin: 24px auto;
     padding: 0 16px 60px;
   }
+  /* Frontend Shell Refinement Slice: .brand became a full-width row so
+     a role badge (GUEST here; HOST is host.html's own identical
+     pattern) can sit at the far right without disturbing the
+     mark/word/badge group's own tight spacing — that group now lives
+     in .brand-identity, the only thing space-between separates from
+     the role badge. No Auth: the badge is a static string, not a real
+     account/session concept. */
   .brand {
-    display: inline-flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; margin-bottom: 10px;
+  }
+  .brand-identity { display: inline-flex; align-items: center; gap: 10px; }
+  .identity-role-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px;
+    white-space: nowrap; flex-shrink: 0;
   }
   /* URBANO Gaming logo (production playtest refinement) — see
      host.html's identical block for the full reasoning: same
@@ -157,9 +171,25 @@
   }
   .waiting .big { font-size: 28px; display: block; margin-bottom: 8px; }
 
-  .progress-bar { height: 8px; background: var(--upcoming); border-radius: 4px; overflow: hidden; margin: 8px 0; }
-  .progress-fill { height: 100%; background: var(--done); }
+  .progress-bar { height: 8px; background: var(--upcoming); border-radius: 4px; overflow: hidden; margin: 8px 0; position: relative; }
+  .progress-fill { height: 100%; background: var(--done); position: relative; z-index: 0; }
   .progress-label { font-size: 13px; color: var(--muted); text-align: center; }
+
+  /* Frontend Shell Refinement Slice: five discrete milestone markers
+     (1/5..5/5) on Math Duel's own race bar — four boundary lines at
+     20/40/60/80%, drawn as one background-image overlay rather than
+     four separate elements. Decorative only: exposes no information
+     beyond the count already truthfully shown by the fill width and
+     text label (mathDuelRaceLabelMine/Opp). Sits above .progress-fill
+     (z-index) so a milestone already passed still shows its boundary
+     line against the fill color, not just the empty track. */
+  .progress-bar::after {
+    content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background-image: repeating-linear-gradient(
+      to right, transparent, transparent calc(20% - 1px),
+      rgba(10, 10, 10, 0.35) calc(20% - 1px), rgba(10, 10, 10, 0.35) 20%
+    );
+  }
 
   .result-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
   .result-card.own { background: var(--own); border-color: var(--accent); }
@@ -181,6 +211,18 @@
     margin-top: 12px; padding: 12px 14px; border-radius: 8px; font-weight: 700;
     text-align: center; background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold);
     font-size: 15px;
+  }
+  /* Frontend Shell Refinement Slice: Math Duel terminal tone. Additive
+     modifiers only — bare .winner-banner (Quiz's own winner banner,
+     the Session-complete banner, and Multiple Choice Duel's own
+     third-person terminal banner) is untouched and keeps today's
+     unconditional gold treatment. Only renderMathDuelTerminal() ever
+     applies tone-loss/tone-neutral. */
+  .winner-banner.tone-loss {
+    background: var(--wrong-bg); color: var(--wrong); border-color: var(--wrong);
+  }
+  .winner-banner.tone-neutral {
+    background: var(--surface-2); color: var(--ink); border-color: var(--line);
   }
 
   button {
@@ -240,9 +282,12 @@
 <body>
 
 <div class="brand">
-  <img class="brand-mark" src="/urbano-mark.svg" alt="" />
-  <span class="brand-word">URBANO</span>
-  <span class="brand-badge">Gaming</span>
+  <div class="brand-identity">
+    <img class="brand-mark" src="/urbano-mark.svg" alt="" />
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <span class="identity-role-badge">Guest</span>
 </div>
 <h1 id="pageTitle">URBANO Gaming</h1>
 <p class="subtitle" id="pageSubtitle">Plays the game; does not control the session.</p>
@@ -405,7 +450,14 @@
     </div>
   </div>
 
-  <button class="btn-ghost" onclick="sessionSync.refreshNow()" title="Manual refresh — the game normally syncs automatically; use this if you suspect it's stalled.">Check for updates</button>
+  <!-- Frontend Shell Refinement Slice: the visible "Check for updates"
+       button was removed from normal UX — automatic synchronization
+       (sessionSync.js: polling, visibilitychange/pageshow/focus
+       recovery) is unaffected and unchanged by this removal. Manual
+       refresh remains reachable for development/diagnosis via the
+       console (sessionSync.refreshNow()) or the existing, already
+       hidden-by-default #syncDebugPanel above — no new developer
+       surface was built for this. -->
 </div>
 
 <details id="debugOutputDetails" style="display:none;">
@@ -1583,33 +1635,44 @@ function duelTerminalSummaryText(duel) {
 // branches, 0128's check constraint) — so for a caller already
 // confirmed to be one of the two competitors, "not the winner" and
 // "the one who forfeited" are the same fact; there is no third case.
+// Frontend Shell Refinement Slice: `tone` ("win"|"loss"|"neutral")
+// replaces the old boolean `celebrate` so a non-win outcome can be
+// truthfully distinguished from a genuine loss rather than the two
+// being visually identical (both previously rendered the same
+// unconditional gold .winner-banner, celebrate only gating the pulse
+// animation). "win" keeps exactly today's gold+pulse treatment
+// (renderMathDuelTerminal below still applies exp-celebrate only for
+// tone === "win"); "loss" is the new red treatment; every outcome with
+// no truthful winner/loser at all (DRAW/CANCELLED/VOID) and every
+// spectator view is "neutral" — deliberately not "loss", since none of
+// those describe this viewer losing anything.
 function mathDuelTerminalBanner(duel) {
   const isCompetitorA = participantState.participantId === duel.competitorAParticipantId;
   const isCompetitorB = participantState.participantId === duel.competitorBParticipantId;
   if (!isCompetitorA && !isCompetitorB) {
-    return { headline: duelTerminalSummaryText(duel), secondary: null, celebrate: false };
+    return { headline: duelTerminalSummaryText(duel), secondary: null, tone: "neutral" };
   }
   const iWon = duel.winnerParticipantId === participantState.participantId;
   if (duel.terminalResolution === "WON_LOST") {
     return iWon
-      ? { headline: "YOU WON", secondary: "+10 points", celebrate: true }
-      : { headline: "YOU LOST", secondary: null, celebrate: false };
+      ? { headline: "YOU WON", secondary: "+10 points", tone: "win" }
+      : { headline: "YOU LOST", secondary: null, tone: "loss" };
   }
   if (duel.terminalResolution === "FORFEIT") {
     return iWon
-      ? { headline: "YOU WON", secondary: "+10 points — opponent forfeited", celebrate: true }
-      : { headline: "YOU FORFEITED", secondary: null, celebrate: false };
+      ? { headline: "YOU WON", secondary: "+10 points — opponent forfeited", tone: "win" }
+      : { headline: "YOU FORFEITED", secondary: null, tone: "loss" };
   }
   if (duel.terminalResolution === "DRAW") {
-    return { headline: "DRAW", secondary: null, celebrate: false };
+    return { headline: "DRAW", secondary: null, tone: "neutral" };
   }
   if (duel.terminalResolution === "CANCELLED") {
-    return { headline: "DUEL CANCELLED", secondary: null, celebrate: false };
+    return { headline: "DUEL CANCELLED", secondary: null, tone: "neutral" };
   }
   if (duel.terminalResolution === "VOID") {
-    return { headline: "DUEL VOIDED", secondary: null, celebrate: false };
+    return { headline: "DUEL VOIDED", secondary: null, tone: "neutral" };
   }
-  return { headline: duelTerminalSummaryText(duel), secondary: null, celebrate: false };
+  return { headline: duelTerminalSummaryText(duel), secondary: null, tone: "neutral" };
 }
 
 // Owns the entire duelCard: three mutually exclusive views (competitor,
@@ -1897,7 +1960,7 @@ function renderMathDuelActive(body) {
       answerArea.innerHTML =
         `<div class="prompt-text" style="margin-bottom:12px;">${current.questionText}</div>` +
         `<label>Your answer</label>` +
-        `<input type="number" id="mathDuelAnswerInput" inputmode="numeric" placeholder="Enter a whole number" data-ordinal="${current.challengeOrdinal}" />` +
+        `<input type="number" id="mathDuelAnswerInput" inputmode="numeric" placeholder="Enter a whole number" data-ordinal="${current.challengeOrdinal}" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();submitMathDuelAnswer();}" />` +
         `<button class="btn-primary" onclick="submitMathDuelAnswer()">Submit Answer</button>`;
     } else if (md.phase === "SUDDEN_DEATH") {
       answerArea.innerHTML = `<div class="waiting">Waiting for ${opponentName} to answer this round…</div>`;
@@ -1919,7 +1982,10 @@ function renderMathDuelActive(body) {
 // genuine incorrect answer.
 function formatMathDuelAnswer(answer, correct) {
   if (answer === null) return `<span style="color:var(--muted);">no answer</span>`;
-  return `${answer} ${correct ? "✓" : "✗"}`;
+  const icon = correct
+    ? `<span style="color:var(--done);">✓</span>`
+    : `<span style="color:var(--wrong);">✗</span>`;
+  return `${answer} ${icon}`;
 }
 
 function renderMathDuelTerminal(body, last) {
@@ -1972,7 +2038,7 @@ function renderMathDuelTerminal(body, last) {
 
   body.innerHTML =
     `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
-    `<div class="winner-banner${banner.celebrate ? " exp-celebrate" : ""}">${banner.headline}` +
+    `<div class="winner-banner tone-${banner.tone}${banner.tone === "win" ? " exp-celebrate" : ""}">${banner.headline}` +
     (banner.secondary
       ? `<div style="font-weight:400; font-size:13px; margin-top:4px;">${banner.secondary}</div>`
       : "") +
