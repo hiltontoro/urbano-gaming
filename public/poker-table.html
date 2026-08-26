@@ -184,162 +184,29 @@
   <div id="table-card" style="display:none;"></div>
 </div>
 
+<script src="/sessionSync.js"></script>
+<script src="/pokerParticipant.js"></script>
 <script>
-const STORAGE_KEY = "urbano_poker_seat";
-const ACTION_LABELS = { FOLD: "Fold", CHECK: "Check", CALL: "Call", BET: "Bet", RAISE: "Raise", ALL_IN: "All-in" };
+// Participant Unified Entry Slice 002: this page is now a thin
+// compatibility surface over the shared PokerParticipant module
+// (pokerParticipant.js) — the same join/render/action implementation
+// /participant.html's own inline Poker experience now also calls, so
+// the two surfaces cannot silently drift apart. This page's own join
+// form (below) stays, since it — unlike participant.html's unified
+// form — has always been Poker-only. Seat identity is now
+// sessionStorage-scoped (tab-scoped), a deliberate Founder correction
+// carried into this compatibility surface too — see
+// pokerParticipant.js's own top comment.
+const tableContainer = document.getElementById("table-card");
 
-function el(html) {
-  const div = document.createElement("div");
-  div.innerHTML = html.trim();
-  return div.firstElementChild;
-}
-function saveSeat(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function loadSeat() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { return null; } }
-
-async function apiFetch(path, options) {
-  const res = await fetch(path, options);
-  const json = await res.json().catch(() => null);
-  return { status: res.status, json };
-}
-
-function renderCard(code) {
-  if (!code) return `<div class="playing-card face-down">?</div>`;
-  const rank = code[0];
-  const suit = code[1];
-  const suitSymbol = { C: "♣", D: "♦", H: "♥", S: "♠" }[suit] || suit;
-  const isRed = suit === "D" || suit === "H";
-  return `<div class="playing-card${isRed ? " red" : ""}">${rank}${suitSymbol}</div>`;
-}
-
-function randomIdempotencyKey() {
-  return (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-}
-
-async function sendAction(seat, pokerHandId, actionType, amount) {
-  return apiFetch(`/api/gaming/poker/tables/${seat.pokerTableId}/action`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: "Bearer " + seat.participantToken },
-    body: JSON.stringify({ pokerHandId, actionType, amount: amount ?? null, idempotencyKey: randomIdempotencyKey() }),
-  });
-}
-
-async function renderTable(seat) {
-  const container = document.getElementById("table-card");
-  const res = await apiFetch(`/api/gaming/poker/tables/${seat.pokerTableId}`, {
-    headers: { authorization: "Bearer " + seat.participantToken },
-  });
-
-  if (res.status !== 200) {
-    container.innerHTML = "";
-    container.appendChild(el(`<div class="card"><p class="msg error">${(res.json && res.json.error) || "Failed to load table."}</p></div>`));
-    return;
-  }
-
-  const state = res.json;
-  const mySeatNumber = seat.seatNumber;
-  const mySeat = state.seats.find((s) => s.seatNumber === mySeatNumber);
-
-  const seatRows = state.seats.map((s) => {
-    const classes = ["seat-row"];
-    if (s.seatNumber === mySeatNumber) classes.push("is-me");
-    if (s.isCurrentActor) classes.push("is-turn");
-    if (s.folded) classes.push("is-folded");
-    const badges = [
-      s.isDealer ? '<span class="seat-badge">Dealer</span>' : "",
-      s.isCurrentActor ? '<span class="seat-badge turn">Acting</span>' : "",
-      s.allIn ? '<span class="seat-badge allin">All-in</span>' : "",
-      state.currentHandId && !s.inCurrentHand ? '<span class="seat-badge">Waiting</span>' : "",
-    ].join("");
-    const cardsRow = s.revealedHoleCards
-      ? `<div class="hole-cards" style="margin:4px 0 0;">${s.revealedHoleCards.map(renderCard).join("")}</div>`
-      : "";
-    return `<div class="${classes.join(" ")}">
-      <span class="seat-name">${s.displayName}${s.seatNumber === mySeatNumber ? " (you)" : ""}${cardsRow}</span>
-      <span><span class="seat-stack">${s.stack} chips${s.committedThisHand ? " (" + s.committedThisHand + " in)" : ""}</span>${badges}</span>
-    </div>`;
-  }).join("");
-
-  const holeCardsHtml = state.myHoleCards
-    ? `<div class="hole-cards">${state.myHoleCards.map(renderCard).join("")}</div>`
-    : state.currentHandId
-      ? `<p class="msg">You'll join the next Hand.</p>`
-      : `<p class="msg">Waiting for the host to deal.</p>`;
-
-  const boardHtml = state.board && state.board.length > 0
-    ? `<div class="board-cards">${state.board.map(renderCard).join("")}</div>`
-    : "";
-
-  let resultHtml = "";
-  if (state.handResult) {
-    const myPayout = state.handResult.pots
-      .flatMap((p) => p.payouts)
-      .filter((p) => p.seatNumber === mySeatNumber)
-      .reduce((s, p) => s + p.amount, 0);
-    resultHtml = `<div class="card result-card">
-      <div class="result-row"><span>Hand result</span><span>${myPayout > 0 ? "You won " + myPayout : "No win this hand"}</span></div>
-    </div>`;
-  }
-
-  let actionHtml = "";
-  if (state.myLegalActions) {
-    const la = state.myLegalActions;
-    const buttons = [];
-    if (la.canFold) buttons.push(`<button class="action-btn fold" data-action="FOLD">Fold</button>`);
-    if (la.canCheck) buttons.push(`<button class="action-btn" data-action="CHECK">Check</button>`);
-    if (la.canCall) buttons.push(`<button class="action-btn primary" data-action="CALL">Call ${la.callAmount}</button>`);
-    if (la.canBet) buttons.push(`<button class="action-btn aggressive" data-action="BET" data-needs-amount="1">Bet</button>`);
-    if (la.canRaise) buttons.push(`<button class="action-btn aggressive" data-action="RAISE" data-needs-amount="1">Raise</button>`);
-    if (la.canAllIn) buttons.push(`<button class="action-btn fold" data-action="ALL_IN">All-in ${la.maxAmount}</button>`);
-
-    actionHtml = `
-      <div class="street-label">Your turn</div>
-      <div class="action-bar">${buttons.join("")}</div>
-      ${(la.canBet || la.canRaise) ? `<div class="amount-row">
-        <input type="number" id="amount-input" placeholder="Amount" min="${la.minRaiseTo || 0}" max="${la.maxAmount}" value="${la.minRaiseTo || la.maxAmount}" />
-      </div>` : ""}
-      <p class="msg" id="action-msg"></p>
-    `;
-  }
-
-  container.innerHTML = "";
-  container.appendChild(el(`
-    <div>
-      <div class="card felt">
-        <span class="status-pill">Room ${state.roomCode} — ${state.street || "Waiting"}</span>
-        <div class="pot-row">Pot: ${state.pot} chips</div>
-        ${boardHtml}
-        ${holeCardsHtml}
-      </div>
-      ${resultHtml}
-      <div class="card">
-        <div class="seat-list">${seatRows}</div>
-        ${actionHtml}
-      </div>
-    </div>
-  `));
-
-  if (state.myLegalActions) {
-    const amountInput = document.getElementById("amount-input");
-    container.querySelectorAll(".action-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const actionType = btn.dataset.action;
-        const needsAmount = btn.dataset.needsAmount === "1";
-        const amount = needsAmount && amountInput ? parseInt(amountInput.value, 10) : null;
-        container.querySelectorAll(".action-btn").forEach((b) => (b.disabled = true));
-        const actionMsg = document.getElementById("action-msg");
-        actionMsg.textContent = "Sending…";
-        const result = await sendAction(seat, state.currentHandId, actionType, amount);
-        if (result.status !== 200) {
-          actionMsg.className = "msg error";
-          actionMsg.textContent = (result.json && result.json.error) || "Action failed.";
-          container.querySelectorAll(".action-btn").forEach((b) => (b.disabled = false));
-        } else {
-          await renderTable(seat);
-        }
-      });
-    });
-  }
-}
+// Reuses the same session-agnostic polling factory participant.html's
+// own Session sync already uses — createSessionSync() has no concept
+// of "session" or "table" at all, so this is not a special case.
+const pokerSync = createSessionSync(function () {
+  const seat = PokerParticipant.loadPokerSeat();
+  if (!seat) return Promise.resolve();
+  return PokerParticipant.renderPokerTable(tableContainer, seat);
+}, 2000);
 
 document.getElementById("btn-join").addEventListener("click", async () => {
   const roomCode = document.getElementById("join-room-code").value.trim();
@@ -357,18 +224,14 @@ document.getElementById("btn-join").addEventListener("click", async () => {
   msg.className = "msg";
   msg.textContent = "Joining…";
 
-  const res = await apiFetch(`/api/gaming/poker/tables/${roomCode.toUpperCase()}/join`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName }),
-  });
+  const res = await PokerParticipant.joinPokerTable(roomCode.toUpperCase(), displayName);
 
   if (res.status === 201) {
-    saveSeat(res.json);
+    PokerParticipant.savePokerSeat(res.json);
     document.getElementById("join-card").style.display = "none";
     document.getElementById("table-card").style.display = "block";
-    await renderTable(res.json);
-    setInterval(() => renderTable(loadSeat()), 2000);
+    await PokerParticipant.renderPokerTable(tableContainer, res.json);
+    pokerSync.start();
   } else {
     msg.className = "msg error";
     msg.textContent = (res.json && res.json.error) || "Failed to join table.";
@@ -377,23 +240,26 @@ document.getElementById("btn-join").addEventListener("click", async () => {
 });
 
 // Poker Dedicated Experience Participant Handoff Slice: a plain,
-// non-authoritative convenience prefill from participant.html's own
-// "Poker Table" link — carries no identity, token, or Session
-// reference. Only pre-fills the visible join form; the actual Guest/
-// seat identity this page creates is entirely independent of it, and
-// nothing breaks if this parameter is absent, stale, or tampered with.
+// non-authoritative convenience prefill — carries no identity, token,
+// or Session reference. Only pre-fills the visible join form; the
+// actual Guest/seat identity this page creates is entirely
+// independent of it, and nothing breaks if this parameter is absent,
+// stale, or tampered with. Participant Unified Entry Slice 002 no
+// longer links here from participant.html (the unified join form
+// handles Poker codes directly), but this page remains reachable
+// directly, so the prefill stays useful and is left unchanged.
 (function prefillNameFromQuery() {
   const name = new URLSearchParams(location.search).get("name");
   if (name) document.getElementById("join-display-name").value = name;
 })();
 
 (function init() {
-  const seat = loadSeat();
+  const seat = PokerParticipant.loadPokerSeat();
   if (seat) {
     document.getElementById("join-card").style.display = "none";
     document.getElementById("table-card").style.display = "block";
-    renderTable(seat);
-    setInterval(() => renderTable(loadSeat()), 2000);
+    PokerParticipant.renderPokerTable(tableContainer, seat);
+    pokerSync.start();
   }
 })();
 </script>

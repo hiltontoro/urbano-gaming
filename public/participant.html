@@ -121,27 +121,6 @@
   }
   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 10px; }
 
-  /* Poker Dedicated Experience Participant Handoff Slice. Deliberately
-     gold, not --exp-purple — this file's own purple already means
-     "Duel / Experience Layer," a runtime concept sharing the Session's
-     own lifecycle; Poker shares neither. Gold is this file's existing
-     "important, brand-level, not a Session turn type" accent (room
-     code, standings score) — reused here, not invented, to say
-     "this belongs to URBANO Gaming" without implying "this is another
-     capability alongside Open Response/Trivia/Quiz/Voting/Duel." A
-     sibling of #join-panel/#game-panels, not inside either — visible
-     identically before and after joining a Session, since Poker does
-     not require Session participation at all. */
-  .dedicated-experiences-label {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--gold); margin-bottom: 6px;
-  }
-  .dedicated-experience-link {
-    display: block; text-align: center; text-decoration: none;
-    background: var(--gold-bg); border: 1px solid var(--gold); color: var(--gold);
-    font-weight: 700; font-size: 15px; padding: 13px 16px; border-radius: 8px;
-  }
-
   .option-btn-list { display: flex; flex-direction: column; gap: 10px; }
   .option-btn {
     display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -298,6 +277,82 @@
     50% { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0.25); }
   }
   .winner-banner.exp-celebrate { animation: expWinnerPulse 1.4s ease-in-out 3; }
+
+  /* ============================================================
+     Participant Unified Entry Slice 002: Poker gameplay markup,
+     shared verbatim with /poker-table.html via pokerParticipant.js.
+     Reuses this file's own existing --gold/--gold-bg/--line/--muted/
+     --bg-card/.card tokens where the two files' meanings already
+     agree; only genuinely Poker-specific tokens/classes are added
+     here. Poker's "result" classes are prefixed (.poker-result-card/
+     -row) because this file's own pre-existing .result-card already
+     means something different (a per-participant Trivia/Quiz result
+     row) — reusing that name would silently pull in the wrong box
+     styling.
+     ============================================================ */
+  :root {
+    --good: #4ade80; --bad: #f87171;
+    --card-white: #f5f1e8; --card-ink: #0a0a0a; --card-red: #d64545;
+    --felt: #123524;
+  }
+  .felt { background: var(--felt); border-color: #1e5c3d; }
+  .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+  .hole-cards, .board-cards { display: flex; gap: 8px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
+  .playing-card {
+    width: 52px; height: 74px; border-radius: 7px; background: var(--card-white);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; color: var(--card-ink);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  }
+  .hole-cards .playing-card { width: 64px; height: 92px; font-size: 22px; }
+  .playing-card.red { color: var(--card-red); }
+  .playing-card.face-down {
+    background: linear-gradient(135deg, #2a2a2a 25%, #1c1c1c 25%, #1c1c1c 50%, #2a2a2a 50%, #2a2a2a 75%, #1c1c1c 75%, #1c1c1c);
+    background-size: 12px 12px; color: transparent;
+  }
+  .pot-row { text-align: center; font-size: 14px; color: var(--gold); font-weight: 700; margin: 6px 0 14px; }
+  .street-label { text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+  .seat-list { display: flex; flex-direction: column; gap: 8px; }
+  .seat-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card);
+    font-size: 13.5px;
+  }
+  .seat-row.is-me { border-color: var(--gold); }
+  .seat-row.is-turn { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); }
+  .seat-row.is-folded { opacity: 0.45; }
+  .seat-name { font-weight: 600; }
+  .seat-stack { color: var(--muted); font-size: 12px; }
+  .seat-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 999px; background: var(--gold-bg); color: var(--gold);
+    margin-left: 6px;
+  }
+  .seat-badge.turn { background: rgba(74,222,128,0.14); color: var(--good); }
+  .seat-badge.allin { background: rgba(248,113,113,0.14); color: var(--bad); }
+  .status-pill {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,0.04);
+    color: var(--muted); border: 1px solid var(--line); display: inline-block; margin-bottom: 14px;
+  }
+  .action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .action-btn {
+    flex: 1 1 auto; min-width: 80px; font-family: inherit; font-size: 13.5px; font-weight: 700;
+    padding: 13px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card);
+    color: var(--ink); cursor: pointer; min-height: 48px; margin: 0;
+  }
+  .action-btn.fold { border-color: var(--bad); color: var(--bad); }
+  .action-btn.aggressive { border-color: var(--gold); color: var(--gold); }
+  .action-btn.primary { background: var(--primary-fill); color: var(--primary-ink); border: none; }
+  .amount-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .amount-row input {
+    flex: 1; font-family: inherit; font-size: 15px; padding: 11px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); min-height: 44px;
+  }
+  .poker-result-card { border-color: var(--gold); }
+  .poker-result-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -326,31 +381,8 @@
   <label>Room code</label>
   <input id="p-roomCode" placeholder="e.g. AB23CD" />
   <label>Your name</label>
-  <input id="p-displayName" placeholder="e.g. Alex" oninput="updatePokerLaunchLink()" />
+  <input id="p-displayName" placeholder="e.g. Alex" />
   <button class="btn-primary" onclick="joinSession()">Join</button>
-</div>
-
-<!-- Poker Dedicated Experience Participant Handoff Slice: a sibling of
-     #join-panel/#game-panels, not inside either, so it renders
-     identically whether or not a Session has been joined — Poker is
-     independent of Session participation. Room code and display name
-     entered here are a separate, non-authoritative convenience
-     prefill (see updatePokerLaunchLink()) — Poker still creates its
-     own Guest/seat identity through its own existing join flow at
-     /poker-table.html; nothing here maps Session participantId/
-     participantToken/Gaming Member identity onto a Poker seat.
-
-     Active-Gameplay Density Correction: visible by default (matters
-     for the pre-join screen, which never calls updateFocusMode() at
-     all) — updateFocusMode() below is the only thing that ever hides
-     it, using the exact same inFocusMode signal already governing the
-     stepper/standingsCard, plus SESSION_COMPLETE, so this card never
-     outranks the winner banner / final standings / Join Another
-     Session it sits above once a Session ends. -->
-<div class="card" id="dedicated-experiences-card">
-  <div class="dedicated-experiences-label">Dedicated Experiences</div>
-  <p class="room-code-hint" style="margin-top:0; margin-bottom:12px; text-align:left;">Separate games with their own room code — not part of this Session.</p>
-  <a class="dedicated-experience-link" id="poker-launch-link" href="/poker-table.html">🃏&nbsp;Poker Table</a>
 </div>
 
 <div id="game-panels" style="display:none;">
@@ -504,6 +536,21 @@
        surface was built for this. -->
 </div>
 
+<!-- Participant Unified Entry Slice 002. A sibling of #join-panel/
+     #game-panels, shown instead of #game-panels once the Room
+     resolver identifies a POKER_TABLE runtime for the code the
+     participant typed into the one, unified join form above — no
+     second room-code entry, no navigation to /poker-table.html.
+     Gameplay markup itself is rendered by the shared
+     PokerParticipant.renderPokerTable() (pokerParticipant.js) into
+     #poker-container, the same function /poker-table.html's own
+     compatibility surface now also calls, so the two surfaces cannot
+     silently drift apart. -->
+<div id="poker-panels" style="display:none;">
+  <div id="poker-container"></div>
+  <p class="room-code-hint" style="margin-top:14px;"><a href="#" onclick="clearRuntimeState(); return false;">← Join a different room</a></p>
+</div>
+
 <details id="debugOutputDetails" style="display:none;">
   <summary>Debug: last raw response</summary>
   <pre id="output">(nothing yet)</pre>
@@ -511,6 +558,7 @@
 
 <script src="/urbanoAuth.js"></script>
 <script src="/sessionSync.js"></script>
+<script src="/pokerParticipant.js"></script>
 <script>
 // Developer-harness-only credential persistence, via sessionStorage:
 // survives a refresh of this tab, but never shared with any other tab
@@ -551,6 +599,15 @@ async function initGamingAuthPrefill() {
 
 const PARTICIPANT_STORAGE_KEY = "urbano_gaming_dev_harness_participant";
 const LEGACY_PARTICIPANT_STORAGE_KEY = "level33_dev_harness_participant";
+// Participant Unified Entry Slice 002. The one piece of top-level
+// state deciding which runtime restoreState() restores after a
+// reload — authoritative on its own, never inferred from which of
+// participantState/pokerSeatState happens to be non-null (both could
+// be populated at once from an earlier visit to each). sessionStorage
+// — tab-scoped, matching participantState's own existing scope and
+// the Founder's Room Registry Slice 001 correction extending that
+// same tab-isolation to Poker seat identity.
+const ACTIVE_RUNTIME_TYPE_KEY = "urbano_gaming_active_runtime_type";
 const LIFECYCLE_STEPS = ["LOBBY_OPEN", "LOBBY_LOCKED", "PROMPT_ACTIVE", "SUBMISSIONS_CLOSED", "RESULT_REVEAL", "SESSION_COMPLETE"];
 // Turn is the presentation-layer word for what the domain layer still
 // calls an Interaction Instance — see host.html's identical comment.
@@ -622,7 +679,31 @@ const sessionSync = createSessionSync(function () {
   );
 }, 2000);
 
+// Participant Unified Entry Slice 002. A second, independent instance
+// of the same session-agnostic factory sessionSync above already uses
+// — createSessionSync() has no concept of "Session" at all, so reusing
+// it here for Poker is not a special case, just a second caller.
+// Never runs alongside sessionSync for the same participant: the
+// runtime discriminator (activeRuntimeType) guarantees only one of the
+// two is ever started at a time (see showGamePanels/showPokerPanels/
+// clearRuntimeState), so only one poll loop is ever live.
+const pokerSync = createSessionSync(function () {
+  const seat = PokerParticipant.loadPokerSeat();
+  if (!seat) return Promise.resolve();
+  return PokerParticipant.renderPokerTable(document.getElementById("poker-container"), seat);
+}, 2000);
+
 let participantState = { sessionId: null, participantId: null, participantToken: null, displayName: null };
+// Participant Unified Entry Slice 002. Structurally separate from
+// participantState by design — a Poker seat is never a Session
+// participant, and this object is never sent to a Session API
+// (mirrors how poker-table.html's own seat record already worked
+// before this Slice; only its storage scope changed, see
+// PokerParticipant.savePokerSeat/loadPokerSeat). null until a
+// POKER_TABLE join succeeds.
+let pokerSeatState = null;
+// "SESSION" | "POKER_TABLE" | null — see ACTIVE_RUNTIME_TYPE_KEY above.
+let activeRuntimeType = null;
 let hasSubmittedThisPageLoad = false;
 // Duel / SESSION_SUBGAME v1 (Product/Duel_Architecture.md). Mirrors
 // currentQuiz's own pattern: activeDuel is this session's single
@@ -718,19 +799,102 @@ function saveParticipantState() {
   sessionStorage.setItem(PARTICIPANT_STORAGE_KEY, JSON.stringify(participantState));
 }
 
+function saveActiveRuntimeType() {
+  if (activeRuntimeType) {
+    sessionStorage.setItem(ACTIVE_RUNTIME_TYPE_KEY, activeRuntimeType);
+  } else {
+    sessionStorage.removeItem(ACTIVE_RUNTIME_TYPE_KEY);
+  }
+}
+
+// Participant Unified Entry Slice 002. The one truthful reset path
+// for the common shell, reachable from either runtime: stops both
+// sync loops (idempotent — stopping one that never started is a
+// no-op), clears both runtimes' stored identity, clears the
+// discriminator, and restores the unified join screen. Never
+// navigates to another public runtime page. Used directly by the
+// "Join a different room" link inside #poker-panels, by
+// restoreState() when the discriminator points at a runtime with no
+// usable stored record, and by joinAnotherSession() before it
+// re-submits through the one unified joinSession() path.
+function clearRuntimeState() {
+  sessionSync.stop();
+  pokerSync.stop();
+
+  participantState = { sessionId: null, participantId: null, participantToken: null, displayName: null };
+  sessionStorage.removeItem(PARTICIPANT_STORAGE_KEY);
+  pokerSeatState = null;
+  PokerParticipant.clearPokerSeat();
+  activeRuntimeType = null;
+  saveActiveRuntimeType();
+
+  document.getElementById("poker-container").innerHTML = "";
+  document.getElementById("poker-panels").style.display = "none";
+  document.getElementById("game-panels").style.display = "none";
+  document.getElementById("join-panel").style.display = "block";
+  document.getElementById("pageTitle").classList.remove("sr-only");
+  document.getElementById("pageSubtitle").style.display = "block";
+  renderNotice(null);
+}
+
+// Participant Unified Entry Slice 002: the discriminator is
+// authoritative — restoreState() trusts ACTIVE_RUNTIME_TYPE_KEY first
+// and restores only that one runtime, never both, and never falls
+// back to guessing from whichever state record happens to be present.
+// A runtime the discriminator names but whose own record is missing
+// or malformed is treated as inconsistent and reset cleanly rather
+// than silently restoring a different runtime instead.
 function restoreState() {
+  const storedRuntimeType = sessionStorage.getItem(ACTIVE_RUNTIME_TYPE_KEY);
+
+  if (storedRuntimeType === "POKER_TABLE") {
+    const seat = PokerParticipant.loadPokerSeat();
+    if (seat && seat.pokerTableId) {
+      pokerSeatState = seat;
+      activeRuntimeType = "POKER_TABLE";
+      showPokerPanels();
+    } else {
+      clearRuntimeState();
+    }
+    return;
+  }
+
+  if (storedRuntimeType === "SESSION") {
+    restoreStoredSession(/* discriminatorAlreadySet */ true);
+    return;
+  }
+
+  // No discriminator yet — either a fresh tab, or a Session tab whose
+  // identity was saved before this Slice introduced the discriminator
+  // at all. Treat a present, valid legacy Session record as SESSION
+  // for one-time migration, exactly mirroring how PARTICIPANT_STORAGE_
+  // KEY itself already migrates an even older key below.
+  restoreStoredSession(/* discriminatorAlreadySet */ false);
+}
+
+function restoreStoredSession(discriminatorAlreadySet) {
   const stored = sessionStorage.getItem(PARTICIPANT_STORAGE_KEY) || sessionStorage.getItem(LEGACY_PARTICIPANT_STORAGE_KEY);
-  if (!stored) return;
+  if (!stored) {
+    if (discriminatorAlreadySet) clearRuntimeState();
+    return;
+  }
   try {
     participantState = JSON.parse(stored);
     if (!sessionStorage.getItem(PARTICIPANT_STORAGE_KEY)) {
       saveParticipantState();
       sessionStorage.removeItem(LEGACY_PARTICIPANT_STORAGE_KEY);
     }
-    if (participantState.sessionId) showGamePanels();
+    if (participantState.sessionId) {
+      activeRuntimeType = "SESSION";
+      saveActiveRuntimeType();
+      showGamePanels();
+    } else if (discriminatorAlreadySet) {
+      clearRuntimeState();
+    }
   } catch (e) {
     console.warn("Discarding malformed participant state from sessionStorage:", e);
     sessionStorage.removeItem(PARTICIPANT_STORAGE_KEY);
+    if (discriminatorAlreadySet) clearRuntimeState();
   }
 }
 
@@ -825,6 +989,36 @@ function classifyError(r) {
   return { category: "unexpected", message: "Something went wrong. Please try again." };
 }
 
+// Participant Unified Entry Slice 002. Poker's own error surface,
+// classified the same way Session's already is above (translated
+// table -> friendly text, falling back to a generic message) but kept
+// as an independent table: the two runtimes' error strings share no
+// overlap today, and a future Poker wording change should not need to
+// touch Session's own table (or vice versa).
+const KNOWN_POKER_ERRORS = [
+  { test: (m) => m === "No poker table exists for this id.", text: "We couldn't find that Poker table. Check the room code and try again." },
+  { test: (m) => m === "This poker table is closed.", text: "This Poker table is closed." },
+  { test: (m) => m === "This poker table already has the maximum number of seats filled.", text: "This Poker table is full." },
+  { test: (m) => m === "This display name is already seated at this table.", text: "That name is already seated at this table — try a different one." },
+  { test: (m) => m === "Display name cannot be empty.", text: "Please enter a display name." },
+  { test: (m) => m === "Display name cannot exceed 40 characters.", text: "That name is too long — please use 40 characters or fewer." },
+];
+
+function translateKnownPokerError(raw) {
+  const match = KNOWN_POKER_ERRORS.find((e) => e.test(raw));
+  return match ? match.text : null;
+}
+
+function classifyPokerError(r) {
+  if (r.status === 0) {
+    return { category: "connectivity", message: "Could not reach the server. Check your connection and try again." };
+  }
+  const raw = r.json && typeof r.json.error === "string" ? r.json.error : null;
+  const friendly = raw ? translateKnownPokerError(raw) : null;
+  if (friendly) return { category: "validation", message: friendly };
+  return { category: "unexpected", message: "Something went wrong. Please try again." };
+}
+
 // The one rendering mechanism for the status banner. Every action
 // calls this with either classifyError(r) on failure or null on
 // success — no action function decides visibility, styling, or text
@@ -854,27 +1048,21 @@ function renderNotice(notice) {
 // outright.
 function showGamePanels() {
   document.getElementById("join-panel").style.display = "none";
+  document.getElementById("poker-panels").style.display = "none";
   document.getElementById("game-panels").style.display = "block";
   document.getElementById("pageTitle").classList.add("sr-only");
   document.getElementById("pageSubtitle").style.display = "none";
-  updatePokerLaunchLink();
 }
 
-// Poker Dedicated Experience Participant Handoff Slice: a
-// non-authoritative convenience prefill only — the joined Session's
-// own displayName (once known) or whatever the participant has typed
-// into the still-visible join form, passed as a plain query string
-// Poker's own join screen may optionally read. This carries no
-// identity, token, or session reference of any kind; Poker still
-// creates its own independent Guest/seat identity regardless of
-// whether this parameter is present, absent, or stale.
-function updatePokerLaunchLink() {
-  const link = document.getElementById("poker-launch-link");
-  if (!link) return;
-  const name =
-    (participantState && participantState.displayName) ||
-    document.getElementById("p-displayName").value.trim();
-  link.href = name ? "/poker-table.html?name=" + encodeURIComponent(name) : "/poker-table.html";
+// Participant Unified Entry Slice 002. Mirrors showGamePanels() above
+// exactly, for the POKER_TABLE branch the Room resolver can now
+// identify from the same one join form.
+function showPokerPanels() {
+  document.getElementById("join-panel").style.display = "none";
+  document.getElementById("game-panels").style.display = "none";
+  document.getElementById("poker-panels").style.display = "block";
+  document.getElementById("pageTitle").classList.add("sr-only");
+  document.getElementById("pageSubtitle").style.display = "none";
 }
 
 function renderStepper(currentState) {
@@ -2325,20 +2513,6 @@ function updateFocusMode(effectiveState) {
   if (inFocusMode) {
     document.getElementById("standingsCard").style.display = "none";
   }
-
-  // Active-Gameplay Density Correction: the Dedicated Experiences/Poker
-  // card is discovery/navigation chrome, exactly the category this
-  // function already exists to suppress while a Turn or Duel is
-  // actively being played — reuses inFocusMode verbatim rather than a
-  // second, parallel definition of "is something active right now."
-  // Also hidden at SESSION_COMPLETE specifically: this card sits above
-  // #game-panels in the DOM, so left visible there it would render
-  // above the winner banner / final standings / Join Another Session —
-  // displacing exactly the terminal hierarchy this correction must not
-  // touch. Hiding it here is the smallest way to guarantee that
-  // without moving the node or duplicating markup.
-  document.getElementById("dedicated-experiences-card").style.display =
-    inFocusMode || effectiveState === "SESSION_COMPLETE" ? "none" : "block";
 }
 
 // Structural Tier 2 addendum (production playtest defect fix).
@@ -2418,6 +2592,15 @@ function updateExperienceLayer(effectiveState) {
 // explicit "no state leaking" requirement applies here exactly as it
 // does there.
 function switchToJoinedSession(json) {
+  // Participant Unified Entry Slice 002: no residue from a previous
+  // Poker seat may remain operational once this tab becomes a Session
+  // participant — stop its poll loop and clear its identity before
+  // this runtime becomes active, mirroring switchToJoinedPokerSeat()'s
+  // identical treatment of Session state below.
+  pokerSync.stop();
+  pokerSeatState = null;
+  PokerParticipant.clearPokerSeat();
+
   participantState = {
     sessionId: json.sessionId,
     participantId: json.participantId,
@@ -2425,6 +2608,8 @@ function switchToJoinedSession(json) {
     displayName: json.displayName,
   };
   saveParticipantState();
+  activeRuntimeType = "SESSION";
+  saveActiveRuntimeType();
 
   hasSubmittedThisPageLoad = false;
   lastSeenInteractionNumber = null;
@@ -2451,9 +2636,75 @@ function switchToJoinedSession(json) {
   renderSyncDebug();
 }
 
+// Participant Unified Entry Slice 002. Mirrors switchToJoinedSession()
+// above exactly: stops and clears whatever Session identity this tab
+// may have held, then establishes the new Poker seat as this tab's
+// one active runtime.
+function switchToJoinedPokerSeat(json) {
+  sessionSync.stop();
+  participantState = { sessionId: null, participantId: null, participantToken: null, displayName: null };
+  sessionStorage.removeItem(PARTICIPANT_STORAGE_KEY);
+
+  pokerSeatState = json;
+  PokerParticipant.savePokerSeat(json);
+  activeRuntimeType = "POKER_TABLE";
+  saveActiveRuntimeType();
+
+  showPokerPanels();
+  pokerSync.start();
+}
+
+// Participant Unified Entry Slice 002. The one unified join path: a
+// single room code + display name resolved through the Room Registry
+// (GET /api/rooms/[code]) before anything else is called, then
+// dispatched to exactly one runtime's own existing, unchanged join
+// command. Once the resolver names a runtime, a join failure inside
+// that runtime is never retried against the other — see
+// classifyError()/classifyPokerError() below, each scoped to its own
+// runtime's error surface only.
 async function joinSession() {
-  const roomCode = document.getElementById("p-roomCode").value.trim();
+  const roomCode = document.getElementById("p-roomCode").value.trim().toUpperCase();
   const displayName = document.getElementById("p-displayName").value.trim();
+
+  if (!roomCode || !displayName) {
+    renderNotice({ category: "validation", message: "Room code and display name are required." });
+    return;
+  }
+
+  const resolved = await getJson(`/api/rooms/${roomCode}`);
+  show("RESOLVE_ROOM (" + resolved.status + ")", resolved.json);
+
+  if (resolved.status === 404) {
+    renderNotice({ category: "validation", message: "No active room found for this code." });
+    return;
+  }
+  if (resolved.status === 409) {
+    renderNotice({ category: "validation", message: "This room code can't be resolved right now — check it or ask the host for a new one." });
+    return;
+  }
+  if (resolved.status !== 200 || !resolved.json) {
+    renderNotice(
+      resolved.status === 0
+        ? { category: "connectivity", message: "Could not reach the server. Check your connection and try again." }
+        : { category: "unexpected", message: "Something went wrong. Please try again." }
+    );
+    return;
+  }
+
+  if (resolved.json.runtimeType === "POKER_TABLE") {
+    const r = await PokerParticipant.joinPokerTable(roomCode, displayName);
+    show("JOIN_POKER_TABLE (" + r.status + ")", r.json);
+    if (r.status === 201) {
+      renderNotice(null);
+      switchToJoinedPokerSeat(r.json);
+    } else {
+      renderNotice(classifyPokerError(r));
+    }
+    return;
+  }
+
+  // SESSION — the only other runtimeType Room Registry Slice 001
+  // currently issues. Unchanged from the pre-Slice-002 join call.
   const r = await postJson(`/api/sessions/${roomCode}/join`, { displayName }, gamingAccessToken);
   show("JOIN_SESSION (" + r.status + ")", r.json);
   if (r.status === 201) {
@@ -2486,22 +2737,25 @@ async function joinNextSession() {
   }
 }
 
-// Session Continuity slice. The general reset-and-rejoin path — works
-// identically whether resuming a rematch the host didn't offer via
-// Join Next Session, or joining an entirely unrelated session run by a
-// different host with a different room code.
+// Session Continuity slice, extended by Participant Unified Entry
+// Slice 002: the general reset-and-rejoin path — works identically
+// whether resuming a rematch the host didn't offer via Join Next
+// Session, joining an entirely unrelated Session run by a different
+// host, or joining a Poker table instead. Rather than duplicate
+// resolver-dispatch logic here, this is now a thin wrapper: reset to
+// the one canonical join screen (clearRuntimeState — the same "one
+// truthful reset path" the Poker "Join a different room" link also
+// uses), refill its fields with what was typed into this card, and
+// delegate to the one unified joinSession(). This is why "Join
+// Another Session" already correctly handles a Poker code typed into
+// it with no separate code path to keep in sync.
 async function joinAnotherSession() {
   const roomCode = document.getElementById("ja-roomCode").value.trim();
   const displayName = document.getElementById("ja-displayName").value.trim();
-  const r = await postJson(`/api/sessions/${roomCode}/join`, { displayName }, gamingAccessToken);
-  show("JOIN_SESSION (another session) (" + r.status + ")", r.json);
-  if (r.status === 201) {
-    renderNotice(null);
-    switchToJoinedSession(r.json);
-    await participantRefresh();
-  } else {
-    renderNotice(classifyError(r));
-  }
+  clearRuntimeState();
+  document.getElementById("p-roomCode").value = roomCode;
+  document.getElementById("p-displayName").value = displayName;
+  await joinSession();
 }
 
 async function submitResponse() {
@@ -2554,12 +2808,19 @@ if (new URLSearchParams(location.search).has("debug")) {
 
 restoreState();
 initGamingAuthPrefill();
-updatePokerLaunchLink();
 renderSyncDebug();
-if (participantState.sessionId) {
+// Participant Unified Entry Slice 002: mirrors the pre-Slice-002
+// gate exactly (start sync + do one immediate refresh rather than
+// waiting out the first poll interval), just keyed on which one
+// runtime restoreState() actually restored, per the discriminator.
+if (activeRuntimeType === "SESSION") {
   sessionSync.start();
   renderSyncDebug();
   participantRefresh();
+} else if (activeRuntimeType === "POKER_TABLE") {
+  pokerSync.start();
+  renderSyncDebug();
+  PokerParticipant.renderPokerTable(document.getElementById("poker-container"), pokerSeatState);
 }
 </script>
 </body>
