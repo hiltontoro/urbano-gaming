@@ -12,6 +12,7 @@ import {
   HostTokenMismatchError,
   SessionAlreadyCompleteError,
 } from "../lib/session/types";
+import { RoomCodeRegistryCollisionError } from "../lib/rooms/types";
 
 describe("COMPLETE_SESSION", () => {
   it("transitions a LOBBY_OPEN session to SESSION_COMPLETE and increments state_version", async () => {
@@ -161,8 +162,8 @@ describe("COMPLETE_SESSION", () => {
     );
   });
 
-  describe("room-code reuse (the motivating gap this slice closes)", () => {
-    it("allows a new session to claim a room code once the original session is completed through the real command — no test backdoor", async () => {
+  describe("room-code reuse (the motivating gap this slice closes; Room Registry Slice 001 correction below)", () => {
+    it("frees the room code at the sessions_room_code_active_unique layer once the original session is completed through the real command — but Room Registry v1 still forbids reuse", async () => {
       const repo = new InMemorySessionRepository();
       const first = await createSession(repo);
       await setSessionCapabilities(repo, first.sessionId, first.hostToken, ["OPEN_RESPONSE", "VOTING", "TRIVIA", "QUIZ"]);
@@ -171,13 +172,20 @@ describe("COMPLETE_SESSION", () => {
 
       // getActiveSessionByRoomCode must no longer resolve the completed
       // session for its own room code — this is the exact mechanism
-      // sessions_room_code_active_unique depends on in production.
+      // sessions_room_code_active_unique depends on in production, and
+      // remains true and untouched by the Room Registry.
       const activeMatch = await repo.getActiveSessionByRoomCode(first.roomCode);
       expect(activeMatch).toBeNull();
 
-      // Directly exercise the collision-avoidance path createSession()
-      // relies on: creating a new session with the now-freed room code
-      // must succeed rather than throwing RoomCodeCollisionError.
+      // Room Registry Slice 001 correction: this test previously
+      // stopped here and asserted that reuse succeeds — true only at
+      // the sessions_room_code_active_unique layer just proven above.
+      // The Founder's own Room Registry Slice 001 resolution deliberately
+      // supersedes it system-wide: "once URBANO Gaming has issued a room
+      // code through the Room Registry, that code never identifies
+      // another runtime." rooms' own global, non-partial uniqueness
+      // constraint is what now correctly forbids this, independently of
+      // sessions' own already-freed view.
       const reusedSessionId = "22222222-2222-2222-2222-222222222222";
       const now = new Date().toISOString();
       await expect(
@@ -201,7 +209,7 @@ describe("COMPLETE_SESSION", () => {
             payload: { roomCode: first.roomCode },
           }
         )
-      ).resolves.not.toThrow();
+      ).rejects.toBeInstanceOf(RoomCodeRegistryCollisionError);
     });
 
     it("JOIN_SESSION rejects a room code whose session was completed through the real command", async () => {

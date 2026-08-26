@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { InMemoryRoomStore } from "../../rooms/db/inMemoryRoomRepository";
 import type {
   SessionRecord,
   InteractionState,
@@ -120,6 +121,20 @@ const MAX_PROMPT_TEXT_LENGTH = 1000;
  * the real database function.
  */
 export class InMemorySessionRepository implements SessionRepository {
+  /**
+   * Room Registry Slice 001: defaults to a private instance so every
+   * existing Session-only test is unaffected (a lone repository's own
+   * room-code collisions are still caught, just now redundantly by two
+   * checks instead of one). Tests proving real cross-runtime behavior
+   * construct one InMemoryRoomStore and pass it to both
+   * InMemorySessionRepository and InMemoryPokerRepository explicitly.
+   */
+  private roomStore: InMemoryRoomStore;
+
+  constructor(roomStore: InMemoryRoomStore = new InMemoryRoomStore()) {
+    this.roomStore = roomStore;
+  }
+
   private sessions = new Map<string, SessionRecord>();
 
   private participants = new Map<string, ParticipantRecord>();
@@ -330,7 +345,19 @@ export class InMemorySessionRepository implements SessionRepository {
     /*
      * No mutation occurs before every validation succeeds. This preserves
      * all-or-nothing behavior within the in-memory implementation.
+     *
+     * Room Registry Slice 001: roomStore.register() is called first,
+     * specifically because it is itself both the last validation and a
+     * mutation (it doubles as the atomic check-and-set a real
+     * transaction gives the SQL path for free — see InMemoryRoomStore's
+     * own comment). If it throws (this exact code was already issued
+     * to some other runtime, active or historical — a case this
+     * function's own room-code collision check above cannot see on its
+     * own), nothing below it has mutated yet, mirroring
+     * create_session_atomically's (0153) real transactional rollback.
      */
+    this.roomStore.register(record.roomCode, "SESSION", record.sessionId);
+
     this.sessions.set(record.sessionId, { ...record });
 
     this.events.push({

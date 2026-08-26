@@ -18,6 +18,7 @@ import type {
   MathDuelResponseRecord,
 } from "../types";
 import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
+import { RoomCodeRegistryCollisionError } from "../../rooms/types";
 import {
   RoomCodeCollisionError,
   DisplayNameTakenError,
@@ -167,6 +168,19 @@ export class SupabaseSessionRepository implements SessionRepository {
         error.message.includes("sessions_room_code_active_unique")
       ) {
         throw new RoomCodeCollisionError();
+      }
+
+      // Room Registry Slice 001: create_session_atomically (0153) now
+      // also inserts into rooms in the same transaction — a collision
+      // there (this exact code already issued to some other runtime,
+      // active or historical) rolls the whole transaction back,
+      // including the sessions insert above, and surfaces here as this
+      // constraint's own violation instead.
+      if (
+        error.code === "23505" &&
+        error.message.includes("rooms_room_code_unique")
+      ) {
+        throw new RoomCodeRegistryCollisionError();
       }
 
       if (

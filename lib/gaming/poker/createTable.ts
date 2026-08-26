@@ -4,17 +4,24 @@ import { generateHostToken } from "../../session/hostToken";
 import type { PokerRepository } from "./db/pokerRepository";
 import type { CreatePokerTableResult, PokerTableRecord } from "./types";
 import { PokerRoomCodeCollisionError } from "./types";
+import { RoomCodeRegistryCollisionError } from "../../rooms/types";
 
 /**
- * CREATE_POKER_TABLE command handler. Mirrors createSession.ts exactly:
- * generate-and-retry room code allocation in the domain layer, not an
- * atomic SQL function — there is no concurrent-mutation race here,
- * only a collision to retry past. Reuses generateRoomCode/
- * generateHostToken directly (pure, dependency-free utilities) rather
- * than duplicating them — the one piece of Session's own code this
- * module imports, deliberately, per the readiness gate's own finding
- * that these two functions are genuinely reusable primitives with zero
- * coupling to Session's tables.
+ * CREATE_POKER_TABLE command handler. Mirrors createSession.ts's own
+ * generate-and-retry room code allocation shape in the domain layer.
+ * Reuses generateRoomCode/generateHostToken directly (pure,
+ * dependency-free utilities) rather than duplicating them — the one
+ * piece of Session's own code this module imports, deliberately, per
+ * the readiness gate's own finding that these two functions are
+ * genuinely reusable primitives with zero coupling to Session's
+ * tables.
+ *
+ * Room Registry Slice 001: repo.createTable() itself became atomic
+ * (create_poker_table_atomically, 0154) — the original "no atomic
+ * function needed, only a collision to retry past" reasoning stops
+ * holding the moment table creation must jointly claim a code from the
+ * same registry Session writes to; see 0154's own migration comment.
+ * This function's own retry shape is otherwise unchanged.
  */
 
 const MAX_ROOM_CODE_RETRIES = 5;
@@ -71,7 +78,11 @@ export async function createTable(
         bigBlind: record.bigBlind,
       };
     } catch (err) {
-      if (err instanceof PokerRoomCodeCollisionError) {
+      // Room Registry Slice 001: a collision can now also surface as
+      // RoomCodeRegistryCollisionError (see this file's own top
+      // comment) — treated identically to Poker's own pre-existing
+      // collision error.
+      if (err instanceof PokerRoomCodeCollisionError || err instanceof RoomCodeRegistryCollisionError) {
         continue;
       }
       throw err;

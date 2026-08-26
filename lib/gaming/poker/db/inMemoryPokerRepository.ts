@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { InMemoryRoomStore } from "../../../rooms/db/inMemoryRoomRepository";
 import type { PokerRepository } from "./pokerRepository";
 import type {
   PokerTableRecord,
@@ -57,6 +58,13 @@ interface ActionOutcome {
  * suite (against real Postgres).
  */
 export class InMemoryPokerRepository implements PokerRepository {
+  /** Room Registry Slice 001 — see InMemorySessionRepository's identical field comment. */
+  private roomStore: InMemoryRoomStore;
+
+  constructor(roomStore: InMemoryRoomStore = new InMemoryRoomStore()) {
+    this.roomStore = roomStore;
+  }
+
   private tables = new Map<string, PokerTableRecord>();
   private seats = new Map<string, PokerSeatRecord>();
   private hands = new Map<string, PokerHandRecord>();
@@ -73,6 +81,13 @@ export class InMemoryPokerRepository implements PokerRepository {
       (t) => t.roomCode === record.roomCode && t.closedAt === null
     );
     if (collision) throw new PokerRoomCodeCollisionError();
+    // Room Registry Slice 001: registered first, mirroring
+    // InMemorySessionRepository's identical ordering — if this throws
+    // (the code was already issued to some other runtime, active or
+    // historical), this.tables is not yet mutated, matching
+    // create_poker_table_atomically's (0154) real transactional
+    // rollback.
+    this.roomStore.register(record.roomCode, "POKER_TABLE", record.pokerTableId);
     this.tables.set(record.pokerTableId, record);
   }
 

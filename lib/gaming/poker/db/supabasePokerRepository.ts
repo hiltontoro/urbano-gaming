@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 
 import type { PokerRepository } from "./pokerRepository";
+import { RoomCodeRegistryCollisionError } from "../../../rooms/types";
 import type {
   PokerTableRecord,
   PokerSeatRecord,
@@ -160,19 +161,28 @@ export class SupabasePokerRepository implements PokerRepository {
     });
   }
 
+  // Room Registry Slice 001: was a plain insert; now an atomic RPC
+  // (create_poker_table_atomically, 0154) that also registers this
+  // table's room code in the same transaction as the poker_tables
+  // insert itself — either both persist or neither does. Same columns,
+  // same values this method already sent before this Slice; no Poker
+  // gameplay behavior changes.
   async createTable(record: PokerTableRecord): Promise<void> {
-    const { error } = await this.client.from("poker_tables").insert({
-      poker_table_id: record.pokerTableId,
-      room_code: record.roomCode,
-      host_token: record.hostToken,
-      max_seats: record.maxSeats,
-      starting_stack: record.startingStack,
-      small_blind: record.smallBlind,
-      big_blind: record.bigBlind,
+    const { error } = await this.client.rpc("create_poker_table_atomically", {
+      p_poker_table_id: record.pokerTableId,
+      p_room_code: record.roomCode,
+      p_host_token: record.hostToken,
+      p_max_seats: record.maxSeats,
+      p_starting_stack: record.startingStack,
+      p_small_blind: record.smallBlind,
+      p_big_blind: record.bigBlind,
     });
     if (error) {
       if (error.code === "23505" && error.message.includes("poker_tables_room_code_active_unique")) {
         throw new PokerRoomCodeCollisionError();
+      }
+      if (error.code === "23505" && error.message.includes("rooms_room_code_unique")) {
+        throw new RoomCodeRegistryCollisionError();
       }
       throw error;
     }

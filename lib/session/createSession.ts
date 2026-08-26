@@ -4,6 +4,7 @@ import { generateHostToken } from "./hostToken";
 import type { SessionRepository } from "./db/sessionRepository";
 import type { CreateSessionResult, SessionRecord } from "./types";
 import { RoomCodeCollisionError } from "./types";
+import { RoomCodeRegistryCollisionError } from "../rooms/types";
 
 /**
  * CREATE_SESSION command handler.
@@ -57,7 +58,14 @@ export async function createSession(
         stateVersion: record.stateVersion,
       };
     } catch (err) {
-      if (err instanceof RoomCodeCollisionError) {
+      // Room Registry Slice 001: a collision can now also surface as
+      // RoomCodeRegistryCollisionError — this exact code was already
+      // issued to some other runtime, active or historical, a case
+      // sessions_room_code_active_unique alone cannot see (rooms.
+      // room_code is global and non-reusable, per the Founder's own
+      // Room Registry Slice 001 resolution). Both error classes mean
+      // exactly the same thing to this loop: regenerate and retry.
+      if (err instanceof RoomCodeCollisionError || err instanceof RoomCodeRegistryCollisionError) {
         lastError = err;
         continue; // regenerate and retry, per finalized data model
       }

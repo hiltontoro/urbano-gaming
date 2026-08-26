@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createSession } from "../lib/session/createSession";
 import { InMemorySessionRepository } from "../lib/session/db/inMemorySessionRepository";
 import { RoomCodeCollisionError } from "../lib/session/types";
+import { RoomCodeRegistryCollisionError } from "../lib/rooms/types";
 
 describe("CREATE_SESSION", () => {
   it("creates a session with all required fields correctly populated", async () => {
@@ -95,7 +96,17 @@ describe("CREATE_SESSION", () => {
     expect(duplicateEvents).toHaveLength(0);
   });
 
-  it("allows room code reuse once the original session is SESSION_COMPLETE", async () => {
+  // Room Registry Slice 001 correction: this test previously asserted
+  // the opposite — that a room code became reusable once its original
+  // session completed. That was sessions_room_code_active_unique's own
+  // rule alone. The Founder's own Room Registry Slice 001 resolution
+  // deliberately supersedes it: "once URBANO Gaming has issued a room
+  // code through the Room Registry, that code never identifies another
+  // runtime" — a simpler invariant, traded deliberately against
+  // theoretical code reuse. sessions_room_code_active_unique itself is
+  // untouched and would still allow this reuse on its own; rooms'
+  // global, non-partial uniqueness is what now correctly forbids it.
+  it("rejects room code reuse even after the original session is SESSION_COMPLETE (Room Registry v1: codes are non-reusable)", async () => {
     const repo = new InMemorySessionRepository();
     const first = await createSession(repo);
 
@@ -128,22 +139,12 @@ describe("CREATE_SESSION", () => {
           },
         }
       )
-    ).resolves.toBeUndefined();
+    ).rejects.toBeInstanceOf(RoomCodeRegistryCollisionError);
 
     const stored = await repo.getSessionById(reusedSessionId);
     const events = repo._getEventsForSession(reusedSessionId);
 
-    expect(stored).not.toBeNull();
-    expect(stored?.roomCode).toBe(first.roomCode);
-    expect(stored?.state).toBe("LOBBY_OPEN");
-
-    expect(events).toHaveLength(1);
-    expect(events[0]).toEqual({
-      sessionId: reusedSessionId,
-      eventType: "SESSION_CREATED",
-      payload: {
-        roomCode: first.roomCode,
-      },
-    });
+    expect(stored).toBeNull();
+    expect(events).toHaveLength(0);
   });
 });
