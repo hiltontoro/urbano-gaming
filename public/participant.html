@@ -121,6 +121,27 @@
   }
   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 10px; }
 
+  /* Poker Dedicated Experience Participant Handoff Slice. Deliberately
+     gold, not --exp-purple — this file's own purple already means
+     "Duel / Experience Layer," a runtime concept sharing the Session's
+     own lifecycle; Poker shares neither. Gold is this file's existing
+     "important, brand-level, not a Session turn type" accent (room
+     code, standings score) — reused here, not invented, to say
+     "this belongs to URBANO Gaming" without implying "this is another
+     capability alongside Open Response/Trivia/Quiz/Voting/Duel." A
+     sibling of #join-panel/#game-panels, not inside either — visible
+     identically before and after joining a Session, since Poker does
+     not require Session participation at all. */
+  .dedicated-experiences-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--gold); margin-bottom: 6px;
+  }
+  .dedicated-experience-link {
+    display: block; text-align: center; text-decoration: none;
+    background: var(--gold-bg); border: 1px solid var(--gold); color: var(--gold);
+    font-weight: 700; font-size: 15px; padding: 13px 16px; border-radius: 8px;
+  }
+
   .option-btn-list { display: flex; flex-direction: column; gap: 10px; }
   .option-btn {
     display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -305,8 +326,31 @@
   <label>Room code</label>
   <input id="p-roomCode" placeholder="e.g. AB23CD" />
   <label>Your name</label>
-  <input id="p-displayName" placeholder="e.g. Alex" />
+  <input id="p-displayName" placeholder="e.g. Alex" oninput="updatePokerLaunchLink()" />
   <button class="btn-primary" onclick="joinSession()">Join</button>
+</div>
+
+<!-- Poker Dedicated Experience Participant Handoff Slice: a sibling of
+     #join-panel/#game-panels, not inside either, so it renders
+     identically whether or not a Session has been joined — Poker is
+     independent of Session participation. Room code and display name
+     entered here are a separate, non-authoritative convenience
+     prefill (see updatePokerLaunchLink()) — Poker still creates its
+     own Guest/seat identity through its own existing join flow at
+     /poker-table.html; nothing here maps Session participantId/
+     participantToken/Gaming Member identity onto a Poker seat.
+
+     Active-Gameplay Density Correction: visible by default (matters
+     for the pre-join screen, which never calls updateFocusMode() at
+     all) — updateFocusMode() below is the only thing that ever hides
+     it, using the exact same inFocusMode signal already governing the
+     stepper/standingsCard, plus SESSION_COMPLETE, so this card never
+     outranks the winner banner / final standings / Join Another
+     Session it sits above once a Session ends. -->
+<div class="card" id="dedicated-experiences-card">
+  <div class="dedicated-experiences-label">Dedicated Experiences</div>
+  <p class="room-code-hint" style="margin-top:0; margin-bottom:12px; text-align:left;">Separate games with their own room code — not part of this Session.</p>
+  <a class="dedicated-experience-link" id="poker-launch-link" href="/poker-table.html">🃏&nbsp;Poker Table</a>
 </div>
 
 <div id="game-panels" style="display:none;">
@@ -813,6 +857,24 @@ function showGamePanels() {
   document.getElementById("game-panels").style.display = "block";
   document.getElementById("pageTitle").classList.add("sr-only");
   document.getElementById("pageSubtitle").style.display = "none";
+  updatePokerLaunchLink();
+}
+
+// Poker Dedicated Experience Participant Handoff Slice: a
+// non-authoritative convenience prefill only — the joined Session's
+// own displayName (once known) or whatever the participant has typed
+// into the still-visible join form, passed as a plain query string
+// Poker's own join screen may optionally read. This carries no
+// identity, token, or session reference of any kind; Poker still
+// creates its own independent Guest/seat identity regardless of
+// whether this parameter is present, absent, or stale.
+function updatePokerLaunchLink() {
+  const link = document.getElementById("poker-launch-link");
+  if (!link) return;
+  const name =
+    (participantState && participantState.displayName) ||
+    document.getElementById("p-displayName").value.trim();
+  link.href = name ? "/poker-table.html?name=" + encodeURIComponent(name) : "/poker-table.html";
 }
 
 function renderStepper(currentState) {
@@ -2263,6 +2325,20 @@ function updateFocusMode(effectiveState) {
   if (inFocusMode) {
     document.getElementById("standingsCard").style.display = "none";
   }
+
+  // Active-Gameplay Density Correction: the Dedicated Experiences/Poker
+  // card is discovery/navigation chrome, exactly the category this
+  // function already exists to suppress while a Turn or Duel is
+  // actively being played — reuses inFocusMode verbatim rather than a
+  // second, parallel definition of "is something active right now."
+  // Also hidden at SESSION_COMPLETE specifically: this card sits above
+  // #game-panels in the DOM, so left visible there it would render
+  // above the winner banner / final standings / Join Another Session —
+  // displacing exactly the terminal hierarchy this correction must not
+  // touch. Hiding it here is the smallest way to guarantee that
+  // without moving the node or duplicating markup.
+  document.getElementById("dedicated-experiences-card").style.display =
+    inFocusMode || effectiveState === "SESSION_COMPLETE" ? "none" : "block";
 }
 
 // Structural Tier 2 addendum (production playtest defect fix).
@@ -2478,6 +2554,7 @@ if (new URLSearchParams(location.search).has("debug")) {
 
 restoreState();
 initGamingAuthPrefill();
+updatePokerLaunchLink();
 renderSyncDebug();
 if (participantState.sessionId) {
   sessionSync.start();

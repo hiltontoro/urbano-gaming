@@ -26,8 +26,10 @@
     --good: #4ade80; --bad: #f87171;
     --card-white: #f5f1e8; --card-ink: #0a0a0a; --card-red: #d64545;
     --felt: #123524;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
   }
   * { box-sizing: border-box; }
+  a { color: inherit; text-decoration: none; }
   body {
     font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
@@ -35,6 +37,39 @@
   .content { max-width: 480px; margin: 0 auto; padding: 20px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+
+  /* Poker Dedicated Experience Participant Handoff Slice: visual-shell
+     continuity only — reuses participant.html's own already-accepted
+     header pattern (Frontend Shell Refinement Slice) byte-for-byte,
+     rather than inventing a third variant alongside host.html's and
+     participant.html's. No gameplay markup below this point changed. */
+  .brand {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; max-width: 480px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand-identity { display: inline-flex; align-items: center; gap: 10px; }
+  .identity-role-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .brand-mark { width: 24px; height: 26px; display: block; filter: drop-shadow(0 0 6px var(--exp-purple-glow)); }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge {
+    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .back-link {
+    max-width: 480px; margin: 14px auto 0; padding: 0 20px;
+    font-size: 13px; color: var(--muted); display: block;
+  }
+  .back-link:hover { color: var(--ink); }
+
+  @media (max-width: 400px) {
+    .brand, .back-link, .content { padding-left: 16px; padding-right: 16px; }
+    .brand-word { font-size: 15px; }
+  }
 
   .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 16px; }
   .felt { background: var(--felt); border-color: #1e5c3d; }
@@ -119,9 +154,19 @@
 </head>
 <body>
 
+<div class="brand">
+  <div class="brand-identity">
+    <img class="brand-mark" src="/urbano-mark.svg" alt="" />
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <span class="identity-role-badge">Guest</span>
+</div>
+<a class="back-link" href="/participant.html">← Back to URBANO Gaming</a>
+
 <div class="content" id="content">
-  <h1>Poker Table</h1>
-  <p class="sub">URBANO Gaming — non-wagering, free chips only.</p>
+  <h1>🃏 Poker Table</h1>
+  <p class="sub">Non-wagering — free chips only.</p>
 
   <div class="card" id="join-card">
     <div class="field">
@@ -330,6 +375,17 @@ document.getElementById("btn-join").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+
+// Poker Dedicated Experience Participant Handoff Slice: a plain,
+// non-authoritative convenience prefill from participant.html's own
+// "Poker Table" link — carries no identity, token, or Session
+// reference. Only pre-fills the visible join form; the actual Guest/
+// seat identity this page creates is entirely independent of it, and
+// nothing breaks if this parameter is absent, stale, or tampered with.
+(function prefillNameFromQuery() {
+  const name = new URLSearchParams(location.search).get("name");
+  if (name) document.getElementById("join-display-name").value = name;
+})();
 
 (function init() {
   const seat = loadSeat();
