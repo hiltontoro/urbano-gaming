@@ -103,7 +103,11 @@ export interface PokerHandResultRecord {
     eligibleSeatNumbers: number[];
     payouts: Array<{ seatNumber: number; amount: number }>;
   }>;
-  showdownHands: Record<string, { cards: [string, string]; rankName: string }> | null;
+  // descr is optional: a hand settled before the Poker Playtest UX +
+  // Showdown Transparency Slice persisted only rankName — real
+  // existing rows in production have no descr field at all, and the
+  // participant client falls back to rankName for those.
+  showdownHands: Record<string, { cards: [string, string]; rankName: string; descr?: string }> | null;
   completedAt: string;
 }
 

@@ -77,11 +77,18 @@ export async function applyPlayerAction(
       .filter((group) => group.length > 0);
   });
 
-  const showdownHands: Record<string, { cards: [string, string]; rankName: string }> = {};
+  // Poker Playtest UX + Showdown Transparency Slice: descr is
+  // pokersolver's own already-computed human-readable qualifier
+  // ("Pair, A's", "Straight, 10 High") — previously discarded here,
+  // now persisted alongside rankName so the participant client can
+  // render a truthful "why you won/lost" line without a second
+  // evaluation. showdown_hands is a jsonb column (0077); no migration.
+  const showdownHands: Record<string, { cards: [string, string]; rankName: string; descr: string }> = {};
   for (const e of evaluated) {
     showdownHands[String(e.seatNumber)] = {
       cards: holeCardsBySeat.get(e.seatNumber)!,
       rankName: e.rankName,
+      descr: e.descr,
     };
   }
 

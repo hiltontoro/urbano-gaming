@@ -379,6 +379,53 @@ describe("Showdown hand evaluation", () => {
     const groups = rankHandsBestToWorst([a, b]);
     expect(groups[0].sort()).toEqual([0, 1]);
   });
+
+  // Poker Playtest UX + Showdown Transparency Slice — documentation
+  // test, not a bug fix. A real Founder playtest (room JR95HE)
+  // produced a screenshot that, read quickly, looked like a wrong
+  // winner: Founder KD/QS appears to have "just" a pair of Queens,
+  // opponent 7D/9S appears to have "just" a pair of Nines, so Founder
+  // seemed to have lost a hand they should have won. The Founder
+  // Playtest Reconciliation gate traced this exactly and found no
+  // defect: the opponent's own 7D closes a Straight against the
+  // board's 6C-8C-9C-TC (six through ten), a hand shape genuinely easy
+  // for a human to miss on a board that also carries four clubs. This
+  // test permanently encodes the correct result so this exact
+  // trust-critical scenario can never silently regress.
+  it("Founder playtest scenario (room JR95HE): a hidden Straight beats a visible Pair — the opponent's hand was correctly evaluated and correctly won", () => {
+    const board = ["8C", "9C", "QH", "6C", "TC"];
+    const founder = evaluateHand(0, ["KD", "QS"], board);
+    const opponent = evaluateHand(1, ["7D", "9S"], board);
+
+    expect(founder.rankName).toBe("Pair");
+    expect(founder.descr).toBe("Pair, Q's");
+    expect(opponent.rankName).toBe("Straight");
+    expect(opponent.descr).toBe("Straight, 10 High");
+
+    const groups = rankHandsBestToWorst([founder, opponent]);
+    expect(groups[0]).toEqual([1]); // opponent (seat 1) wins outright
+  });
+});
+
+describe("Showdown descr persistence (Poker Playtest UX + Showdown Transparency Slice)", () => {
+  it("persists pokersolver's own descr alongside rankName for every revealed seat, returned via GET_TABLE_STATE", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table, seats } = await setupTable(repo, ["Alex", "Jordan"], { startingStack: 200 });
+    const hand = await startHand(repo, table.pokerTableId);
+    await act(repo, hand.pokerHandId, 0, "ALL_IN");
+    const r = await act(repo, hand.pokerHandId, 1, "CALL");
+    expect(r.showdownReached).toBe(true);
+
+    const state = await getTableState(repo, table.pokerTableId, seats[0].participantToken);
+    const showdownHands = state.handResult?.showdownHands;
+    expect(showdownHands).not.toBeNull();
+    for (const seatKey of Object.keys(showdownHands!)) {
+      const entry = showdownHands![seatKey];
+      expect(typeof entry.rankName).toBe("string");
+      expect(typeof entry.descr).toBe("string");
+      expect(entry.descr!.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe("Payout / settlement", () => {

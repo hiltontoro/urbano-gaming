@@ -72,7 +72,9 @@
   }
 
   .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 16px; }
-  .felt { background: var(--felt); border-color: #1e5c3d; }
+  /* Poker Playtest UX Slice: small, restrained table-depth treatment —
+     one inset shadow, no new asset, no structural change. */
+  .felt { background: var(--felt); border-color: #1e5c3d; box-shadow: inset 0 0 28px rgba(0,0,0,0.35); }
 
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
@@ -147,9 +149,30 @@
     flex: 1; font-family: inherit; font-size: 15px; padding: 11px 12px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); min-height: 44px;
   }
+  /* Poker Playtest UX Slice: truthful "Bet"/"Raise to" labeling plus a
+     cheap, already-available min/all-in helper line. */
+  .amount-label { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .amount-help { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
 
-  .result-card { border-color: var(--gold); }
-  .result-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+  /* Renamed from .result-card/.result-row to .poker-result-card/
+     .poker-result-row during the Participant Unified Entry Slice 002
+     shared-module extraction (to avoid participant.html's own
+     pre-existing, differently-meaning .result-card class) — this
+     file's own copy was missed at the time, so its hand-result card
+     has been rendering unstyled here ever since. Corrected now while
+     already touching this exact block for the Poker Playtest UX
+     Slice's own visual-polish work. */
+  .poker-result-card { border-color: var(--gold); }
+  .poker-result-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+  /* Subtle, gold win pulse — same technique as Session's own
+     .exp-celebrate/expWinnerPulse, in gold rather than purple to match
+     Poker's own established brand-level accent. Only applied when the
+     viewer's own payout is positive. */
+  @keyframes pokerWinPulse {
+    0% { box-shadow: 0 0 0 0 var(--gold-bg); }
+    100% { box-shadow: 0 0 0 20px rgba(212, 175, 55, 0); }
+  }
+  .poker-result-win { animation: pokerWinPulse 1.2s ease-out 2; }
 </style>
 </head>
 <body>

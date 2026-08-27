@@ -295,7 +295,9 @@
     --card-white: #f5f1e8; --card-ink: #0a0a0a; --card-red: #d64545;
     --felt: #123524;
   }
-  .felt { background: var(--felt); border-color: #1e5c3d; }
+  /* Poker Playtest UX Slice: small, restrained table-depth treatment —
+     one inset shadow, no new asset, no structural change. */
+  .felt { background: var(--felt); border-color: #1e5c3d; box-shadow: inset 0 0 28px rgba(0,0,0,0.35); }
   .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
@@ -351,8 +353,28 @@
     flex: 1; font-family: inherit; font-size: 15px; padding: 11px 12px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); min-height: 44px;
   }
+  /* Poker Playtest UX Slice: truthful "Bet"/"Raise to" labeling (the
+     backend's own semantics — computeLegalActions()'s minRaiseTo/
+     maxAmount are already totals, not deltas) plus a cheap, already-
+     available min/all-in helper line, replacing the previously
+     unlabeled bare number box. */
+  .amount-label { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .amount-help { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
   .poker-result-card { border-color: var(--gold); }
   .poker-result-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+  /* Poker Playtest UX Slice: a subtle, gold win pulse — reuses the
+     exact box-shadow-pulse technique Session's own .exp-celebrate/
+     expWinnerPulse already established, but in gold rather than
+     --exp-purple, matching this file's own documented reasoning above
+     (gold is Poker/brand-level, purple is Session Activity — reusing
+     purple here would borrow the wrong meaning, not just the wrong
+     color). Applied only when the viewer's own payout is positive —
+     never on a loss, tie-with-zero-payout, or fold-ended hand. */
+  @keyframes pokerWinPulse {
+    0% { box-shadow: 0 0 0 0 var(--gold-bg); }
+    100% { box-shadow: 0 0 0 20px rgba(212, 175, 55, 0); }
+  }
+  .poker-result-win { animation: pokerWinPulse 1.2s ease-out 2; }
 </style>
 </head>
 <body>
@@ -548,7 +570,13 @@
      silently drift apart. -->
 <div id="poker-panels" style="display:none;">
   <div id="poker-container"></div>
-  <p class="room-code-hint" style="margin-top:14px;"><a href="#" onclick="clearRuntimeState(); return false;">← Join a different room</a></p>
+  <!-- Poker Playtest UX Slice: reuses the existing .btn-ghost treatment
+       (host.html's own established pattern for a secondary/exit
+       control) instead of a bare <a>, which fell through to browser-
+       default blue/underline — participant.html's own .btn-ghost rule
+       already existed but had no application yet. Real <button>, not a
+       link masquerading as one: nothing here navigates. -->
+  <button type="button" class="btn-ghost" onclick="clearRuntimeState()" style="width:100%; margin-top:14px;">← Join a different room</button>
 </div>
 
 <details id="debugOutputDetails" style="display:none;">
@@ -834,6 +862,13 @@ function clearRuntimeState() {
   document.getElementById("join-panel").style.display = "block";
   document.getElementById("pageTitle").classList.remove("sr-only");
   document.getElementById("pageSubtitle").style.display = "block";
+  // Poker Playtest UX Slice correction (found during the Slice 002
+  // production gate): without this, reusing this same tab's join form
+  // after a reset showed whatever room code/name were typed before —
+  // easy to miss, producing a garbled, concatenated code on the next
+  // attempt. A fresh reset now always presents a genuinely blank form.
+  document.getElementById("p-roomCode").value = "";
+  document.getElementById("p-displayName").value = "";
   renderNotice(null);
 }
 
@@ -1052,6 +1087,13 @@ function showGamePanels() {
   document.getElementById("game-panels").style.display = "block";
   document.getElementById("pageTitle").classList.add("sr-only");
   document.getElementById("pageSubtitle").style.display = "none";
+  // Poker Playtest UX Slice: a mobile browser auto-scrolls to keep the
+  // just-focused room-code/name input above the keyboard while the
+  // join form was still visible — that offset otherwise survives this
+  // panel swap untouched, landing the participant mid-page instead of
+  // at the URBANO Gaming header. Neither runtime ever has a legitimate
+  // reason to open anywhere but the top.
+  window.scrollTo(0, 0);
 }
 
 // Participant Unified Entry Slice 002. Mirrors showGamePanels() above
@@ -1063,6 +1105,7 @@ function showPokerPanels() {
   document.getElementById("poker-panels").style.display = "block";
   document.getElementById("pageTitle").classList.add("sr-only");
   document.getElementById("pageSubtitle").style.display = "none";
+  window.scrollTo(0, 0);
 }
 
 function renderStepper(currentState) {
