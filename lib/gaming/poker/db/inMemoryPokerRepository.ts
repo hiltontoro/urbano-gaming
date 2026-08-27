@@ -28,6 +28,7 @@ import {
   InvalidActionAmountError,
   HandNotAtShowdownError,
   ChipConservationViolationError,
+  PokerTableHasActiveHandError,
 } from "../types";
 import { isValidStandardDeck } from "../deck";
 import { computeBoardCards } from "../pokerRules";
@@ -727,5 +728,23 @@ export class InMemoryPokerRepository implements PokerRepository {
     this.hands.set(input.pokerHandId, { ...hand, street: "COMPLETE", currentActorSeatNumber: null, completedAt: new Date().toISOString() });
 
     return { alreadySettled: false };
+  }
+
+  async closeTable(pokerTableId: string): Promise<{ closedAt: string; alreadyClosed: boolean }> {
+    const table = this.tables.get(pokerTableId);
+    if (!table) throw new PokerTableNotFoundError();
+
+    if (table.closedAt !== null) {
+      return { closedAt: table.closedAt, alreadyClosed: true };
+    }
+
+    const mostRecent = await this.getMostRecentHandForTable(pokerTableId);
+    if (mostRecent && mostRecent.street !== "COMPLETE") {
+      throw new PokerTableHasActiveHandError();
+    }
+
+    const closedAt = new Date().toISOString();
+    this.tables.set(pokerTableId, { ...table, closedAt });
+    return { closedAt, alreadyClosed: false };
   }
 }

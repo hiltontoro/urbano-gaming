@@ -152,6 +152,12 @@ export interface StartPokerHandResult {
   alreadyStarted: boolean;
 }
 
+export interface CloseTableResult {
+  pokerTableId: string;
+  closedAt: string;
+  alreadyClosed: boolean;
+}
+
 export interface PlayerActionResult {
   pokerHandId: string;
   street: PokerStreet;
@@ -279,6 +285,13 @@ export class NotEnoughSeatedPlayersError extends Error {
   constructor() {
     super("At least two seated players are required to deal a hand.");
     this.name = "NotEnoughSeatedPlayersError";
+  }
+}
+
+export class PokerTableHasActiveHandError extends Error {
+  constructor() {
+    super("This poker table has a hand in progress and cannot be closed until it finishes.");
+    this.name = "PokerTableHasActiveHandError";
   }
 }
 

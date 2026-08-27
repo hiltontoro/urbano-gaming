@@ -116,4 +116,16 @@ export interface PokerRepository {
   }): Promise<{ alreadySettled: boolean }>;
 
   getHandResult(pokerHandId: string): Promise<PokerHandResultRecord | null>;
+
+  /**
+   * Poker End Table Lifecycle Slice. Legal only "between hands" — no
+   * Hand ever dealt, or the most recent Hand's street = 'COMPLETE'.
+   * Idempotent per table (mirrors startHand's own alreadyStarted and
+   * settleShowdown's own alreadySettled convention): a repeat call on
+   * an already-closed table returns alreadyClosed: true rather than
+   * throwing. Never mutates poker_hands/poker_hand_players/
+   * poker_hand_actions/poker_hand_results — full Hand history remains
+   * queryable indefinitely.
+   */
+  closeTable(pokerTableId: string): Promise<{ closedAt: string; alreadyClosed: boolean }>;
 }

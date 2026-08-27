@@ -30,6 +30,7 @@ import {
   InvalidActionAmountError,
   HandNotAtShowdownError,
   ChipConservationViolationError,
+  PokerTableHasActiveHandError,
 } from "../types";
 
 function mapTable(row: any): PokerTableRecord {
@@ -139,6 +140,7 @@ function translateNamedError(error: { code?: string; message?: string }): Error 
     ["INVALID_ACTION_TYPE", () => new InvalidActionAmountError(error.message!)],
     ["HAND_NOT_AT_SHOWDOWN", () => new HandNotAtShowdownError()],
     ["CHIP_CONSERVATION_VIOLATION", () => new ChipConservationViolationError()],
+    ["POKER_TABLE_HAS_ACTIVE_HAND", () => new PokerTableHasActiveHandError()],
   ];
   for (const [code, build] of table) {
     if (error.message.includes(code)) return build();
@@ -444,5 +446,20 @@ export class SupabasePokerRepository implements PokerRepository {
       .maybeSingle();
     if (error) throw error;
     return data ? mapHandResult(data) : null;
+  }
+
+  async closeTable(pokerTableId: string): Promise<{ closedAt: string; alreadyClosed: boolean }> {
+    const { data, error } = await this.client.rpc("close_poker_table_atomically", {
+      p_poker_table_id: pokerTableId,
+    });
+
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    return { closedAt: row.closed_at, alreadyClosed: row.already_closed as boolean };
   }
 }

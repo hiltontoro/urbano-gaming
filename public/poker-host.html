@@ -88,6 +88,24 @@
   }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /* Poker End Table Lifecycle Slice: secondary/destructive, reusing
+     --bad (already established elsewhere as this app's error/danger
+     color) rather than a new token — End Table is a real, irreversible
+     action but not the primary flow on this screen. */
+  .btn-danger-ghost {
+    font-family: inherit; font-size: 13px; font-weight: 700; padding: 11px 18px;
+    border-radius: 10px; border: 1px solid var(--bad); background: transparent; color: var(--bad);
+    cursor: pointer; width: 100%; min-height: 42px; margin-top: 10px;
+  }
+  .btn-danger-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .table-ended-banner {
+    border-radius: 12px; border: 1px solid var(--line); background: var(--bg-card);
+    padding: 14px 16px; text-align: center; color: var(--muted);
+    font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    margin-top: 0;
+  }
+
   .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
@@ -164,7 +182,14 @@
     </div>
 
     <div class="card">
+      <div id="table-ended-banner" class="table-ended-banner" style="display:none;">Table Ended</div>
       <button id="btn-start-hand" class="btn-primary" style="margin-top:0;">Start Hand</button>
+      <!-- Poker End Table Lifecycle Slice: legal only between hands —
+           visible/actionable exactly when Start Hand is itself
+           actionable (handOver), matching computeLegalActions' own
+           precedent of reusing an existing state check rather than
+           inventing a second one. Hidden entirely once closed. -->
+      <button id="btn-end-table" class="btn-danger-ghost">End Table</button>
       <p class="msg" id="hand-msg"></p>
       <p class="status-line" id="status-line"></p>
       <div class="board" id="board"></div>
@@ -210,9 +235,20 @@ async function refreshTable(table) {
     .join("");
 
   const startBtn = document.getElementById("btn-start-hand");
+  const endBtn = document.getElementById("btn-end-table");
+  const banner = document.getElementById("table-ended-banner");
   const handOver = !state.currentHandId || state.street === "COMPLETE";
+  const isClosed = state.closedAt !== null;
+
+  // Poker End Table Lifecycle Slice: once closed, hide both action
+  // buttons and show the terminal banner instead — mirrors how a
+  // completed Session's own host surface stops offering lobby controls.
+  banner.style.display = isClosed ? "block" : "none";
+  startBtn.style.display = isClosed ? "none" : "block";
+  endBtn.style.display = isClosed ? "none" : "block";
   startBtn.textContent = state.currentHandId ? "Start Next Hand" : "Start Hand";
   startBtn.disabled = !handOver;
+  endBtn.disabled = !handOver;
 
   const tbody = document.getElementById("seats-body");
   tbody.innerHTML = "";
@@ -270,6 +306,33 @@ document.getElementById("btn-start-hand").addEventListener("click", async () => 
   } else {
     msg.className = "msg error";
     msg.textContent = (res.json && res.json.error) || "Failed to start hand.";
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("btn-end-table").addEventListener("click", async () => {
+  const confirmed = confirm("End this table? Players will no longer be able to join or start a new hand. This cannot be undone.");
+  if (!confirmed) return;
+
+  const table = loadHost();
+  const msg = document.getElementById("hand-msg");
+  const btn = document.getElementById("btn-end-table");
+  btn.disabled = true;
+  msg.className = "msg";
+  msg.textContent = "Ending table…";
+
+  const res = await apiFetch(`/api/gaming/poker/tables/${table.pokerTableId}/close`, {
+    method: "POST",
+    headers: { authorization: "Bearer " + table.hostToken },
+  });
+
+  if (res.status === 200) {
+    msg.className = "msg success";
+    msg.textContent = res.json.alreadyClosed ? "This table is already ended." : "Table ended.";
+    await refreshTable(table);
+  } else {
+    msg.className = "msg error";
+    msg.textContent = (res.json && res.json.error) || "Failed to end table.";
     btn.disabled = false;
   }
 });

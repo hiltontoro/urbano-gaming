@@ -218,11 +218,19 @@
       </div>`;
     }).join("");
 
-    const holeCardsHtml = state.myHoleCards
-      ? `<div class="hole-cards">${state.myHoleCards.map(renderCard).join("")}</div>`
-      : state.currentHandId
-        ? `<p class="msg">You'll join the next Hand.</p>`
-        : `<p class="msg">Waiting for the host to deal.</p>`;
+    // Poker End Table Lifecycle Slice: purely additive — myLegalActions
+    // is already null whenever closedAt is set (closing is legal only
+    // once the most recent Hand reaches street='COMPLETE', the exact
+    // same condition that already clears myLegalActions in
+    // getTableState.ts), so the action area below needs no new logic
+    // at all; only the chrome gets a terminal message.
+    const holeCardsHtml = state.closedAt !== null
+      ? `<p class="msg">This table has ended. Thanks for playing.</p>`
+      : state.myHoleCards
+        ? `<div class="hole-cards">${state.myHoleCards.map(renderCard).join("")}</div>`
+        : state.currentHandId
+          ? `<p class="msg">You'll join the next Hand.</p>`
+          : `<p class="msg">Waiting for the host to deal.</p>`;
 
     const boardHtml = state.board && state.board.length > 0
       ? `<div class="board-cards">${state.board.map(renderCard).join("")}</div>`
@@ -242,9 +250,10 @@
       </div>`;
     }
 
+    const statusLabel = state.closedAt !== null ? "Table Ended" : (state.street || "Waiting");
     chromeEl.innerHTML = `
       <div class="card felt">
-        <span class="status-pill">Room ${state.roomCode} — ${state.street || "Waiting"}</span>
+        <span class="status-pill">Room ${state.roomCode} — ${statusLabel}</span>
         <div class="pot-row">🪙 Pot: ${state.pot} chips</div>
         ${boardHtml}
         ${holeCardsHtml}

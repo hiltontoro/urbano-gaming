@@ -2,14 +2,20 @@ import { loadEnv } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { randomUUID } from "crypto";
+
 import { SupabasePokerRepository } from "../lib/gaming/poker/db/supabasePokerRepository";
 import { createTable } from "../lib/gaming/poker/createTable";
 import { joinTable } from "../lib/gaming/poker/joinTable";
 import { dealHand } from "../lib/gaming/poker/dealHand";
+import { startHand } from "../lib/gaming/poker/startHand";
+import { applyPlayerAction } from "../lib/gaming/poker/applyPlayerAction";
+import { closeTable } from "../lib/gaming/poker/closeTable";
 import { getTableState } from "../lib/gaming/poker/getTableState";
 import {
   PokerDisplayNameTakenError,
   PokerTableAccessDeniedError,
+  PokerTableHasActiveHandError,
 } from "../lib/gaming/poker/types";
 
 const env = loadEnv("development", process.cwd(), "");
@@ -138,5 +144,109 @@ describe("SupabasePokerRepository contract", () => {
       .select("poker_hand_id", { count: "exact", head: true })
       .eq("poker_table_id", table.pokerTableId);
     expect(count).toBe(1);
+  }, 30000);
+
+  it("closeTable persists closed_at against real Postgres and is idempotent", async () => {
+    const table = await createTable(repo);
+    createdTableIds.push(table.pokerTableId);
+    await joinTable(repo, table.roomCode, "Alex");
+    await joinTable(repo, table.roomCode, "Jordan");
+
+    const first = await closeTable(repo, table.pokerTableId);
+    expect(first.alreadyClosed).toBe(false);
+    expect(first.closedAt).toBeTruthy();
+
+    const { data: row } = await cleanupClient
+      .from("poker_tables")
+      .select("closed_at")
+      .eq("poker_table_id", table.pokerTableId)
+      .single();
+    expect(row?.closed_at).toBeTruthy();
+
+    const second = await closeTable(repo, table.pokerTableId);
+    expect(second.alreadyClosed).toBe(true);
+    expect(second.closedAt).toBe(first.closedAt);
+  }, 30000);
+
+  it("closing a table with an active (non-COMPLETE) hand rolls back with no mutation", async () => {
+    const table = await createTable(repo, { startingStack: 500, smallBlind: 5, bigBlind: 10 });
+    createdTableIds.push(table.pokerTableId);
+    await joinTable(repo, table.roomCode, "Alex");
+    await joinTable(repo, table.roomCode, "Jordan");
+    await startHand(repo, table.pokerTableId);
+
+    await expect(closeTable(repo, table.pokerTableId)).rejects.toBeInstanceOf(
+      PokerTableHasActiveHandError
+    );
+
+    const { data: row } = await cleanupClient
+      .from("poker_tables")
+      .select("closed_at")
+      .eq("poker_table_id", table.pokerTableId)
+      .single();
+    expect(row?.closed_at).toBeNull();
+  }, 30000);
+
+  it("table/seat/stack history remains fully queryable after close — nothing is deleted", async () => {
+    const table = await createTable(repo, { startingStack: 500, smallBlind: 5, bigBlind: 10 });
+    createdTableIds.push(table.pokerTableId);
+    const alex = await joinTable(repo, table.roomCode, "Alex");
+    const jordan = await joinTable(repo, table.roomCode, "Jordan");
+    const hand = await startHand(repo, table.pokerTableId);
+    await applyPlayerAction(repo, {
+      pokerHandId: hand.pokerHandId, seatNumber: hand.currentActorSeatNumber!,
+      actionType: "FOLD", amount: null, idempotencyKey: randomUUID(),
+    });
+
+    await closeTable(repo, table.pokerTableId);
+
+    const state = await getTableState(repo, table.pokerTableId, table.hostToken);
+    expect(state.closedAt).toBeTruthy();
+    expect(state.seats.map((s) => s.seatNumber).sort()).toEqual(
+      [alex.seatNumber, jordan.seatNumber].sort()
+    );
+    expect(state.handResult).not.toBeNull();
+
+    const { count: handCount } = await cleanupClient
+      .from("poker_hands")
+      .select("poker_hand_id", { count: "exact", head: true })
+      .eq("poker_table_id", table.pokerTableId);
+    expect(handCount).toBe(1);
+  }, 30000);
+
+  it("closing an already-registered Room Registry room code leaves the rooms row untouched", async () => {
+    const table = await createTable(repo);
+    createdTableIds.push(table.pokerTableId);
+    const { data: roomBefore } = await cleanupClient
+      .from("rooms")
+      .select("*")
+      .eq("room_code", table.roomCode)
+      .maybeSingle();
+    expect(roomBefore).not.toBeNull();
+
+    await closeTable(repo, table.pokerTableId);
+
+    const { data: roomAfter } = await cleanupClient
+      .from("rooms")
+      .select("*")
+      .eq("room_code", table.roomCode)
+      .maybeSingle();
+    expect(roomAfter).toEqual(roomBefore);
+
+    // A second table can never claim the same, now-closed, room code —
+    // rooms.room_code has no closed_at awareness at all (see
+    // resolveRoom.ts), so this must fail exactly like any other
+    // already-issued code, not merely like an already-closed table.
+    const { error } = await cleanupClient.rpc("create_poker_table_atomically", {
+      p_poker_table_id: randomUUID(),
+      p_room_code: table.roomCode,
+      p_host_token: randomUUID(),
+      p_max_seats: 6,
+      p_starting_stack: 1000,
+      p_small_blind: 5,
+      p_big_blind: 10,
+    });
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("rooms_room_code_unique");
   }, 30000);
 });

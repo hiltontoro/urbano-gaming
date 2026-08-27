@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 
+import { randomUUID } from "crypto";
+
 import { InMemoryPokerRepository } from "../lib/gaming/poker/db/inMemoryPokerRepository";
 import { createTable } from "../lib/gaming/poker/createTable";
 import { joinTable } from "../lib/gaming/poker/joinTable";
 import { dealHand } from "../lib/gaming/poker/dealHand";
+import { startHand } from "../lib/gaming/poker/startHand";
+import { applyPlayerAction } from "../lib/gaming/poker/applyPlayerAction";
+import { closeTable } from "../lib/gaming/poker/closeTable";
 import { getTableState } from "../lib/gaming/poker/getTableState";
 import { buildStandardDeck, shuffleDeck, isValidStandardDeck } from "../lib/gaming/poker/deck";
 import {
   PokerTableNotFoundError,
   PokerTableFullError,
+  PokerTableClosedError,
   PokerDisplayNameTakenError,
   PokerTableAccessDeniedError,
+  PokerTableHasActiveHandError,
   NotEnoughSeatedPlayersError,
 } from "../lib/gaming/poker/types";
 
@@ -254,5 +261,137 @@ describe("Reconnect", () => {
     const hostState = await getTableState(repo, table.pokerTableId, table.hostToken);
     expect(hostState.currentHandId).toBe(dealt.pokerHandId);
     expect(hostState.seats).toHaveLength(3);
+  });
+});
+
+describe("End Table lifecycle", () => {
+  it("closing before any Hand has ever been dealt succeeds — 'between hands' includes before the first hand", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    const result = await closeTable(repo, table.pokerTableId);
+    expect(result.alreadyClosed).toBe(false);
+    expect(result.closedAt).toBeTruthy();
+
+    const state = await getTableState(repo, table.pokerTableId, table.hostToken);
+    expect(state.closedAt).toBe(result.closedAt);
+  });
+
+  it("closing between completed hands succeeds", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    const hand = await startHand(repo, table.pokerTableId);
+    // Fold whoever the current actor is, twice: with 3 seated players
+    // this reaches an early win (fold to one) and drives street
+    // straight to COMPLETE — the same mechanism pokerGameplay.test.ts's
+    // own "Early win" suite already exercises, but following the
+    // server's own turn order rather than assuming dealtSeatNumbers[0]
+    // is always first to act (it isn't, 3-handed).
+    let actor = hand.currentActorSeatNumber!;
+    let r = await applyPlayerAction(repo, {
+      pokerHandId: hand.pokerHandId,
+      seatNumber: actor,
+      actionType: "FOLD",
+      amount: null,
+      idempotencyKey: randomUUID(),
+    });
+    actor = r.currentActorSeatNumber!;
+    await applyPlayerAction(repo, {
+      pokerHandId: hand.pokerHandId,
+      seatNumber: actor,
+      actionType: "FOLD",
+      amount: null,
+      idempotencyKey: randomUUID(),
+    });
+
+    const result = await closeTable(repo, table.pokerTableId);
+    expect(result.alreadyClosed).toBe(false);
+  });
+
+  it("closing while a hand is active (not yet COMPLETE) is rejected", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    await startHand(repo, table.pokerTableId);
+    await expect(closeTable(repo, table.pokerTableId)).rejects.toBeInstanceOf(
+      PokerTableHasActiveHandError
+    );
+  });
+
+  it("a repeat close is idempotent — reports alreadyClosed, does not error", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    const first = await closeTable(repo, table.pokerTableId);
+    const second = await closeTable(repo, table.pokerTableId);
+    expect(second.alreadyClosed).toBe(true);
+    expect(second.closedAt).toBe(first.closedAt);
+  });
+
+  it("closing a nonexistent table is rejected", async () => {
+    const repo = new InMemoryPokerRepository();
+    await expect(
+      closeTable(repo, "00000000-0000-0000-0000-000000000000")
+    ).rejects.toBeInstanceOf(PokerTableNotFoundError);
+  });
+
+  it("a closed table rejects a new join", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    await closeTable(repo, table.pokerTableId);
+    await expect(joinTable(repo, table.roomCode, "Casey")).rejects.toBeInstanceOf(
+      PokerTableNotFoundError
+    );
+  });
+
+  it("a closed table rejects Start Hand", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    await closeTable(repo, table.pokerTableId);
+    await expect(startHand(repo, table.pokerTableId)).rejects.toBeInstanceOf(
+      PokerTableClosedError
+    );
+  });
+
+  it("a closed table rejects the legacy Deal Hand path", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table } = await setupTableWithThreeSeats(repo);
+    await closeTable(repo, table.pokerTableId);
+    await expect(dealHand(repo, table.pokerTableId)).rejects.toBeInstanceOf(
+      PokerTableClosedError
+    );
+  });
+
+  it("table state remains readable after closure, with final seats/stacks preserved", async () => {
+    const repo = new InMemoryPokerRepository();
+    const { table, alex, jordan, sam } = await setupTableWithThreeSeats(repo);
+    const hand = await startHand(repo, table.pokerTableId);
+    let actor = hand.currentActorSeatNumber!;
+    let r = await applyPlayerAction(repo, {
+      pokerHandId: hand.pokerHandId,
+      seatNumber: actor,
+      actionType: "FOLD",
+      amount: null,
+      idempotencyKey: randomUUID(),
+    });
+    actor = r.currentActorSeatNumber!;
+    await applyPlayerAction(repo, {
+      pokerHandId: hand.pokerHandId,
+      seatNumber: actor,
+      actionType: "FOLD",
+      amount: null,
+      idempotencyKey: randomUUID(),
+    });
+
+    const beforeClose = await getTableState(repo, table.pokerTableId, table.hostToken);
+    const stacksBefore = beforeClose.seats.map((s) => ({ seatNumber: s.seatNumber, stack: s.stack }));
+
+    await closeTable(repo, table.pokerTableId);
+
+    const afterClose = await getTableState(repo, table.pokerTableId, table.hostToken);
+    expect(afterClose.closedAt).not.toBeNull();
+    const stacksAfter = afterClose.seats.map((s) => ({ seatNumber: s.seatNumber, stack: s.stack }));
+    expect(stacksAfter).toEqual(stacksBefore);
+    // Every seat identity (alex/jordan/sam) is still present and readable.
+    expect(afterClose.seats.map((s) => s.seatNumber).sort()).toEqual(
+      [alex.seatNumber, jordan.seatNumber, sam.seatNumber].sort()
+    );
   });
 });

@@ -8,8 +8,9 @@ import { createTable } from "../lib/gaming/poker/createTable";
 import { joinTable } from "../lib/gaming/poker/joinTable";
 import { startHand } from "../lib/gaming/poker/startHand";
 import { applyPlayerAction } from "../lib/gaming/poker/applyPlayerAction";
+import { closeTable } from "../lib/gaming/poker/closeTable";
 import { getTableState } from "../lib/gaming/poker/getTableState";
-import { NotYourTurnError } from "../lib/gaming/poker/types";
+import { NotYourTurnError, PokerTableClosedError, PokerTableHasActiveHandError } from "../lib/gaming/poker/types";
 import type { PokerActionType } from "../lib/gaming/poker/types";
 
 const env = loadEnv("development", process.cwd(), "");
@@ -164,6 +165,60 @@ describe("Poker Gameplay contract", () => {
     expect(alexJson).not.toContain("deckOrder");
     for (const card of jordanState.myHoleCards ?? []) {
       expect(alexJson).not.toContain(`"${card}"`);
+    }
+  }, 30000);
+
+  it("End Table vs Start Hand: genuinely concurrent calls from a between-hands state produce exactly one coherent outcome, never both", async () => {
+    const table = await createTable(repo, { startingStack: 500, smallBlind: 5, bigBlind: 10 });
+    createdTableIds.push(table.pokerTableId);
+    await joinTable(repo, table.roomCode, "Alex");
+    await joinTable(repo, table.roomCode, "Jordan");
+    // No hand dealt yet — a legitimate "between hands" state (before
+    // the first hand), exercising the row-lock race at its simplest.
+
+    const results = await Promise.allSettled([
+      closeTable(repo, table.pokerTableId),
+      startHand(repo, table.pokerTableId),
+    ]);
+
+    const closeOutcome = results[0];
+    const startOutcome = results[1];
+
+    if (closeOutcome.status === "fulfilled") {
+      // Close won the race: the table is closed, and Start Hand must
+      // have either lost outright (PokerTableClosedError) or, if its
+      // own lock happened to be granted a hair before the table row
+      // was actually marked closed, produced no hand at all.
+      expect(startOutcome.status === "rejected" || (startOutcome as PromiseFulfilledResult<any>).value == null).toBe(true);
+      if (startOutcome.status === "rejected") {
+        expect((startOutcome as PromiseRejectedResult).reason).toBeInstanceOf(PokerTableClosedError);
+      }
+
+      const { data: row } = await cleanupClient
+        .from("poker_tables")
+        .select("closed_at")
+        .eq("poker_table_id", table.pokerTableId)
+        .single();
+      expect(row?.closed_at).toBeTruthy();
+
+      const { count } = await cleanupClient
+        .from("poker_hands")
+        .select("poker_hand_id", { count: "exact", head: true })
+        .eq("poker_table_id", table.pokerTableId);
+      expect(count).toBe(0);
+    } else {
+      // Start Hand won the race: a hand now exists and is not
+      // COMPLETE, so Close must have been rejected as having an active
+      // hand — the table must remain open.
+      expect(startOutcome.status).toBe("fulfilled");
+      expect((closeOutcome as PromiseRejectedResult).reason).toBeInstanceOf(PokerTableHasActiveHandError);
+
+      const { data: row } = await cleanupClient
+        .from("poker_tables")
+        .select("closed_at")
+        .eq("poker_table_id", table.pokerTableId)
+        .single();
+      expect(row?.closed_at).toBeNull();
     }
   }, 30000);
 });
