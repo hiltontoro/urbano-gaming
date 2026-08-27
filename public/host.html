@@ -416,6 +416,55 @@
     50% { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0.25); }
   }
   .winner-banner.exp-celebrate { animation: expWinnerPulse 1.4s ease-in-out 3; }
+
+  /* Host Unified Entry Slice 003. The picker is member-facing, not
+     architecture-facing (Founder decision) — four equal game choices,
+     no SESSION/POKER_TABLE grouping visible anywhere here. */
+  .picker-options { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .btn-picker {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    font-size: 15px; font-weight: 700; padding: 14px 16px; margin: 0;
+    border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    text-align: left; min-height: 48px;
+  }
+  .btn-picker:hover { border-color: var(--ink); }
+  .picker-icon { font-size: 20px; }
+  .btn-change-game { margin-bottom: 12px; }
+
+  /* Poker Host mode, inlined into the unified shell (Host Unified Entry
+     Slice 003) — reuses poker-host.html's own proven markup/behavior
+     verbatim, just with unified-shell ids to avoid collision with
+     Session's own. See that file's own comments for why each piece of
+     Poker-specific behavior exists; nothing about Poker's own domain
+     logic changed to get here. */
+  /* host.html had no .field convention of its own (its existing forms
+     use inline styles per-input) — borrowed verbatim from
+     poker-host.html's own definition rather than inventing a second
+     one, since this is the exact same config form. */
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .field input {
+    width: 100%; font-family: inherit; font-size: 15px; padding: 12px 14px;
+    border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    min-height: 44px;
+  }
+  .poker-config-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .poker-config-row .field { flex: 1 1 120px; margin-bottom: 0; }
+  .poker-status-line { font-size: 13px; color: var(--gold); margin: 4px 0 12px; }
+  .poker-board { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+  .poker-board .card-chip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-weight: 700; font-size: 14px; }
+  .poker-seats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .poker-seats-table th, .poker-seats-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  .poker-seats-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .poker-badge { font-size: 10.5px; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--gold-bg); color: var(--accent); margin-right: 4px; display: inline-block; margin-bottom: 2px; }
+  .poker-badge.turn { background: rgba(52,211,153,0.14); color: var(--done); }
+  .poker-badge.allin { background: var(--danger-bg); color: var(--danger); }
+  .poker-table-ended-banner {
+    border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2);
+    padding: 14px 16px; text-align: center; color: var(--muted);
+    font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    margin-bottom: 12px;
+  }
 </style>
 </head>
 <body>
@@ -451,9 +500,72 @@
 <div id="stepper" class="stepper"></div>
 <div id="interactionLabel" class="room-code-hint" style="display:none;"></div>
 
-<div id="pre-create" class="card">
-  <h2>Start a session</h2>
-  <button class="btn-primary" onclick="createSession()">Create Session</button>
+<!-- Host Unified Entry Slice 003. Member-facing picker — "what do you
+     want to host," not an architecture chooser. Shown whenever no
+     runtime is active and no game has been selected yet (fresh
+     /host.html, or after "Change Game"). See selectGame()/showPicker(). -->
+<div id="picker" class="card">
+  <h2>What do you want to host?</h2>
+  <div class="picker-options">
+    <button class="btn-picker" onclick="selectGame('poker')"><span class="picker-icon">🃏</span> Poker</button>
+    <button class="btn-picker" onclick="selectGame('trivia')"><span class="picker-icon">🧠</span> Trivia</button>
+    <button class="btn-picker" onclick="selectGame('quiz')"><span class="picker-icon">📝</span> Quiz</button>
+    <button class="btn-picker" onclick="selectGame('duel')"><span class="picker-icon">⚔️</span> Duel</button>
+  </div>
+</div>
+
+<!-- The compact config/create step for whichever game was just
+     selected. Poker shows its existing config fields; every
+     Session-backed game shows only a one-line confirmation and a
+     Create button — no config exists for them today, and none is
+     added here merely because the backend could support it. -->
+<div id="pre-create" class="card" style="display:none;">
+  <button type="button" class="btn-ghost btn-change-game" onclick="showPicker()">← Change Game</button>
+  <h2 id="preCreateTitle">Start a session</h2>
+
+  <div id="pokerConfigFields" style="display:none;">
+    <div class="poker-config-row">
+      <div class="field"><label>Starting stack</label><input id="cfg-poker-stack" type="number" value="1000" /></div>
+      <div class="field"><label>Small blind</label><input id="cfg-poker-sb" type="number" value="5" /></div>
+      <div class="field"><label>Big blind</label><input id="cfg-poker-bb" type="number" value="10" /></div>
+    </div>
+  </div>
+
+  <button class="btn-primary" id="btn-create-runtime" onclick="createSelectedGame()">Create</button>
+  <div id="capabilityDeclareError" class="notice" style="display:none;"></div>
+</div>
+
+<!-- Poker Host mode — inlined (Host Unified Entry Slice 003 readiness
+     gate's own conclusion: extracting a shared module would be
+     premature duplication-avoidance given how small this surface is;
+     revisit only if poker-host.html itself needs to change in
+     lockstep). Reuses the exact APIs/markup shape poker-host.html
+     already proved in production — Start Hand, End Table, terminal
+     rendering are unchanged behavior, just a different host page. -->
+<div id="poker-host-panels" style="display:none;">
+  <div class="card room-code-card" id="pokerRoomCodeCard">
+    <h2>Room Code</h2>
+    <div class="room-code" id="pokerRoomCodeDisplay">——————</div>
+    <div class="room-code-hint">Share this with participants at <strong>/participant.html</strong></div>
+  </div>
+
+  <div class="card">
+    <button type="button" class="btn-ghost btn-change-game" id="btn-change-game-poker" onclick="showPicker()" style="display:none;">← Change Game</button>
+    <div id="pokerTableEndedBanner" class="poker-table-ended-banner" style="display:none;">Table Ended</div>
+    <button class="btn-primary" id="btn-poker-start-hand" onclick="startPokerHandUnified()">Start Hand</button>
+    <!-- Poker End Table Lifecycle (Slice 12): legal only between
+         hands, mirroring computeLegalActions' own precedent of
+         reusing an existing state check rather than inventing a
+         second one. -->
+    <button class="btn-danger" id="btn-poker-end-table" onclick="endPokerTableUnified()">End Table</button>
+    <p class="poker-status-line" id="pokerHandMsg" style="color:var(--muted);"></p>
+    <p class="poker-status-line" id="pokerStatusLine"></p>
+    <div class="poker-board" id="pokerBoard"></div>
+    <table class="poker-seats-table">
+      <thead><tr><th>Seat</th><th>Player</th><th>Stack</th><th>In hand</th><th></th></tr></thead>
+      <tbody id="pokerSeatsBody"></tbody>
+    </table>
+  </div>
 </div>
 
 <div id="session-panels" style="display:none;">
@@ -637,8 +749,13 @@
            hidden-by-default #syncDebugPanel above. -->
       <div class="secondary-actions">
         <button class="btn-danger" id="btn-complete" onclick="completeSession()">End Session</button>
-        <button class="btn-primary" id="btn-new-session" onclick="createSession()" style="display:none;">Create New Session</button>
+        <button class="btn-primary" id="btn-new-session" onclick="createSelectedGame()" style="display:none;">Create New Session</button>
         <button class="btn-primary" id="btn-rematch" onclick="createSuccessorSession()" style="display:none;">Create Rematch</button>
+        <!-- Host Unified Entry Slice 003: only reachable once
+             SESSION_COMPLETE (see updateActionAvailability) — a live
+             Session is never abandoned by this control, matching the
+             same terminal-only gate Poker's own Change Game uses. -->
+        <button type="button" class="btn-ghost" id="btn-change-game-session" onclick="showPicker()" style="display:none;">← Change Game</button>
         <div id="rematchHint" class="room-code-hint" style="display:none;"></div>
       </div>
     </div>
@@ -815,6 +932,17 @@
 
 const HOST_STORAGE_KEY = "urbano_gaming_dev_harness_host";
 const LEGACY_HOST_STORAGE_KEY = "level33_dev_harness_host";
+// Host Unified Entry Slice 003. Mirrors participant.html's own
+// ACTIVE_RUNTIME_TYPE_KEY/activeRuntimeType pattern exactly — the same
+// discriminator applied to the other side of the same room. Poker Host
+// credentials get their own sessionStorage key, deliberately NOT the
+// standalone poker-host.html's historical localStorage key: within
+// this shared shell, Poker Host state must be exactly as tab-isolated
+// as Session Host state already is, or the two runtimes' credentials
+// could leak across tabs asymmetrically. poker-host.html itself is
+// unchanged — this correction is scoped to the unified shell only.
+const POKER_HOST_STORAGE_KEY = "urbano_gaming_host_poker";
+const ACTIVE_HOST_RUNTIME_TYPE_KEY = "urbano_gaming_active_host_runtime_type";
 const LIFECYCLE_STEPS = ["LOBBY_OPEN", "LOBBY_LOCKED", "PROMPT_ACTIVE", "SUBMISSIONS_CLOSED", "RESULT_REVEAL", "SESSION_COMPLETE"];
 // Turn is the presentation-layer word for what the domain layer still
 // calls an Interaction Instance — chosen deliberately generic (not
@@ -890,7 +1018,65 @@ const sessionSync = createSessionSync(function () {
   );
 }, 2000);
 
+// Host Unified Entry Slice 003. A second, independent instance of the
+// same runtime-agnostic factory sessionSync above already uses —
+// createSessionSync() has no concept of "Session" at all (see
+// sessionSync.js's own header comment), so reusing it here for Poker
+// Host is not a special case, just a second caller, exactly mirroring
+// participant.html's own sessionSync/pokerSync pair. Never runs
+// alongside sessionSync: the runtime discriminator (activeHostRuntimeType)
+// guarantees only one of the two is ever started at a time — see
+// switchToNewSession()/switchToNewPokerTable()/clearHostRuntimeState().
+const pokerSync = createSessionSync(function () {
+  return pokerHostRefresh();
+}, 2000);
+
 let hostState = { sessionId: null, roomCode: null, hostToken: null };
+// Host Unified Entry Slice 003. "SESSION" | "POKER_TABLE" | null — see
+// ACTIVE_HOST_RUNTIME_TYPE_KEY above. Structurally separate from
+// hostState by design, mirroring participantState/pokerSeatState on
+// the participant side: a Poker table is never a Session, and this
+// object is never sent to a Session API.
+let pokerHostState = { pokerTableId: null, roomCode: null, hostToken: null };
+let activeHostRuntimeType = null;
+// Which game the Host picked on the picker screen — "poker" | "trivia"
+// | "quiz" | "duel" | null. Purely a UI-routing value: it decides which
+// config screen shows and which capability array (if any) gets
+// declared on create; it is never sent to any API as authority, and it
+// persists across a completed/ended runtime only so "Create New
+// Session"/"Create New Table" can quickly repeat the same game type —
+// showPicker() is the only thing that clears it.
+let selectedGame = null;
+// Session Capability Architecture v1. Populated from GET_SESSION's own
+// declaredCapabilities field (see getSession.ts) — drives which Turn
+// Type buttons and which cards (Duel) are shown at all, not merely
+// disabled. Reset to [] by switchToNewSession() like every other
+// per-session cache on this page.
+let declaredCapabilities = [];
+// True only for a session predating Session Capability Architecture v1
+// (declaredCapabilities is null server-side, not merely empty) — see
+// getSession.ts's own field. Turn Type filtering below leaves such a
+// session's existing unrestricted behavior untouched.
+let legacyUndeclared = false;
+// Host Unified Entry Slice 003 defect fix: renderDuelCard() used to
+// infer "are we at the choose-next-Turn decision point" by peeking at
+// turnTypeSelector's own CSS display — a coupling that broke the
+// moment capability filtering could legitimately hide turnTypeSelector
+// entirely (a Duel-only session has zero ordinary Turn Types, so its
+// selector row is correctly absent, but Duel itself must still be
+// offered). This is now resolvePrimaryAction()'s own explicit, decoupled
+// signal for that one question, read by renderDuelCard() instead.
+let atTurnDecisionPoint = false;
+// Smallest safe handling for "Session created, capability declaration
+// failed" (Host Unified Entry Slice 003 readiness gate, §10): the
+// session already exists server-side once CREATE_SESSION succeeds, so
+// a retry must call SET_SESSION_CAPABILITIES again against that same
+// session rather than creating a second, orphaned one. Holds the
+// just-created session's own identity only for the duration of that
+// narrow failure window; cleared the moment declaration succeeds (by
+// switchToNewSession, which never runs until it does) or the Host
+// picks a different game.
+let pendingCapabilitySession = null;
 // Slice 001 (Session / Interaction separation): the session's own
 // lifecycle (LOBBY_OPEN | LOBBY_LOCKED | SESSION_COMPLETE) and the
 // current interaction instance's lifecycle (null | PROMPT_ACTIVE |
@@ -1027,19 +1213,83 @@ function saveHostState() {
   sessionStorage.setItem(HOST_STORAGE_KEY, JSON.stringify(hostState));
 }
 
+function savePokerHostState() {
+  sessionStorage.setItem(POKER_HOST_STORAGE_KEY, JSON.stringify(pokerHostState));
+}
+
+function saveActiveHostRuntimeType() {
+  if (activeHostRuntimeType) {
+    sessionStorage.setItem(ACTIVE_HOST_RUNTIME_TYPE_KEY, activeHostRuntimeType);
+  } else {
+    sessionStorage.removeItem(ACTIVE_HOST_RUNTIME_TYPE_KEY);
+  }
+}
+
+// Host Unified Entry Slice 003. The discriminator is authoritative —
+// restoreState() trusts ACTIVE_HOST_RUNTIME_TYPE_KEY first and
+// restores only that one runtime, never both, and never falls back to
+// guessing from whichever state record happens to be present. A
+// runtime the discriminator names but whose own record is missing or
+// malformed is treated as inconsistent and reset cleanly rather than
+// silently restoring a different runtime instead — mirrors
+// participant.html's identical restoreState()/restoreStoredSession()
+// discipline exactly.
 function restoreState() {
+  const storedRuntimeType = sessionStorage.getItem(ACTIVE_HOST_RUNTIME_TYPE_KEY);
+
+  if (storedRuntimeType === "POKER_TABLE") {
+    const stored = sessionStorage.getItem(POKER_HOST_STORAGE_KEY);
+    try {
+      const parsed = stored ? JSON.parse(stored) : null;
+      if (parsed && parsed.pokerTableId) {
+        pokerHostState = parsed;
+        activeHostRuntimeType = "POKER_TABLE";
+        showPokerHostPanels();
+        return;
+      }
+    } catch (e) {
+      console.warn("Discarding malformed poker host state from sessionStorage:", e);
+    }
+    resetToPicker();
+    return;
+  }
+
+  if (storedRuntimeType === "SESSION") {
+    restoreStoredSession(/* discriminatorAlreadySet */ true);
+    return;
+  }
+
+  // No discriminator yet — either a fresh tab, or a Session Host tab
+  // whose identity was saved before this Slice introduced the
+  // discriminator at all. Treat a present, valid legacy Session record
+  // as SESSION for one-time migration, exactly mirroring how
+  // HOST_STORAGE_KEY itself already migrates an even older key below.
+  restoreStoredSession(/* discriminatorAlreadySet */ false);
+}
+
+function restoreStoredSession(discriminatorAlreadySet) {
   const stored = sessionStorage.getItem(HOST_STORAGE_KEY) || sessionStorage.getItem(LEGACY_HOST_STORAGE_KEY);
-  if (!stored) return;
+  if (!stored) {
+    if (discriminatorAlreadySet) resetToPicker();
+    return;
+  }
   try {
     hostState = JSON.parse(stored);
     if (!sessionStorage.getItem(HOST_STORAGE_KEY)) {
       saveHostState();
       sessionStorage.removeItem(LEGACY_HOST_STORAGE_KEY);
     }
-    if (hostState.sessionId) showSessionPanels();
+    if (hostState.sessionId) {
+      activeHostRuntimeType = "SESSION";
+      saveActiveHostRuntimeType();
+      showSessionPanels();
+    } else if (discriminatorAlreadySet) {
+      resetToPicker();
+    }
   } catch (e) {
     console.warn("Discarding malformed host state from sessionStorage:", e);
     sessionStorage.removeItem(HOST_STORAGE_KEY);
+    if (discriminatorAlreadySet) resetToPicker();
   }
 }
 
@@ -1163,11 +1413,97 @@ function renderNotice(notice) {
 }
 
 function showSessionPanels() {
+  document.getElementById("picker").style.display = "none";
   document.getElementById("pre-create").style.display = "none";
+  document.getElementById("poker-host-panels").style.display = "none";
   document.getElementById("session-panels").style.display = "block";
   document.getElementById("roomCodeDisplay").textContent = hostState.roomCode || "——————";
   document.getElementById("sessionIdDisplay").textContent = hostState.sessionId || "—";
   document.getElementById("hostTokenDisplay").textContent = hostState.hostToken || "—";
+}
+
+// Host Unified Entry Slice 003. Mirrors showSessionPanels() above
+// exactly, for the other runtime.
+function showPokerHostPanels() {
+  document.getElementById("picker").style.display = "none";
+  document.getElementById("pre-create").style.display = "none";
+  document.getElementById("session-panels").style.display = "none";
+  document.getElementById("poker-host-panels").style.display = "block";
+  document.getElementById("pokerRoomCodeDisplay").textContent = pokerHostState.roomCode || "——————";
+  pokerSync.start();
+  pokerHostRefresh();
+}
+
+// The one truthful reset path back to the picker — mirrors
+// participant.html's clearRuntimeState() exactly: stops both sync
+// loops (idempotent — stopping one that never started is a no-op),
+// clears both runtimes' stored identity, clears the discriminator, and
+// restores the picker. Reachable from two contexts only, both safe by
+// construction: before any runtime has been created (pre-create's own
+// "← Change Game", where both credential objects are already empty),
+// and once the active runtime has reached a genuinely terminal state
+// (SESSION_COMPLETE / a closed Poker table) — never from a live
+// runtime, since no visible control calls this while one is running.
+function resetToPicker() {
+  sessionSync.stop();
+  pokerSync.stop();
+
+  hostState = { sessionId: null, roomCode: null, hostToken: null };
+  sessionStorage.removeItem(HOST_STORAGE_KEY);
+  pokerHostState = { pokerTableId: null, roomCode: null, hostToken: null };
+  sessionStorage.removeItem(POKER_HOST_STORAGE_KEY);
+  activeHostRuntimeType = null;
+  saveActiveHostRuntimeType();
+  selectedGame = null;
+  pendingCapabilitySession = null;
+
+  document.getElementById("session-panels").style.display = "none";
+  document.getElementById("poker-host-panels").style.display = "none";
+  document.getElementById("pre-create").style.display = "none";
+  document.getElementById("picker").style.display = "block";
+  // Host Unified Entry Slice 003 defect fix (caught during this Slice's
+  // own browser operational simulation): the stepper and interaction
+  // label live outside #session-panels in the DOM (shared chrome, not
+  // Session-panel content), so hiding #session-panels alone left a
+  // completed Session's stepper/label visibly stuck on screen above
+  // the picker. sessionLifecycleState is reset alongside it so no
+  // stale Session-lifecycle value can be read by a render function
+  // before the next runtime's own first snapshot arrives.
+  sessionLifecycleState = null;
+  document.getElementById("stepper").innerHTML = "";
+  const interactionLabelEl = document.getElementById("interactionLabel");
+  interactionLabelEl.style.display = "none";
+  interactionLabelEl.textContent = "";
+  renderNotice(null);
+}
+
+function showPicker() {
+  resetToPicker();
+}
+
+// Host Unified Entry Slice 003. Bounded, static mapping — runtime
+// selection plus, for a Session-backed game, the exact capability
+// array to declare. Deliberately not configurable/dynamic: this is a
+// picker, not an Experience Template (see the readiness gate's own
+// pressure-test). Poker never gets a capabilities array — it is not a
+// Session capability and never becomes one.
+const GAME_CONFIG = {
+  poker: { label: "Poker", runtime: "POKER_TABLE" },
+  trivia: { label: "Trivia", runtime: "SESSION", capabilities: ["TRIVIA"] },
+  quiz: { label: "Quiz", runtime: "SESSION", capabilities: ["QUIZ"] },
+  duel: { label: "Duel", runtime: "SESSION", capabilities: ["DUEL"] },
+};
+
+function selectGame(game) {
+  if (!GAME_CONFIG[game]) return;
+  selectedGame = game;
+  pendingCapabilitySession = null;
+  document.getElementById("picker").style.display = "none";
+  document.getElementById("pre-create").style.display = "block";
+  document.getElementById("capabilityDeclareError").style.display = "none";
+  document.getElementById("preCreateTitle").textContent = "Host " + GAME_CONFIG[game].label;
+  document.getElementById("btn-create-runtime").textContent = "Create " + GAME_CONFIG[game].label + (GAME_CONFIG[game].runtime === "POKER_TABLE" ? " Table" : " Session");
+  document.getElementById("pokerConfigFields").style.display = GAME_CONFIG[game].runtime === "POKER_TABLE" ? "block" : "none";
 }
 
 // Authoring Workspace slice.
@@ -1769,6 +2105,11 @@ function updateActionAvailability() {
   // can't be clicked mid-game by mistake.
   document.getElementById("btn-new-session").style.display =
     sessionLifecycleState === "SESSION_COMPLETE" ? "inline-block" : "none";
+  // Host Unified Entry Slice 003 §15: only reachable once the Session
+  // is genuinely terminal — a live Session is never abandoned by this
+  // control, mirroring Poker's own Change Game gate.
+  document.getElementById("btn-change-game-session").style.display =
+    sessionLifecycleState === "SESSION_COMPLETE" ? "inline-block" : "none";
 
   // Session Continuity slice: the rematch button is hidden once a
   // successor already exists for this session — the write-once
@@ -1858,6 +2199,7 @@ function resolvePrimaryAction() {
   // own explicit line.
   const compactLockBtn = document.getElementById("btn-lock-lobby-compact");
   compactLockBtn.style.display = "none";
+  atTurnDecisionPoint = false;
   const turnTypeSelector = document.getElementById("turnTypeSelector");
   const openResponseForm = document.getElementById("openResponseStartForm");
   const triviaForm = document.getElementById("triviaStartForm");
@@ -1995,7 +2337,54 @@ function resolvePrimaryAction() {
     return;
   }
 
+  // We have reached the "choose what happens next" decision point —
+  // true regardless of whether any *ordinary* Turn Type ends up legal
+  // below (a Duel-only session legitimately has none). See
+  // atTurnDecisionPoint's own declaration comment.
+  atTurnDecisionPoint = true;
   turnTypeSelector.style.display = "block";
+
+  // Host Unified Entry Slice 003 §11 (Host UI filtering). A Turn Type
+  // whose capability was never declared is absent, not merely
+  // disabled — matches the same server-side gate startSession.ts
+  // already enforces (CapabilityNotAuthorizedError), the UI just
+  // stops offering what the backend would reject anyway. Legacy
+  // sessions with legacyUndeclared (declaredCapabilities was null,
+  // predating Session Capability Architecture v1) show every Turn
+  // Type, exactly matching their own pre-existing unrestricted
+  // behavior — this filter only narrows a session that has genuinely
+  // declared a bounded capability set.
+  const turnTypeCapability = {
+    "btn-turn-type-open-response": ["OPEN_RESPONSE", "OPEN_RESPONSE"],
+    "btn-turn-type-trivia": ["TRIVIA", "MULTIPLE_CHOICE"],
+    "btn-turn-type-quiz": ["QUIZ", "QUIZ"],
+    "btn-turn-type-voting": ["VOTING", "VOTING"],
+  };
+  const capabilityFilterActive = !legacyUndeclared && declaredCapabilities.length > 0;
+  const allowedTurnTypeValues = [];
+  for (const id of Object.keys(turnTypeCapability)) {
+    const [capabilityKey, turnTypeValue] = turnTypeCapability[id];
+    const allowed = !capabilityFilterActive || declaredCapabilities.includes(capabilityKey);
+    document.getElementById(id).style.display = allowed ? "" : "none";
+    if (allowed) allowedTurnTypeValues.push(turnTypeValue);
+  }
+
+  // Defect caught during this Slice's own browser operational
+  // simulation: a Duel-only session (declaredCapabilities === ["DUEL"])
+  // has no ordinary Turn Type at all — DUEL never runs through
+  // turnTypeSelector, it is the separate duelCard below. Leaving this
+  // bar visible with zero legal buttons still left a "Start Turn N"
+  // primary action rendered and clickable with selectedTurnType stuck
+  // undefined. When capability filtering has eliminated every ordinary
+  // Turn Type, the whole bar is absent and Duel's own card (rendered
+  // right after this function returns — see applySessionSnapshot) is
+  // the sole action surface, exactly mirroring how activeDuel/currentQuiz
+  // already hide this same bar above.
+  if (capabilityFilterActive && allowedTurnTypeValues.length === 0) {
+    bar.style.display = "none";
+    hideTurnTypeUI();
+    return;
+  }
 
   // Trivia Game composition correction: a Multiple Choice question just
   // revealed with no further prepared question queued — the Trivia
@@ -2032,10 +2421,19 @@ function resolvePrimaryAction() {
   // available (e.g. the prepared queue emptied, or the previous
   // interaction was no longer eligible) rather than leaving a disabled
   // option silently selected.
-  if (selectedTurnType === null) {
-    selectedTurnType = hasNextQuestion ? "MULTIPLE_CHOICE" : "OPEN_RESPONSE";
+  // Host Unified Entry Slice 003 §11: the fallback must only ever land
+  // on a Turn Type the session actually declared — an undeclared
+  // OPEN_RESPONSE is not a safe universal fallback once capability
+  // filtering is active (e.g. a Trivia-only session has no Open
+  // Response capability to fall back to at all).
+  if (selectedTurnType === null || !allowedTurnTypeValues.includes(selectedTurnType)) {
+    selectedTurnType = allowedTurnTypeValues.includes("MULTIPLE_CHOICE") && hasNextQuestion
+      ? "MULTIPLE_CHOICE"
+      : allowedTurnTypeValues.includes("OPEN_RESPONSE")
+      ? "OPEN_RESPONSE"
+      : allowedTurnTypeValues[0];
   }
-  if (selectedTurnType === "MULTIPLE_CHOICE" && !hasNextQuestion) {
+  if (selectedTurnType === "MULTIPLE_CHOICE" && !hasNextQuestion && allowedTurnTypeValues.includes("OPEN_RESPONSE")) {
     selectedTurnType = "OPEN_RESPONSE";
   }
   if (selectedVotingSource === "SUBMISSION" && !votingSourceEligible) {
@@ -2057,7 +2455,7 @@ function resolvePrimaryAction() {
   quizBtn.classList.toggle("active", selectedTurnType === "QUIZ");
   document.getElementById("btn-turn-type-voting").classList.toggle("active", selectedTurnType === "VOTING");
 
-  if (selectedTurnType === "QUIZ" && !hasNextQuestion) {
+  if (selectedTurnType === "QUIZ" && !hasNextQuestion && allowedTurnTypeValues.includes("OPEN_RESPONSE")) {
     selectedTurnType = "OPEN_RESPONSE";
   }
 
@@ -2419,6 +2817,12 @@ function updateExperienceLayer() {
 
 function applySessionSnapshot(data) {
   sessionLifecycleState = data.state;
+  // Host Unified Entry Slice 003 §11 (Host UI filtering). Read before
+  // updateActionAvailability() (→ resolvePrimaryAction()/renderDuelCard())
+  // below, both of which filter their own visible controls by this —
+  // mirrors activeDuel's identical ordering requirement just below.
+  if ("declaredCapabilities" in data) declaredCapabilities = data.declaredCapabilities || [];
+  if ("legacyUndeclared" in data) legacyUndeclared = !!data.legacyUndeclared;
   if ("interactionState" in data) interactionLifecycleState = data.interactionState;
   if ("currentInteractionInstanceId" in data) {
     currentInteractionInstanceId = data.currentInteractionInstanceId;
@@ -2485,8 +2889,21 @@ function applySessionSnapshot(data) {
 // without reloading the page would briefly show the previous session's
 // trivia queue, standings, and winner banner under the new room code.
 function switchToNewSession(json) {
+  // Host Unified Entry Slice 003: no residue from a previous Poker
+  // table may remain operational once this tab becomes a Session
+  // Host — stop its poll loop and clear its identity before this
+  // runtime becomes active, mirroring switchToNewPokerTable()'s
+  // identical treatment of Session state below.
+  pokerSync.stop();
+  pokerHostState = { pokerTableId: null, roomCode: null, hostToken: null };
+  sessionStorage.removeItem(POKER_HOST_STORAGE_KEY);
+
   hostState = { sessionId: json.sessionId, roomCode: json.roomCode, hostToken: json.hostToken };
   saveHostState();
+  activeHostRuntimeType = "SESSION";
+  saveActiveHostRuntimeType();
+  declaredCapabilities = [];
+  pendingCapabilitySession = null;
 
   draftItems = [];
   expandedDraftIndex = null;
@@ -2533,15 +2950,215 @@ function switchToNewSession(json) {
   renderSyncDebug();
 }
 
-async function createSession() {
+// Host Unified Entry Slice 003. Dispatches on selectedGame — the only
+// thing selectGame() ever sets — to exactly one runtime's own existing
+// creation path. Poker and Session-backed games never share a code
+// path beyond this one dispatch point.
+async function createSelectedGame() {
+  if (!selectedGame) return;
+  const config = GAME_CONFIG[selectedGame];
+  if (config.runtime === "POKER_TABLE") {
+    await createPokerTable();
+  } else {
+    await createSessionForGame(config);
+  }
+}
+
+// CREATE_SESSION -> SET_SESSION_CAPABILITIES -> activate Host UI. Both
+// calls already exist and are unchanged; this is a new caller, not new
+// backend behavior. If capability declaration fails after a real
+// session was already created server-side, the Host UI is NOT switched
+// into that session (it is unusable — SessionCapabilitiesNotDeclaredError
+// on join, CapabilityNotAuthorizedError on start) and is not presented
+// as though creation succeeded. The just-created session's identity is
+// held in pendingCapabilitySession so Retry re-declares against the
+// same session rather than creating an orphaned duplicate —
+// SET_SESSION_CAPABILITIES is itself idempotent on an unchanged set
+// (see setSessionCapabilities.ts), so a retry is safe.
+async function createSessionForGame(config) {
+  const createBtn = document.getElementById("btn-create-runtime");
+  createBtn.disabled = true;
+  document.getElementById("capabilityDeclareError").style.display = "none";
+
   const { status, json } = await postJson("/api/sessions", {});
   show("CREATE_SESSION (" + status + ")", json);
+  if (status !== 201) {
+    renderNotice(classifyError({ status, json }));
+    createBtn.disabled = false;
+    return;
+  }
+
+  pendingCapabilitySession = { sessionId: json.sessionId, roomCode: json.roomCode, hostToken: json.hostToken };
+  await declareCapabilitiesAndActivate(config.capabilities);
+}
+
+async function declareCapabilitiesAndActivate(capabilities) {
+  const createBtn = document.getElementById("btn-create-runtime");
+  const errorEl = document.getElementById("capabilityDeclareError");
+  const session = pendingCapabilitySession;
+
+  const capRes = await postJson(
+    `/api/sessions/${session.sessionId}/capabilities`,
+    { hostToken: session.hostToken, capabilities }
+  );
+  show("SET_SESSION_CAPABILITIES (" + capRes.status + ")", capRes.json);
+
+  if (capRes.status === 200) {
+    pendingCapabilitySession = null;
+    errorEl.style.display = "none";
+    renderNotice(null);
+    switchToNewSession({ sessionId: session.sessionId, roomCode: session.roomCode, hostToken: session.hostToken });
+    await hostRefresh();
+    return;
+  }
+
+  createBtn.disabled = false;
+  errorEl.style.display = "block";
+  errorEl.innerHTML = "";
+  errorEl.appendChild(document.createTextNode(
+    "The session was created, but its capability could not be declared yet: " +
+    ((capRes.json && capRes.json.error) || "unknown error") + ". "
+  ));
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.className = "btn-secondary";
+  retryBtn.textContent = "Retry";
+  retryBtn.onclick = function () { declareCapabilitiesAndActivate(capabilities); };
+  errorEl.appendChild(retryBtn);
+}
+
+// Poker mapping (Host Unified Entry Slice 003 §5): Poker is never a
+// Session capability. Reuses the exact create API poker-host.html
+// already proved in production — no new endpoint, no new config field
+// beyond the three poker-host.html already asked for.
+async function createPokerTable() {
+  const createBtn = document.getElementById("btn-create-runtime");
+  createBtn.disabled = true;
+
+  const startingStack = parseInt(document.getElementById("cfg-poker-stack").value, 10);
+  const smallBlind = parseInt(document.getElementById("cfg-poker-sb").value, 10);
+  const bigBlind = parseInt(document.getElementById("cfg-poker-bb").value, 10);
+  const { status, json } = await postJson("/api/gaming/poker/tables", { startingStack, smallBlind, bigBlind });
+  show("CREATE_POKER_TABLE (" + status + ")", json);
   if (status === 201) {
     renderNotice(null);
-    switchToNewSession(json);
-    await hostRefresh();
+    switchToNewPokerTable(json);
   } else {
     renderNotice(classifyError({ status, json }));
+    createBtn.disabled = false;
+  }
+}
+
+// Mirrors switchToNewSession() exactly, for the other runtime.
+function switchToNewPokerTable(json) {
+  sessionSync.stop();
+  hostState = { sessionId: null, roomCode: null, hostToken: null };
+  sessionStorage.removeItem(HOST_STORAGE_KEY);
+  declaredCapabilities = [];
+
+  pokerHostState = { pokerTableId: json.pokerTableId, roomCode: json.roomCode, hostToken: json.hostToken };
+  savePokerHostState();
+  activeHostRuntimeType = "POKER_TABLE";
+  saveActiveHostRuntimeType();
+
+  showPokerHostPanels();
+}
+
+// Host Unified Entry Slice 003. Poker Host operational UI, inlined —
+// reuses poker-host.html's own cardLabel()/refreshTable()/Start Hand/
+// End Table logic verbatim, against the exact same unchanged API
+// routes already proven in production (Poker End Table Lifecycle
+// Slice). No Poker domain behavior differs here from the standalone
+// page; only the container and the ids differ.
+function pokerCardLabel(code) {
+  const suitSymbol = { C: "♣", D: "♦", H: "♥", S: "♠" }[code[1]] || code[1];
+  return code[0] + suitSymbol;
+}
+
+async function pokerHostRefresh() {
+  if (!pokerHostState.pokerTableId) return Promise.resolve();
+  const requestedTableId = pokerHostState.pokerTableId;
+  const res = await getJson(`/api/gaming/poker/tables/${requestedTableId}`, pokerHostState.hostToken);
+  if (requestedTableId !== pokerHostState.pokerTableId) return;
+  show("GET_TABLE_STATE as host (" + res.status + ")", res.json);
+  if (res.status !== 200) return;
+
+  const state = res.json;
+
+  document.getElementById("pokerStatusLine").textContent = state.currentHandId
+    ? `Hand #${state.currentHandOrdinal} — ${state.street} — Pot: ${state.pot} chips`
+    : "No hand in progress.";
+
+  document.getElementById("pokerBoard").innerHTML = (state.board || [])
+    .map((c) => `<div class="card-chip">${pokerCardLabel(c)}</div>`)
+    .join("");
+
+  const startBtn = document.getElementById("btn-poker-start-hand");
+  const endBtn = document.getElementById("btn-poker-end-table");
+  const banner = document.getElementById("pokerTableEndedBanner");
+  const changeGameBtn = document.getElementById("btn-change-game-poker");
+  const handOver = !state.currentHandId || state.street === "COMPLETE";
+  const isClosed = state.closedAt !== null;
+
+  banner.style.display = isClosed ? "block" : "none";
+  startBtn.style.display = isClosed ? "none" : "block";
+  endBtn.style.display = isClosed ? "none" : "block";
+  // Host Unified Entry Slice 003 §15: only reachable once the table is
+  // genuinely terminal — a live table is never silently abandoned.
+  changeGameBtn.style.display = isClosed ? "block" : "none";
+  startBtn.textContent = state.currentHandId ? "Start Next Hand" : "Start Hand";
+  startBtn.disabled = !handOver;
+  endBtn.disabled = !handOver;
+
+  const tbody = document.getElementById("pokerSeatsBody");
+  tbody.innerHTML = "";
+  for (const seat of state.seats) {
+    const badges = [
+      seat.isDealer ? '<span class="poker-badge">Dealer</span>' : "",
+      seat.isCurrentActor ? '<span class="poker-badge turn">Acting</span>' : "",
+      seat.allIn ? '<span class="poker-badge allin">All-in</span>' : "",
+      seat.folded ? '<span class="poker-badge">Folded</span>' : "",
+    ].join("");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${seat.seatNumber}</td><td>${seat.displayName}</td><td>${seat.stack}</td><td>${state.currentHandId && seat.inCurrentHand ? "Yes" : "—"}</td><td>${badges}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  if (isClosed) pokerSync.stop();
+}
+
+async function startPokerHandUnified() {
+  const msg = document.getElementById("pokerHandMsg");
+  const btn = document.getElementById("btn-poker-start-hand");
+  btn.disabled = true;
+  msg.textContent = "Starting…";
+
+  const res = await postJson(`/api/gaming/poker/tables/${pokerHostState.pokerTableId}/hand`, null, pokerHostState.hostToken);
+  if (res.status === 200) {
+    msg.textContent = res.json.alreadyStarted ? "A hand is already in progress." : "Hand started — cards are private to each player's own device.";
+    await pokerHostRefresh();
+  } else {
+    msg.textContent = (res.json && res.json.error) || "Failed to start hand.";
+    btn.disabled = false;
+  }
+}
+
+async function endPokerTableUnified() {
+  const confirmed = confirm("End this table? Players will no longer be able to join or start a new hand. This cannot be undone.");
+  if (!confirmed) return;
+
+  const msg = document.getElementById("pokerHandMsg");
+  const btn = document.getElementById("btn-poker-end-table");
+  btn.disabled = true;
+  msg.textContent = "Ending table…";
+
+  const res = await postJson(`/api/gaming/poker/tables/${pokerHostState.pokerTableId}/close`, null, pokerHostState.hostToken);
+  if (res.status === 200) {
+    msg.textContent = res.json.alreadyClosed ? "This table is already ended." : "Table ended.";
+    await pokerHostRefresh();
+  } else {
+    msg.textContent = (res.json && res.json.error) || "Failed to end table.";
+    btn.disabled = false;
   }
 }
 
@@ -2822,9 +3439,23 @@ function renderDuelCard() {
 
   activeState.style.display = "none";
 
-  const turnTypeVisible =
-    document.getElementById("turnTypeSelector").style.display !== "none";
-  if (!turnTypeVisible) {
+  // Host Unified Entry Slice 003 defect fix: reads resolvePrimaryAction()'s
+  // own explicit atTurnDecisionPoint signal now, not turnTypeSelector's
+  // CSS — that coupling broke once capability filtering could
+  // legitimately hide turnTypeSelector's own button row entirely (a
+  // Duel-only session has no ordinary Turn Type to select at all) while
+  // Duel itself must still be offered at this exact decision point. See
+  // atTurnDecisionPoint's own declaration comment for the full story.
+  const turnTypeVisible = atTurnDecisionPoint;
+  // Host Unified Entry Slice 003 §11: absent, not merely disabled, for
+  // a session that never declared DUEL — matches the exact server-side
+  // gate startDuel.ts/startMathDuel.ts already enforce
+  // (declaredCapabilities.includes("DUEL")). A legacy session
+  // (declaredCapabilities was never set at all) keeps its existing
+  // unrestricted behavior, exactly mirroring the Turn Type filter's
+  // own legacyUndeclared exception above.
+  const duelCapabilityOk = legacyUndeclared || declaredCapabilities.includes("DUEL");
+  if (!turnTypeVisible || !duelCapabilityOk) {
     card.style.display = "none";
     return;
   }
@@ -3382,6 +4013,21 @@ if (hostState.sessionId) {
   sessionSync.start();
   renderSyncDebug();
   hostRefresh();
+}
+
+// Host Unified Entry Slice 003 §3 (landing-page preselection). Purely
+// client-side UI convenience — it can only select which config screen
+// the picker jumps straight to; it never creates anything by itself,
+// never bypasses CREATE_SESSION/SET_SESSION_CAPABILITIES, and is
+// authoritative for nothing. Runs only when no runtime was actually
+// restored above — a real active/terminal runtime always wins over a
+// query-param hint. An unknown/invalid experience value is ignored,
+// falling safely back to the picker.
+if (!activeHostRuntimeType) {
+  const experience = new URLSearchParams(location.search).get("experience");
+  if (experience && GAME_CONFIG[experience]) {
+    selectGame(experience);
+  }
 }
 </script>
 </body>

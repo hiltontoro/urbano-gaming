@@ -334,7 +334,12 @@
       title: "Poker",
       sub: "Host a private No-Limit Hold'em table for your group.",
       status: "playtest",
-      href: "/poker-host.html",
+      // Host Unified Entry Slice 003 §18: converges on the canonical
+      // picker shell with Poker preselected, replacing the standalone
+      // /poker-host.html entry point — that page still works
+      // indefinitely as a compatibility surface (§17/§19), it is just
+      // no longer where this card sends a Host.
+      href: "/host.html?experience=poker",
       action: "Host →",
     },
     {
