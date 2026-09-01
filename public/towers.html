@@ -1,0 +1,468 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>URBANO Towers — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * URBANO Towers Slice 001 — Solo BOUNDED_GAME_RUNTIME play surface.
+   * No Host, no Participant, no room code — this page talks directly to
+   * /api/gaming/towers/attempts/*. Scenario content (towers/initial
+   * stacks) is mirrored here from lib/gaming/towers/scenarios.ts (the
+   * code-owned server catalog) since public/*.html pages are plain
+   * vanilla JS, not compiled from lib/ — keep TOWERS_SCENARIOS below in
+   * sync with that file if either changes. Move legality is likewise
+   * mirrored client-side purely to highlight legal destinations; the
+   * server independently re-validates and derives every move and is the
+   * sole source of truth. Interaction model is deliberately
+   * tap-source-then-destination, not drag — see the Slice 001 Founder
+   * Product Definition Gate's own reasoning (a discrete single transfer
+   * has no distance to communicate, so drag's main advantage over tap
+   * does not apply here).
+   */
+  :root {
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --exp-purple: #7c3aed;
+    --board-bg: #10140f;
+    --peg: #3a3226;
+    --piece-1: #4f7cac;
+    --piece-2: #5a9367;
+    --piece-3: #b5834a;
+    --piece-4: #a45a6b;
+    --piece-5: #7c6bab;
+    --illegal-bg: #3a1f1f;
+    --illegal-border: #7a3b3b;
+    --illegal-ink: #e39b9b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 620px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-word { font-size: 17px; font-weight: 700; }
+  .brand-badge {
+    background: rgba(124,58,237,.12); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .back-link { max-width: 620px; margin: 14px auto 0; padding: 0 20px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link:hover { color: var(--ink); }
+
+  .panel { max-width: 620px; margin: 16px auto 0; padding: 0 20px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; background: var(--bg-card);
+    padding: 20px;
+  }
+
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 16px; }
+
+  .scenario-picker { display: flex; flex-direction: column; gap: 8px; }
+  .scenario-btn {
+    padding: 14px; border-radius: 10px; text-align: left;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  }
+  .scenario-btn:hover { border-color: var(--ink); }
+  .scenario-btn strong { display: block; font-size: 14px; margin-bottom: 3px; }
+  .scenario-btn span { display: block; font-size: 12px; color: var(--muted); }
+
+  .hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; gap: 6px 14px; }
+  .hud strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  #board-wrap { display: flex; justify-content: center; gap: 4%; margin: 0 auto; padding: 10px 0; user-select: none; }
+  .tower {
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    border-radius: 10px; border: 2px solid var(--line); background: var(--board-bg);
+    padding: 10px 6px 8px; min-width: 0; flex: 1; max-width: 33%;
+    cursor: pointer; transition: border-color .12s, box-shadow .12s;
+  }
+  .tower.selected {
+    border-color: var(--ink); box-shadow: 0 0 0 2px rgba(245,241,232,.25);
+  }
+  .tower.legal-dest {
+    border-style: dashed; border-color: #6fae7c;
+  }
+  .tower-tag {
+    font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px; height: 14px; text-align: center;
+  }
+  .tower.selected .tower-tag::before { content: "▲ SELECTED  "; color: var(--ink); }
+  .tower.legal-dest:not(.selected) .tower-tag::before { content: "✓ LEGAL  "; color: #8fd19c; }
+
+  .stack { display: flex; flex-direction: column-reverse; align-items: center; gap: 4px; min-height: 40px; width: 100%; }
+  .piece {
+    height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; color: var(--primary-ink);
+    box-shadow: 0 2px 0 rgba(0,0,0,.35), inset 0 0 0 2px rgba(255,255,255,.15);
+  }
+  .peg-base { width: 66%; height: 8px; background: var(--peg); border-radius: 3px; margin-top: 4px; }
+
+  #illegal-banner {
+    display: none; margin-top: 12px; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid var(--illegal-border); background: var(--illegal-bg); color: var(--illegal-ink);
+    font-size: 13px; font-weight: 600; text-align: center;
+  }
+
+  .controls { display: flex; gap: 8px; margin-top: 16px; }
+  .btn {
+    flex: 1; padding: 12px; border-radius: 10px; font-weight: 700; font-size: 13px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--ink); color: var(--primary-ink); border: none; }
+  .btn.danger-ghost { border-color: #7a3b3b; color: #e39b9b; background: transparent; }
+
+  #terminal-banner {
+    display: none; margin-top: 14px; padding: 14px; border-radius: 10px;
+    border: 1px solid #3f6b46; background: rgba(63,107,70,.15); color: #b9e5c0;
+    text-align: center; font-weight: 700;
+  }
+  #terminal-banner .optimal-note { display: block; font-weight: 500; font-size: 12px; margin-top: 4px; color: #9fcaa6; }
+
+  @media (max-width: 480px) {
+    .shell-header, .back-link, .panel { padding-left: 14px; padding-right: 14px; }
+    .piece { font-size: 11px; height: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <span class="brand">
+    <span class="brand-word">URBANO Towers</span>
+    <span class="brand-badge">Solo</span>
+  </span>
+</div>
+<a class="back-link" href="/">&larr; Back to URBANO Gaming</a>
+
+<div class="panel">
+  <div class="card" id="picker-card">
+    <h1>URBANO Towers</h1>
+    <p class="sub">Move the whole stack to the target tower. A larger piece can never rest on a smaller one.</p>
+    <div class="scenario-picker">
+      <button class="scenario-btn" data-scenario="towers-001"><strong>Scenario 1 — Classic minimal</strong><span>3 pieces · optimal 7 moves</span></button>
+      <button class="scenario-btn" data-scenario="towers-002"><strong>Scenario 2 — Classic deeper</strong><span>4 pieces · optimal 15 moves</span></button>
+      <button class="scenario-btn" data-scenario="towers-003"><strong>Scenario 3 — Split start</strong><span>Pieces begin on two different towers</span></button>
+    </div>
+  </div>
+
+  <div class="card" id="game-card" style="display:none;">
+    <div class="hud">
+      <span>Moves: <strong id="hud-moves">0</strong></span>
+      <span>Undos: <strong id="hud-undos">0</strong></span>
+      <span>Time: <strong id="hud-time">0:00</strong></span>
+    </div>
+
+    <div id="board-wrap"></div>
+
+    <div id="illegal-banner"></div>
+
+    <div id="terminal-banner">
+      Solved! <span id="terminal-detail"></span>
+      <span class="optimal-note" id="terminal-optimal"></span>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="btn-undo" disabled>Undo</button>
+      <button class="btn danger-ghost" id="btn-restart">Restart</button>
+      <button class="btn primary" id="btn-change">Change scenario</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Mirrors lib/gaming/towers/scenarios.ts — keep in sync.
+const TOWERS_SCENARIOS = {
+  "towers-001": {
+    scenarioId: "towers-001", scenarioVersion: 1, towerIds: ["T1","T2","T3"],
+    initialStacks: { T1: [3,2,1], T2: [], T3: [] },
+    destinationTowerId: "T3", knownMinimumMoves: 7,
+  },
+  "towers-002": {
+    scenarioId: "towers-002", scenarioVersion: 1, towerIds: ["T1","T2","T3"],
+    initialStacks: { T1: [4,3,2,1], T2: [], T3: [] },
+    destinationTowerId: "T3", knownMinimumMoves: 15,
+  },
+  "towers-003": {
+    scenarioId: "towers-003", scenarioVersion: 1, towerIds: ["T1","T2","T3"],
+    initialStacks: { T1: [3,1], T2: [2], T3: [] },
+    destinationTowerId: "T3", knownMinimumMoves: null,
+  },
+};
+
+const PIECE_COLORS = { 1: "var(--piece-1)", 2: "var(--piece-2)", 3: "var(--piece-3)", 4: "var(--piece-4)", 5: "var(--piece-5)" };
+const MIN_PIECE_PCT = 40; // narrowest piece, % of tower's inner width
+const PCT_STEP = 12;      // width added per rank step
+
+let scenario = null;
+let attemptId = null;
+let stacks = null;
+let actionHistory = [];
+let startedAt = null;
+let completedAt = null;
+let outcome = null;
+let moveCount = 0;
+let undoCount = 0;
+let selectedTower = null;
+let timerInterval = null;
+let illegalBannerTimeout = null;
+
+function uuid() {
+  if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  return "id-" + Math.random().toString(36).slice(2) + Date.now();
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || "request failed"), { status: res.status });
+  return json;
+}
+async function getJson(url) {
+  // cache: "no-store" is required, not decorative — same stale-read
+  // defense-in-depth established for Rutas. The API route also sends
+  // Cache-Control: no-store server-side.
+  const res = await fetch(url, { cache: "no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || "request failed"), { status: res.status });
+  return json;
+}
+
+// --- Pure move-legality mirror (client preview only; server is sole authority) ---
+function topOf(stack) { return stack.length > 0 ? stack[stack.length - 1] : null; }
+function isLegalDestination(fromTowerId, toTowerId) {
+  if (fromTowerId === toTowerId) return false;
+  const fromStack = stacks[fromTowerId] || [];
+  if (fromStack.length === 0) return false;
+  const movingRank = topOf(fromStack);
+  const destTop = topOf(stacks[toTowerId] || []);
+  return destTop === null || destTop > movingRank;
+}
+
+function applyAttemptSnapshot(attempt) {
+  stacks = attempt.currentStacks;
+  actionHistory = attempt.actionHistory || [];
+  startedAt = attempt.startedAt;
+  completedAt = attempt.completedAt;
+  outcome = attempt.outcome;
+  moveCount = attempt.moveCount;
+  undoCount = attempt.undoCount;
+  selectedTower = null;
+  document.getElementById("hud-moves").textContent = String(moveCount);
+  document.getElementById("hud-undos").textContent = String(undoCount);
+  renderBoard();
+  updateControls();
+  updateTimer();
+  if (outcome === "COMPLETE") showTerminalBanner();
+}
+
+function showTerminalBanner() {
+  const banner = document.getElementById("terminal-banner");
+  document.getElementById("terminal-detail").textContent = `in ${moveCount} moves.`;
+  const optimalEl = document.getElementById("terminal-optimal");
+  if (scenario.knownMinimumMoves != null) {
+    optimalEl.textContent = `Optimal for this scenario: ${scenario.knownMinimumMoves} moves.`;
+  } else {
+    optimalEl.textContent = "";
+  }
+  banner.style.display = "block";
+}
+
+function updateControls() {
+  const lastAction = actionHistory[actionHistory.length - 1];
+  const canUndo = outcome === "IN_PROGRESS" && lastAction && lastAction.type === "MOVE";
+  document.getElementById("btn-undo").disabled = !canUndo;
+  document.getElementById("terminal-banner").style.display = outcome === "COMPLETE" ? "block" : "none";
+}
+
+function updateTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  const el = document.getElementById("hud-time");
+  function tick() {
+    if (!startedAt) { el.textContent = "0:00"; return; }
+    // Once the attempt has completed, elapsed time is frozen at
+    // completedAt (server-authoritative) — it must NOT keep advancing
+    // with wall-clock time on a later reload, which would misleadingly
+    // grow the displayed solve time well past how long solving actually
+    // took.
+    const end = outcome === "COMPLETE" && completedAt ? new Date(completedAt).getTime() : Date.now();
+    const elapsedMs = end - new Date(startedAt).getTime();
+    const s = Math.max(0, Math.floor(elapsedMs / 1000));
+    el.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+  tick();
+  if (startedAt && outcome === "IN_PROGRESS") {
+    timerInterval = setInterval(tick, 1000);
+  }
+}
+
+function showIllegalBanner(message) {
+  const el = document.getElementById("illegal-banner");
+  el.textContent = message;
+  el.style.display = "block";
+  if (illegalBannerTimeout) clearTimeout(illegalBannerTimeout);
+  illegalBannerTimeout = setTimeout(() => { el.style.display = "none"; }, 2800);
+}
+
+function renderBoard() {
+  const wrap = document.getElementById("board-wrap");
+  wrap.innerHTML = "";
+  for (const towerId of scenario.towerIds) {
+    const stack = stacks[towerId] || [];
+    const towerEl = document.createElement("div");
+    towerEl.className = "tower";
+    if (towerId === selectedTower) towerEl.classList.add("selected");
+    if (selectedTower && selectedTower !== towerId && isLegalDestination(selectedTower, towerId)) {
+      towerEl.classList.add("legal-dest");
+    }
+
+    const tag = document.createElement("div");
+    tag.className = "tower-tag";
+    tag.textContent = towerId === scenario.destinationTowerId ? "TARGET" : "";
+    towerEl.appendChild(tag);
+
+    const stackEl = document.createElement("div");
+    stackEl.className = "stack";
+    for (const rank of stack) {
+      const pieceEl = document.createElement("div");
+      pieceEl.className = "piece";
+      pieceEl.style.width = Math.min(100, MIN_PIECE_PCT + (rank - 1) * PCT_STEP) + "%";
+      pieceEl.style.background = PIECE_COLORS[rank] || "var(--piece-5)";
+      pieceEl.textContent = String(rank);
+      stackEl.appendChild(pieceEl);
+    }
+    towerEl.appendChild(stackEl);
+
+    const base = document.createElement("div");
+    base.className = "peg-base";
+    towerEl.appendChild(base);
+
+    towerEl.addEventListener("click", () => onTowerTap(towerId));
+    wrap.appendChild(towerEl);
+  }
+}
+
+async function onTowerTap(towerId) {
+  if (outcome !== "IN_PROGRESS") return;
+
+  if (selectedTower === towerId) {
+    // Tapping the selected source again cancels the selection.
+    selectedTower = null;
+    renderBoard();
+    return;
+  }
+
+  if (selectedTower === null) {
+    if ((stacks[towerId] || []).length === 0) return; // nothing to pick up
+    selectedTower = towerId;
+    renderBoard();
+    return;
+  }
+
+  const fromTowerId = selectedTower;
+  const toTowerId = towerId;
+  selectedTower = null;
+
+  try {
+    const result = await postJson(`/api/gaming/towers/attempts/${attemptId}/move`, {
+      fromTowerId, toTowerId, idempotencyKey: uuid(),
+    });
+    applyAttemptSnapshot(result.attempt);
+  } catch (err) {
+    renderBoard();
+    if (err.status === 422) {
+      showIllegalBanner(err.message);
+    } else if (err.status === 409) {
+      await refreshAttempt();
+    } else {
+      showIllegalBanner("Move failed: " + err.message);
+    }
+  }
+}
+
+async function refreshAttempt() {
+  const attempt = await getJson(`/api/gaming/towers/attempts/${attemptId}`);
+  applyAttemptSnapshot(attempt);
+}
+
+async function startScenario(scenarioId) {
+  scenario = TOWERS_SCENARIOS[scenarioId];
+  const started = await postJson("/api/gaming/towers/attempts", { scenarioId: scenario.scenarioId, scenarioVersion: scenario.scenarioVersion });
+  attemptId = started.attemptId;
+  sessionStorage.setItem("urbano_towers_attempt_id", attemptId);
+  sessionStorage.setItem("urbano_towers_scenario_id", scenarioId);
+  document.getElementById("picker-card").style.display = "none";
+  document.getElementById("game-card").style.display = "block";
+  applyAttemptSnapshot(started);
+}
+
+async function restoreFromStorage() {
+  const storedAttemptId = sessionStorage.getItem("urbano_towers_attempt_id");
+  const storedScenarioId = sessionStorage.getItem("urbano_towers_scenario_id");
+  if (!storedAttemptId || !storedScenarioId || !TOWERS_SCENARIOS[storedScenarioId]) return false;
+  try {
+    const attempt = await getJson(`/api/gaming/towers/attempts/${storedAttemptId}`);
+    attemptId = storedAttemptId;
+    scenario = TOWERS_SCENARIOS[storedScenarioId];
+    document.getElementById("picker-card").style.display = "none";
+    document.getElementById("game-card").style.display = "block";
+    applyAttemptSnapshot(attempt);
+    return true;
+  } catch {
+    sessionStorage.removeItem("urbano_towers_attempt_id");
+    sessionStorage.removeItem("urbano_towers_scenario_id");
+    return false;
+  }
+}
+
+document.querySelectorAll(".scenario-btn").forEach((btn) => {
+  btn.addEventListener("click", () => startScenario(btn.dataset.scenario));
+});
+
+document.getElementById("btn-undo").addEventListener("click", async () => {
+  try {
+    const result = await postJson(`/api/gaming/towers/attempts/${attemptId}/undo`, { idempotencyKey: uuid() });
+    applyAttemptSnapshot(result.attempt);
+  } catch { await refreshAttempt(); }
+});
+
+document.getElementById("btn-restart").addEventListener("click", async () => {
+  const result = await postJson(`/api/gaming/towers/attempts/${attemptId}/restart`, { idempotencyKey: uuid() });
+  attemptId = result.newAttempt.attemptId;
+  sessionStorage.setItem("urbano_towers_attempt_id", attemptId);
+  applyAttemptSnapshot(result.newAttempt);
+});
+
+document.getElementById("btn-change").addEventListener("click", () => {
+  sessionStorage.removeItem("urbano_towers_attempt_id");
+  sessionStorage.removeItem("urbano_towers_scenario_id");
+  if (timerInterval) clearInterval(timerInterval);
+  attemptId = null; scenario = null;
+  document.getElementById("game-card").style.display = "none";
+  document.getElementById("picker-card").style.display = "block";
+});
+
+restoreFromStorage();
+</script>
+
+</body>
+</html>
