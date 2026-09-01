@@ -1,0 +1,545 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>URBANO Rutas — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * URBANO Rutas Slice 001 — Solo BOUNDED_GAME_RUNTIME play surface.
+   * No Host, no Participant, no room code — this page talks directly to
+   * /api/gaming/rutas/attempts/*. Scenario geometry (board/pieces/gates)
+   * is mirrored here from lib/gaming/rutas/scenarios.ts (the code-owned
+   * server catalog) since public/*.html pages are plain vanilla JS, not
+   * compiled from lib/ — keep RUTAS_SCENARIOS below in sync with that
+   * file if either changes. Movement geometry (legal-distance clamping)
+   * is likewise a client-side mirror of lib/gaming/rutas/geometry.ts —
+   * used only for live drag preview; the server independently
+   * re-validates every submitted move and is the sole source of truth.
+   */
+  :root {
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --exp-purple: #7c3aed;
+    --board-bg: #10140f;
+    --gate-mismatch: #4a3030;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 620px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; }
+  .brand-badge {
+    background: rgba(124,58,237,.12); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .back-link { max-width: 620px; margin: 14px auto 0; padding: 0 20px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link:hover { color: var(--ink); }
+
+  .panel { max-width: 620px; margin: 16px auto 0; padding: 0 20px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; background: var(--bg-card);
+    padding: 20px;
+  }
+
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 16px; }
+
+  .scenario-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+  .scenario-btn {
+    flex: 1; min-width: 120px; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    font-weight: 700; font-size: 13px;
+  }
+  .scenario-btn:hover { border-color: var(--ink); }
+
+  .hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
+  .hud strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  #board-wrap { position: relative; margin: 0 auto; touch-action: none; user-select: none; }
+  #board {
+    position: relative; background: var(--board-bg); border-radius: 10px;
+    border: 1px solid var(--line);
+  }
+  .cell { position: absolute; border: 1px solid rgba(255,255,255,0.04); }
+
+  .piece {
+    position: absolute; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; font-weight: 800; transition: box-shadow .15s;
+    box-shadow: 0 2px 0 rgba(0,0,0,.35), inset 0 0 0 2px rgba(255,255,255,.08);
+    cursor: grab; touch-action: none;
+  }
+  .piece.blocker { cursor: default; opacity: .85; }
+  .piece.dragging { cursor: grabbing; z-index: 5; box-shadow: 0 6px 16px rgba(0,0,0,.5); }
+  .piece .glyph { font-size: 20px; line-height: 1; }
+  .piece .label { font-size: 8px; letter-spacing: .05em; text-transform: uppercase; margin-top: 2px; opacity: .85; }
+
+  .gate-mark {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; border-radius: 4px;
+  }
+  .gate-mark.mismatch-hint { opacity: .55; }
+
+  .controls { display: flex; gap: 8px; margin-top: 16px; }
+  .btn {
+    flex: 1; padding: 12px; border-radius: 10px; font-weight: 700; font-size: 13px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--ink); color: var(--primary-ink); border: none; }
+  .btn.danger-ghost { border-color: #7a3b3b; color: #e39b9b; background: transparent; }
+
+  #terminal-banner {
+    display: none; margin-top: 14px; padding: 14px; border-radius: 10px;
+    border: 1px solid #3f6b46; background: rgba(63,107,70,.15); color: #b9e5c0;
+    text-align: center; font-weight: 700;
+  }
+
+  @media (max-width: 480px) {
+    .shell-header, .back-link, .panel { padding-left: 14px; padding-right: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 26" fill="none"><rect width="24" height="26" rx="5" fill="#0a0a0a"/><text x="12" y="19" font-size="16" font-weight="800" fill="#f5f1e8" text-anchor="middle">U</text></svg>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+</div>
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<div class="panel">
+  <div class="card" id="picker-card">
+    <h1>URBANO Rutas</h1>
+    <p class="sub">Slide pieces to their matching exit. Pick a scenario to begin.</p>
+    <div class="scenario-picker">
+      <button class="scenario-btn" data-scenario="rutas-001">Scenario 1<br><span style="font-weight:400;color:var(--muted)">Core proof</span></button>
+      <button class="scenario-btn" data-scenario="rutas-002">Scenario 2<br><span style="font-weight:400;color:var(--muted)">Footprint proof</span></button>
+      <button class="scenario-btn" data-scenario="rutas-003">Scenario 3<br><span style="font-weight:400;color:var(--muted)">Accessibility proof</span></button>
+    </div>
+  </div>
+
+  <div class="card" id="game-card" style="display:none; margin-top:16px;">
+    <div class="hud">
+      <span>Time: <strong id="hud-time">0:00</strong></span>
+      <span>Moves: <strong id="hud-moves">0</strong></span>
+    </div>
+    <div id="board-wrap"><div id="board"></div></div>
+    <div class="controls">
+      <button class="btn" id="btn-undo">Undo</button>
+      <button class="btn danger-ghost" id="btn-restart">Restart</button>
+      <button class="btn" id="btn-change">← Change Scenario</button>
+    </div>
+    <div id="terminal-banner">Solved! 🎉</div>
+  </div>
+</div>
+
+<script>
+// --- Code-owned scenario mirror (see top-of-file comment) ------------
+const IDENTITY_STYLE = {
+  RUBY:      { color: "#e0455a", glyph: "●", label: "Ruby" },
+  SAPPHIRE:  { color: "#3d7fe0", glyph: "■", label: "Sapphire" },
+  EMERALD:   { color: "#3fae6b", glyph: "▲", label: "Emerald" },
+  AMBER:     { color: "#d98a2b", glyph: "◆", label: "Amber" },
+  AMETHYST:  { color: "#9a5fd9", glyph: "★", label: "Amethyst" },
+  TOPAZ:     { color: "#d9c22b", glyph: "✦", label: "Topaz" },
+};
+
+const RUTAS_SCENARIOS = {
+  "rutas-001": {
+    scenarioId: "rutas-001", scenarioVersion: 1, boardWidth: 5, boardHeight: 5,
+    pieces: [
+      { pieceId: "r1", footprint: { width: 1, height: 1 }, startAnchor: { col: 2, row: 2 }, identity: "RUBY", isRequired: true },
+      { pieceId: "b1", footprint: { width: 1, height: 1 }, startAnchor: { col: 0, row: 2 }, identity: "AMBER", isRequired: false },
+    ],
+    gates: [
+      { gateId: "g1", edge: "E", position: 2, identity: "RUBY" },
+      { gateId: "g2", edge: "S", position: 2, identity: "SAPPHIRE" },
+    ],
+  },
+  "rutas-002": {
+    scenarioId: "rutas-002", scenarioVersion: 1, boardWidth: 4, boardHeight: 4,
+    pieces: [
+      { pieceId: "r2", footprint: { width: 1, height: 2 }, startAnchor: { col: 1, row: 1 }, identity: "EMERALD", isRequired: true },
+    ],
+    gates: [
+      { gateId: "g1", edge: "E", position: 1, identity: "EMERALD" },
+      { gateId: "g2", edge: "E", position: 2, identity: "EMERALD" },
+    ],
+  },
+  "rutas-003": {
+    scenarioId: "rutas-003", scenarioVersion: 1, boardWidth: 5, boardHeight: 5,
+    pieces: [
+      { pieceId: "r3a", footprint: { width: 1, height: 1 }, startAnchor: { col: 1, row: 2 }, identity: "AMBER", isRequired: true },
+      { pieceId: "r3b", footprint: { width: 1, height: 1 }, startAnchor: { col: 3, row: 2 }, identity: "TOPAZ", isRequired: true },
+    ],
+    gates: [
+      { gateId: "g1", edge: "W", position: 2, identity: "AMBER" },
+      { gateId: "g2", edge: "E", position: 2, identity: "TOPAZ" },
+    ],
+  },
+};
+
+// --- Client-side geometry mirror (live-clamp preview only; server is
+// authoritative — see lib/gaming/rutas/geometry.ts) --------------------
+const DELTA = { N: { dCol: 0, dRow: -1 }, S: { dCol: 0, dRow: 1 }, E: { dCol: 1, dRow: 0 }, W: { dCol: -1, dRow: 0 } };
+
+function footprintCells(anchor, footprint) {
+  const cells = [];
+  for (let i = 0; i < footprint.width; i++)
+    for (let j = 0; j < footprint.height; j++)
+      cells.push({ col: anchor.col + i, row: anchor.row + j });
+  return cells;
+}
+function isOnBoard(cell, scenario) {
+  return cell.col >= 0 && cell.col < scenario.boardWidth && cell.row >= 0 && cell.row < scenario.boardHeight;
+}
+function edgePositionFor(cell, direction) {
+  return (direction === "N" || direction === "S") ? cell.col : cell.row;
+}
+function hasMatchingGate(scenario, direction, position, identity) {
+  return scenario.gates.some((g) => g.edge === direction && g.position === position && g.identity === identity);
+}
+function occupiedCellKeys(scenario, positions, excludePieceId) {
+  const occupied = new Set();
+  for (const piece of scenario.pieces) {
+    if (piece.pieceId === excludePieceId) continue;
+    const pos = positions[piece.pieceId];
+    if (pos === "CLEARED") continue;
+    for (const c of footprintCells(pos, piece.footprint)) occupied.add(c.col + "," + c.row);
+  }
+  return occupied;
+}
+function validateAndApplyMove(scenario, positions, pieceId, direction, distance) {
+  if (!Number.isInteger(distance) || distance < 1) return { legal: false };
+  const piece = scenario.pieces.find((p) => p.pieceId === pieceId);
+  const currentPos = positions[pieceId];
+  if (!piece || currentPos === "CLEARED" || !currentPos) return { legal: false };
+  const otherOccupied = occupiedCellKeys(scenario, positions, pieceId);
+  const { dCol, dRow } = DELTA[direction];
+  let lastValidAnchor = currentPos, exitedFully = false;
+  for (let step = 1; step <= distance; step++) {
+    const anchor = { col: currentPos.col + dCol * step, row: currentPos.row + dRow * step };
+    const cells = footprintCells(anchor, piece.footprint);
+    const onBoardCells = cells.filter((c) => isOnBoard(c, scenario));
+    const offBoardCells = cells.filter((c) => !isOnBoard(c, scenario));
+    for (const c of onBoardCells) if (otherOccupied.has(c.col + "," + c.row)) return { legal: false };
+    for (const c of offBoardCells) if (!hasMatchingGate(scenario, direction, edgePositionFor(c, direction), piece.identity)) return { legal: false };
+    if (offBoardCells.length === 0) { lastValidAnchor = anchor; exitedFully = false; }
+    else if (onBoardCells.length === 0) { exitedFully = true; }
+    else if (step === distance) { return { legal: false }; }
+  }
+  if (exitedFully) return { legal: true, cleared: true };
+  return { legal: true, cleared: false, anchor: lastValidAnchor };
+}
+function maxLegalDistance(scenario, positions, pieceId, direction) {
+  let max = 0;
+  const upperBound = scenario.boardWidth + scenario.boardHeight + 1;
+  for (let d = 1; d <= upperBound; d++) {
+    const r = validateAndApplyMove(scenario, positions, pieceId, direction, d);
+    if (r.legal) { max = d; if (r.cleared) break; }
+  }
+  return max;
+}
+
+// --- App state ---------------------------------------------------------
+let attemptId = null;
+let scenario = null;
+let positions = null; // current authoritative positions from server
+let actionHistory = [];
+let startedAt = null;
+let outcome = "IN_PROGRESS";
+let timerInterval = null;
+let CELL_SIZE = 64;
+const MAX_CELL_SIZE = 64;
+const MIN_CELL_SIZE = 36;
+
+function computeCellSize() {
+  if (!scenario) return MAX_CELL_SIZE;
+  const wrap = document.getElementById("board-wrap");
+  // parentElement is the card, whose own padding already constrains
+  // wrap's clientWidth — leave a few px of margin for the gate marks
+  // that render just outside the board's own edges.
+  const available = Math.max(0, wrap.parentElement.clientWidth - 24);
+  const maxByWidth = Math.floor(available / scenario.boardWidth);
+  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, maxByWidth));
+}
+
+function uuid() {
+  if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  return "id-" + Math.random().toString(36).slice(2) + Date.now();
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || "request failed"), { status: res.status });
+  return json;
+}
+async function getJson(url) {
+  // cache: "no-store" is required, not decorative — proven live during
+  // Slice 001's own browser proving: without it, a completed attempt's
+  // GET was served stale (IN_PROGRESS) by the browser's default HTTP
+  // cache even though Postgres and the server response were already
+  // correct. The API route also now sends Cache-Control: no-store
+  // (the durable server-side fix); this is defense in depth.
+  const res = await fetch(url, { cache: "no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || "request failed"), { status: res.status });
+  return json;
+}
+
+function applyAttemptSnapshot(attempt) {
+  positions = attempt.currentPiecePositions;
+  actionHistory = attempt.actionHistory || [];
+  startedAt = attempt.startedAt;
+  outcome = attempt.outcome;
+  document.getElementById("hud-moves").textContent = String(attempt.moveCount);
+  renderBoard();
+  updateControls();
+  updateTimer();
+}
+
+function updateControls() {
+  const lastAction = actionHistory[actionHistory.length - 1];
+  const canUndo = outcome === "IN_PROGRESS" && lastAction && lastAction.type === "MOVE";
+  document.getElementById("btn-undo").disabled = !canUndo;
+  const banner = document.getElementById("terminal-banner");
+  banner.style.display = outcome === "COMPLETE" ? "block" : "none";
+}
+
+function updateTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  const el = document.getElementById("hud-time");
+  function tick() {
+    if (!startedAt) { el.textContent = "0:00"; return; }
+    const end = outcome === "COMPLETE" ? Date.now() : Date.now(); // display uses wall clock; server elapsed is authoritative on completion
+    const elapsedMs = end - new Date(startedAt).getTime();
+    const s = Math.max(0, Math.floor(elapsedMs / 1000));
+    el.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+  tick();
+  if (startedAt && outcome === "IN_PROGRESS") {
+    timerInterval = setInterval(tick, 1000);
+  }
+}
+
+function pieceRect(anchor, footprint) {
+  return {
+    left: anchor.col * CELL_SIZE,
+    top: anchor.row * CELL_SIZE,
+    width: footprint.width * CELL_SIZE,
+    height: footprint.height * CELL_SIZE,
+  };
+}
+
+function renderBoard() {
+  CELL_SIZE = computeCellSize();
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  board.style.width = (scenario.boardWidth * CELL_SIZE) + "px";
+  board.style.height = (scenario.boardHeight * CELL_SIZE) + "px";
+  document.getElementById("board-wrap").style.width = (scenario.boardWidth * CELL_SIZE) + "px";
+
+  // grid lines
+  for (let c = 0; c < scenario.boardWidth; c++) {
+    for (let r = 0; r < scenario.boardHeight; r++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.style.left = (c * CELL_SIZE) + "px";
+      cell.style.top = (r * CELL_SIZE) + "px";
+      cell.style.width = CELL_SIZE + "px";
+      cell.style.height = CELL_SIZE + "px";
+      board.appendChild(cell);
+    }
+  }
+
+  // gates
+  for (const gate of scenario.gates) {
+    const style = IDENTITY_STYLE[gate.identity];
+    const mark = document.createElement("div");
+    mark.className = "gate-mark";
+    mark.textContent = style.glyph;
+    mark.style.color = style.color;
+    mark.title = style.label + " exit";
+    const thickness = 10;
+    if (gate.edge === "E") { mark.style.left = (scenario.boardWidth * CELL_SIZE) + "px"; mark.style.top = (gate.position * CELL_SIZE) + "px"; mark.style.width = thickness + "px"; mark.style.height = CELL_SIZE + "px"; }
+    if (gate.edge === "W") { mark.style.left = -thickness + "px"; mark.style.top = (gate.position * CELL_SIZE) + "px"; mark.style.width = thickness + "px"; mark.style.height = CELL_SIZE + "px"; }
+    if (gate.edge === "N") { mark.style.top = -thickness + "px"; mark.style.left = (gate.position * CELL_SIZE) + "px"; mark.style.width = CELL_SIZE + "px"; mark.style.height = thickness + "px"; }
+    if (gate.edge === "S") { mark.style.top = (scenario.boardHeight * CELL_SIZE) + "px"; mark.style.left = (gate.position * CELL_SIZE) + "px"; mark.style.width = CELL_SIZE + "px"; mark.style.height = thickness + "px"; }
+    board.appendChild(mark);
+  }
+
+  // pieces
+  for (const piece of scenario.pieces) {
+    const pos = positions[piece.pieceId];
+    if (pos === "CLEARED") continue;
+    const style = IDENTITY_STYLE[piece.identity];
+    const el = document.createElement("div");
+    el.className = "piece" + (piece.isRequired ? "" : " blocker");
+    el.dataset.pieceId = piece.pieceId;
+    const rect = pieceRect(pos, piece.footprint);
+    el.style.left = rect.left + "px";
+    el.style.top = rect.top + "px";
+    el.style.width = rect.width + "px";
+    el.style.height = rect.height + "px";
+    el.style.background = style.color;
+    el.innerHTML = '<span class="glyph">' + style.glyph + '</span><span class="label">' + style.label + '</span>';
+    if (piece.isRequired) attachDragHandlers(el, piece);
+    board.appendChild(el);
+  }
+}
+
+// --- Drag interaction: straight-segment, axis-locked, live-clamped ----
+function attachDragHandlers(el, piece) {
+  let dragging = false;
+  let axis = null; // "H" | "V"
+  let direction = null;
+  let startX = 0, startY = 0;
+  let maxDist = 0;
+  let currentDist = 0;
+  const startAnchor = { ...positions[piece.pieceId] };
+
+  function onPointerDown(e) {
+    if (outcome !== "IN_PROGRESS") return;
+    dragging = true; axis = null; direction = null; currentDist = 0;
+    startX = e.clientX; startY = e.clientY;
+    el.classList.add("dragging");
+    el.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axis = Math.abs(dx) > Math.abs(dy) ? "H" : "V";
+      direction = axis === "H" ? (dx > 0 ? "E" : "W") : (dy > 0 ? "S" : "N");
+      maxDist = maxLegalDistance(scenario, positions, piece.pieceId, direction);
+    }
+    const rawDelta = axis === "H" ? dx : dy;
+    const sign = (direction === "E" || direction === "S") ? 1 : -1;
+    let cells = Math.round((rawDelta * sign) / CELL_SIZE);
+    cells = Math.max(0, Math.min(cells, maxDist));
+    currentDist = cells;
+    const rect = pieceRect(startAnchor, piece.footprint);
+    const offsetPx = cells * CELL_SIZE * sign;
+    if (axis === "H") el.style.left = (rect.left + offsetPx) + "px";
+    else el.style.top = (rect.top + offsetPx) + "px";
+  }
+  async function onPointerUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    el.classList.remove("dragging");
+    if (!axis || currentDist === 0) { renderBoard(); return; }
+    const dist = currentDist, dir = direction;
+    try {
+      const result = await postJson(`/api/gaming/rutas/attempts/${attemptId}/move`, {
+        pieceId: piece.pieceId, direction: dir, distance: dist, idempotencyKey: uuid(),
+      });
+      applyAttemptSnapshot(result.attempt);
+    } catch (err) {
+      // Server rejected (stale state or otherwise) — resync from truth.
+      await refreshAttempt();
+    }
+  }
+
+  el.addEventListener("pointerdown", onPointerDown);
+  el.addEventListener("pointermove", onPointerMove);
+  el.addEventListener("pointerup", onPointerUp);
+  el.addEventListener("pointercancel", onPointerUp);
+}
+
+async function refreshAttempt() {
+  const attempt = await getJson(`/api/gaming/rutas/attempts/${attemptId}`);
+  applyAttemptSnapshot(attempt);
+}
+
+async function startScenario(scenarioId) {
+  scenario = RUTAS_SCENARIOS[scenarioId];
+  const started = await postJson("/api/gaming/rutas/attempts", { scenarioId: scenario.scenarioId, scenarioVersion: scenario.scenarioVersion });
+  attemptId = started.attemptId;
+  sessionStorage.setItem("urbano_rutas_attempt_id", attemptId);
+  sessionStorage.setItem("urbano_rutas_scenario_id", scenarioId);
+  document.getElementById("picker-card").style.display = "none";
+  document.getElementById("game-card").style.display = "block";
+  applyAttemptSnapshot(started);
+}
+
+async function restoreFromStorage() {
+  const storedAttemptId = sessionStorage.getItem("urbano_rutas_attempt_id");
+  const storedScenarioId = sessionStorage.getItem("urbano_rutas_scenario_id");
+  if (!storedAttemptId || !storedScenarioId || !RUTAS_SCENARIOS[storedScenarioId]) return false;
+  try {
+    const attempt = await getJson(`/api/gaming/rutas/attempts/${storedAttemptId}`);
+    attemptId = storedAttemptId;
+    scenario = RUTAS_SCENARIOS[storedScenarioId];
+    document.getElementById("picker-card").style.display = "none";
+    document.getElementById("game-card").style.display = "block";
+    applyAttemptSnapshot(attempt);
+    return true;
+  } catch {
+    sessionStorage.removeItem("urbano_rutas_attempt_id");
+    sessionStorage.removeItem("urbano_rutas_scenario_id");
+    return false;
+  }
+}
+
+document.querySelectorAll(".scenario-btn").forEach((btn) => {
+  btn.addEventListener("click", () => startScenario(btn.dataset.scenario));
+});
+
+document.getElementById("btn-undo").addEventListener("click", async () => {
+  try {
+    const result = await postJson(`/api/gaming/rutas/attempts/${attemptId}/undo`, { idempotencyKey: uuid() });
+    applyAttemptSnapshot(result.attempt);
+  } catch { await refreshAttempt(); }
+});
+
+document.getElementById("btn-restart").addEventListener("click", async () => {
+  const result = await postJson(`/api/gaming/rutas/attempts/${attemptId}/restart`, { idempotencyKey: uuid() });
+  attemptId = result.newAttempt.attemptId;
+  sessionStorage.setItem("urbano_rutas_attempt_id", attemptId);
+  applyAttemptSnapshot(result.newAttempt);
+});
+
+document.getElementById("btn-change").addEventListener("click", () => {
+  sessionStorage.removeItem("urbano_rutas_attempt_id");
+  sessionStorage.removeItem("urbano_rutas_scenario_id");
+  if (timerInterval) clearInterval(timerInterval);
+  attemptId = null; scenario = null;
+  document.getElementById("game-card").style.display = "none";
+  document.getElementById("picker-card").style.display = "block";
+});
+
+window.addEventListener("resize", () => {
+  if (scenario && positions) renderBoard();
+});
+
+restoreFromStorage();
+</script>
+
+</body>
+</html>
