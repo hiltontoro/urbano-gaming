@@ -4,6 +4,7 @@ import type {
   QuizQuestionSummary,
   QuizParticipantProgressSummary,
   MathDuelChallengeSummary,
+  PulseTargetResult,
 } from "./types";
 import { SessionNotFoundError, SessionAccessDeniedError } from "./types";
 import { MATH_DUEL_STANDARD_COUNT } from "./mathDuelFixture";
@@ -651,6 +652,102 @@ export async function getSession(
                     r.isCorrect
                 ).length
               : null,
+          },
+        };
+      }
+
+      // URBANO Pulse Slice 001 (UG-CR-GATE-002). Role-aware, phase-aware
+      // projection, mirroring the MATH_DUEL branch above exactly. Never
+      // exposes opponentForms until reveal — ordinary completion or
+      // timeout/forfeit only (UG-CR-REV-001's explicit reveal-policy
+      // correction: Host VOID/CANCELLED preserves privacy). Host/
+      // spectator (non-competitor) callers see only the coarse fields;
+      // myForms/opponentForms/target histories all stay null/empty for
+      // them, matching MathDuelSummary's own "correctness-free... safe
+      // for Host/spectator viewing" precedent.
+      if (duel.mechanicKey === "PULSE") {
+        const boards = await repo.getPulseBoards(duel.duelId);
+        const game = await repo.getPulseGame(duel.duelId);
+        const actions = await repo.getPulseActions(duel.duelId);
+
+        const isCompetitor =
+          callingParticipant !== undefined &&
+          (callingParticipant.participantId === duel.competitorAParticipantId ||
+            callingParticipant.participantId === duel.competitorBParticipantId);
+
+        const myParticipantId = callingParticipant && isCompetitor ? callingParticipant.participantId : null;
+        const opponentParticipantId =
+          myParticipantId === duel.competitorAParticipantId
+            ? duel.competitorBParticipantId
+            : myParticipantId === duel.competitorBParticipantId
+            ? duel.competitorAParticipantId
+            : null;
+
+        const myBoard = myParticipantId ? boards.find((b) => b.participantId === myParticipantId) : undefined;
+        const boardA = boards.find((b) => b.participantId === duel.competitorAParticipantId);
+        const boardB = boards.find((b) => b.participantId === duel.competitorBParticipantId);
+
+        // Reveal only on genuine terminal completion via ordinary play
+        // or timeout — never on Host VOID/CANCELLED.
+        const revealed =
+          duel.lifecycleState === "COMPLETED" &&
+          (duel.terminalResolution === "WON_LOST" || duel.terminalResolution === "FORFEIT");
+
+        const opponentBoard = opponentParticipantId
+          ? boards.find((b) => b.participantId === opponentParticipantId)
+          : undefined;
+
+        const toHistoryEntry = (a: (typeof actions)[number]) => ({
+          row: a.row,
+          col: a.col,
+          result: a.result as PulseTargetResult,
+          completedFormId: a.completedFormId,
+        });
+
+        const myTargetHistory = myParticipantId
+          ? actions.filter((a) => a.actorParticipantId === myParticipantId).map(toHistoryEntry)
+          : [];
+        const opponentTargetHistory =
+          opponentParticipantId && (isCompetitor || revealed)
+            ? actions.filter((a) => a.actorParticipantId === opponentParticipantId).map(toHistoryEntry)
+            : [];
+
+        return {
+          ...genericFields,
+          pulse: {
+            myCommittedAt: myBoard?.committedAt ?? null,
+            opponentCommittedAt: opponentBoard?.committedAt ?? null,
+            currentActorParticipantId: game?.currentActorParticipantId ?? null,
+            currentDeadline: game?.currentDeadline ?? null,
+            myTargetCount:
+              myParticipantId === duel.competitorAParticipantId
+                ? game?.targetCountA ?? 0
+                : myParticipantId === duel.competitorBParticipantId
+                ? game?.targetCountB ?? 0
+                : 0,
+            opponentTargetCount:
+              opponentParticipantId === duel.competitorAParticipantId
+                ? game?.targetCountA ?? 0
+                : opponentParticipantId === duel.competitorBParticipantId
+                ? game?.targetCountB ?? 0
+                : 0,
+            // Host/spectator (non-competitor): "myForms"/"opponentForms"
+            // have no natural meaning, but at reveal both real layouts
+            // must still be inspectable — competitor A's board stands
+            // in for "myForms", competitor B's for "opponentForms"
+            // (arbitrary but stable labeling; UI renders them as
+            // "Competitor A"/"Competitor B" for this role, never
+            // "mine"/"opponent's").
+            myForms: isCompetitor ? myBoard?.forms ?? null : revealed ? boardA?.forms ?? null : null,
+            opponentForms: isCompetitor
+              ? revealed
+                ? opponentBoard?.forms ?? null
+                : null
+              : revealed
+              ? boardB?.forms ?? null
+              : null,
+            myTargetHistory,
+            opponentTargetHistory,
           },
         };
       }

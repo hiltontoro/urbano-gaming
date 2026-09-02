@@ -245,6 +245,48 @@
 
   .submitted-note { font-size: 13px; color: var(--done); margin-bottom: 8px; }
 
+  /* URBANO Pulse Slice 001. 8x8 board grid — shared visual language
+     with the rest of this file (--own/--done/--wrong/--upcoming), no
+     new color tokens introduced. A cell only ever shows what this
+     viewer is authoritatively allowed to know (see renderPulseBoard):
+     opponentForms/myForms stay null server-side until reveal, so
+     there is genuinely nothing else this markup could show sooner. */
+  .pulse-grid-wrap {
+    display: grid; grid-template-columns: 18px repeat(8, 1fr); gap: 3px;
+    max-width: 340px; margin: 0 auto;
+  }
+  .pulse-label {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--muted); user-select: none;
+  }
+  .pulse-cell {
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; background: var(--upcoming); border: 1px solid var(--line);
+    font-size: 13px; font-weight: 700; color: var(--muted); user-select: none;
+  }
+  .pulse-cell-own { background: var(--own); border-color: var(--accent); color: var(--ink); }
+  .pulse-cell-hit { background: var(--wrong-bg); border-color: var(--wrong); color: var(--wrong); }
+  .pulse-cell-miss { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
+  .pulse-cell-targetable { cursor: pointer; }
+  .pulse-cell-targetable:active { transform: scale(0.93); }
+  .pulse-cell-selected { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .pulse-confirm-bar {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin: 10px 0; font-size: 14px;
+  }
+  .pulse-board-label {
+    font-size: 12px; color: var(--muted); text-align: center; margin: 14px 0 6px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .pulse-form-slot {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px;
+    border: 2px solid var(--line); margin: 3px; font-size: 13px; background: transparent; color: var(--ink);
+  }
+  .pulse-form-slot.active { border-color: var(--accent); background: var(--own); }
+  .pulse-form-slot.placed:not(.active) { border-color: var(--done); }
+  .pulse-countdown { font-size: 22px; font-weight: 700; text-align: center; color: var(--accent); margin: 6px 0; }
+  .pulse-countdown.expired { color: var(--wrong); }
+
   .notice {
     padding: 10px 14px; border-radius: 8px; margin-bottom: 14px;
     font-size: 14px; border: 1px solid var(--danger);
@@ -746,6 +788,31 @@ let hasSubmittedThisPageLoad = false;
 let activeDuel = null;
 let duelHistory = [];
 let lastKnownParticipants = [];
+// URBANO Pulse Slice 001. Draft setup state — client-only, never
+// persisted until COMMIT_SETUP. Mirrors renderDuelOptionInputs' own
+// "preserve in-progress authoring across a routine poll" discipline:
+// pulseDraftForms must survive renderDuelCard() being called every
+// ~2s while SETUP is active, so it is reset only when a *different*
+// Duel's setup begins (see pulseResetDraftIfNewDuel), never on a
+// routine re-render. FORM_LENGTHS is fixed Product (Pulse Product
+// Definition v1): four forms, lengths 2/2/3/4, one slot each.
+const PULSE_FORM_LENGTHS = [2, 2, 3, 4];
+let pulseSetupDuelId = null;
+let pulseDraftForms = [null, null, null, null];
+let pulseDraftOrientations = ["H", "H", "H", "H"];
+let pulseSelectedSlot = 0;
+let pulseWasAssisted = false;
+let pulseSetupError = null;
+let pulseCountdownIntervalId = null;
+// Confirmation-before-target (UG-CR-GATE-002's own explicit "confirmation
+// protection against accidental targeting" requirement): a tap selects a
+// cell without submitting it; a second, explicit Confirm tap submits.
+// Cleared on every new Duel and after every submit attempt.
+let pulseSelectedTargetCell = null;
+// aria-live announcements must describe a genuine change, not repeat the
+// same status on every ~2s poll — this key captures "nothing new to
+// announce" so the announcer only updates when it actually changes.
+let pulseLastAnnouncedKey = null;
 // Slice 001 (Session / Interaction separation): tracks the last
 // interactionNumber seen from GET_SESSION, so a newly started
 // interaction can be detected and hasSubmittedThisPageLoad (and the
@@ -1986,11 +2053,15 @@ function renderDuelCard() {
     card.style.display = "block";
     if (activeDuel.mechanicKey === "MATH_DUEL") {
       renderMathDuelActive(body);
+    } else if (activeDuel.mechanicKey === "PULSE") {
+      renderPulseDuelActive(body);
     } else {
       renderMultipleChoiceDuelActive(body);
     }
     return;
   }
+
+  pulseStopCountdown();
 
   // No active Duel: show the most recently completed one, for the same
   // short post-completion window host.html's own renderDuelLastResult
@@ -2004,6 +2075,8 @@ function renderDuelCard() {
   card.style.display = "block";
   if (last.mechanicKey === "MATH_DUEL") {
     renderMathDuelTerminal(body, last);
+  } else if (last.mechanicKey === "PULSE") {
+    renderPulseDuelTerminal(body, last);
   } else {
     renderMultipleChoiceDuelTerminal(body, last);
   }
@@ -2340,6 +2413,513 @@ function renderMathDuelTerminal(body, last) {
     scoreLine +
     challengeRows +
     `</details>`;
+}
+
+// URBANO Pulse Slice 001 (UG-CR-GATE-002). Draft setup state
+// (pulseDraftForms/pulseDraftOrientations/pulseSelectedSlot/
+// pulseWasAssisted/pulseSetupError) lives at module scope, not inside
+// this function, so it survives the ~2s poll re-render that calls
+// renderDuelCard() unconditionally while SETUP is active — the same
+// Active Input Preservation concern renderDuelOptionInputs()/
+// renderMathDuelTerminal() already solve elsewhere in this file, just
+// via a persistent variable instead of a DOM read-back. Only reset
+// when a genuinely different Duel's setup begins.
+function pulseResetDraftIfNewDuel(duelId) {
+  if (pulseSetupDuelId === duelId) return;
+  pulseSetupDuelId = duelId;
+  pulseDraftForms = [null, null, null, null];
+  pulseDraftOrientations = ["H", "H", "H", "H"];
+  pulseSelectedSlot = 0;
+  pulseWasAssisted = false;
+  pulseSetupError = null;
+  pulseSelectedTargetCell = null;
+  pulseLastAnnouncedKey = null;
+}
+
+const PULSE_COLS = "ABCDEFGH";
+
+// One 8x8 board with coordinate labels (UG-CR-GATE-002's own explicit
+// "usable touch targets and coordinate labels" requirement), built
+// fresh every call — all cells are click targets or static color
+// swatches, never text input, so unlike the option-authoring rows
+// elsewhere in this file there is no in-progress typed state a
+// rebuild could destroy. cellClass(row,col) returns "own" / "hit" /
+// "miss" / ""; cellClickable(row,col) and the onclick handler are
+// only wired when onClickName is non-null; extraClass(row,col)
+// (optional) appends a further modifier such as "selected" without
+// disturbing the base state class. Every cell — clickable or not —
+// carries an aria-label naming exactly its coordinate and visible
+// state, never anything not already shown on screen (no privacy
+// leakage through accessible names).
+function pulseGridHtml(idPrefix, cellClass, cellClickable, onClickName, extraClass) {
+  let html = `<div class="pulse-grid-wrap" id="${idPrefix}" role="group">`;
+  html += `<div class="pulse-label"></div>`;
+  for (let col = 0; col < 8; col++) html += `<div class="pulse-label" aria-hidden="true">${PULSE_COLS[col]}</div>`;
+  for (let row = 0; row < 8; row++) {
+    html += `<div class="pulse-label" aria-hidden="true">${row + 1}</div>`;
+    for (let col = 0; col < 8; col++) {
+      const extra = cellClass(row, col);
+      const extraMod = extraClass ? extraClass(row, col) : "";
+      const clickable = !!onClickName && cellClickable(row, col);
+      const cls =
+        "pulse-cell" +
+        (extra ? ` pulse-cell-${extra}` : "") +
+        (extraMod ? ` pulse-cell-${extraMod}` : "") +
+        (clickable ? " pulse-cell-targetable" : "");
+      const glyph = extra === "hit" ? "✕" : extra === "miss" ? "·" : "";
+      const coord = `${PULSE_COLS[col]}${row + 1}`;
+      const stateText = extra === "own" ? ", your form" : extra === "hit" ? ", hit" : extra === "miss" ? ", miss" : "";
+      const ariaLabel = coord + stateText + (extraMod === "selected" ? ", selected" : "");
+      html += clickable
+        ? `<div class="${cls}" role="button" tabindex="0" aria-label="${ariaLabel}" onclick="${onClickName}(${row},${col})">${glyph}</div>`
+        : `<div class="${cls}" aria-label="${ariaLabel}">${glyph}</div>`;
+    }
+  }
+  html += `</div>`;
+  return html;
+}
+
+function cellClassFromForms(forms) {
+  const cells = new Set((forms || []).flatMap((f) => f.cells).map((c) => c.row + "," + c.col));
+  return (row, col) => (cells.has(row + "," + col) ? "own" : "");
+}
+
+// SETUP phase, this competitor has not yet committed. Manual
+// placement (tap a slot, tap the grid) and Auto-Arrange both write
+// into the same pulseDraftForms — Auto-Arrange only pre-fills it, per
+// the Pulse Product Definition's own "editable until commitment"
+// requirement; nothing here treats an assisted draft differently from
+// a manual one except the wasAssisted flag sent at commit time. The
+// server (commit_pulse_setup_atomically / pulseFormsAreValid) always
+// fully revalidates regardless of origin — this client-side overlap/
+// bounds check exists only for responsive UX, never as the authority.
+function renderPulseSetupPanel(body) {
+  const slotsHtml = PULSE_FORM_LENGTHS
+    .map((len, i) => {
+      const placed = !!pulseDraftForms[i];
+      const cls = "pulse-form-slot" + (i === pulseSelectedSlot ? " active" : "") + (placed ? " placed" : "");
+      return `<button type="button" class="${cls}" onclick="pulseSelectSlot(${i})">Form ${i + 1} (${len}) ${placed ? "✓" : ""}</button>`;
+    })
+    .join("");
+
+  const gridHtml = pulseGridHtml("pulseSetupGrid", cellClassFromForms(pulseDraftForms.filter(Boolean)), () => true, "pulseGridCellClickSetup");
+  const allPlaced = pulseDraftForms.every((f) => f !== null);
+  const orientationLabel = pulseDraftOrientations[pulseSelectedSlot] === "H" ? "Horizontal ↔" : "Vertical ↕";
+  const errorHtml = pulseSetupError ? `<div class="notice" style="margin-top:10px;">${pulseSetupError}</div>` : "";
+
+  body.innerHTML =
+    `<div class="room-code-hint" style="margin-bottom:8px;">Place your 4 forms privately — tap a slot below, then tap the grid to place it.</div>` +
+    `<div style="text-align:center; margin-bottom:8px;">${slotsHtml}</div>` +
+    `<div class="row" style="justify-content:center; gap:8px; margin-bottom:10px;">` +
+    `<button type="button" class="btn-ghost" onclick="pulseToggleOrientation()">${orientationLabel} (tap to rotate)</button>` +
+    `<button type="button" class="btn-ghost" onclick="pulseAutoArrange()">🎲 Auto-Arrange</button>` +
+    `</div>` +
+    gridHtml +
+    errorHtml +
+    `<button class="btn-primary" style="margin-top:14px;" onclick="pulseCommitSetup()" ${allPlaced ? "" : "disabled"}>Commit Setup</button>`;
+}
+
+function pulseSelectSlot(i) {
+  pulseSelectedSlot = i;
+  pulseSetupError = null;
+  renderDuelCard();
+}
+
+function pulseToggleOrientation() {
+  const slot = pulseSelectedSlot;
+  const newOrientation = pulseDraftOrientations[slot] === "H" ? "V" : "H";
+  pulseDraftOrientations[slot] = newOrientation;
+  const existing = pulseDraftForms[slot];
+  if (existing) {
+    const start = existing.cells[0];
+    const length = PULSE_FORM_LENGTHS[slot];
+    const cells = [];
+    for (let i = 0; i < length; i++) {
+      cells.push(
+        newOrientation === "H" ? { row: start.row, col: start.col + i } : { row: start.row + i, col: start.col }
+      );
+    }
+    // An in-bounds placement can go out of bounds on rotation (e.g. a
+    // 4-cell form starting at col 6) — cleared rather than clamped, so
+    // the player re-taps a valid cell rather than silently landing
+    // somewhere they didn't choose.
+    pulseDraftForms[slot] = cells.every((c) => c.row <= 7 && c.col <= 7) ? { formId: "f" + (slot + 1), cells } : null;
+  }
+  renderDuelCard();
+}
+
+function pulseGridCellClickSetup(row, col) {
+  const slot = pulseSelectedSlot;
+  const length = PULSE_FORM_LENGTHS[slot];
+  const orientation = pulseDraftOrientations[slot];
+  const cells = [];
+  for (let i = 0; i < length; i++) {
+    cells.push(orientation === "H" ? { row, col: col + i } : { row: row + i, col });
+  }
+
+  if (cells.some((c) => c.row > 7 || c.col > 7)) {
+    pulseSetupError = "That placement goes off the board — try a different cell or rotate.";
+    renderDuelCard();
+    return;
+  }
+
+  const occupied = new Set();
+  pulseDraftForms.forEach((form, i) => {
+    if (i === slot || !form) return;
+    form.cells.forEach((c) => occupied.add(c.row + "," + c.col));
+  });
+  if (cells.some((c) => occupied.has(c.row + "," + c.col))) {
+    pulseSetupError = "That overlaps another form — try a different cell.";
+    renderDuelCard();
+    return;
+  }
+
+  pulseSetupError = null;
+  pulseDraftForms[slot] = { formId: "f" + (slot + 1), cells };
+  pulseWasAssisted = false;
+  const nextUnplaced = pulseDraftForms.findIndex((f) => f === null);
+  if (nextUnplaced !== -1) pulseSelectedSlot = nextUnplaced;
+  renderDuelCard();
+}
+
+async function pulseAutoArrange() {
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/pulse/setup-assist`,
+    {},
+    participantState.participantToken
+  );
+  show("GENERATE_ASSISTED_SETUP (" + r.status + ")", r.json);
+  if (r.status === 200 && r.json && Array.isArray(r.json.forms)) {
+    pulseDraftForms = r.json.forms.map((f, i) => ({ formId: "f" + (i + 1), cells: f.cells }));
+    pulseDraftOrientations = pulseDraftForms.map((f) => (f.cells[0].row === f.cells[1].row ? "H" : "V"));
+    pulseWasAssisted = true;
+    pulseSetupError = null;
+    renderNotice(null);
+  } else {
+    renderNotice(classifyError(r));
+  }
+  renderDuelCard();
+}
+
+async function pulseCommitSetup() {
+  if (!pulseDraftForms.every((f) => f !== null)) return;
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/pulse/commit-setup`,
+    {
+      duelId: activeDuel.duelId,
+      forms: pulseDraftForms,
+      wasAssisted: pulseWasAssisted,
+      idempotencyKey: crypto.randomUUID(),
+    },
+    participantState.participantToken
+  );
+  show("COMMIT_PULSE_SETUP (" + r.status + ")", r.json);
+  if (r.status === 200) {
+    renderNotice(null);
+    pulseSetupError = null;
+  } else if (r.status === 422) {
+    pulseSetupError = (r.json && r.json.error) || "That layout is invalid — adjust it and try again.";
+    renderNotice(classifyError(r));
+  } else {
+    renderNotice(classifyError(r));
+  }
+  await participantRefresh();
+}
+
+// SETUP phase, already committed — my own layout is immutable from
+// here (PulseSetupAlreadyCommittedError on any further attempt), so
+// this is read-only: the same grid the setup panel showed, minus the
+// interactive affordances.
+function renderPulseWaitingForOpponent(body, myForms) {
+  const gridHtml = pulseGridHtml("pulseWaitingGrid", cellClassFromForms(myForms), () => false, null);
+  body.innerHTML = `<div class="submitted-note">Setup submitted — waiting for your opponent…</div>` + gridHtml;
+}
+
+// ACTIVE phase. Two boards: "Target Board" is the opponent's — always
+// blank except at coordinates this competitor has already targeted
+// (myTargetHistory), since opponentForms stays null server-side until
+// reveal; "Your Board" shows this competitor's own forms plus
+// whatever the opponent has already targeted against them
+// (opponentTargetHistory) — both are truthfully knowable to this
+// viewer already, never an early reveal of anything not yet targeted.
+function renderPulseActivePlay(body, nameA, nameB, isCompetitorA) {
+  const p = activeDuel.pulse;
+  const myTurn = p.currentActorParticipantId === participantState.participantId;
+  const opponentName = isCompetitorA ? nameB : nameA;
+
+  const myFormCells = new Set((p.myForms || []).flatMap((f) => f.cells).map((c) => c.row + "," + c.col));
+  const opponentHitsAgainstMe = new Map();
+  (p.opponentTargetHistory || []).forEach((t) => opponentHitsAgainstMe.set(t.row + "," + t.col, t.result));
+  const myTargets = new Map();
+  (p.myTargetHistory || []).forEach((t) => myTargets.set(t.row + "," + t.col, t.result));
+
+  const ownBoardHtml = pulseGridHtml(
+    "pulseOwnBoard",
+    (row, col) => {
+      const key = row + "," + col;
+      const opponentResult = opponentHitsAgainstMe.get(key);
+      if (opponentResult === "HIT" || opponentResult === "HIT_COMPLETED_FORM") return "hit";
+      if (opponentResult === "MISS") return "miss";
+      return myFormCells.has(key) ? "own" : "";
+    },
+    () => false,
+    null
+  );
+
+  const targetBoardHtml = pulseGridHtml(
+    "pulseTargetBoard",
+    (row, col) => {
+      const result = myTargets.get(row + "," + col);
+      if (result === "HIT" || result === "HIT_COMPLETED_FORM") return "hit";
+      if (result === "MISS") return "miss";
+      return "";
+    },
+    (row, col) => myTurn && !myTargets.has(row + "," + col),
+    "pulseGridCellClickTarget",
+    (row, col) =>
+      pulseSelectedTargetCell && pulseSelectedTargetCell.row === row && pulseSelectedTargetCell.col === col
+        ? "selected"
+        : ""
+  );
+
+  const lastMine = (p.myTargetHistory || []).at(-1);
+  const justCompletedNote = lastMine && lastMine.completedFormId ? `<div class="submitted-note">🎯 You sank a form!</div>` : "";
+
+  // Confirmation protection against accidental targeting: the first
+  // tap only selects a cell (see pulseGridCellClickTarget) — nothing
+  // is submitted until this bar's Confirm is tapped (or the same
+  // cell is tapped again).
+  const confirmBarHtml = pulseSelectedTargetCell
+    ? `<div class="pulse-confirm-bar">` +
+      `<span>Target ${PULSE_COLS[pulseSelectedTargetCell.col]}${pulseSelectedTargetCell.row + 1}?</span>` +
+      `<button type="button" class="btn-primary" style="width:auto;" onclick="pulseConfirmTarget()">Confirm</button>` +
+      `<button type="button" class="btn-ghost" onclick="pulseCancelTargetSelection()">Cancel</button>` +
+      `</div>`
+    : "";
+
+  body.innerHTML =
+    `<div id="pulseAnnouncer" class="sr-only" aria-live="polite"></div>` +
+    `<div class="room-code-hint" style="margin-bottom:4px;">You vs ${opponentName}</div>` +
+    `<div class="room-code-hint" style="margin-bottom:8px;">${myTurn ? "Your turn — tap a cell, then confirm" : "Opponent's turn — waiting…"}</div>` +
+    `<div id="pulseCountdownLabel" class="pulse-countdown"></div>` +
+    `<div id="pulseTimeoutClaim" style="text-align:center;"></div>` +
+    justCompletedNote +
+    confirmBarHtml +
+    `<div class="pulse-board-label">Target Board (${opponentName})</div>` +
+    targetBoardHtml +
+    `<div class="pulse-board-label">Your Board</div>` +
+    ownBoardHtml;
+
+  pulseStartCountdown(p.currentDeadline);
+  pulseAnnounce(myTurn, lastMine, opponentName);
+}
+
+// aria-live truthful status announcements (UG-CR-GATE-002's own
+// explicit requirement) — updates only on a genuine change (turn
+// flip or a new result on either side), never repeats the same
+// announcement on every ~2s poll, which would be noise rather than
+// information for a screen reader user.
+function pulseAnnounce(myTurn, lastMine, opponentName) {
+  const p = activeDuel.pulse;
+  const key = `${p.currentActorParticipantId}:${(p.myTargetHistory || []).length}:${(p.opponentTargetHistory || []).length}`;
+  if (key === pulseLastAnnouncedKey) return;
+  pulseLastAnnouncedKey = key;
+
+  const el = document.getElementById("pulseAnnouncer");
+  if (!el) return;
+
+  let message = myTurn ? "Your turn." : `${opponentName}'s turn.`;
+  if (lastMine) {
+    if (lastMine.completedFormId) message = "You sank a form! " + message;
+    else if (lastMine.result === "HIT") message = "Hit! " + message;
+    else if (lastMine.result === "MISS") message = "Miss. " + message;
+  }
+  el.textContent = message;
+}
+
+// Tap-to-select, then a separate explicit Confirm — a second tap on
+// the same cell also confirms (a faster path for anyone who already
+// understands the pattern), but the first tap on any untried cell
+// never submits by itself. Selecting a different cell just moves the
+// selection; it never queues two targets.
+function pulseGridCellClickTarget(row, col) {
+  const p = activeDuel.pulse;
+  if (p.currentActorParticipantId !== participantState.participantId) return;
+  const already = (p.myTargetHistory || []).some((t) => t.row === row && t.col === col);
+  if (already) return;
+  if (pulseSelectedTargetCell && pulseSelectedTargetCell.row === row && pulseSelectedTargetCell.col === col) {
+    pulseConfirmTarget();
+    return;
+  }
+  pulseSelectedTargetCell = { row, col };
+  renderDuelCard();
+}
+
+function pulseCancelTargetSelection() {
+  pulseSelectedTargetCell = null;
+  renderDuelCard();
+}
+
+function pulseConfirmTarget() {
+  if (!pulseSelectedTargetCell) return;
+  const { row, col } = pulseSelectedTargetCell;
+  pulseSelectedTargetCell = null;
+  pulseTargetCell(row, col);
+}
+
+async function pulseTargetCell(row, col) {
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/pulse/target`,
+    { duelId: activeDuel.duelId, row, col, idempotencyKey: crypto.randomUUID() },
+    participantState.participantToken
+  );
+  show("TARGET_CELL (" + r.status + ")", r.json);
+  if (r.status === 200) renderNotice(null);
+  else renderNotice(classifyError(r));
+  await participantRefresh();
+}
+
+async function pulseClaimTimeout() {
+  const r = await postJson(
+    `/api/sessions/${participantState.sessionId}/duel/pulse/claim-timeout`,
+    { duelId: activeDuel.duelId },
+    participantState.participantToken
+  );
+  show("CLAIM_TIMEOUT (" + r.status + ")", r.json);
+  if (r.status === 200) renderNotice(null);
+  else renderNotice(classifyError(r));
+  await participantRefresh();
+}
+
+function pulseStopCountdown() {
+  if (pulseCountdownIntervalId !== null) {
+    clearInterval(pulseCountdownIntervalId);
+    pulseCountdownIntervalId = null;
+  }
+}
+
+// Purely cosmetic, client-side ticking between ~2s polls — the
+// server's own current_deadline (re-checked with `now()` inside
+// apply_pulse_target_atomically / claim_pulse_timeout_atomically) is
+// the sole authority for whether a turn has actually expired; this
+// interval only updates the visible countdown text and the Claim
+// Timeout button, never a decision that reaches the server. Restarted
+// on every render call — cheap, and avoids a second interval ever
+// stacking on top of an old one from a prior Duel/render.
+function pulseStartCountdown(deadlineIso) {
+  pulseStopCountdown();
+  if (!deadlineIso) return;
+  const tick = () => {
+    const label = document.getElementById("pulseCountdownLabel");
+    const claimSlot = document.getElementById("pulseTimeoutClaim");
+    if (!label) {
+      pulseStopCountdown();
+      return;
+    }
+    const remainingMs = new Date(deadlineIso).getTime() - Date.now();
+    const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+    label.textContent = remainingSeconds > 0 ? `${remainingSeconds}s` : "Time's up";
+    label.classList.toggle("expired", remainingSeconds <= 0);
+    if (claimSlot) {
+      claimSlot.innerHTML =
+        remainingSeconds <= 0 ? `<button class="btn-primary" onclick="pulseClaimTimeout()">Claim Timeout Win</button>` : "";
+    }
+  };
+  tick();
+  pulseCountdownIntervalId = setInterval(tick, 1000);
+}
+
+function pulseTerminalBanner(duel) {
+  const isCompetitorA = participantState.participantId === duel.competitorAParticipantId;
+  const isCompetitorB = participantState.participantId === duel.competitorBParticipantId;
+  if (!isCompetitorA && !isCompetitorB) {
+    return { headline: duelTerminalSummaryText(duel), secondary: null, tone: "neutral" };
+  }
+  const iWon = duel.winnerParticipantId === participantState.participantId;
+  if (duel.terminalResolution === "WON_LOST") {
+    return iWon
+      ? { headline: "YOU WON", secondary: "+10 points", tone: "win" }
+      : { headline: "YOU LOST", secondary: null, tone: "loss" };
+  }
+  if (duel.terminalResolution === "FORFEIT") {
+    return iWon
+      ? { headline: "YOU WON", secondary: "+10 points — opponent's turn expired", tone: "win" }
+      : { headline: "YOU FORFEITED", secondary: "Your turn expired", tone: "loss" };
+  }
+  if (duel.terminalResolution === "CANCELLED") {
+    return { headline: "DUEL CANCELLED", secondary: null, tone: "neutral" };
+  }
+  if (duel.terminalResolution === "VOID") {
+    return { headline: "DUEL VOIDED", secondary: null, tone: "neutral" };
+  }
+  return { headline: duelTerminalSummaryText(duel), secondary: null, tone: "neutral" };
+}
+
+// Host VOID/CANCELLED preserves board privacy (UG-CR-REV-001's own
+// explicit reveal-policy correction) — opponentForms/myForms stay
+// null server-side in that case, the same signal GET_SESSION already
+// uses; this function shows only the coarse banner then, never a
+// separately-tracked "was this revealed" flag invented client-side.
+function renderPulseDuelTerminal(body, last) {
+  pulseStopCountdown();
+  const nameA = participantDisplayName(last.competitorAParticipantId);
+  const nameB = participantDisplayName(last.competitorBParticipantId);
+  const banner = pulseTerminalBanner(last);
+  const p = last.pulse;
+  const revealed = !!p && p.opponentForms !== null;
+
+  let boardsHtml = "";
+  if (revealed) {
+    const isCompetitorB = participantState.participantId === last.competitorBParticipantId;
+    const formsA = isCompetitorB ? p.opponentForms : p.myForms;
+    const formsB = isCompetitorB ? p.myForms : p.opponentForms;
+    boardsHtml =
+      `<div class="pulse-board-label">${nameA}'s Board</div>` +
+      pulseGridHtml("pulseTerminalGridA", cellClassFromForms(formsA), () => false, null) +
+      `<div class="pulse-board-label">${nameB}'s Board</div>` +
+      pulseGridHtml("pulseTerminalGridB", cellClassFromForms(formsB), () => false, null);
+  }
+
+  body.innerHTML =
+    `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+    `<div class="winner-banner tone-${banner.tone}">${banner.headline}` +
+    (banner.secondary ? `<div style="font-weight:400; font-size:13px; margin-top:4px;">${banner.secondary}</div>` : "") +
+    `</div>` +
+    boardsHtml;
+}
+
+// Top-level dispatcher called from renderDuelCard() — mirrors
+// renderMathDuelActive's own role for its mechanic.
+function renderPulseDuelActive(body) {
+  pulseResetDraftIfNewDuel(activeDuel.duelId);
+  const nameA = participantDisplayName(activeDuel.competitorAParticipantId);
+  const nameB = participantDisplayName(activeDuel.competitorBParticipantId);
+  const isCompetitorA = participantState.participantId === activeDuel.competitorAParticipantId;
+  const isCompetitorB = participantState.participantId === activeDuel.competitorBParticipantId;
+  const p = activeDuel.pulse;
+  const inSetup = p.currentActorParticipantId === null;
+
+  if (!isCompetitorA && !isCompetitorB) {
+    pulseStopCountdown();
+    body.innerHTML =
+      `<div class="room-code-hint" style="margin-bottom:8px;">${nameA} <span style="color:var(--muted);">vs</span> ${nameB}</div>` +
+      (inSetup
+        ? `<div class="waiting">Both competitors are setting up their boards…</div>`
+        : `<div class="waiting">${participantDisplayName(p.currentActorParticipantId)}'s turn — watching…</div>`);
+    return;
+  }
+
+  if (inSetup) {
+    pulseStopCountdown();
+    if (p.myCommittedAt === null) {
+      renderPulseSetupPanel(body);
+    } else {
+      renderPulseWaitingForOpponent(body, p.myForms || []);
+    }
+    return;
+  }
+
+  renderPulseActivePlay(body, nameA, nameB, isCompetitorA);
 }
 
 // Math Duel Slice 001. Unlike submitDuelResponse()'s optimistic local

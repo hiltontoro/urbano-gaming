@@ -809,6 +809,7 @@
           <div class="row" style="gap:8px; margin-bottom:10px;">
             <button type="button" class="btn-ghost" id="duelMechanicBtnMultipleChoice" onclick="selectDuelMechanic('MULTIPLE_CHOICE')" style="flex:1;">🧠 Multiple Choice</button>
             <button type="button" class="btn-ghost" id="duelMechanicBtnMathDuel" onclick="selectDuelMechanic('MATH_DUEL')" style="flex:1;">🔢 Math Duel</button>
+            <button type="button" class="btn-ghost" id="duelMechanicBtnPulse" onclick="selectDuelMechanic('PULSE')" style="flex:1;">🎯 Pulse</button>
           </div>
           <div id="duelMultipleChoiceFields">
             <textarea id="duelPromptInput" rows="2" oninput="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" placeholder="Duel question…"></textarea>
@@ -820,6 +821,12 @@
                fields here at all, only an explanation. -->
           <div id="duelMathDuelFields" style="display:none;">
             <div class="room-code-hint" style="margin-bottom:8px;">5 challenges, automatically selected — no authoring needed. If tied after 5, sudden death continues one challenge at a time until decided.</div>
+          </div>
+          <!-- URBANO Pulse Slice 001 (UG-CR-GATE-002). Same "no Host
+               authoring" shape as Math Duel — each competitor sets up
+               their own private 8x8 board after the Duel starts. -->
+          <div id="duelPulseFields" style="display:none;">
+            <div class="room-code-hint" style="margin-bottom:8px;">Each competitor privately places 4 forms (lengths 2, 2, 3, 4) on an 8×8 board after the Duel starts — no authoring needed here. A server coin flip picks who targets first; each turn has a 60-second deadline.</div>
           </div>
           <!-- Ordinary Duel Session Scoring Slice 001. Smallest
                truthful transparency treatment — no input, no
@@ -3479,13 +3486,18 @@ function renderDuelCard() {
 function syncDuelMechanicSelector() {
   const mcBtn = document.getElementById("duelMechanicBtnMultipleChoice");
   const mathBtn = document.getElementById("duelMechanicBtnMathDuel");
+  const pulseBtn = document.getElementById("duelMechanicBtnPulse");
   const mcFields = document.getElementById("duelMultipleChoiceFields");
   const mathFields = document.getElementById("duelMathDuelFields");
+  const pulseFields = document.getElementById("duelPulseFields");
   const isMath = selectedDuelMechanic === "MATH_DUEL";
-  mcBtn.style.borderColor = isMath ? "" : "var(--accent)";
+  const isPulse = selectedDuelMechanic === "PULSE";
+  mcBtn.style.borderColor = !isMath && !isPulse ? "var(--accent)" : "";
   mathBtn.style.borderColor = isMath ? "var(--accent)" : "";
-  mcFields.style.display = isMath ? "none" : "block";
+  pulseBtn.style.borderColor = isPulse ? "var(--accent)" : "";
+  mcFields.style.display = !isMath && !isPulse ? "block" : "none";
   mathFields.style.display = isMath ? "block" : "none";
+  pulseFields.style.display = isPulse ? "block" : "none";
 }
 
 function selectDuelMechanic(mechanic) {
@@ -3650,6 +3662,8 @@ async function startDuel() {
   const body = { hostToken: hostState.hostToken, competitorAParticipantId, competitorBParticipantId };
   if (selectedDuelMechanic === "MATH_DUEL") {
     body.mechanicKey = "MATH_DUEL";
+  } else if (selectedDuelMechanic === "PULSE") {
+    body.mechanicKey = "PULSE";
   } else {
     const promptText = document.getElementById("duelPromptInput").value.trim();
     const rows = Array.from(document.querySelectorAll(".duel-option-input"));
@@ -3715,6 +3729,9 @@ function renderDuelActiveState() {
   if (activeDuel.mechanicKey === "MATH_DUEL") {
     mechanicLabel.textContent = "🔢 Math Duel";
     renderMathDuelActiveState(nameA, nameB);
+  } else if (activeDuel.mechanicKey === "PULSE") {
+    mechanicLabel.textContent = "🎯 Pulse";
+    renderPulseActiveState(nameA, nameB);
   } else {
     mechanicLabel.textContent = "🧠 Multiple Choice";
     const body = document.getElementById("duelActiveBody");
@@ -3774,6 +3791,28 @@ function renderMathDuelActiveState(nameA, nameB) {
     `<div class="room-code-hint" style="margin-bottom:4px;">${nameA}: ${md.competitorASubmittedCount} answered</div>` +
     `<div class="room-code-hint" style="margin-bottom:10px;">${nameB}: ${md.competitorBSubmittedCount} answered</div>` +
     `<div class="room-code-hint">Resolves automatically once both competitors answer.</div>`;
+}
+
+// URBANO Pulse Slice 001 (UG-CR-GATE-002). Coarse only, mirroring Math
+// Duel's own "no board/answer content, no manual Resolve button"
+// treatment — GET_SESSION's own Pulse projection (getSession.ts)
+// gives a non-competitor caller null/0/[] for myCommittedAt/
+// opponentCommittedAt/myTargetCount/opponentTargetCount/
+// myTargetHistory (there is no "my"/"opponent" role for the Host to
+// begin with), so this deliberately shows only what is genuinely
+// populated for that role — currentActorParticipantId and
+// currentDeadline — rather than fabricating a commit-progress counter
+// the read-model does not actually provide to this caller.
+function renderPulseActiveState(nameA, nameB) {
+  const p = activeDuel.pulse;
+  const inSetup = p.currentActorParticipantId === null;
+  const body = document.getElementById("duelActiveBody");
+  body.innerHTML =
+    `<div style="font-weight:600; margin-bottom:8px;">${nameA} <span style="color:var(--muted); font-weight:400;">vs</span> ${nameB}</div>` +
+    (inSetup
+      ? `<div class="room-code-hint" style="margin-bottom:10px;">Both competitors are privately setting up their boards. Activates automatically once both have committed.</div>`
+      : `<div class="room-code-hint" style="margin-bottom:4px;">Current turn: ${participantDisplayName(p.currentActorParticipantId)}</div>` +
+        `<div class="room-code-hint" style="margin-bottom:10px;">Resolves automatically — a completing hit, a timeout claim, or exceptional resolution below.</div>`);
 }
 
 async function resolveDuel() {

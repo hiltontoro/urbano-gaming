@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { startDuel } from "@/lib/session/startDuel";
 import { startMathDuel } from "@/lib/session/startMathDuel";
+import { startPulseDuel } from "@/lib/session/startPulseDuel";
 import { SupabaseSessionRepository } from "@/lib/session/db/supabaseSessionRepository";
 import {
   SessionNotFoundError,
@@ -123,6 +124,46 @@ export async function POST(
       console.error("START_MATH_DUEL failed:", err);
       return NextResponse.json(
         { error: "Failed to start Math Duel." },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (mechanicKey === "PULSE") {
+    try {
+      const result = await startPulseDuel(
+        repo,
+        sessionId,
+        hostToken,
+        competitorAParticipantId,
+        competitorBParticipantId
+      );
+      return NextResponse.json(result, { status: 201 });
+    } catch (err) {
+      if (err instanceof SessionNotFoundError) {
+        return NextResponse.json({ error: err.message }, { status: 404 });
+      }
+      if (err instanceof HostTokenMismatchError) {
+        return NextResponse.json({ error: err.message }, { status: 403 });
+      }
+      if (
+        err instanceof LobbyNotLockedError ||
+        err instanceof CapabilityNotAuthorizedError ||
+        err instanceof InteractionActiveError ||
+        err instanceof ActiveDuelExistsError
+      ) {
+        return NextResponse.json({ error: err.message }, { status: 409 });
+      }
+      if (
+        err instanceof DuplicateDuelCompetitorError ||
+        err instanceof DuelCompetitorNotInSessionError
+      ) {
+        return NextResponse.json({ error: err.message }, { status: 400 });
+      }
+
+      console.error("START_PULSE_DUEL failed:", err);
+      return NextResponse.json(
+        { error: "Failed to start Pulse duel." },
         { status: 500 }
       );
     }

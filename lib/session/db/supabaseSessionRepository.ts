@@ -16,6 +16,11 @@ import type {
   DuelExceptionalResolution,
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
+  PulseForm,
+  PulseTargetResult,
+  PulseBoardRecord,
+  PulseGameRecord,
+  PulseActionRecord,
 } from "../types";
 import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 import { RoomCodeRegistryCollisionError } from "../../rooms/types";
@@ -74,6 +79,16 @@ import {
   InvalidMathDuelOrdinalError,
   InvalidMathDuelAnswerError,
   MathDuelChallengesExhaustedError,
+  PulseNotFoundError,
+  PulseAccessDeniedError,
+  PulseNotActiveError,
+  PulseInvalidSetupError,
+  PulseSetupAlreadyCommittedError,
+  PulseNotYourTurnError,
+  PulseTargetOutOfBoundsError,
+  PulseCellAlreadyTargetedError,
+  PulseTurnExpiredError,
+  PulseTurnNotExpiredError,
 } from "../types";
 import type {
   SessionEventRecord,
@@ -2007,6 +2022,280 @@ export class SupabaseSessionRepository implements SessionRepository {
       submittedAnswer: row.submitted_answer,
       isCorrect: row.is_correct,
       answeredAt: row.answered_at,
+    }));
+  }
+
+  // ===================== URBANO Pulse Slice 001 =====================
+  // UG-CR-GATE-002. Mirrors Math Duel's own RPC-call + per-error-code
+  // translation convention exactly (start_pulse_duel_atomically /
+  // commit_pulse_setup_atomically / apply_pulse_target_atomically /
+  // claim_pulse_timeout_atomically — 0169-0172).
+
+  async startPulseDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string
+  ): Promise<{ duelId: string; lifecycleState: DuelLifecycleState; startedAt: string }> {
+    const { data, error } = await this.client.rpc("start_pulse_duel_atomically", {
+      p_session_id: sessionId,
+      p_host_token: hostToken,
+      p_competitor_a_participant_id: competitorAParticipantId,
+      p_competitor_b_participant_id: competitorBParticipantId,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("DUPLICATE_DUEL_COMPETITOR")) {
+        throw new DuplicateDuelCompetitorError();
+      }
+      if (error.code === "P0001" && msg.includes("SESSION_NOT_FOUND")) {
+        throw new SessionNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("HOST_TOKEN_MISMATCH")) {
+        throw new HostTokenMismatchError();
+      }
+      if (error.code === "P0001" && msg.includes("LOBBY_NOT_LOCKED")) {
+        throw new LobbyNotLockedError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("CAPABILITY_NOT_AUTHORIZED")) {
+        throw new CapabilityNotAuthorizedError("DUEL");
+      }
+      if (error.code === "P0001" && msg.includes("DUEL_COMPETITOR_NOT_IN_SESSION")) {
+        throw new DuelCompetitorNotInSessionError();
+      }
+      if (error.code === "P0001" && msg.includes("INTERACTION_ACTIVE")) {
+        throw new InteractionActiveError(extractStateFromGuardMessage(msg));
+      }
+      if (error.code === "P0001" && msg.includes("ACTIVE_DUEL_EXISTS")) {
+        throw new ActiveDuelExistsError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      duelId: row.duel_id,
+      lifecycleState: row.lifecycle_state as DuelLifecycleState,
+      startedAt: row.started_at,
+    };
+  }
+
+  async commitPulseSetup(
+    duelId: string,
+    participantToken: string,
+    forms: PulseForm[],
+    wasAssisted: boolean,
+    idempotencyKey: string
+  ): Promise<{
+    participantId: string;
+    committedAt: string;
+    activated: boolean;
+    currentActorParticipantId: string | null;
+    currentDeadline: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const { data, error } = await this.client.rpc("commit_pulse_setup_atomically", {
+      p_duel_id: duelId,
+      p_participant_token: participantToken,
+      p_forms: forms,
+      p_was_assisted: wasAssisted,
+      p_idempotency_key: idempotencyKey,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("PULSE_ACCESS_DENIED")) {
+        throw new PulseAccessDeniedError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_FOUND")) {
+        throw new PulseNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_ACTIVE")) {
+        throw new PulseNotActiveError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_SETUP_ALREADY_COMMITTED")) {
+        throw new PulseSetupAlreadyCommittedError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_INVALID_SETUP")) {
+        throw new PulseInvalidSetupError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      participantId: row.participant_id,
+      committedAt: row.committed_at,
+      activated: row.activated,
+      currentActorParticipantId: row.current_actor_participant_id ?? null,
+      currentDeadline: row.current_deadline ?? null,
+      alreadyApplied: row.already_applied,
+    };
+  }
+
+  async applyPulseTarget(
+    duelId: string,
+    participantToken: string,
+    row: number,
+    col: number,
+    idempotencyKey: string
+  ): Promise<{
+    result: PulseTargetResult;
+    completedFormId: string | null;
+    terminal: boolean;
+    winnerParticipantId: string | null;
+    nextActorParticipantId: string | null;
+    nextDeadline: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const { data, error } = await this.client.rpc("apply_pulse_target_atomically", {
+      p_duel_id: duelId,
+      p_participant_token: participantToken,
+      p_row: row,
+      p_col: col,
+      p_idempotency_key: idempotencyKey,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("PULSE_ACCESS_DENIED")) {
+        throw new PulseAccessDeniedError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_FOUND")) {
+        throw new PulseNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_TURN_EXPIRED")) {
+        throw new PulseTurnExpiredError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_ACTIVE")) {
+        throw new PulseNotActiveError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_YOUR_TURN")) {
+        throw new PulseNotYourTurnError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_TARGET_OUT_OF_BOUNDS")) {
+        throw new PulseTargetOutOfBoundsError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_CELL_ALREADY_TARGETED")) {
+        throw new PulseCellAlreadyTargetedError();
+      }
+      throw error;
+    }
+
+    const resultRow = Array.isArray(data) ? data[0] : data;
+
+    return {
+      result: resultRow.result as PulseTargetResult,
+      completedFormId: resultRow.completed_form_id ?? null,
+      terminal: resultRow.terminal,
+      winnerParticipantId: resultRow.winner_participant_id ?? null,
+      nextActorParticipantId: resultRow.next_actor_participant_id ?? null,
+      nextDeadline: resultRow.next_deadline ?? null,
+      alreadyApplied: resultRow.already_applied,
+    };
+  }
+
+  async claimPulseTimeout(
+    duelId: string,
+    participantToken: string
+  ): Promise<{
+    terminal: boolean;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const { data, error } = await this.client.rpc("claim_pulse_timeout_atomically", {
+      p_duel_id: duelId,
+      p_participant_token: participantToken,
+    });
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (error.code === "P0001" && msg.includes("PULSE_ACCESS_DENIED")) {
+        throw new PulseAccessDeniedError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_FOUND")) {
+        throw new PulseNotFoundError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_NOT_ACTIVE")) {
+        throw new PulseNotActiveError();
+      }
+      if (error.code === "P0001" && msg.includes("PULSE_TURN_NOT_EXPIRED")) {
+        throw new PulseTurnNotExpiredError();
+      }
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    return {
+      terminal: row.terminal,
+      terminalResolution: row.terminal_resolution as DuelTerminalResolution,
+      winnerParticipantId: row.winner_participant_id ?? null,
+      alreadyApplied: row.already_applied,
+    };
+  }
+
+  async getPulseBoards(duelId: string): Promise<PulseBoardRecord[]> {
+    const { data, error } = await this.client
+      .from("pulse_boards")
+      .select("*")
+      .eq("duel_id", duelId);
+
+    if (error) throw error;
+
+    return (data ?? []).map((row) => ({
+      duelId: row.duel_id,
+      participantId: row.participant_id,
+      forms: row.forms ?? null,
+      wasAssisted: row.was_assisted,
+      committedAt: row.committed_at,
+    }));
+  }
+
+  async getPulseGame(duelId: string): Promise<PulseGameRecord | null> {
+    const { data, error } = await this.client
+      .from("pulse_games")
+      .select("*")
+      .eq("duel_id", duelId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return {
+      duelId: data.duel_id,
+      currentActorParticipantId: data.current_actor_participant_id ?? null,
+      currentDeadline: data.current_deadline ?? null,
+      targetCountA: data.target_count_a,
+      targetCountB: data.target_count_b,
+      startedAt: data.started_at ?? null,
+      completedAt: data.completed_at ?? null,
+    };
+  }
+
+  async getPulseActions(duelId: string): Promise<PulseActionRecord[]> {
+    const { data, error } = await this.client
+      .from("pulse_actions")
+      .select("*")
+      .eq("duel_id", duelId)
+      .order("sequence_number", { ascending: true });
+
+    if (error) throw error;
+
+    return (data ?? []).map((row) => ({
+      duelId: row.duel_id,
+      sequenceNumber: row.sequence_number,
+      actorParticipantId: row.actor_participant_id,
+      row: row.cell_row,
+      col: row.cell_col,
+      result: row.result as PulseTargetResult,
+      completedFormId: row.completed_form_id ?? null,
+      idempotencyKey: row.idempotency_key,
+      createdAt: row.created_at,
     }));
   }
 }

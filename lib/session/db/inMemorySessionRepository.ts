@@ -64,6 +64,16 @@ import {
   InvalidMathDuelOrdinalError,
   InvalidMathDuelAnswerError,
   MathDuelChallengesExhaustedError,
+  PulseNotFoundError,
+  PulseAccessDeniedError,
+  PulseNotActiveError,
+  PulseInvalidSetupError,
+  PulseSetupAlreadyCommittedError,
+  PulseNotYourTurnError,
+  PulseTargetOutOfBoundsError,
+  PulseCellAlreadyTargetedError,
+  PulseTurnExpiredError,
+  PulseTurnNotExpiredError,
 } from "../types";
 import type {
   DuelRecord,
@@ -73,7 +83,13 @@ import type {
   DuelExceptionalResolution,
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
+  PulseForm,
+  PulseTargetResult,
+  PulseBoardRecord,
+  PulseGameRecord,
+  PulseActionRecord,
 } from "../types";
+import { pulseFormsAreValid } from "../pulseFormValidation";
 import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 
 const SESSION_CAPABILITY_KEYS: SessionCapabilityKey[] = [
@@ -201,6 +217,30 @@ export class InMemorySessionRepository implements SessionRepository {
    * selected by the read paths GET_SESSION uses pre-resolution.
    */
   private duelCorrectOptionIndexes = new Map<string, number>();
+
+  /**
+   * URBANO Pulse Slice 001 (UG-CR-GATE-002). Keyed by
+   * `${duelId}:${participantId}` — mirrors pulse_boards' own composite
+   * primary key. commitIdempotencyKey is kept internally, never on the
+   * public PulseBoardRecord shape.
+   */
+  private pulseBoards = new Map<
+    string,
+    {
+      duelId: string;
+      participantId: string;
+      forms: PulseForm[] | null;
+      wasAssisted: boolean;
+      commitIdempotencyKey: string | null;
+      committedAt: string | null;
+    }
+  >();
+
+  /** URBANO Pulse Slice 001. Keyed by duelId — mirrors pulse_games' own header-row role. */
+  private pulseGames = new Map<string, PulseGameRecord>();
+
+  /** URBANO Pulse Slice 001. Keyed by pulseActionId — append-only, mirrors pulse_actions. */
+  private pulseActions = new Map<string, PulseActionRecord>();
 
   /**
    * Slice 008 (Segment / Turn grouping). Keyed by segmentId. No stored
@@ -2602,6 +2642,466 @@ export class InMemorySessionRepository implements SessionRepository {
 
   async getMathDuelResponses(duelId: string): Promise<MathDuelResponseRecord[]> {
     return [...this.mathDuelResponses.values()].filter((r) => r.duelId === duelId);
+  }
+
+  // ===================== URBANO Pulse Slice 001 =====================
+  // UG-CR-GATE-002. Mirrors apply_pulse_target_atomically's/
+  // commit_pulse_setup_atomically's/claim_pulse_timeout_atomically's
+  // own SQL logic step by step (see each migration's own comment) — the
+  // two implementations are tested against the same contract
+  // (pulse.test.ts's in-memory suite and pulseSupabaseRepository.
+  // contract.test.ts's real-Postgres suite), so behavioral drift
+  // between them is a genuine defect, not an acceptable implementation
+  // difference.
+
+  async startPulseDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string
+  ): Promise<{ duelId: string; lifecycleState: DuelLifecycleState; startedAt: string }> {
+    if (competitorAParticipantId === competitorBParticipantId) {
+      throw new DuplicateDuelCompetitorError();
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError();
+    }
+    if (session.hostToken !== hostToken) {
+      throw new HostTokenMismatchError();
+    }
+    if (session.state !== "LOBBY_LOCKED") {
+      throw new LobbyNotLockedError(session.state);
+    }
+    if (!(session.declaredCapabilities ?? []).includes("DUEL")) {
+      throw new CapabilityNotAuthorizedError("DUEL");
+    }
+
+    const competitorA = this.participants.get(competitorAParticipantId);
+    if (!competitorA || competitorA.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+    const competitorB = this.participants.get(competitorBParticipantId);
+    if (!competitorB || competitorB.sessionId !== sessionId) {
+      throw new DuelCompetitorNotInSessionError();
+    }
+
+    const previousInteraction = this.getCurrentInteractionInstance(sessionId);
+    if (previousInteraction && previousInteraction.state !== "RESULT_REVEAL") {
+      throw new InteractionActiveError(previousInteraction.state);
+    }
+
+    if (this.getActiveDuelRecordForSession(sessionId)) {
+      throw new ActiveDuelExistsError();
+    }
+
+    const startedAt = new Date().toISOString();
+    const duel: DuelRecord = {
+      duelId: randomUUID(),
+      sessionId,
+      mechanicKey: "PULSE",
+      competitorAParticipantId,
+      competitorBParticipantId,
+      lifecycleState: "ACTIVE",
+      terminalResolution: null,
+      winnerParticipantId: null,
+      reason: null,
+      createdAt: startedAt,
+      startedAt,
+      endedAt: null,
+      winnerPoints: 10,
+    };
+    this.duels.set(duel.duelId, duel);
+
+    for (const participantId of [competitorAParticipantId, competitorBParticipantId]) {
+      this.pulseBoards.set(`${duel.duelId}:${participantId}`, {
+        duelId: duel.duelId,
+        participantId,
+        forms: null,
+        wasAssisted: false,
+        commitIdempotencyKey: null,
+        committedAt: null,
+      });
+    }
+
+    this.pulseGames.set(duel.duelId, {
+      duelId: duel.duelId,
+      currentActorParticipantId: null,
+      currentDeadline: null,
+      targetCountA: 0,
+      targetCountB: 0,
+      startedAt: null,
+      completedAt: null,
+    });
+
+    this.events.push({
+      sessionId,
+      eventType: "DUEL_STARTED",
+      payload: {
+        duelId: duel.duelId,
+        mechanicKey: "PULSE",
+        competitorAParticipantId,
+        competitorBParticipantId,
+      },
+    });
+
+    return { duelId: duel.duelId, lifecycleState: duel.lifecycleState, startedAt };
+  }
+
+  async commitPulseSetup(
+    duelId: string,
+    participantToken: string,
+    forms: PulseForm[],
+    wasAssisted: boolean,
+    idempotencyKey: string
+  ): Promise<{
+    participantId: string;
+    committedAt: string;
+    activated: boolean;
+    currentActorParticipantId: string | null;
+    currentDeadline: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const duel = this.duels.get(duelId);
+    if (!duel || duel.mechanicKey !== "PULSE") {
+      throw new PulseNotFoundError();
+    }
+
+    const participant = [...this.participants.values()].find(
+      (p) => p.sessionId === duel.sessionId && p.participantToken === participantToken
+    );
+    if (
+      !participant ||
+      (participant.participantId !== duel.competitorAParticipantId &&
+        participant.participantId !== duel.competitorBParticipantId)
+    ) {
+      throw new PulseAccessDeniedError();
+    }
+    if (duel.lifecycleState !== "ACTIVE") {
+      throw new PulseNotActiveError();
+    }
+
+    const myKey = `${duelId}:${participant.participantId}`;
+    const myBoard = this.pulseBoards.get(myKey)!;
+    const game = this.pulseGames.get(duelId)!;
+
+    if (myBoard.committedAt !== null) {
+      if (myBoard.commitIdempotencyKey === idempotencyKey) {
+        return {
+          participantId: participant.participantId,
+          committedAt: myBoard.committedAt,
+          activated: game.currentActorParticipantId !== null,
+          currentActorParticipantId: game.currentActorParticipantId,
+          currentDeadline: game.currentDeadline,
+          alreadyApplied: true,
+        };
+      }
+      throw new PulseSetupAlreadyCommittedError();
+    }
+
+    if (!pulseFormsAreValid(forms)) {
+      throw new PulseInvalidSetupError();
+    }
+
+    const committedAt = new Date().toISOString();
+    myBoard.forms = forms;
+    myBoard.wasAssisted = wasAssisted;
+    myBoard.commitIdempotencyKey = idempotencyKey;
+    myBoard.committedAt = committedAt;
+
+    const opponentParticipantId =
+      participant.participantId === duel.competitorAParticipantId
+        ? duel.competitorBParticipantId
+        : duel.competitorAParticipantId;
+    const opponentBoard = this.pulseBoards.get(`${duelId}:${opponentParticipantId}`)!;
+
+    let activated = false;
+    if (opponentBoard.committedAt !== null) {
+      activated = true;
+      const actor = Math.random() < 0.5 ? duel.competitorAParticipantId : duel.competitorBParticipantId;
+      const deadline = new Date(Date.now() + 60_000).toISOString();
+      game.currentActorParticipantId = actor;
+      game.currentDeadline = deadline;
+      game.startedAt = new Date().toISOString();
+
+      this.events.push({
+        sessionId: duel.sessionId,
+        eventType: "PULSE_ACTIVATED",
+        payload: { duelId, currentActorParticipantId: actor },
+      });
+    }
+
+    return {
+      participantId: participant.participantId,
+      committedAt,
+      activated,
+      currentActorParticipantId: game.currentActorParticipantId,
+      currentDeadline: game.currentDeadline,
+      alreadyApplied: false,
+    };
+  }
+
+  async applyPulseTarget(
+    duelId: string,
+    participantToken: string,
+    row: number,
+    col: number,
+    idempotencyKey: string
+  ): Promise<{
+    result: PulseTargetResult;
+    completedFormId: string | null;
+    terminal: boolean;
+    winnerParticipantId: string | null;
+    nextActorParticipantId: string | null;
+    nextDeadline: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const duel = this.duels.get(duelId);
+    if (!duel || duel.mechanicKey !== "PULSE") {
+      throw new PulseNotFoundError();
+    }
+
+    const participant = [...this.participants.values()].find(
+      (p) => p.sessionId === duel.sessionId && p.participantToken === participantToken
+    );
+    if (
+      !participant ||
+      (participant.participantId !== duel.competitorAParticipantId &&
+        participant.participantId !== duel.competitorBParticipantId)
+    ) {
+      throw new PulseAccessDeniedError();
+    }
+
+    const existing = [...this.pulseActions.values()].find(
+      (a) => a.duelId === duelId && a.idempotencyKey === idempotencyKey
+    );
+    if (existing) {
+      const game = this.pulseGames.get(duelId)!;
+      return {
+        result: existing.result,
+        completedFormId: existing.completedFormId,
+        terminal: duel.lifecycleState === "COMPLETED",
+        winnerParticipantId: duel.winnerParticipantId,
+        nextActorParticipantId: game.currentActorParticipantId,
+        nextDeadline: game.currentDeadline,
+        alreadyApplied: true,
+      };
+    }
+
+    if (duel.lifecycleState !== "ACTIVE") {
+      throw new PulseNotActiveError();
+    }
+
+    const game = this.pulseGames.get(duelId)!;
+    if (game.currentActorParticipantId === null) {
+      throw new PulseNotActiveError("Setup is not yet complete.");
+    }
+
+    if (game.currentDeadline !== null && Date.now() >= new Date(game.currentDeadline).getTime()) {
+      throw new PulseTurnExpiredError();
+    }
+
+    if (participant.participantId !== game.currentActorParticipantId) {
+      throw new PulseNotYourTurnError();
+    }
+
+    if (row < 0 || row > 7 || col < 0 || col > 7) {
+      throw new PulseTargetOutOfBoundsError();
+    }
+
+    const myPriorActions = [...this.pulseActions.values()].filter(
+      (a) => a.duelId === duelId && a.actorParticipantId === participant.participantId
+    );
+    if (myPriorActions.some((a) => a.row === row && a.col === col)) {
+      throw new PulseCellAlreadyTargetedError();
+    }
+
+    const opponentParticipantId =
+      participant.participantId === duel.competitorAParticipantId
+        ? duel.competitorBParticipantId
+        : duel.competitorAParticipantId;
+    const opponentForms = this.pulseBoards.get(`${duelId}:${opponentParticipantId}`)!.forms!;
+
+    let result: PulseTargetResult = "MISS";
+    let hitFormId: string | null = null;
+    for (const form of opponentForms) {
+      if (form.cells.some((c) => c.row === row && c.col === col)) {
+        result = "HIT";
+        hitFormId = form.formId;
+        break;
+      }
+    }
+
+    let completedFormId: string | null = null;
+    if (result === "HIT") {
+      const matchedForm = opponentForms.find((f) => f.formId === hitFormId)!;
+      const hitCellsAfterThis = new Set(myPriorActions.filter((a) => a.result !== "MISS").map((a) => `${a.row},${a.col}`));
+      hitCellsAfterThis.add(`${row},${col}`);
+      const formFullyHit = matchedForm.cells.every((c) => hitCellsAfterThis.has(`${c.row},${c.col}`));
+      if (formFullyHit) {
+        completedFormId = hitFormId;
+        result = "HIT_COMPLETED_FORM";
+      }
+    }
+
+    const sequenceNumber =
+      [...this.pulseActions.values()].filter((a) => a.duelId === duelId).length + 1;
+    const createdAt = new Date().toISOString();
+    const action: PulseActionRecord = {
+      duelId,
+      sequenceNumber,
+      actorParticipantId: participant.participantId,
+      row,
+      col,
+      result,
+      completedFormId,
+      idempotencyKey,
+      createdAt,
+    };
+    this.pulseActions.set(randomUUID(), action);
+
+    const allMyHitCells = new Set(
+      [...this.pulseActions.values()]
+        .filter((a) => a.duelId === duelId && a.actorParticipantId === participant.participantId && a.result !== "MISS")
+        .map((a) => `${a.row},${a.col}`)
+    );
+    const allFormsCleared = opponentForms.every((f) => f.cells.every((c) => allMyHitCells.has(`${c.row},${c.col}`)));
+
+    if (participant.participantId === duel.competitorAParticipantId) {
+      game.targetCountA += 1;
+    } else {
+      game.targetCountB += 1;
+    }
+
+    if (allFormsCleared) {
+      duel.lifecycleState = "COMPLETED";
+      duel.terminalResolution = "WON_LOST";
+      duel.winnerParticipantId = participant.participantId;
+      duel.endedAt = new Date().toISOString();
+
+      game.completedAt = new Date().toISOString();
+      game.currentActorParticipantId = null;
+      game.currentDeadline = null;
+
+      this.events.push({
+        sessionId: duel.sessionId,
+        eventType: "DUEL_RESOLVED",
+        payload: { duelId, terminalResolution: "WON_LOST", winnerParticipantId: participant.participantId },
+      });
+      this.awardDuelPoints(duel.sessionId, duel.duelId, participant.participantId, duel.winnerPoints);
+
+      return {
+        result,
+        completedFormId,
+        terminal: true,
+        winnerParticipantId: participant.participantId,
+        nextActorParticipantId: null,
+        nextDeadline: null,
+        alreadyApplied: false,
+      };
+    }
+
+    game.currentActorParticipantId = opponentParticipantId;
+    game.currentDeadline = new Date(Date.now() + 60_000).toISOString();
+
+    return {
+      result,
+      completedFormId,
+      terminal: false,
+      winnerParticipantId: null,
+      nextActorParticipantId: game.currentActorParticipantId,
+      nextDeadline: game.currentDeadline,
+      alreadyApplied: false,
+    };
+  }
+
+  async claimPulseTimeout(
+    duelId: string,
+    participantToken: string
+  ): Promise<{
+    terminal: boolean;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+    alreadyApplied: boolean;
+  }> {
+    const duel = this.duels.get(duelId);
+    if (!duel || duel.mechanicKey !== "PULSE") {
+      throw new PulseNotFoundError();
+    }
+
+    const participant = [...this.participants.values()].find(
+      (p) => p.sessionId === duel.sessionId && p.participantToken === participantToken
+    );
+    if (
+      !participant ||
+      (participant.participantId !== duel.competitorAParticipantId &&
+        participant.participantId !== duel.competitorBParticipantId)
+    ) {
+      throw new PulseAccessDeniedError();
+    }
+
+    if (duel.lifecycleState === "COMPLETED") {
+      return {
+        terminal: true,
+        terminalResolution: duel.terminalResolution!,
+        winnerParticipantId: duel.winnerParticipantId,
+        alreadyApplied: true,
+      };
+    }
+
+    const game = this.pulseGames.get(duelId)!;
+    if (game.currentActorParticipantId === null || game.currentDeadline === null) {
+      throw new PulseNotActiveError("There is no active turn to expire.");
+    }
+    if (Date.now() < new Date(game.currentDeadline).getTime()) {
+      throw new PulseTurnNotExpiredError();
+    }
+
+    const winner =
+      game.currentActorParticipantId === duel.competitorAParticipantId
+        ? duel.competitorBParticipantId
+        : duel.competitorAParticipantId;
+
+    duel.lifecycleState = "COMPLETED";
+    duel.terminalResolution = "FORFEIT";
+    duel.winnerParticipantId = winner;
+    duel.endedAt = new Date().toISOString();
+
+    game.completedAt = new Date().toISOString();
+    game.currentActorParticipantId = null;
+    game.currentDeadline = null;
+
+    this.events.push({
+      sessionId: duel.sessionId,
+      eventType: "DUEL_RESOLVED",
+      payload: { duelId, terminalResolution: "FORFEIT", winnerParticipantId: winner },
+    });
+    this.awardDuelPoints(duel.sessionId, duel.duelId, winner, duel.winnerPoints);
+
+    return { terminal: true, terminalResolution: "FORFEIT", winnerParticipantId: winner, alreadyApplied: false };
+  }
+
+  async getPulseBoards(duelId: string): Promise<PulseBoardRecord[]> {
+    return [...this.pulseBoards.values()]
+      .filter((b) => b.duelId === duelId)
+      .map((b) => ({
+        duelId: b.duelId,
+        participantId: b.participantId,
+        forms: b.forms,
+        wasAssisted: b.wasAssisted,
+        committedAt: b.committedAt,
+      }));
+  }
+
+  async getPulseGame(duelId: string): Promise<PulseGameRecord | null> {
+    return this.pulseGames.get(duelId) ?? null;
+  }
+
+  async getPulseActions(duelId: string): Promise<PulseActionRecord[]> {
+    return [...this.pulseActions.values()]
+      .filter((a) => a.duelId === duelId)
+      .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
   }
 
   /** Test-only helper, not part of the repository interface. */

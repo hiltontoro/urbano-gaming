@@ -14,6 +14,11 @@ import type {
   DuelExceptionalResolution,
   MathDuelChallengeRecord,
   MathDuelResponseRecord,
+  PulseForm,
+  PulseTargetResult,
+  PulseBoardRecord,
+  PulseGameRecord,
+  PulseActionRecord,
 } from "../types";
 import type { MathDuelFixtureChallenge } from "../mathDuelFixture";
 
@@ -1465,4 +1470,157 @@ export interface SessionRepository {
    * getDuelResponses()'s own unfiltered contract exactly.
    */
   getMathDuelResponses(duelId: string): Promise<MathDuelResponseRecord[]>;
+
+  // ===================== URBANO Pulse Slice 001 =====================
+  // UG-CR-GATE-002. Duel Container vs. Mechanic boundary, third
+  // mechanic — mirrors Math Duel's own sibling-method convention on
+  // this same interface exactly; no separate PulseRepository.
+
+  /**
+   * START_PULSE_DUEL's atomic operation — a sibling to startDuel()/
+   * startMathDuel(), not a generalization of either. Same generic
+   * Duel-initiation mutual-exclusion contract (see startDuel's own doc
+   * comment for the shared error vocabulary). Creates empty
+   * pulse_boards rows for both competitors and a pulse_games header
+   * row with no actor/deadline yet — the game's own SETUP phase.
+   *
+   * Implementations must:
+   * - apply every mutual-exclusion/authorization check startDuel()
+   *   documents, with the same error vocabulary;
+   * - persist exactly one DUEL_STARTED session event on success;
+   * - never populate current_actor_participant_id/current_deadline —
+   *   those become authoritative only via commitPulseSetup's own
+   *   activating transaction.
+   */
+  startPulseDuel(
+    sessionId: string,
+    hostToken: string,
+    competitorAParticipantId: string,
+    competitorBParticipantId: string
+  ): Promise<{ duelId: string; lifecycleState: DuelLifecycleState; startedAt: string }>;
+
+  /**
+   * COMMIT_SETUP's atomic operation. Participant-token authority only.
+   * Idempotent against this competitor's own already-committed board:
+   * a repeat call with the same idempotencyKey returns the original
+   * result; a repeat call with a different key against an
+   * already-committed board is a genuine second, rejected attempt.
+   * When this call is the second competitor to commit, activation
+   * (persisted coin-flip actor, first 60-second deadline, started_at)
+   * happens in the same atomic transaction.
+   *
+   * Implementations must:
+   * - throw PulseNotFoundError only when no Pulse duel exists for this
+   *   id;
+   * - throw PulseAccessDeniedError only when the resolved participant
+   *   is not one of this Duel's two competitors;
+   * - throw PulseNotActiveError only when the Duel container itself is
+   *   not ACTIVE;
+   * - throw PulseSetupAlreadyCommittedError only when this competitor
+   *   has already committed under a *different* idempotencyKey;
+   * - throw PulseInvalidSetupError only when forms fails server-side
+   *   validation (count, lengths, bounds, orientation, overlap —
+   *   adjacency/touching is permitted);
+   * - never trust wasAssisted as a substitute for validation.
+   */
+  commitPulseSetup(
+    duelId: string,
+    participantToken: string,
+    forms: PulseForm[],
+    wasAssisted: boolean,
+    idempotencyKey: string
+  ): Promise<{
+    participantId: string;
+    committedAt: string;
+    activated: boolean;
+    currentActorParticipantId: string | null;
+    currentDeadline: string | null;
+    alreadyApplied: boolean;
+  }>;
+
+  /**
+   * TARGET_CELL's atomic operation. Participant-token authority only.
+   * Idempotency is checked FIRST, before any lifecycle/turn
+   * revalidation — the mandatory Towers lesson: a retry of the exact
+   * target that completed this Duel must return the cached result
+   * rather than throwing PulseNotActiveError. The deadline race is
+   * resolved under the same row lock used for turn authority: if
+   * already expired when this call acquires the lock, the target is
+   * rejected (PulseTurnExpiredError) without mutating anything —
+   * resolution itself only ever happens via claimPulseTimeout.
+   *
+   * Implementations must:
+   * - throw PulseNotFoundError / PulseAccessDeniedError / PulseNotActiveError
+   *   with the same meaning as commitPulseSetup;
+   * - throw PulseTurnExpiredError only when the deadline has already
+   *   passed;
+   * - throw PulseNotYourTurnError only when the caller is not the
+   *   current actor;
+   * - throw PulseTargetOutOfBoundsError only when row/col fall outside
+   *   0..7;
+   * - throw PulseCellAlreadyTargetedError only when this same attacker
+   *   has already targeted this exact coordinate;
+   * - derive result/completedFormId entirely server-side from the
+   *   opponent's own committed forms — never trust a client-supplied
+   *   result;
+   * - persist exactly one pulse_actions row on success;
+   * - persist exactly one DUEL_RESOLVED (and, on WON_LOST, one
+   *   POINTS_AWARDED) session event only when this call is the one
+   *   that determines the winner.
+   */
+  applyPulseTarget(
+    duelId: string,
+    participantToken: string,
+    row: number,
+    col: number,
+    idempotencyKey: string
+  ): Promise<{
+    result: PulseTargetResult;
+    completedFormId: string | null;
+    terminal: boolean;
+    winnerParticipantId: string | null;
+    nextActorParticipantId: string | null;
+    nextDeadline: string | null;
+    alreadyApplied: boolean;
+  }>;
+
+  /**
+   * CLAIM_TIMEOUT's atomic operation — the CLOSE_QUIZ pattern:
+   * dual-authority (either competitor may call this), lazy (no
+   * background job), idempotent by construction (a call against an
+   * already-COMPLETED duel simply returns the cached terminal facts).
+   *
+   * Implementations must:
+   * - throw PulseNotFoundError / PulseAccessDeniedError with the same
+   *   meaning as commitPulseSetup;
+   * - throw PulseNotActiveError only when there is no active turn to
+   *   expire (setup incomplete, or already terminal is instead handled
+   *   as an idempotent success — see below);
+   * - throw PulseTurnNotExpiredError only when the deadline genuinely
+   *   has not passed yet;
+   * - return alreadyApplied: true, without re-resolving, when the duel
+   *   is already COMPLETED — regardless of how it became terminal;
+   * - resolve terminal_resolution = 'FORFEIT' against whichever
+   *   competitor was the current actor at the moment of expiry;
+   * - persist exactly one DUEL_RESOLVED and one POINTS_AWARDED session
+   *   event on a genuine (non-idempotent-replay) resolution.
+   */
+  claimPulseTimeout(
+    duelId: string,
+    participantToken: string
+  ): Promise<{
+    terminal: boolean;
+    terminalResolution: DuelTerminalResolution;
+    winnerParticipantId: string | null;
+    alreadyApplied: boolean;
+  }>;
+
+  /** URBANO Pulse Slice 001. Both competitors' board rows for one Duel — raw evidence; privacy is enforced at the read-model boundary (getSession.ts), not here. */
+  getPulseBoards(duelId: string): Promise<PulseBoardRecord[]>;
+
+  /** URBANO Pulse Slice 001. The current-state header row for one Pulse Duel, if any. */
+  getPulseGame(duelId: string): Promise<PulseGameRecord | null>;
+
+  /** URBANO Pulse Slice 001. Every accepted target action for one Duel, sequence ascending — raw evidence, unfiltered. */
+  getPulseActions(duelId: string): Promise<PulseActionRecord[]>;
 }

@@ -832,6 +832,38 @@ export interface DuelSummary {
   endedAt: string | null;
   multipleChoice?: MultipleChoiceDuelSummary;
   mathDuel?: MathDuelSummary;
+  pulse?: PulseSummary;
+}
+
+/**
+ * URBANO Pulse Slice 001. GET_SESSION's own Pulse projection —
+ * role-aware and phase-aware, mirroring MathDuelSummary's own
+ * established shape exactly. myForms is this caller's own committed
+ * layout (or draft-in-progress state — always null here, since drafts
+ * are held client-side only and never reach this projection until
+ * committed); opponentForms is populated ONLY once revealed (ordinary
+ * completion or timeout/forfeit — never on Host VOID/CANCELLED, per
+ * UG-CR-REV-001's explicit reveal-policy correction). myTargetHistory
+ * is this caller's own target results against the opponent — always
+ * visible to the caller, mirrors MathDuelSummary's own "own progress
+ * always visible" precedent. Host/spectator (non-competitor) callers
+ * see only the coarse fields — myForms/opponentForms/myTargetHistory
+ * all null/empty — matching MathDuelSummary's own "correctness-free...
+ * safe for Host/spectator viewing" precedent.
+ */
+export interface PulseSummary {
+  myCommittedAt: string | null;
+  opponentCommittedAt: string | null;
+  currentActorParticipantId: string | null;
+  currentDeadline: string | null;
+  myTargetCount: number;
+  opponentTargetCount: number;
+  /** My own committed layout — visible to me alone, from the moment I commit; never to the opponent, Host, or spectators before reveal. */
+  myForms: PulseForm[] | null;
+  /** The opponent's layout — populated ONLY on reveal (ordinary completion or timeout/forfeit); never on Host VOID/CANCELLED; null throughout SETUP/ACTIVE for every role. */
+  opponentForms: PulseForm[] | null;
+  myTargetHistory: Array<{ row: number; col: number; result: PulseTargetResult; completedFormId: string | null }>;
+  opponentTargetHistory: Array<{ row: number; col: number; result: PulseTargetResult; completedFormId: string | null }>;
 }
 
 /** Raised when a generated room code collides with an active session. */
@@ -1545,9 +1577,12 @@ export type DuelExceptionalResolution =
  * actually graduated and implemented, never speculatively — MATH_DUEL
  * is Math Duel Slice 001's own graduated second mechanic (Product
  * Definition confirmed across two Founder reconciliation gates; see
- * MATH_DUEL_IMPLEMENTATION_RECORD.md).
+ * MATH_DUEL_IMPLEMENTATION_RECORD.md). PULSE is URBANO Pulse Slice 001's
+ * own graduated third mechanic (UG-CR-GATE-001/UG-CR-REV-001/
+ * UG-CR-GATE-002 — Code Review readiness, Founder correction, and
+ * implementation authorization respectively).
  */
-export type DuelMechanicKey = "MULTIPLE_CHOICE" | "MATH_DUEL";
+export type DuelMechanicKey = "MULTIPLE_CHOICE" | "MATH_DUEL" | "PULSE";
 
 /**
  * Multiple Choice's own mechanic-owned content — the prompt and
@@ -1598,6 +1633,81 @@ export interface MathDuelResponseRecord {
   submittedAnswer: number;
   isCorrect: boolean;
   answeredAt: string;
+}
+
+/**
+ * URBANO Pulse Slice 001. One coordinate on the fixed 8x8 field, 0-7 in
+ * each axis. formId ties a set of cells together for completed-form
+ * detection — never exposed to the opponent, Host, or spectators while
+ * the Duel is ACTIVE (see pulse_forms_are_valid's own migration
+ * comment for the exact shape this must satisfy at commitment).
+ */
+export interface PulseCell {
+  row: number;
+  col: number;
+}
+
+export interface PulseForm {
+  formId: string;
+  cells: PulseCell[];
+}
+
+/**
+ * URBANO Pulse Slice 001. One competitor's own committed (or
+ * not-yet-committed) private layout — the actual secret. forms is null
+ * until committed_at is set; both are immutable afterward. Mirrors
+ * duel_responses'/duel_math_responses' own one-or-composite-row-per-
+ * competitor persistence shape, never Multiple Choice's or Math
+ * Duel's own content tables.
+ */
+export interface PulseBoardRecord {
+  duelId: string;
+  participantId: string;
+  forms: PulseForm[] | null;
+  wasAssisted: boolean;
+  committedAt: string | null;
+}
+
+/**
+ * URBANO Pulse Slice 001. The fast-read current-state header for one
+ * Pulse Duel — mirrors RutasAttemptRecord's/TowersAttemptRecord's own
+ * header-table role exactly (technically re-derivable by replaying
+ * PulseActionRecord history, materialized here for read performance
+ * only). currentActorParticipantId/currentDeadline are both null while
+ * setup is incomplete — the game's own SETUP phase, derived, never a
+ * separately persisted column (mirrors MathDuelSummary's own "phase is
+ * derived" precedent).
+ */
+export interface PulseGameRecord {
+  duelId: string;
+  currentActorParticipantId: string | null;
+  currentDeadline: string | null;
+  targetCountA: number;
+  targetCountB: number;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type PulseTargetResult = "MISS" | "HIT" | "HIT_COMPLETED_FORM";
+
+/**
+ * URBANO Pulse Slice 001. One append-only row per accepted TARGET_CELL
+ * attempt — never for a rejected/illegal attempt, and never for a
+ * timeout-forfeit resolution (that path is recorded as an ordinary
+ * DUEL_RESOLVED session event only, mirroring how Host VOID/CANCELLED
+ * already works). Mirrors RutasActionEvent's/TowersActionEvent's own
+ * append-only evidence role.
+ */
+export interface PulseActionRecord {
+  duelId: string;
+  sequenceNumber: number;
+  actorParticipantId: string;
+  row: number;
+  col: number;
+  result: PulseTargetResult;
+  completedFormId: string | null;
+  idempotencyKey: string;
+  createdAt: string;
 }
 
 /**
@@ -1718,6 +1828,54 @@ export interface SubmitMathDuelAnswerResult {
   participantId: string;
   challengeOrdinal: number;
   answeredAt: string;
+}
+
+/** Result of a successful START_PULSE_DUEL. Mirrors StartMathDuelResult's own shape. */
+export interface StartPulseDuelResult {
+  duelId: string;
+  sessionId: string;
+  mechanicKey: DuelMechanicKey;
+  competitorAParticipantId: string;
+  competitorBParticipantId: string;
+  lifecycleState: DuelLifecycleState;
+  startedAt: string;
+}
+
+/**
+ * Result of a successful COMMIT_SETUP. activated is true only when
+ * this call was the second competitor's commit — the atomic
+ * transition to ACTIVE, with the persisted coin-flip actor and first
+ * 60-second deadline already assigned in the same transaction.
+ */
+export interface CommitPulseSetupResult {
+  duelId: string;
+  participantId: string;
+  committedAt: string;
+  activated: boolean;
+  currentActorParticipantId: string | null;
+  currentDeadline: string | null;
+  alreadyApplied: boolean;
+}
+
+/** Result of a successful TARGET_CELL. */
+export interface ApplyPulseTargetResult {
+  duelId: string;
+  result: PulseTargetResult;
+  completedFormId: string | null;
+  terminal: boolean;
+  winnerParticipantId: string | null;
+  currentActorParticipantId: string | null;
+  currentDeadline: string | null;
+  alreadyApplied: boolean;
+}
+
+/** Result of a successful CLAIM_TIMEOUT. */
+export interface ClaimPulseTimeoutResult {
+  duelId: string;
+  terminal: boolean;
+  terminalResolution: DuelTerminalResolution;
+  winnerParticipantId: string | null;
+  alreadyApplied: boolean;
 }
 
 /** Result of a successful RESOLVE_DUEL or RESOLVE_DUEL_EXCEPTIONALLY. */
@@ -1934,5 +2092,91 @@ export class MathDuelChallengesExhaustedError extends Error {
   constructor() {
     super("No further challenges remain for this Duel.");
     this.name = "MathDuelChallengesExhaustedError";
+  }
+}
+
+// ===================== URBANO Pulse Slice 001 =====================
+// UG-CR-GATE-002. Duel Container vs. Mechanic boundary, third mechanic
+// — mirrors Math Duel's own dedicated error vocabulary, reusing the
+// generic Duel errors (DuplicateDuelCompetitorError,
+// DuelCompetitorNotInSessionError, HostTokenMismatchError,
+// SessionNotFoundError, LobbyNotLockedError, CapabilityNotAuthorizedError,
+// InteractionActiveError, ActiveDuelExistsError) only where semantics
+// genuinely match, per UG-CR-GATE-002's own reuse instructions.
+
+export class PulseNotFoundError extends Error {
+  constructor() {
+    super("No Pulse duel exists for this id.");
+    this.name = "PulseNotFoundError";
+  }
+}
+
+export class PulseAccessDeniedError extends Error {
+  constructor() {
+    super("This caller is not a competitor in this Pulse duel.");
+    this.name = "PulseAccessDeniedError";
+  }
+}
+
+export class PulseNotActiveError extends Error {
+  constructor(message: string = "This Pulse duel is not active.") {
+    super(message);
+    this.name = "PulseNotActiveError";
+  }
+}
+
+export class PulseInvalidSetupError extends Error {
+  constructor() {
+    super("The submitted layout is not a valid arrangement.");
+    this.name = "PulseInvalidSetupError";
+  }
+}
+
+export class PulseSetupAlreadyCommittedError extends Error {
+  constructor() {
+    super("This competitor has already committed a layout.");
+    this.name = "PulseSetupAlreadyCommittedError";
+  }
+}
+
+export class PulseNotYourTurnError extends Error {
+  constructor() {
+    super("It is not your turn.");
+    this.name = "PulseNotYourTurnError";
+  }
+}
+
+export class PulseTargetOutOfBoundsError extends Error {
+  constructor() {
+    super("The target coordinate is out of bounds.");
+    this.name = "PulseTargetOutOfBoundsError";
+  }
+}
+
+export class PulseCellAlreadyTargetedError extends Error {
+  constructor() {
+    super("This coordinate has already been targeted.");
+    this.name = "PulseCellAlreadyTargetedError";
+  }
+}
+
+/**
+ * Raised by TARGET_CELL when the active turn's deadline has already
+ * passed at the moment the target arrives — the target is rejected
+ * without mutating anything (the CLOSE_QUIZ pattern); the caller
+ * should invoke CLAIM_TIMEOUT to actually resolve the duel.
+ */
+export class PulseTurnExpiredError extends Error {
+  constructor() {
+    super("The active turn deadline has passed; claim the timeout to resolve.");
+    this.name = "PulseTurnExpiredError";
+  }
+}
+
+/** Raised by CLAIM_TIMEOUT when the deadline has genuinely not passed yet. */
+export class PulseTurnNotExpiredError extends Error {
+  constructor() {
+    super("The active turn deadline has not passed yet.");
+    this.name = "PulseTurnNotExpiredError";
   }
 }
