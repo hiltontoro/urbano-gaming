@@ -809,7 +809,14 @@
           <div class="row" style="gap:8px; margin-bottom:10px;">
             <button type="button" class="btn-ghost" id="duelMechanicBtnMultipleChoice" onclick="selectDuelMechanic('MULTIPLE_CHOICE')" style="flex:1;">🧠 Multiple Choice</button>
             <button type="button" class="btn-ghost" id="duelMechanicBtnMathDuel" onclick="selectDuelMechanic('MATH_DUEL')" style="flex:1;">🔢 Math Duel</button>
-            <button type="button" class="btn-ghost" id="duelMechanicBtnPulse" onclick="selectDuelMechanic('PULSE')" style="flex:1;">🎯 Pulse</button>
+            <!-- URBANO Pulse Slice 001 production containment
+                 (UG-CR-GATE-011): hidden pending production database
+                 migration (see the PULSE_PRODUCTION_SCHEMA_READY
+                 constant near selectDuelMechanic() in this file, and
+                 the identical constant in duel/start/route.ts).
+                 Remove display:none and both matching constants/
+                 guards together once schema readiness is confirmed. -->
+            <button type="button" class="btn-ghost" id="duelMechanicBtnPulse" onclick="selectDuelMechanic('PULSE')" style="flex:1; display:none;">🎯 Pulse</button>
           </div>
           <div id="duelMultipleChoiceFields">
             <textarea id="duelPromptInput" rows="2" oninput="updateDuelStartAvailability()" style="width:100%; font-family:inherit; font-size:14px; padding:8px; border-radius:6px; border:1px solid var(--line); margin-bottom:8px;" placeholder="Duel question…"></textarea>
@@ -3500,7 +3507,14 @@ function syncDuelMechanicSelector() {
   pulseFields.style.display = isPulse ? "block" : "none";
 }
 
+// URBANO Pulse Slice 001 production containment (UG-CR-GATE-011). See
+// the identical constant/comment in duel/start/route.ts — flip both
+// together, never independently, once production schema readiness is
+// confirmed, then remove both constants and their guards entirely.
+const PULSE_PRODUCTION_SCHEMA_READY = false;
+
 function selectDuelMechanic(mechanic) {
+  if (mechanic === "PULSE" && !PULSE_PRODUCTION_SCHEMA_READY) return;
   selectedDuelMechanic = mechanic;
   syncDuelMechanicSelector();
   updateDuelStartAvailability();

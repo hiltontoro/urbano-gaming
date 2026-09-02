@@ -36,6 +36,23 @@ import {
  * actually needs, avoiding the generic payload blob implementation-
  * readiness explicitly rejected.
  */
+/**
+ * URBANO Pulse Slice 001 production containment (UG-CR-GATE-011).
+ * Production application code shipped ahead of its own database
+ * migrations (0164-0172), which remain blocked — see
+ * UG-CR-RPT-010/UG-CR-REV-009 (the standard migration workflow
+ * cannot exclude the unrelated, historically-deferred migration
+ * 0125, and production currently has no recorded backup). This is a
+ * single, narrowly-scoped kill switch for exactly that one condition
+ * — not a generic feature-flag system. Flip to true only once the
+ * production schema is confirmed present (Pulse tables/functions/the
+ * mechanic_key constraint's PULSE value all exist on the linked
+ * project), then remove this constant and the one guard below
+ * entirely, together with the matching constant/guard in
+ * public/host.html.
+ */
+const PULSE_PRODUCTION_SCHEMA_READY = false;
+
 export async function POST(
   request: Request,
   { params }: { params: { identifier: string } }
@@ -130,6 +147,16 @@ export async function POST(
   }
 
   if (mechanicKey === "PULSE") {
+    if (!PULSE_PRODUCTION_SCHEMA_READY) {
+      return NextResponse.json(
+        {
+          error:
+            "Pulse is temporarily unavailable while its database schema is being prepared. Try again later.",
+        },
+        { status: 503 }
+      );
+    }
+
     try {
       const result = await startPulseDuel(
         repo,
