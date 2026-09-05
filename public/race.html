@@ -1,0 +1,1167 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>URBANO Race — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * URBANO Race Slice 001 — synchronous two-competitor Live Race, Towers
+   * as its first proving child. This page talks directly to
+   * /api/gaming/race/events/* — no Session, no Host, no Room Registry.
+   * The Towers board rendering below mirrors public/towers.html's own
+   * (tap-source-then-destination, server is sole authority); keep
+   * TOWERS_SCENARIOS in sync with lib/gaming/towers/scenarios.ts, same
+   * as towers.html already does. sessionStorage (tab-scoped) holds the
+   * caller's OWN raceEventId + organizerToken/competitorToken for
+   * reconnect — never anything about the opponent, and never a raw
+   * Towers attemptId (the server never sends one).
+   */
+  :root {
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --exp-purple: #7c3aed;
+    --board-bg: #10140f;
+    --peg: #3a3226;
+    --piece-1: #4f7cac;
+    --piece-2: #5a9367;
+    --piece-3: #b5834a;
+    --piece-4: #a45a6b;
+    --piece-5: #7c6bab;
+    --illegal-bg: #3a1f1f;
+    --illegal-border: #7a3b3b;
+    --illegal-ink: #e39b9b;
+    --win-bg: rgba(63,107,70,.15);
+    --win-border: #3f6b46;
+    --win-ink: #b9e5c0;
+    --lose-bg: rgba(122,59,59,.15);
+    --lose-border: #7a3b3b;
+    --lose-ink: #e39b9b;
+    --working-bg: rgba(124,58,237,.10);
+    --working-border: #6d4fb0;
+    --working-ink: #cbb9f0;
+    --recovered-bg: rgba(63,107,70,.15);
+    --recovered-border: #3f6b46;
+    --recovered-ink: #b9e5c0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--exp-purple); outline-offset: 2px;
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 620px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-word { font-size: 17px; font-weight: 700; }
+  .brand-badge {
+    background: rgba(124,58,237,.12); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .back-link { max-width: 620px; margin: 14px auto 0; padding: 0 20px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link:hover { color: var(--ink); }
+
+  .panel { max-width: 620px; margin: 16px auto 0; padding: 0 20px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; background: var(--bg-card);
+    padding: 20px;
+  }
+  .card + .card { margin-top: 14px; }
+
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 16px; }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .field input {
+    width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--ink); font-size: 14px; font-family: inherit;
+  }
+
+  .scenario-picker { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .scenario-btn {
+    padding: 14px; border-radius: 10px; text-align: left;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  }
+  .scenario-btn[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(245,241,232,.2); }
+  .scenario-btn strong { display: block; font-size: 14px; margin-bottom: 3px; }
+  .scenario-btn span { display: block; font-size: 12px; color: var(--muted); }
+
+  .btn {
+    width: 100%; padding: 13px; border-radius: 10px; font-weight: 700; font-size: 14px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--ink); color: var(--primary-ink); border: none; }
+  .btn.danger-ghost { border-color: #7a3b3b; color: #e39b9b; background: transparent; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn-row .btn { flex: 1; }
+
+  .code-display {
+    font-family: "SFMono-Regular", Consolas, monospace; font-size: 16px; font-weight: 700;
+    letter-spacing: .04em; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px; word-break: break-all; user-select: all;
+  }
+
+  .status-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; font-size: 13.5px; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .status-dot.on { background: #6fae7c; }
+  .status-row + .status-row { border-top: 1px solid var(--line); }
+
+  #countdown-value {
+    font-size: 44px; font-weight: 800; text-align: center; margin: 8px 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; gap: 6px 14px; }
+  .hud strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  #board-wrap { display: flex; justify-content: center; gap: 4%; margin: 0 auto; padding: 10px 0; user-select: none; }
+  .tower {
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    border-radius: 10px; border: 2px solid var(--line); background: var(--board-bg);
+    padding: 10px 6px 8px; min-width: 0; flex: 1; max-width: 33%;
+    cursor: pointer; transition: border-color .12s, box-shadow .12s;
+  }
+  .tower.selected { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(245,241,232,.25); }
+  .tower.legal-dest { border-style: dashed; border-color: #6fae7c; }
+  .tower-tag {
+    font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px; height: 14px; text-align: center;
+  }
+  .tower.selected .tower-tag::before { content: "▲ SELECTED  "; color: var(--ink); }
+  .tower.legal-dest:not(.selected) .tower-tag::before { content: "✓ LEGAL  "; color: #8fd19c; }
+
+  .stack { display: flex; flex-direction: column-reverse; align-items: center; gap: 4px; min-height: 40px; width: 100%; }
+  .piece {
+    height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; color: var(--primary-ink);
+    box-shadow: 0 2px 0 rgba(0,0,0,.35), inset 0 0 0 2px rgba(255,255,255,.15);
+  }
+  .peg-base { width: 66%; height: 8px; background: var(--peg); border-radius: 3px; margin-top: 4px; }
+
+  #illegal-banner {
+    display: none; margin-top: 12px; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid var(--illegal-border); background: var(--illegal-bg); color: var(--illegal-ink);
+    font-size: 13px; font-weight: 600; text-align: center;
+  }
+
+  .terminal-banner {
+    margin-top: 14px; padding: 16px; border-radius: 10px; text-align: center; font-weight: 700; font-size: 15px;
+  }
+  .terminal-banner.win { border: 1px solid var(--win-border); background: var(--win-bg); color: var(--win-ink); }
+  .terminal-banner.lose { border: 1px solid var(--lose-border); background: var(--lose-bg); color: var(--lose-ink); }
+  .terminal-banner.neutral { border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); }
+  .terminal-banner .detail { display: block; font-weight: 500; font-size: 12.5px; margin-top: 5px; opacity: .85; }
+
+  .op-banner {
+    max-width: 620px; margin: 0 auto 12px; padding: 12px 14px; border-radius: 10px;
+    font-size: 13.5px; font-weight: 600; text-align: center;
+  }
+  .op-banner.working { border: 1px solid var(--working-border); background: var(--working-bg); color: var(--working-ink); }
+  .op-banner.retry { border: 1px solid var(--illegal-border); background: var(--illegal-bg); color: var(--illegal-ink); }
+  .op-banner.recovered { border: 1px solid var(--recovered-border); background: var(--recovered-bg); color: var(--recovered-ink); }
+  .op-banner.error { border: 1px solid var(--illegal-border); background: var(--illegal-bg); color: var(--illegal-ink); }
+  .op-banner .btn { margin-top: 8px; width: auto; padding: 9px 22px; }
+
+  [aria-busy="true"] { opacity: .7; }
+
+  [hidden] { display: none !important; }
+
+  @media (max-width: 480px) {
+    .shell-header, .back-link, .panel { padding-left: 14px; padding-right: 14px; }
+    .piece { font-size: 11px; height: 26px; }
+    #countdown-value { font-size: 36px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <span class="brand">
+    <span class="brand-word">URBANO Race</span>
+    <span class="brand-badge">Live</span>
+  </span>
+</div>
+<a class="back-link" href="/">&larr; Back to URBANO Gaming</a>
+
+<div class="panel">
+
+  <div id="op-banner" class="op-banner" hidden></div>
+
+  <div class="card" id="landing-card">
+    <h1>URBANO Race</h1>
+    <p class="sub">Two competitors, one Towers scenario, one shared countdown. First to solve it wins.</p>
+    <div class="scenario-picker" id="scenario-picker" role="group" aria-label="Choose a Towers scenario"></div>
+    <button class="btn primary" id="btn-create" disabled>Create a Race</button>
+    <div class="btn-row">
+      <input type="text" id="join-code-input" placeholder="Paste a Race event id to join" aria-label="Race event id to join" style="flex:2; padding:11px 12px; border-radius:8px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); font-size:13px;" />
+      <button class="btn" id="btn-join" style="flex:1;">Join</button>
+    </div>
+  </div>
+
+  <div class="card" id="setup-card" hidden aria-live="polite">
+    <h2>Race event created</h2>
+    <p class="sub">Share this event id with your opponent so they can join.</p>
+    <div class="code-display" id="event-id-display"></div>
+    <div class="status-row"><span class="status-dot" id="dot-a"></span><span id="label-a">Competitor A — waiting</span></div>
+    <div class="status-row"><span class="status-dot" id="dot-b"></span><span id="label-b">Competitor B — waiting</span></div>
+    <div class="btn-row">
+      <button class="btn" id="btn-organizer-join">Join as a competitor</button>
+      <button class="btn danger-ghost" id="btn-organizer-cancel">Cancel Race</button>
+    </div>
+  </div>
+
+  <div class="card" id="ready-card" hidden aria-live="polite">
+    <h2 id="ready-heading">Waiting for both competitors</h2>
+    <p class="sub" id="ready-sub"></p>
+    <button class="btn primary" id="btn-ready">I'm ready</button>
+  </div>
+
+  <div class="card" id="countdown-card" hidden aria-live="assertive">
+    <h2>Both ready — starting</h2>
+    <div id="countdown-value">3</div>
+    <p class="sub" style="text-align:center;">Same start time for both competitors.</p>
+  </div>
+
+  <div class="card" id="game-card" hidden>
+    <div class="hud">
+      <span>Your moves: <strong id="hud-moves">0</strong></span>
+      <span>Time left: <strong id="hud-remaining">10:00</strong></span>
+      <span id="hud-opponent">Opponent: not ready</span>
+    </div>
+
+    <div id="board-wrap" role="group" aria-label="Your Towers board"></div>
+
+    <div id="illegal-banner" role="alert"></div>
+
+    <div class="btn-row">
+      <button class="btn" id="btn-undo" disabled>Undo</button>
+      <button class="btn danger-ghost" id="btn-live-cancel">Request cancellation</button>
+    </div>
+
+    <div id="terminal-banner-live" class="terminal-banner" hidden role="status"></div>
+  </div>
+
+</div>
+
+<script>
+// Mirrors lib/gaming/towers/scenarios.ts — keep in sync.
+const TOWERS_SCENARIOS = {
+  "towers-001": { scenarioId: "towers-001", scenarioVersion: 1, towerIds: ["T1","T2","T3"], initialStacks: { T1: [3,2,1], T2: [], T3: [] }, destinationTowerId: "T3", knownMinimumMoves: 7 },
+  "towers-002": { scenarioId: "towers-002", scenarioVersion: 1, towerIds: ["T1","T2","T3"], initialStacks: { T1: [4,3,2,1], T2: [], T3: [] }, destinationTowerId: "T3", knownMinimumMoves: 15 },
+  "towers-003": { scenarioId: "towers-003", scenarioVersion: 1, towerIds: ["T1","T2","T3"], initialStacks: { T1: [3,1], T2: [2], T3: [] }, destinationTowerId: "T3", knownMinimumMoves: null },
+};
+const PIECE_COLORS = { 1: "var(--piece-1)", 2: "var(--piece-2)", 3: "var(--piece-3)", 4: "var(--piece-4)", 5: "var(--piece-5)" };
+const MIN_PIECE_PCT = 40;
+const PCT_STEP = 12;
+
+let raceEventId = null;
+let organizerToken = null;
+let competitorToken = null;
+let scenario = null;
+let stacks = null;
+let outcome = null;
+let selectedTower = null;
+let pollInterval = null;
+let countdownInterval = null;
+let remainingInterval = null;
+let illegalBannerTimeout = null;
+let lastPhase = null;
+
+// -----------------------------------------------------------------------
+// Idempotency key contract (UG-CR-GATE-026) — one shared contract across
+// browser, API (lib/gaming/race/idempotencyKey.ts), and PostgreSQL (both
+// ledger tables' idempotency_key columns are the native `uuid` type). A
+// standard UUID string. crypto.randomUUID() is preferred; the fallback
+// below still produces a value satisfying the same format contract
+// (RFC 4122 v4, via crypto.getRandomValues() for real entropy) rather
+// than a non-conforming placeholder — this repository's earlier
+// fallback ("id-" + Math.random()...) would have failed the database's
+// own uuid-typed column outright. Secure random generation being
+// unavailable at all is a hard failure, not a silent weaker key.
+// -----------------------------------------------------------------------
+const IDEMPOTENCY_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidIdempotencyKey(key) {
+  return typeof key === "string" && key.length === 36 && IDEMPOTENCY_KEY_PATTERN.test(key);
+}
+function uuid() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+    return `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-${hex[4]}${hex[5]}-${hex[6]}${hex[7]}-${hex[8]}${hex[9]}-${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`;
+  }
+  throw new Error("Secure random UUID generation is not available in this browser.");
+}
+
+// -----------------------------------------------------------------------
+// Pending-operation envelope (UG-CR-GATE-026's "Required Client-Side
+// Correction"). Exactly one slot — this UI never has more than one
+// mutating Race action in flight at a time, and a single slot is
+// sufficient to satisfy every required operation (Create, Join
+// including organizer-as-competitor, Ready, Move, Undo, both
+// cancellation paths) without building a queue, which is explicitly
+// prohibited. The envelope is the ONLY place a mutation's
+// idempotencyKey and canonical payload live between "user acted" and
+// "server definitively responded" — every submit/resume/retry path
+// reads the key and payload back OUT of the envelope rather than
+// regenerating either, which is what makes a retry after an ambiguous
+// failure (dropped response, timeout, 5xx, or a reload) reuse the
+// SAME logical-operation identity instead of silently becoming a new
+// one. Persisted in sessionStorage (survives reload, tab-scoped, same
+// scope as the existing Race bearer credentials) — never a raw Towers
+// attempt id, only operation-level data the client itself generated.
+// -----------------------------------------------------------------------
+const PENDING_KEY = "urbano_race_pending_operation";
+function savePendingOperation(envelope) {
+  sessionStorage.setItem(PENDING_KEY, JSON.stringify(envelope));
+}
+function loadPendingOperation() {
+  const raw = sessionStorage.getItem(PENDING_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !isValidIdempotencyKey(parsed.idempotencyKey) || !OPERATIONS[parsed.operationKind]) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+function clearPendingOperation() {
+  sessionStorage.removeItem(PENDING_KEY);
+}
+
+let operationInFlight = false;
+
+/**
+ * Deliberate HTTP response classification (UG-CR-GATE-027 Defect 3).
+ * "ambiguous" means THIS request's server-side outcome is not proven —
+ * a 5xx, or an explicit 408 (request timeout) / 429 (throttled), where
+ * the server may not have processed the request body at all — so the
+ * pending envelope must be preserved and safely retried under the same
+ * key/payload. Every other 4xx (validation, auth, not-found,
+ * illegal-move, stale-state, and idempotency-conflict) is "definite":
+ * the server HAS already communicated an outcome, so the client must
+ * stop and reflect it rather than retry blindly under the same key.
+ * Mirrors lib/gaming/race/httpResponseClassification.ts exactly — keep
+ * both in sync; that file's own Vitest suite exercises this logic
+ * directly and is the source of truth for the boundary values.
+ */
+function classifyResponseStatus(status) {
+  if (status >= 500) return "ambiguous";
+  if (status === 408 || status === 429) return "ambiguous";
+  return "definite";
+}
+
+/**
+ * Fetch wrapper that classifies every outcome as success, AMBIGUOUS (a
+ * thrown network error, a client-side abort/timeout, or a response
+ * classified "ambiguous" above), or DEFINITE (a response classified
+ * "definite" above).
+ */
+async function idempotentFetch(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 10000);
+  let res;
+  try {
+    res = await fetch(url, { ...options, signal: controller.signal });
+  } catch (networkErr) {
+    clearTimeout(timer);
+    const e = new Error("network");
+    e.ambiguous = true;
+    e.cause = networkErr;
+    throw e;
+  }
+  clearTimeout(timer);
+  let json = {};
+  try { json = await res.json(); } catch {}
+  if (!res.ok) {
+    const e = new Error(json.error || "request failed");
+    e.ambiguous = classifyResponseStatus(res.status) === "ambiguous";
+    e.status = res.status;
+    e.body = json;
+    throw e;
+  }
+  return json;
+}
+function idempotentPost(url, body, token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = "Bearer " + token;
+  return idempotentFetch(url, { method: "POST", headers, body: JSON.stringify(body || {}) });
+}
+async function getJson(url, token) {
+  const headers = {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(url, { headers, cache: "no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || "request failed"), { status: res.status, body: json });
+  return json;
+}
+
+function saveSession() {
+  sessionStorage.setItem("urbano_race_event_id", raceEventId || "");
+  sessionStorage.setItem("urbano_race_organizer_token", organizerToken || "");
+  sessionStorage.setItem("urbano_race_competitor_token", competitorToken || "");
+}
+function clearSession() {
+  sessionStorage.removeItem("urbano_race_event_id");
+  sessionStorage.removeItem("urbano_race_organizer_token");
+  sessionStorage.removeItem("urbano_race_competitor_token");
+}
+
+function showOnly(cardId) {
+  ["landing-card", "setup-card", "ready-card", "countdown-card", "game-card"].forEach((id) => {
+    document.getElementById(id).hidden = id !== cardId;
+  });
+}
+
+// --- Operation status banner: Working / Retry / Recovered / definitive error ---
+let recoveredBannerTimeout = null;
+function renderOpBanner(state) {
+  const el = document.getElementById("op-banner");
+  if (recoveredBannerTimeout) { clearTimeout(recoveredBannerTimeout); recoveredBannerTimeout = null; }
+  if (!state) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.hidden = false;
+  el.className = "op-banner " + state.kind;
+  el.setAttribute("role", state.kind === "error" || state.kind === "retry" ? "alert" : "status");
+  el.setAttribute("aria-live", state.kind === "error" || state.kind === "retry" ? "assertive" : "polite");
+  el.innerHTML = "";
+  const msg = document.createElement("span");
+  msg.textContent = state.message;
+  el.appendChild(msg);
+  if (state.kind === "retry" && typeof state.onRetry === "function") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn primary";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", state.onRetry);
+    el.appendChild(document.createElement("br"));
+    el.appendChild(btn);
+  }
+  if (state.kind === "recovered") {
+    recoveredBannerTimeout = setTimeout(() => renderOpBanner(null), 2500);
+  }
+}
+
+function setButtonBusy(id, busy, busyLabel) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  if (busy) {
+    if (!btn.dataset.originalLabel) btn.dataset.originalLabel = btn.textContent;
+    btn.textContent = busyLabel || "Working…";
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  } else {
+    if (btn.dataset.originalLabel) { btn.textContent = btn.dataset.originalLabel; delete btn.dataset.originalLabel; }
+    btn.disabled = false;
+    btn.removeAttribute("aria-busy");
+  }
+}
+
+/**
+ * One entry per operation kind: how to build the request, which token
+ * authorizes it, which button (if any) reflects its busy state, and
+ * what to do on success or on a definitive (non-retriable) failure.
+ * MOVE has no single button — see onTowerTap's own operationInFlight
+ * guard, which disables the whole board instead.
+ */
+const OPERATIONS = {
+  CREATE: {
+    buttonId: "btn-create",
+    busyLabel: "Creating…",
+    ambiguousMessage: "We couldn't confirm your Race was created. It may already exist — Retry is safe.",
+    url: () => "/api/gaming/race/events",
+    body: (envelope) => ({ idempotencyKey: envelope.idempotencyKey, ...envelope.payload }),
+    token: () => null,
+    onSuccess: (envelope, result) => {
+      raceEventId = result.raceEventId;
+      organizerToken = result.organizerToken;
+      competitorToken = null;
+      saveSession();
+      enterOrganizerSetup();
+    },
+  },
+  JOIN: {
+    buttonId: null, // set per-call: btn-join or btn-organizer-join
+    busyLabel: "Joining…",
+    ambiguousMessage: "We couldn't confirm you joined. It may have worked — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/join`,
+    body: (envelope) => ({ idempotencyKey: envelope.idempotencyKey }),
+    token: () => null,
+    onSuccess: (envelope, result) => {
+      raceEventId = envelope.raceEventId;
+      competitorToken = result.competitorToken;
+      saveSession();
+      enterReadyOrPoll();
+    },
+  },
+  READY: {
+    buttonId: "btn-ready",
+    busyLabel: "Confirming…",
+    ambiguousMessage: "We couldn't confirm your readiness. It may have registered — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/ready`,
+    body: () => ({}),
+    token: (envelope) => envelope.callerToken,
+    onSuccess: async () => { await refreshProjection(); },
+  },
+  MOVE: {
+    buttonId: null,
+    busyLabel: null,
+    ambiguousMessage: "We couldn't confirm your move. It may have been applied — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/move`,
+    body: (envelope) => ({ ...envelope.payload, idempotencyKey: envelope.idempotencyKey }),
+    token: (envelope) => envelope.callerToken,
+    onSuccess: (envelope, result) => {
+      stacks = result.currentStacks || stacks;
+      outcome = result.towersOutcome;
+      document.getElementById("hud-moves").textContent = String(result.moveCount || 0);
+      renderBoard();
+      updateUndoButton();
+      if (result.raceTerminalResolution) refreshProjection();
+    },
+    onDefiniteError: (envelope, err) => {
+      // An illegal move (422) is an expected, fast, non-alarming outcome
+      // — keep the existing dedicated illegal-move banner UX instead of
+      // the generic op-banner. Every OTHER definitive outcome (already
+      // terminal, stale state, idempotency conflict) falls through to
+      // the generic handling, which also resyncs via refreshProjection.
+      if (err.status === 422) {
+        renderBoard();
+        showIllegalBanner(err.message);
+        return true;
+      }
+      return false;
+    },
+  },
+  UNDO: {
+    buttonId: "btn-undo",
+    busyLabel: "Undoing…",
+    ambiguousMessage: "We couldn't confirm your undo. It may have been applied — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/undo`,
+    body: (envelope) => ({ idempotencyKey: envelope.idempotencyKey }),
+    token: (envelope) => envelope.callerToken,
+    onSuccess: (envelope, result) => {
+      stacks = result.currentStacks || stacks;
+      renderBoard();
+    },
+  },
+  ORGANIZER_CANCEL: {
+    buttonId: "btn-organizer-cancel",
+    busyLabel: "Cancelling…",
+    ambiguousMessage: "We couldn't confirm the cancellation. It may have gone through — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/cancel`,
+    body: (envelope) => ({ idempotencyKey: envelope.idempotencyKey }),
+    token: (envelope) => envelope.callerToken,
+    onSuccess: () => {
+      clearSession();
+      stopPolling();
+      showOnly("landing-card");
+    },
+  },
+  LIVE_CANCEL: {
+    buttonId: "btn-live-cancel",
+    busyLabel: "Requesting…",
+    ambiguousMessage: "We couldn't confirm your cancellation request. It may have registered — Retry is safe.",
+    url: (envelope) => `/api/gaming/race/events/${envelope.raceEventId}/cancel`,
+    body: (envelope) => ({ idempotencyKey: envelope.idempotencyKey }),
+    token: (envelope) => envelope.callerToken,
+    onSuccess: async () => { await refreshProjection(); },
+  },
+};
+
+/**
+ * The one path every mutation goes through, whether this is a fresh
+ * user action, an automatic resume-on-load, or a manual Retry click —
+ * all three call this with the SAME envelope object (never a
+ * regenerated one), so the idempotencyKey and payload are always
+ * whatever was persisted before the very first send.
+ *
+ * UG-CR-REV-024 Defect 1: a successful HTTP response must NOT clear the
+ * pending envelope by itself — the envelope is the only durable record
+ * that this operation's success effects (Create/Join credential
+ * storage, above all) may still need to be (re)applied. So a success
+ * response is persisted into the envelope as SUCCESS_RECEIVED, with the
+ * server's own result attached, and control passes to finalizeSuccess,
+ * which is the ONLY place that ever calls clearPendingOperation() after
+ * a success — and only once the operation's own onSuccess effects have
+ * actually completed without throwing.
+ */
+async function executeOperation(envelope, { isResume, buttonId } = {}) {
+  const def = OPERATIONS[envelope.operationKind];
+  const targetButtonId = buttonId || def.buttonId;
+
+  // A response was already durably received on an earlier attempt (the
+  // envelope was persisted as SUCCESS_RECEIVED before this call), but
+  // applying its success effects was interrupted or failed. Recovery
+  // here means re-applying that already-known result — never
+  // re-issuing the network request, since the server has nothing left
+  // to tell us.
+  if (envelope.status === "SUCCESS_RECEIVED") {
+    return finalizeSuccess(envelope, { isResume, buttonId: targetButtonId });
+  }
+
+  operationInFlight = true;
+  savePendingOperation({ ...envelope, status: "IN_FLIGHT" });
+  if (targetButtonId) setButtonBusy(targetButtonId, true, def.busyLabel);
+  if (!isResume) renderOpBanner({ kind: "working", message: (def.busyLabel || "Working…").replace("…", "") + "…" });
+
+  let result;
+  try {
+    result = await idempotentPost(def.url(envelope), def.body(envelope), def.token(envelope));
+  } catch (err) {
+    if (targetButtonId) setButtonBusy(targetButtonId, false);
+    operationInFlight = false;
+    if (err.ambiguous) {
+      savePendingOperation({ ...envelope, status: "AMBIGUOUS" });
+      renderOpBanner({
+        kind: "retry",
+        message: def.ambiguousMessage,
+        onRetry: () => executeOperation(envelope, { isResume: true, buttonId: targetButtonId }),
+      });
+      return { ok: false, ambiguous: true };
+    }
+    // Definitive (a 4xx classified "definite" — see classifyResponseStatus,
+    // including an idempotency conflict): clear the pending envelope —
+    // this operation's outcome is now known. An idempotency-conflict
+    // response is never silently retried with a fresh key; the user
+    // must start a genuinely new action for that.
+    clearPendingOperation();
+    if (def.onDefiniteError && def.onDefiniteError(envelope, err) === true) {
+      return { ok: false, ambiguous: false, error: err };
+    }
+    const isConflict = err.status === 409 && /IDEMPOTENCY_KEY_CONFLICT/i.test((err.body && err.body.error) || "");
+    renderOpBanner({
+      kind: "error",
+      message: isConflict
+        ? "This action could not be safely confirmed. Please try again."
+        : (err.body && err.body.error) || "That didn't work.",
+    });
+    if (raceEventId) refreshProjection();
+    return { ok: false, ambiguous: false, error: err };
+  }
+
+  const receivedEnvelope = { ...envelope, status: "SUCCESS_RECEIVED", result };
+  savePendingOperation(receivedEnvelope);
+  return finalizeSuccess(receivedEnvelope, { isResume, buttonId: targetButtonId, freshlyReceived: true });
+}
+
+/**
+ * Applies a KNOWN-successful result's operation-specific success
+ * effects (def.onSuccess), then — and ONLY then — clears the pending
+ * envelope. If onSuccess throws (an interruption, a storage failure, a
+ * script error), the envelope is left exactly as it was persisted
+ * (status SUCCESS_RECEIVED, result intact) and a Retry affordance calls
+ * this SAME function again with the SAME stored result: it never
+ * re-issues the network request, since the server has already recorded
+ * the outcome durably. This is the recovery path UG-CR-REV-024 Defect 1
+ * requires: "receive successful response; durably apply all required
+ * success effects; only then clear the pending envelope; if success
+ * processing fails before that, retain an explicitly recoverable
+ * envelope."
+ */
+async function finalizeSuccess(envelope, { isResume, buttonId, freshlyReceived } = {}) {
+  const def = OPERATIONS[envelope.operationKind];
+  const targetButtonId = buttonId || def.buttonId;
+  if (!freshlyReceived) {
+    operationInFlight = true;
+    if (targetButtonId) setButtonBusy(targetButtonId, true, def.busyLabel);
+    if (!isResume) renderOpBanner({ kind: "working", message: "Finishing up…" });
+  }
+  try {
+    await def.onSuccess(envelope, envelope.result);
+  } catch (applyErr) {
+    if (targetButtonId) setButtonBusy(targetButtonId, false);
+    operationInFlight = false;
+    renderOpBanner({
+      kind: "retry",
+      message: "Your action was confirmed by the server, but we couldn't finish applying it here. Retry is safe — it will not repeat the action.",
+      onRetry: () => finalizeSuccess(envelope, { isResume: true, buttonId: targetButtonId }),
+    });
+    return { ok: false, ambiguous: true, pendingApply: true };
+  }
+  clearPendingOperation();
+  if (targetButtonId) setButtonBusy(targetButtonId, false);
+  operationInFlight = false;
+  if (isResume) {
+    renderOpBanner({ kind: "recovered", message: "Recovered — you're all set." });
+  } else {
+    renderOpBanner(null);
+  }
+  return { ok: true, result: envelope.result };
+}
+
+/**
+ * UG-CR-REV-024 Defect 2: while an unresolved envelope exists (status
+ * IN_FLIGHT, AMBIGUOUS, or SUCCESS_RECEIVED-not-yet-applied), no new,
+ * possibly-conflicting mutation may start — the only permitted actions
+ * are retrying/recovering that SAME envelope, safe authoritative
+ * reconciliation (reconcilePendingFromProjection), or a definitive
+ * outcome reached by that retry. Re-surface the existing envelope's own
+ * recovery affordance so the blocked action is not silently swallowed.
+ */
+function reannounceUnresolvedOperation(pending) {
+  const def = OPERATIONS[pending.operationKind];
+  if (pending.status === "SUCCESS_RECEIVED") {
+    renderOpBanner({ kind: "working", message: "Finishing your last action…" });
+    finalizeSuccess(pending, { isResume: true });
+    return;
+  }
+  renderOpBanner({
+    kind: "retry",
+    message: def.ambiguousMessage,
+    onRetry: () => executeOperation(pending, { isResume: true }),
+  });
+}
+
+/** Begins a genuinely NEW logical action: mints a fresh key, persists the envelope, sends it. */
+function beginOperation(operationKind, { raceEventId: eventId, payload, callerToken, buttonId } = {}) {
+  if (operationInFlight) return Promise.resolve({ ok: false, blocked: true });
+  const pending = loadPendingOperation();
+  if (pending) {
+    // An earlier operation is still unresolved. Starting a new one here
+    // would mint a fresh key and overwrite the one pending envelope
+    // slot, silently abandoning the earlier operation's own recovery —
+    // exactly what UG-CR-REV-024 Defect 2 prohibits. Re-surface the
+    // existing envelope's recovery affordance instead.
+    reannounceUnresolvedOperation(pending);
+    return Promise.resolve({ ok: false, blocked: true, pendingOperationKind: pending.operationKind });
+  }
+  const envelope = {
+    operationKind,
+    raceEventId: eventId || null,
+    payload: payload || {},
+    idempotencyKey: uuid(),
+    callerToken: callerToken || null,
+    createdAt: Date.now(),
+  };
+  return executeOperation(envelope, { isResume: false, buttonId });
+}
+
+/** Resumes a PREVIOUSLY PERSISTED envelope — reload recovery or an explicit page-load retry. Never mints a new key. */
+async function resumePendingOperationOnLoad() {
+  const pending = loadPendingOperation();
+  if (!pending) return false;
+  if (pending.raceEventId) raceEventId = pending.raceEventId;
+  organizerToken = sessionStorage.getItem("urbano_race_organizer_token") || null;
+  competitorToken = sessionStorage.getItem("urbano_race_competitor_token") || null;
+  renderOpBanner({ kind: "working", message: "Recovering your last action…" });
+  await executeOperation(pending, { isResume: true });
+  return true;
+}
+
+// --- Landing: scenario picker + create/join ---
+let selectedScenarioId = "towers-001";
+function renderScenarioPicker() {
+  const wrap = document.getElementById("scenario-picker");
+  wrap.innerHTML = "";
+  Object.values(TOWERS_SCENARIOS).forEach((s) => {
+    const btn = document.createElement("button");
+    btn.className = "scenario-btn";
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", String(s.scenarioId === selectedScenarioId));
+    btn.innerHTML = `<strong>${s.scenarioId}</strong><span>${Object.values(s.initialStacks).reduce((n, st) => n + st.length, 0)} pieces${s.knownMinimumMoves ? " · optimal " + s.knownMinimumMoves + " moves" : ""}</span>`;
+    btn.addEventListener("click", () => { selectedScenarioId = s.scenarioId; renderScenarioPicker(); });
+    wrap.appendChild(btn);
+  });
+  document.getElementById("btn-create").disabled = false;
+}
+renderScenarioPicker();
+
+document.getElementById("btn-create").addEventListener("click", () => {
+  const s = TOWERS_SCENARIOS[selectedScenarioId];
+  beginOperation("CREATE", { payload: { scenarioId: s.scenarioId, scenarioVersion: s.scenarioVersion } });
+});
+
+document.getElementById("btn-join").addEventListener("click", () => {
+  const input = document.getElementById("join-code-input");
+  const id = input.value.trim();
+  if (!id) return;
+  beginOperation("JOIN", { raceEventId: id, buttonId: "btn-join" });
+});
+
+// --- Organizer setup ---
+function enterOrganizerSetup() {
+  document.getElementById("event-id-display").textContent = raceEventId;
+  showOnly("setup-card");
+  startPolling();
+}
+
+document.getElementById("btn-organizer-join").addEventListener("click", () => {
+  beginOperation("JOIN", { raceEventId, buttonId: "btn-organizer-join" });
+});
+
+document.getElementById("btn-organizer-cancel").addEventListener("click", () => {
+  beginOperation("ORGANIZER_CANCEL", { raceEventId, callerToken: organizerToken });
+});
+
+// --- Readiness ---
+function enterReadyOrPoll() {
+  showOnly("ready-card");
+  startPolling();
+}
+
+document.getElementById("btn-ready").addEventListener("click", () => {
+  beginOperation("READY", { raceEventId, callerToken: competitorToken });
+});
+
+document.getElementById("btn-live-cancel").addEventListener("click", () => {
+  beginOperation("LIVE_CANCEL", { raceEventId, callerToken: competitorToken || organizerToken });
+});
+
+// --- Polling / projection-driven state machine ---
+function startPolling() {
+  stopPolling();
+  // Fire immediately — waiting for the first interval tick would leave
+  // stale content from whichever card was visible before this call
+  // (e.g. "waiting for an opponent" briefly shown right after an
+  // organizer's own join completes) visible for up to 1.5s.
+  refreshProjection();
+  pollInterval = setInterval(refreshProjection, 1500);
+}
+function stopPolling() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+async function refreshProjection() {
+  if (!raceEventId) return;
+  const token = competitorToken || organizerToken || null;
+  let projection;
+  try {
+    projection = await getJson(`/api/gaming/race/events/${raceEventId}`, token);
+  } catch {
+    return;
+  }
+  applyProjection(projection);
+}
+
+/**
+ * UG-CR-REV-024 Defect 2/6: since beginOperation now blocks ALL new
+ * mutations while any envelope is unresolved, a pending envelope that
+ * has become moot must be reconciled from stronger authoritative state
+ * — otherwise gameplay could stall behind an envelope whose outcome the
+ * server has already settled. This is deliberately narrow:
+ *
+ * - Only ever touches a pending envelope whose status is AMBIGUOUS.
+ *   IN_FLIGHT is never touched here: that request is still actively
+ *   resolving on its own via executeOperation, and clearing it out from
+ *   under that in-progress call would let a LATER ambiguous/definite
+ *   result re-arm a phantom envelope for an operation the UI had
+ *   already reconciled away. SUCCESS_RECEIVED is never touched either:
+ *   it is a proven success whose own effects must still be applied
+ *   (finalizeSuccess), not silently discarded.
+ * - READY is reconciled once the shared countdown/live/terminal phase
+ *   is reached, or once this caller's own readiness flag reads true
+ *   from a fresh poll — none of those are reachable without the server
+ *   having already recorded this caller's readiness, so no evidence is
+ *   lost.
+ * - MOVE, UNDO, and both cancellation kinds are reconciled once the
+ *   event is terminal (COMPLETED) — the terminal projection is a
+ *   strictly stronger, already-authoritative signal (computed by the
+ *   same locked transaction boundary that would have applied the
+ *   pending request, had it reached the server) than that request's own
+ *   still-ambiguous response, so dropping the envelope loses no
+ *   evidence: the true outcome is already reflected in the projection
+ *   regardless of whether this particular request ever landed.
+ * - CREATE and JOIN are deliberately NEVER reconciled here: reaching any
+ *   phase does not, by itself, prove whether THIS caller's own
+ *   create/join attempt succeeded (e.g. an organizer's own ambiguous
+ *   "join as competitor" cannot be distinguished from a still-open slot
+ *   using only organizer-scoped projection fields) — those require an
+ *   explicit, definitive resolution via Retry.
+ */
+function reconcilePendingFromProjection(p) {
+  const pending = loadPendingOperation();
+  if (!pending || pending.status !== "AMBIGUOUS") return;
+  if (pending.raceEventId !== p.raceEventId) return;
+  const youReadyNow = p.you && p.you.slot === "A" ? p.competitorAReady : p.you && p.you.slot === "B" ? p.competitorBReady : false;
+  if (pending.operationKind === "READY" && (p.phase === "COUNTDOWN" || p.phase === "LIVE" || p.phase === "COMPLETED" || youReadyNow)) {
+    clearPendingOperation();
+    renderOpBanner(null);
+    return;
+  }
+  if (p.phase === "COMPLETED" &&
+      (pending.operationKind === "MOVE" || pending.operationKind === "UNDO" ||
+       pending.operationKind === "ORGANIZER_CANCEL" || pending.operationKind === "LIVE_CANCEL")) {
+    clearPendingOperation();
+    renderOpBanner(null);
+  }
+}
+
+function applyProjection(p) {
+  reconcilePendingFromProjection(p);
+  if (p.phase === "AWAITING_COMPETITORS") {
+    document.getElementById("dot-a").classList.toggle("on", p.competitorASlotFilled);
+    document.getElementById("dot-b").classList.toggle("on", p.competitorBSlotFilled);
+    document.getElementById("label-a").textContent = "Competitor A — " + (p.competitorASlotFilled ? "joined" : "waiting");
+    document.getElementById("label-b").textContent = "Competitor B — " + (p.competitorBSlotFilled ? "joined" : "waiting");
+    // A competitor identity (including an organizer who has ALSO joined
+    // as a competitor) takes priority over organizer-only identity here
+    // — otherwise an organizer-as-competitor's own successful join
+    // keeps getting overridden back to the setup-card by every
+    // subsequent poll tick while the event is still awaiting the other
+    // competitor, since organizerToken alone stays truthy regardless.
+    if (competitorToken) showOnly("ready-card"); else if (organizerToken) showOnly("setup-card"); else showOnly("ready-card");
+    document.getElementById("ready-heading").textContent = "Waiting for an opponent to join";
+    document.getElementById("ready-sub").textContent = "Share the Race event id with someone else.";
+    document.getElementById("btn-ready").hidden = true;
+  } else if (p.phase === "AWAITING_READINESS") {
+    showOnly("ready-card");
+    document.getElementById("btn-ready").hidden = false;
+    const youReady = p.you && p.you.slot === "A" ? p.competitorAReady : p.you && p.you.slot === "B" ? p.competitorBReady : false;
+    // Do not let a poll tick clobber a currently in-flight/busy button's
+    // own disabled state (set by setButtonBusy) — only reflect youReady
+    // when nothing is in flight for it.
+    if (!operationInFlight) document.getElementById("btn-ready").disabled = !!youReady;
+    document.getElementById("ready-heading").textContent = youReady ? "Waiting for your opponent to ready up" : "Both competitors have joined";
+    document.getElementById("ready-sub").textContent = youReady ? "The countdown starts automatically once both of you are ready." : "Confirm when you're ready to play.";
+  } else if (p.phase === "COUNTDOWN") {
+    showOnly("countdown-card");
+    startCountdown(p.sharedStartAt);
+  } else if (p.phase === "LIVE") {
+    stopCountdown();
+    showOnly("game-card");
+    scenario = TOWERS_SCENARIOS[p.scenarioId];
+    if (p.you && p.you.board) {
+      stacks = p.you.board.currentStacks;
+      outcome = p.you.board.outcome;
+      document.getElementById("hud-moves").textContent = String(p.you.board.moveCount);
+    }
+    document.getElementById("hud-opponent").textContent = "Opponent: playing";
+    startRemainingClock(p.runningExpiresAt);
+    document.getElementById("terminal-banner-live").hidden = true;
+    renderBoard();
+    updateUndoButton();
+  } else if (p.phase === "COMPLETED") {
+    stopCountdown();
+    stopRemainingClock();
+    showOnly("game-card");
+    scenario = TOWERS_SCENARIOS[p.scenarioId];
+    if (p.you && p.you.board) {
+      stacks = p.you.board.currentStacks;
+      outcome = p.you.board.outcome;
+      document.getElementById("hud-moves").textContent = String(p.you.board.moveCount);
+      renderBoard();
+      updateUndoButton();
+    }
+    document.getElementById("hud-opponent").textContent = "Race over";
+    document.getElementById("hud-remaining").textContent = "—";
+    document.getElementById("btn-live-cancel").disabled = true;
+    // Reconciliation of any still-AMBIGUOUS MOVE/UNDO/cancellation
+    // envelope for this event already happened above, at the top of
+    // applyProjection (reconcilePendingFromProjection) — before any
+    // phase-specific branch runs, so it applies uniformly regardless of
+    // which phase transition made this envelope moot.
+    showTerminalBanner(p);
+    stopPolling();
+  }
+  lastPhase = p.phase;
+}
+
+function startCountdown(sharedStartAt) {
+  stopCountdown();
+  const el = document.getElementById("countdown-value");
+  function tick() {
+    const remaining = Math.max(0, Math.ceil((new Date(sharedStartAt).getTime() - Date.now()) / 1000));
+    el.textContent = String(remaining);
+    if (remaining <= 0) { stopCountdown(); refreshProjection(); }
+  }
+  tick();
+  countdownInterval = setInterval(tick, 200);
+}
+function stopCountdown() {
+  if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+}
+
+function startRemainingClock(runningExpiresAt) {
+  stopRemainingClock();
+  const el = document.getElementById("hud-remaining");
+  function tick() {
+    if (!runningExpiresAt) { el.textContent = "—"; return; }
+    const remainingMs = Math.max(0, new Date(runningExpiresAt).getTime() - Date.now());
+    const s = Math.floor(remainingMs / 1000);
+    el.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+  tick();
+  remainingInterval = setInterval(tick, 1000);
+}
+function stopRemainingClock() {
+  if (remainingInterval) { clearInterval(remainingInterval); remainingInterval = null; }
+}
+
+function showTerminalBanner(p) {
+  const el = document.getElementById("terminal-banner-live");
+  el.hidden = false;
+  const yourSlot = p.you ? p.you.slot : null;
+  if (p.terminalResolution === "WON_LOST") {
+    const youWon = yourSlot && p.winnerSlot === yourSlot;
+    el.className = "terminal-banner " + (youWon ? "win" : yourSlot ? "lose" : "neutral");
+    el.innerHTML = (youWon ? "You won!" : yourSlot ? "You lost." : ("Competitor " + p.winnerSlot + " won.")) +
+      `<span class="detail">First to complete the scenario through the Race.</span>`;
+  } else if (p.terminalResolution === "NO_CONTEST") {
+    el.className = "terminal-banner neutral";
+    el.innerHTML = "No contest." + `<span class="detail">Neither competitor finished in time.</span>`;
+  } else if (p.terminalResolution === "CANCELLED") {
+    el.className = "terminal-banner neutral";
+    el.innerHTML = "Race cancelled." + `<span class="detail">${p.terminalReason || ""}</span>`;
+  }
+}
+
+// --- Board (mirrors towers.html) ---
+function topOf(stack) { return stack.length > 0 ? stack[stack.length - 1] : null; }
+function isLegalDestination(fromTowerId, toTowerId) {
+  if (fromTowerId === toTowerId) return false;
+  const fromStack = stacks[fromTowerId] || [];
+  if (fromStack.length === 0) return false;
+  const movingRank = topOf(fromStack);
+  const destTop = topOf(stacks[toTowerId] || []);
+  return destTop === null || destTop > movingRank;
+}
+
+function renderBoard() {
+  if (!scenario || !stacks) return;
+  const wrap = document.getElementById("board-wrap");
+  wrap.innerHTML = "";
+  for (const towerId of scenario.towerIds) {
+    const stack = stacks[towerId] || [];
+    const towerEl = document.createElement("div");
+    towerEl.className = "tower";
+    towerEl.setAttribute("role", "button");
+    towerEl.setAttribute("tabindex", "0");
+    towerEl.setAttribute("aria-label", "Tower " + towerId + ", " + stack.length + " piece" + (stack.length === 1 ? "" : "s"));
+    if (towerId === selectedTower) towerEl.classList.add("selected");
+    if (selectedTower && selectedTower !== towerId && isLegalDestination(selectedTower, towerId)) towerEl.classList.add("legal-dest");
+
+    const tag = document.createElement("div");
+    tag.className = "tower-tag";
+    tag.textContent = towerId === scenario.destinationTowerId ? "TARGET" : "";
+    towerEl.appendChild(tag);
+
+    const stackEl = document.createElement("div");
+    stackEl.className = "stack";
+    for (const rank of stack) {
+      const pieceEl = document.createElement("div");
+      pieceEl.className = "piece";
+      pieceEl.style.width = Math.min(100, MIN_PIECE_PCT + (rank - 1) * PCT_STEP) + "%";
+      pieceEl.style.background = PIECE_COLORS[rank] || "var(--piece-5)";
+      pieceEl.textContent = String(rank);
+      stackEl.appendChild(pieceEl);
+    }
+    towerEl.appendChild(stackEl);
+
+    const base = document.createElement("div");
+    base.className = "peg-base";
+    towerEl.appendChild(base);
+
+    towerEl.addEventListener("click", () => onTowerTap(towerId));
+    towerEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTowerTap(towerId); } });
+    wrap.appendChild(towerEl);
+  }
+}
+
+function updateUndoButton() {
+  document.getElementById("btn-undo").disabled = outcome !== "IN_PROGRESS";
+}
+
+function onTowerTap(towerId) {
+  if (outcome !== "IN_PROGRESS") return;
+  if (operationInFlight) return; // a move (or any other action) is already in flight — ignore further taps
+  const pending = loadPendingOperation();
+  if (pending) { reannounceUnresolvedOperation(pending); return; } // an earlier action is unresolved — beginOperation would block this too, but re-surface the recovery UI immediately rather than changing tower-selection visuals first
+  if (selectedTower === towerId) { selectedTower = null; renderBoard(); return; }
+  if (selectedTower === null) {
+    if ((stacks[towerId] || []).length === 0) return;
+    selectedTower = towerId;
+    renderBoard();
+    return;
+  }
+  const fromTowerId = selectedTower;
+  const toTowerId = towerId;
+  selectedTower = null;
+  renderBoard();
+
+  beginOperation("MOVE", {
+    raceEventId,
+    payload: { fromTowerId, toTowerId },
+    callerToken: competitorToken,
+  });
+}
+
+document.getElementById("btn-undo").addEventListener("click", () => {
+  beginOperation("UNDO", { raceEventId, callerToken: competitorToken });
+});
+
+function showIllegalBanner(message) {
+  const el = document.getElementById("illegal-banner");
+  el.textContent = message;
+  el.style.display = "block";
+  if (illegalBannerTimeout) clearTimeout(illegalBannerTimeout);
+  illegalBannerTimeout = setTimeout(() => { el.style.display = "none"; }, 2800);
+}
+
+// --- Reconnect ---
+async function restoreFromStorage() {
+  const storedId = sessionStorage.getItem("urbano_race_event_id");
+  if (!storedId) return;
+  raceEventId = storedId;
+  organizerToken = sessionStorage.getItem("urbano_race_organizer_token") || null;
+  competitorToken = sessionStorage.getItem("urbano_race_competitor_token") || null;
+  try {
+    await refreshProjection();
+    startPolling();
+  } catch {
+    clearSession();
+  }
+}
+
+/**
+ * Page entry point. A pending operation (Create/Join before credentials
+ * were ever received, or any other mutation left AMBIGUOUS by a
+ * dropped response, timeout, or reload) is resumed FIRST, reusing its
+ * exact persisted key and payload — never a freshly generated one. Only
+ * once no pending operation remains does the page fall through to the
+ * ordinary reconnect-by-session-credentials path; while a resume is
+ * still ambiguous (showing its own Retry banner), the normal
+ * reconnect/landing flow is deliberately not started underneath it.
+ */
+async function initializePage() {
+  await resumePendingOperationOnLoad();
+  if (!loadPendingOperation()) {
+    await restoreFromStorage();
+  }
+}
+
+initializePage();
+</script>
+
+</body>
+</html>
