@@ -1,0 +1,510 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Competitions — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Competitions — Soccer Slice 001, Member/Captain journeys. Organizer
+   * and Scorekeeper actions live on competitions-admin.html, mirroring
+   * the predictions-admin.html/soccer-predictions.html split. Local demo
+   * only: competitionId is picked from a plain list, and any UUID the
+   * demo operator hands out (e.g. a teammate's gamingMemberId) is typed
+   * in by hand — there is no member directory in Slice 001.
+   */
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
+    --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a;
+    --gold: #d4af37; --gold-bg: rgba(212, 175, 55, 0.12);
+    --primary-fill: #f5f1e8; --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --good: #4ade80; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; }
+  a { color: inherit; text-decoration: none; }
+  /* flex-wrap: wrap — urbanoAuth.js inserts a "Hi, {displayName}" button
+     plus a separate "Sign out" link as two more flex children here; a
+     long display name can push their combined width past the viewport
+     at mobile widths, and wrapping onto a second line (rather than
+     overflowing horizontally) keeps both fully visible and clickable. */
+  .shell-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; row-gap: 8px; max-width: 720px; margin: 0 auto; padding: 20px 20px 0; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before { content: ""; position: absolute; inset: -9px; background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%); filter: blur(4px); z-index: 0; }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge { background: var(--exp-purple-bg); border: 1px solid var(--exp-purple); color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+  .signin-btn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; }
+  .signin-btn:hover { background: var(--surface-2); }
+  .signin-status { max-width: 720px; margin: 10px auto 0; padding: 10px 20px 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .back-link { max-width: 720px; margin: 18px auto 0; padding: 0 20px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link:hover { color: var(--ink); }
+  .content { max-width: 720px; margin: 20px auto 0; padding: 0 20px; }
+  .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 18px; }
+  .card.accent { border-color: var(--exp-purple); box-shadow: 0 0 0 1px rgba(124,58,237,0.14), 0 0 24px var(--exp-purple-glow); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .field input, .field select { width: 100%; font-family: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); min-height: 44px; }
+  .checkbox-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 13.5px; }
+  .btn-primary { font-family: inherit; font-size: 14px; font-weight: 700; padding: 13px 18px; border-radius: 10px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; width: 100%; min-height: 46px; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { font-family: inherit; font-size: 13px; font-weight: 600; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; }
+  .status-pill { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--line); display: inline-block; }
+  .status-pill.good { color: var(--good); border-color: var(--good); }
+  .status-pill.bad { color: var(--bad); border-color: var(--bad); }
+  .status-pill.gold { color: var(--gold); border-color: var(--gold); }
+  .team-list { display: flex; flex-direction: column; gap: 10px; }
+  .team-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .fixture-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .fixture-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .fixture-score { font-size: 22px; font-weight: 800; margin: 6px 0; }
+  .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
+  .record-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .record-row:last-child { border-bottom: none; }
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; } .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
+    .back-link, .content { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
+</div>
+<p class="signin-status" id="signin-status"></p>
+
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<div class="content" id="content">
+  <div class="empty-state">Loading Competitions…</div>
+</div>
+
+<script src="/urbanoAuth.js"></script>
+<script src="/competitionsIntent.js"></script>
+<script>
+UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("signin-status"));
+
+const content = document.getElementById("content");
+
+// --- Return-to-intent (UG-CR-GATE-031) ---------------------------------
+// This shell's own sign-in flow (urbanoAuth.js) is an IN-PAGE panel, never
+// a redirect to a separate login page — so there is no "return trip"
+// across a navigation boundary to engineer, and no page-to-page storage
+// handoff is needed at all: the browser's own URL query string already
+// survives the entire sign-in sequence untouched, for free. Return-to-
+// intent here is therefore just "the one safe piece of navigation intent
+// (which competition) lives in the URL, is validated before every use,
+// and a fresh authenticated fetch is what actually renders the page" —
+// deliberately NOT a stored, replayable action of any kind. No bearer
+// token, OTP material, role/authority claim, or mutation payload is ever
+// placed in the URL or in any persistent browser storage by this code.
+// The actual validation/URL-computation logic lives in the pure,
+// unit-tested competitionsIntent.js loaded above; this page only ever
+// supplies real location/history values to it and applies the result.
+
+/** Reflects the currently-viewed competition into the URL (same page, no navigation) using only a server-confirmed id. */
+function setCompetitionIntentInUrl(competitionId) {
+  const next = CompetitionsIntent.computeUrlWithCompetitionId(window.location.href, competitionId);
+  if (next) window.history.replaceState(null, "", next);
+}
+
+/** Clears any competition intent from the URL. */
+function clearCompetitionIntentFromUrl() {
+  const next = CompetitionsIntent.computeUrlWithoutCompetitionId(window.location.href);
+  if (next) window.history.replaceState(null, "", next);
+}
+
+let currentCompetitionId = CompetitionsIntent.getIntentCompetitionIdFromSearch(window.location.search);
+
+function el(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html.trim();
+  return div.firstElementChild;
+}
+
+// Sets a status message's text and class from one query, always
+// re-including the selector's own hook class in the new className —
+// overwriting className outright would strip that hook class on the
+// first call and make the element unfindable by the same selector on
+// a later retry.
+function setFormMsg(container, selector, text, kind) {
+  const elm = container.querySelector(selector);
+  const hookClass = selector.replace(/^[.#]/, "");
+  elm.className = "msg " + hookClass + (kind ? " " + kind : "");
+  elm.textContent = text;
+}
+
+async function authedFetch(path, options) {
+  const token = await UrbanoAuth.getAccessToken();
+  const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
+  if (token) headers.authorization = "Bearer " + token;
+  const res = await fetch(path, Object.assign({}, options, { headers }));
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+function fixtureLabel(role) {
+  return role === "SEMIFINAL_1" ? "Semifinal 1" : role === "SEMIFINAL_2" ? "Semifinal 2" : "Final";
+}
+
+function teamName(teams, teamId) {
+  if (!teamId) return "TBD";
+  const t = teams.find((x) => x.competitionTeamId === teamId);
+  return t ? t.name : "?";
+}
+
+async function renderCompetitionList() {
+  const res = await authedFetch("/api/gaming/competitions");
+  const competitions = (res.json && res.json.competitions) || [];
+  if (competitions.length === 0) {
+    return el(`<div class="empty-state">No competitions have been created yet — ask an organizer to create one from the Competitions admin page.</div>`);
+  }
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(el(`<h2>Competitions</h2>`));
+  for (const c of competitions) {
+    const row = el(`<div class="team-row" style="cursor:pointer" data-id="${c.competitionId}">
+      <span>${c.name}</span>
+      <span class="status-pill ${c.state === "COMPLETE" ? "good" : c.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${c.state}</span>
+    </div>`);
+    row.addEventListener("click", () => { currentCompetitionId = c.competitionId; setCompetitionIntentInUrl(c.competitionId); renderApp(); });
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+async function renderCompetitionDetail(competitionId) {
+  const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);
+  if (res.status !== 200) {
+    // A malformed, expired, or otherwise unresolvable intent (including
+    // one that was well-formed as a UUID but names no competition this
+    // viewer can access) falls back safely: cleared from both state and
+    // the URL, with an explicit path back to the list rather than a
+    // dead-end message.
+    currentCompetitionId = null;
+    clearCompetitionIntentFromUrl();
+    const wrap = el(`<div></div>`);
+    wrap.appendChild(el(`<a class="back-link" style="padding:0;margin:0 0 14px;" id="back-to-list">← All competitions</a>`));
+    wrap.appendChild(el(`<div class="empty-state">${(res.json && res.json.error) || "This competition could not be found."}</div>`));
+    wrap.querySelector("#back-to-list").addEventListener("click", () => { renderApp(); });
+    return wrap;
+  }
+  const view = res.json.view;
+  const { competition, teams, fixtures, myRegistration, myTeamMembership, myPendingJoinRequest, myPersistentRecords } = view;
+  const authState = await UrbanoAuth.getState();
+  const myGamingMemberId = authState.gamingMemberId;
+
+  // Reflect the server-CONFIRMED id (never the raw client-supplied one
+  // directly) back into the URL, so a reload/bookmark/share of this
+  // exact page returns here again.
+  setCompetitionIntentInUrl(competition.competitionId);
+
+  const wrap = el(`<div></div>`);
+  wrap.appendChild(el(`<a class="back-link" style="padding:0;margin:0 0 14px;" id="back-to-list">← All competitions</a>`));
+  wrap.querySelector("#back-to-list").addEventListener("click", () => { currentCompetitionId = null; clearCompetitionIntentFromUrl(); renderApp(); });
+
+  wrap.appendChild(el(`<div class="card accent">
+    <h1>${competition.name}</h1>
+    <span class="status-pill ${competition.state === "COMPLETE" ? "good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${competition.state}</span>
+    ${competition.cancelledReason ? `<p class="msg error">${competition.cancelledReason}</p>` : ""}
+  </div>`));
+
+  // --- Registration ---
+  if (!myRegistration) {
+    if (competition.state !== "PUBLISHED") {
+      wrap.appendChild(el(`<div class="card"><p class="msg">Registration opens once the organizer publishes this competition.</p></div>`));
+    } else {
+      const regCard = el(`<div class="card">
+        <h2>Register</h2>
+        <div class="checkbox-row"><input type="checkbox" id="reg-adult" /> <label for="reg-adult">I self-attest that I am an adult.</label></div>
+        <button class="btn-primary" id="btn-register">Register</button>
+        <p class="msg" id="reg-msg"></p>
+      </div>`);
+      regCard.querySelector("#btn-register").addEventListener("click", async () => {
+        const isAdultSelfAttested = regCard.querySelector("#reg-adult").checked;
+        const r = await authedFetch(`/api/gaming/competitions/${competitionId}/register`, { method: "POST", body: JSON.stringify({ isAdultSelfAttested }) });
+        if (r.status === 200 || r.status === 201) renderApp();
+        else setFormMsg(regCard, "#reg-msg", (r.json && r.json.error) || "Failed to register.", "error");
+      });
+      wrap.appendChild(regCard);
+    }
+    return wrap;
+  }
+
+  // --- Team selection / join request ---
+  if (!myTeamMembership) {
+    if (myPendingJoinRequest) {
+      wrap.appendChild(el(`<div class="card"><p class="msg">Your request to join a team is pending the captain's approval.</p></div>`));
+    } else {
+      const teamsCard = el(`<div class="card"><h2>Choose a Team</h2><div class="team-list" id="teams-list"></div><p class="msg" id="join-msg"></p></div>`);
+      const list = teamsCard.querySelector("#teams-list");
+      for (const t of teams) {
+        const row = el(`<div class="team-row"><span>${t.name}</span><button class="btn-secondary" data-team="${t.competitionTeamId}">Request to Join</button></div>`);
+        row.querySelector("button").addEventListener("click", async () => {
+          const r = await authedFetch(`/api/gaming/competitions/${competitionId}/join-requests`, { method: "POST", body: JSON.stringify({ competitionTeamId: t.competitionTeamId }) });
+          if (r.status === 201) renderApp();
+          else setFormMsg(teamsCard, "#join-msg", (r.json && r.json.error) || "Failed to request.", "error");
+        });
+        list.appendChild(row);
+      }
+      wrap.appendChild(teamsCard);
+    }
+  } else {
+    const myTeam = teams.find((t) => t.competitionTeamId === myTeamMembership.competitionTeamId);
+    const isCaptain = myTeam && myTeam.captainGamingMemberId === myGamingMemberId;
+    wrap.appendChild(el(`<div class="card"><h2>Your Team</h2><p class="msg">You are a member of <strong>${myTeam ? myTeam.name : "?"}</strong>${isCaptain ? " — you are the captain." : "."}</p></div>`));
+  }
+
+  // Pending join requests for any team this viewer captains — shown
+  // independent of the captain's OWN membership status, since a captain
+  // is assigned by the organizer at team-creation time and may not have
+  // joined their own team's roster yet when applicants start arriving.
+  const captainedTeams = teams.filter((t) => t.captainGamingMemberId === myGamingMemberId);
+  for (const capTeam of captainedTeams) {
+    const captainCard = el(`<div class="card"><h2>Pending Join Requests — ${capTeam.name}</h2><div id="pending-list-${capTeam.competitionTeamId}"><p class="msg">Loading…</p></div></div>`);
+    wrap.appendChild(captainCard);
+    authedFetch(`/api/gaming/competitions/teams/${capTeam.competitionTeamId}/join-requests`).then((r) => {
+      const pending = (r.json && r.json.joinRequests) || [];
+      const listEl = captainCard.querySelector(`#pending-list-${capTeam.competitionTeamId}`);
+      listEl.innerHTML = "";
+      if (pending.length === 0) { listEl.appendChild(el(`<p class="msg">No pending requests.</p>`)); return; }
+      for (const jr of pending) {
+        const row = el(`<div class="team-row"><span>Member ${jr.requestingGamingMemberId.slice(0, 8)}…</span>
+          <span><button class="btn-secondary" data-approve="${jr.competitionJoinRequestId}">Approve</button> <button class="btn-secondary" data-reject="${jr.competitionJoinRequestId}">Reject</button></span></div>`);
+        row.querySelector("[data-approve]").addEventListener("click", async () => {
+          await authedFetch(`/api/gaming/competitions/join-requests/${jr.competitionJoinRequestId}/decide`, { method: "POST", body: JSON.stringify({ decision: "APPROVE" }) });
+          renderApp();
+        });
+        row.querySelector("[data-reject]").addEventListener("click", async () => {
+          await authedFetch(`/api/gaming/competitions/join-requests/${jr.competitionJoinRequestId}/decide`, { method: "POST", body: JSON.stringify({ decision: "REJECT" }) });
+          renderApp();
+        });
+        listEl.appendChild(row);
+      }
+    });
+  }
+
+  // --- Fixtures ---
+  if (fixtures.length > 0) {
+    wrap.appendChild(el(`<h3>Fixtures</h3>`));
+    for (const entry of fixtures) {
+      const f = entry.fixture;
+      const card = el(`<div class="fixture-card">
+        <div class="fixture-title">${fixtureLabel(f.fixtureRole)} — ${f.state.replace(/_/g, " ")}</div>
+        <div>${teamName(teams, f.teamACompetitionTeamId)} vs ${teamName(teams, f.teamBCompetitionTeamId)}</div>
+        <p class="msg">${new Date(f.scheduledAt).toLocaleString()}</p>
+        ${entry.score ? `<div class="fixture-score">${entry.score.teamAScore} – ${entry.score.teamBScore}</div>` : ""}
+        ${entry.finalization ? `<span class="status-pill ${entry.finalization.outcomeType === "VOID" ? "bad" : "good"}">${entry.finalization.outcomeType}</span>` : ""}
+        <div id="fixture-actions-${f.competitionFixtureId}"></div>
+      </div>`);
+      const actions = card.querySelector(`#fixture-actions-${f.competitionFixtureId}`);
+
+      if (myTeamMembership && myTeamMembership.competitionTeamId === f.teamACompetitionTeamId || myTeamMembership && myTeamMembership.competitionTeamId === f.teamBCompetitionTeamId) {
+        const myTeamForFixture = teams.find((t) => t.competitionTeamId === myTeamMembership.competitionTeamId);
+        const isCaptainOfFixtureTeam = myTeamForFixture && myTeamForFixture.captainGamingMemberId === myGamingMemberId;
+
+        if (isCaptainOfFixtureTeam && (f.state === "SCHEDULED" || f.state === "ROSTER_DECLARED")) {
+          if (entry.myRoster) {
+            actions.appendChild(el(`<p class="msg success">Your roster is declared (${entry.myRoster.length} players).</p>`));
+          } else {
+            const rosterForm = el(`<div>
+              <p class="msg">Declare your roster (comma-separated gaming member IDs of your approved team members):</p>
+              <input class="roster-input" placeholder="member-id-1, member-id-2, ..." style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-card);color:var(--ink);margin-bottom:8px;" />
+              <button class="btn-secondary roster-submit">Declare Roster</button>
+              <p class="msg roster-msg"></p>
+            </div>`);
+            rosterForm.querySelector(".roster-submit").addEventListener("click", async () => {
+              const ids = rosterForm.querySelector(".roster-input").value.split(",").map((s) => s.trim()).filter(Boolean);
+              const r = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/roster`, {
+                method: "POST", body: JSON.stringify({ competitionTeamId: myTeamForFixture.competitionTeamId, gamingMemberIds: ids }),
+              });
+              if (r.status === 201) renderApp();
+              else setFormMsg(rosterForm, ".roster-msg", (r.json && r.json.error) || "Failed to declare roster.", "error");
+            });
+            actions.appendChild(rosterForm);
+          }
+        }
+
+        if (entry.myRoster && entry.myRoster.includes(myGamingMemberId) && (f.state === "ROSTER_DECLARED" || f.state === "CHECKIN_OPEN")) {
+          const checkinBtn = el(`<button class="btn-secondary" style="margin-top:8px;">Check In</button>`);
+          checkinBtn.addEventListener("click", async () => {
+            const r = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/checkin`, { method: "POST" });
+            if (r.status === 200 || r.status === 201) { checkinBtn.disabled = true; checkinBtn.textContent = "Checked In"; }
+          });
+          actions.appendChild(checkinBtn);
+        }
+
+        // Raise a dispute — SQL (raise_competition_dispute_atomically) is
+        // the sole authority on who may dispute what; every control below
+        // is a usability match for that same rule, never a substitute for
+        // it (UG-CR-GATE-032/033). Each control targets the real, current
+        // fact id the role-aware projection (getCompetitionView) exposed
+        // for exactly this purpose — never a fixture id, never a fact
+        // belonging to anyone but the authenticated viewer themselves
+        // (myDisputableFacts only ever carries the CALLER's own ids).
+        function buildDisputeControl(label, targetFactType, targetFactId) {
+          const wrapEl = el(`<div style="margin-top:8px;"></div>`);
+          const disputeToggle = el(`<button class="btn-secondary">Dispute ${label}</button>`);
+          const disputeForm = el(`<div style="display:none;margin-top:8px;">
+            <textarea class="dispute-reason" placeholder="Why are you disputing ${label}?" style="width:100%;min-height:60px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-card);color:var(--ink);margin-bottom:8px;"></textarea>
+            <button class="btn-secondary dispute-submit">Submit Dispute</button>
+            <p class="msg dispute-msg"></p>
+          </div>`);
+          disputeToggle.addEventListener("click", () => { disputeForm.style.display = "block"; disputeToggle.style.display = "none"; });
+          disputeForm.querySelector(".dispute-submit").addEventListener("click", async () => {
+            const reason = disputeForm.querySelector(".dispute-reason").value.trim();
+            if (!reason) { setFormMsg(disputeForm, ".dispute-msg", "A reason is required.", "error"); return; }
+            const submitBtn = disputeForm.querySelector(".dispute-submit");
+            submitBtn.disabled = true;
+            const r = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/disputes`, {
+              method: "POST", body: JSON.stringify({ targetFactType, targetFactId, reason }),
+            });
+            if (r.status === 201) { setFormMsg(disputeForm, ".dispute-msg", "Dispute raised — the organizer will review it.", "success"); renderApp(); }
+            else { submitBtn.disabled = false; setFormMsg(disputeForm, ".dispute-msg", (r.json && r.json.error) || "Failed to raise dispute.", "error"); }
+          });
+          wrapEl.appendChild(disputeToggle);
+          wrapEl.appendChild(disputeForm);
+          return wrapEl;
+        }
+
+        // The captain's own bounded SCORE control (UG-CR-GATE-032) — a
+        // whole-fixture fact with no individual owner, so only a captain
+        // of one of the two competing teams may dispute it; an ordinary
+        // member never sees this control.
+        if (isCaptainOfFixtureTeam && entry.score) {
+          actions.appendChild(buildDisputeControl("the Score", "SCORE", entry.score.competitionFixtureEvidenceId));
+        }
+
+        // The accepted member dispute journey (UG-CR-GATE-033): an
+        // authenticated member may dispute only their OWN current
+        // participation attestation, goal attribution, or assist
+        // attribution — never anyone else's, and never the shared SCORE.
+        // entry.myDisputableFacts already carries only the viewer's own
+        // ids (see getCompetitionView.ts), so no further filtering is
+        // needed or possible here.
+        if (entry.myDisputableFacts) {
+          if (entry.myDisputableFacts.participationAttestationId) {
+            actions.appendChild(buildDisputeControl("Your Participation", "PARTICIPATION_ATTESTATION", entry.myDisputableFacts.participationAttestationId));
+          }
+          entry.myDisputableFacts.goalEventIds.forEach((id, i) => {
+            actions.appendChild(buildDisputeControl(`Your Goal${entry.myDisputableFacts.goalEventIds.length > 1 ? ` #${i + 1}` : ""}`, "GOAL_EVENT", id));
+          });
+          entry.myDisputableFacts.assistEventIds.forEach((id, i) => {
+            actions.appendChild(buildDisputeControl(`Your Assist${entry.myDisputableFacts.assistEventIds.length > 1 ? ` #${i + 1}` : ""}`, "ASSIST_EVENT", id));
+          });
+        }
+      }
+      wrap.appendChild(card);
+    }
+  }
+
+  // --- Persistent records ---
+  if (myPersistentRecords && myPersistentRecords.length > 0) {
+    const recCard = el(`<div class="card"><h2>Your Persistent Record</h2><div id="records-list"></div></div>`);
+    const list = recCard.querySelector("#records-list");
+    for (const r of myPersistentRecords) {
+      const fixtureRole = fixtures.find((e) => e.fixture.competitionFixtureId === r.competitionFixtureId);
+      list.appendChild(el(`<div class="record-row"><span>${fixtureRole ? fixtureLabel(fixtureRole.fixture.fixtureRole) : ""}</span><span>${r.appeared ? `${r.goals} goals, ${r.assists} assists` : "Did not appear"}</span></div>`));
+    }
+    wrap.appendChild(recCard);
+  }
+
+  return wrap;
+}
+
+// UrbanoAuth.onAuthStateChange only fires on a genuine Supabase Auth
+// event (sign-in, sign-out, token refresh) — completeProfile() (the
+// first-time "choose a display name" step) is a plain server call with
+// no such event of its own, so a FIRST-TIME member's real transition
+// into "authenticated" would otherwise never re-trigger renderApp(),
+// leaving this exact intent-restoration screen stuck even though the
+// member is, by then, genuinely signed in. This poll is the local,
+// narrowly-scoped fix: while showing the "sign in to continue" message
+// with a pending intent, briefly re-check auth state until it resolves
+// or a short timeout elapses — never fetching or mutating anything
+// itself, and never running once the authenticated view is showing.
+let intentAuthPollTimer = null;
+function stopIntentAuthPoll() {
+  if (intentAuthPollTimer) { clearInterval(intentAuthPollTimer); intentAuthPollTimer = null; }
+}
+function startIntentAuthPoll() {
+  if (intentAuthPollTimer) return;
+  let attempts = 0;
+  intentAuthPollTimer = setInterval(async () => {
+    attempts += 1;
+    const state = await UrbanoAuth.getState();
+    if (state.status === "authenticated") {
+      stopIntentAuthPoll();
+      renderApp();
+    } else if (attempts >= 120) {
+      stopIntentAuthPoll(); // ~60s at 500ms — give up rather than poll forever.
+    }
+  }, 500);
+}
+
+// UrbanoAuth.onAuthStateChange can fire more than once in quick
+// succession while a session is first resolved (e.g. an initial-session
+// event followed by a token-refresh), and each call independently
+// clears then (asynchronously) re-populates #content — an older call's
+// clear can land AFTER a newer call has already appended its own
+// result, producing visibly duplicated content. renderGeneration makes
+// every renderApp() call check, right before it actually touches the
+// DOM, whether a newer call has since started; if so, it discards its
+// own result instead of appending on top of one. Only ever the single
+// latest call's output is ever shown.
+let renderGeneration = 0;
+
+async function renderApp() {
+  const myGeneration = ++renderGeneration;
+  const authState = await UrbanoAuth.getState();
+  if (myGeneration !== renderGeneration) return;
+
+  if (authState.status !== "authenticated") {
+    // currentCompetitionId, if present, came only from a validated URL
+    // query parameter (or a prior successful, server-confirmed view) —
+    // it is preserved as-is across sign-in (never cleared here) so that
+    // completing the SAME in-page sign-in panel naturally resumes this
+    // exact view once authentication actually completes. Nothing is
+    // fetched, mutated, or auto-submitted while signed out — this
+    // branch only ever renders a static message (plus the poll above,
+    // which itself only ever calls the read-only getState()).
+    const message = currentCompetitionId
+      ? "Sign in with URBANO to continue to this competition."
+      : "Sign in with URBANO to view and join Competitions.";
+    content.innerHTML = "";
+    content.appendChild(el(`<div class="empty-state">${message}</div>`));
+    if (currentCompetitionId) startIntentAuthPoll();
+    return;
+  }
+  stopIntentAuthPoll();
+  const rendered = currentCompetitionId
+    ? await renderCompetitionDetail(currentCompetitionId)
+    : await renderCompetitionList();
+  if (myGeneration !== renderGeneration) return;
+  content.innerHTML = "";
+  content.appendChild(rendered);
+}
+
+UrbanoAuth.onAuthStateChange(renderApp);
+renderApp();
+</script>
+
+</body>
+</html>

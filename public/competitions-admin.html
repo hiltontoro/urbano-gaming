@@ -1,0 +1,504 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Competitions Admin — URBANO Gaming</title>
+<style>
+  /*
+   * Smallest founder/operator surface for Soccer Slice 001: Organizer
+   * (create/publish/appoint/correct/finalize/forfeit/void) and
+   * Scorekeeper (submit evidence) actions in one page, mirroring
+   * predictions-admin.html. Desktop-oriented, plain functional tool —
+   * every action's real authority check lives inside its atomic RPC,
+   * never only in this UI, so an unauthorized click still fails safely
+   * server-side with a clear error.
+   */
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0a0a; color: #f5f1e8; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 15px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; margin-top: 34px; }
+  h3 { font-size: 13px; color: #9b9689; text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  section { max-width: 960px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  input, select, textarea { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #2a2a2a; background: #161616; color: #f5f1e8; }
+  button { font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: none; background: #f5f1e8; color: #0a0a0a; cursor: pointer; }
+  button.secondary { background: transparent; border: 1px solid #f5f1e8; color: #f5f1e8; }
+  button.danger { background: transparent; border: 1px solid #f87171; color: #f87171; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c1c1c; }
+  .msg { font-size: 12.5px; color: #9b9689; margin: 6px 0; }
+  .msg.error { color: #f87171; }
+  .msg.success { color: #4ade80; }
+  .fixture-block { border: 1px solid #2a2a2a; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  .fixture-header { display: flex; justify-content: space-between; align-items: center; }
+  .pill { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid #2a2a2a; color: #9b9689; }
+  .pill.good { color: #4ade80; border-color: #4ade80; }
+  .pill.bad { color: #f87171; border-color: #f87171; }
+  .event-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+  .event-row input, .event-row select { max-width: 200px; }
+  fieldset { border: 1px solid #2a2a2a; border-radius: 8px; margin: 10px 0; padding: 10px; }
+  legend { font-size: 12px; color: #9b9689; padding: 0 6px; }
+</style>
+</head>
+<body>
+
+<h1>Competitions — Organizer &amp; Scorekeeper Admin</h1>
+<div class="row">
+  <button id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
+  <span class="msg" id="auth-status">Not signed in.</span>
+</div>
+
+<section id="admin-sections" style="display:none;">
+
+  <h2>Create Competition</h2>
+  <div class="row">
+    <input id="c-name" placeholder="Competition name" style="min-width:240px" />
+    <select id="c-activity"><option value="SOCCER_5V5">SOCCER_5V5</option></select>
+    <button id="btn-create-competition">Create</button>
+  </div>
+  <p class="msg" id="msg-competition">Requires active platform OPERATIONAL authority.</p>
+
+  <h2>Select Competition</h2>
+  <div class="row">
+    <select id="comp-select" style="min-width:320px"></select>
+    <button id="btn-load-competition">Load</button>
+  </div>
+  <p class="msg" id="msg-load"></p>
+
+  <div id="competition-detail" style="display:none;">
+    <h3 id="comp-title"></h3>
+    <span class="pill" id="comp-state-pill"></span>
+
+    <h3>Teams</h3>
+    <table id="table-teams"><thead><tr><th>Name</th><th>Captain</th></tr></thead><tbody></tbody></table>
+    <div class="row" id="add-team-row">
+      <input id="t-name" placeholder="Team name" />
+      <input id="t-captain" placeholder="Captain gaming member ID" style="min-width:280px" />
+      <button id="btn-add-team">Add Team</button>
+    </div>
+    <p class="msg" id="msg-team"></p>
+
+    <h3>Publish</h3>
+    <div id="publish-form">
+      <div class="row"><label>SF1: </label><select id="p-sf1a"></select> vs <select id="p-sf1b"></select> <input type="datetime-local" id="p-sf1-time" /></div>
+      <div class="row"><label>SF2: </label><select id="p-sf2a"></select> vs <select id="p-sf2b"></select> <input type="datetime-local" id="p-sf2-time" /></div>
+      <div class="row"><label>Final: </label><input type="datetime-local" id="p-final-time" /></div>
+      <button id="btn-publish">Publish Competition</button>
+    </div>
+    <p class="msg" id="msg-publish"></p>
+
+    <h3>Fixtures</h3>
+    <div id="fixtures-list"></div>
+  </div>
+
+</section>
+
+<script src="/urbanoAuth.js"></script>
+<script>
+UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("auth-status"));
+
+let cachedCompetitions = [];
+let currentView = null;
+
+function el(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html.trim();
+  return div.firstElementChild;
+}
+
+async function authedFetch(path, options) {
+  const token = await UrbanoAuth.getAccessToken();
+  const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
+  if (token) headers.authorization = "Bearer " + token;
+  const res = await fetch(path, Object.assign({}, options, { headers }));
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+function setMsg(id, text, kind) {
+  const elm = document.getElementById(id);
+  elm.textContent = text;
+  elm.className = "msg" + (kind ? " " + kind : "");
+}
+
+// Queries the element ONCE and sets both properties on that same
+// reference — querying separately for className-then-textContent (as
+// this file's own status-message setters used to) reselects by class
+// AFTER the class has already been overwritten, so the second query
+// returns null and the message silently never renders. The hook class
+// itself (derived from `selector`) is always re-included in the new
+// className, rather than replaced outright — otherwise a SECOND call
+// against the same element (e.g. resubmitting after a failure) would
+// strip its own selector class on the first call and silently fail to
+// find itself on the second.
+function setFormMsg(container, selector, text, kind) {
+  const elm = container.querySelector(selector);
+  const hookClass = selector.replace(/^\./, "");
+  elm.className = ["msg", hookClass, kind].filter(Boolean).join(" ");
+  elm.textContent = text;
+}
+
+function fixtureLabel(role) {
+  return role === "SEMIFINAL_1" ? "Semifinal 1" : role === "SEMIFINAL_2" ? "Semifinal 2" : "Final";
+}
+
+async function refreshAuthState() {
+  const state = await UrbanoAuth.getState();
+  const statusEl = document.getElementById("auth-status");
+  const sections = document.getElementById("admin-sections");
+  if (state.status === "authenticated") {
+    statusEl.textContent = "Signed in as " + state.displayName + " (" + state.gamingMemberId + ").";
+    sections.style.display = "block";
+    await loadCompetitions();
+  } else {
+    statusEl.textContent = "Not signed in.";
+    sections.style.display = "none";
+  }
+}
+
+async function loadCompetitions() {
+  const res = await authedFetch("/api/gaming/competitions");
+  cachedCompetitions = (res.json && res.json.competitions) || [];
+  const select = document.getElementById("comp-select");
+  select.innerHTML = "";
+  for (const c of cachedCompetitions) {
+    const opt = document.createElement("option");
+    opt.value = c.competitionId;
+    opt.textContent = `${c.name} (${c.state})`;
+    select.appendChild(opt);
+  }
+}
+
+document.getElementById("btn-create-competition").addEventListener("click", async () => {
+  const name = document.getElementById("c-name").value.trim();
+  const activityKey = document.getElementById("c-activity").value;
+  if (!name) { setMsg("msg-competition", "Name is required.", "error"); return; }
+  const res = await authedFetch("/api/gaming/competitions", { method: "POST", body: JSON.stringify({ name, activityKey }) });
+  if (res.status === 201) {
+    setMsg("msg-competition", "Competition created.", "success");
+    document.getElementById("c-name").value = "";
+    await loadCompetitions();
+  } else setMsg("msg-competition", (res.json && res.json.error) || "Failed to create competition.", "error");
+});
+
+document.getElementById("btn-load-competition").addEventListener("click", async () => {
+  const competitionId = document.getElementById("comp-select").value;
+  if (!competitionId) { setMsg("msg-load", "Select a competition.", "error"); return; }
+  await loadCompetitionDetail(competitionId);
+});
+
+async function loadCompetitionDetail(competitionId) {
+  const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);
+  if (res.status !== 200) { setMsg("msg-load", (res.json && res.json.error) || "Failed to load.", "error"); return; }
+  currentView = res.json.view;
+  document.getElementById("competition-detail").style.display = "block";
+  renderCompetitionDetail();
+}
+
+function renderCompetitionDetail() {
+  const { competition, teams, fixtures } = currentView;
+  document.getElementById("comp-title").textContent = competition.name;
+  const pill = document.getElementById("comp-state-pill");
+  pill.textContent = competition.state;
+  pill.className = "pill" + (competition.state === "COMPLETE" ? " good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? " bad" : "");
+
+  const tbody = document.querySelector("#table-teams tbody");
+  tbody.innerHTML = "";
+  for (const t of teams) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${t.name}</td><td>${t.captainGamingMemberId}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById("add-team-row").style.display = competition.state === "DRAFT" ? "flex" : "none";
+  document.getElementById("publish-form").style.display = (competition.state === "DRAFT" && teams.length === 4) ? "block" : "none";
+  if (competition.state === "DRAFT" && teams.length === 4) {
+    for (const selId of ["p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b"]) {
+      const sel = document.getElementById(selId);
+      sel.innerHTML = "";
+      for (const t of teams) {
+        const opt = document.createElement("option");
+        opt.value = t.competitionTeamId;
+        opt.textContent = t.name;
+        sel.appendChild(opt);
+      }
+    }
+  }
+
+  const fixturesList = document.getElementById("fixtures-list");
+  fixturesList.innerHTML = "";
+  for (const f of fixtures) {
+    fixturesList.appendChild(renderFixtureBlock(f, teams));
+  }
+}
+
+document.getElementById("btn-add-team").addEventListener("click", async () => {
+  const name = document.getElementById("t-name").value.trim();
+  const captainGamingMemberId = document.getElementById("t-captain").value.trim();
+  if (!name || !captainGamingMemberId) { setMsg("msg-team", "Name and captain ID are required.", "error"); return; }
+  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/teams`, {
+    method: "POST", body: JSON.stringify({ name, captainGamingMemberId }),
+  });
+  if (res.status === 201) {
+    setMsg("msg-team", "Team added.", "success");
+    document.getElementById("t-name").value = ""; document.getElementById("t-captain").value = "";
+    await loadCompetitionDetail(currentView.competition.competitionId);
+  } else setMsg("msg-team", (res.json && res.json.error) || "Failed to add team.", "error");
+});
+
+document.getElementById("btn-publish").addEventListener("click", async () => {
+  const body = {
+    semifinal1TeamAId: document.getElementById("p-sf1a").value,
+    semifinal1TeamBId: document.getElementById("p-sf1b").value,
+    semifinal2TeamAId: document.getElementById("p-sf2a").value,
+    semifinal2TeamBId: document.getElementById("p-sf2b").value,
+    semifinal1ScheduledAt: new Date(document.getElementById("p-sf1-time").value).toISOString(),
+    semifinal2ScheduledAt: new Date(document.getElementById("p-sf2-time").value).toISOString(),
+    finalScheduledAt: new Date(document.getElementById("p-final-time").value).toISOString(),
+  };
+  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/publish`, { method: "POST", body: JSON.stringify(body) });
+  if (res.status === 200) {
+    setMsg("msg-publish", "Published.", "success");
+    await loadCompetitionDetail(currentView.competition.competitionId);
+  } else setMsg("msg-publish", (res.json && res.json.error) || "Failed to publish.", "error");
+});
+
+function teamNameOf(teams, teamId) {
+  if (!teamId) return "TBD";
+  const t = teams.find((x) => x.competitionTeamId === teamId);
+  return t ? t.name : "?";
+}
+
+function eventRowsEditor(container, players, kind) {
+  // kind: "goal" | "assist" | "attestation" — a tiny shared row-editor
+  // used by both the Evidence and Correct forms so their payload shape
+  // never diverges.
+  function addRow(existing) {
+    let row;
+    if (kind === "goal") {
+      row = el(`<div class="event-row">
+        <input class="ev-scorer" placeholder="scorer gaming member ID" value="${existing ? existing.scorerGamingMemberId : ""}" style="min-width:260px" />
+        <select class="ev-team"><option value="A">Team A</option><option value="B">Team B</option></select>
+        <button type="button" class="secondary ev-remove">Remove</button>
+      </div>`);
+      if (existing) row.querySelector(".ev-team").value = existing.teamSide;
+    } else if (kind === "assist") {
+      row = el(`<div class="event-row">
+        <input class="ev-assister" placeholder="assisting gaming member ID" value="${existing ? existing.assistingGamingMemberId : ""}" style="min-width:260px" />
+        <input class="ev-goal-index" type="number" min="0" placeholder="goal event index" value="${existing ? existing.goalEventIndex : ""}" style="max-width:140px" />
+        <button type="button" class="secondary ev-remove">Remove</button>
+      </div>`);
+    } else {
+      row = el(`<div class="event-row">
+        <input class="ev-member" placeholder="gaming member ID" value="${existing ? existing.gamingMemberId : ""}" style="min-width:260px" />
+        <label><input type="checkbox" class="ev-participated" ${!existing || existing.actuallyParticipated ? "checked" : ""} /> Actually participated</label>
+        <button type="button" class="secondary ev-remove">Remove</button>
+      </div>`);
+    }
+    row.querySelector(".ev-remove").addEventListener("click", () => row.remove());
+    container.appendChild(row);
+  }
+  return { addRow };
+}
+
+function readGoalRows(container) {
+  return [...container.querySelectorAll(".event-row")].map((row, i) => ({
+    scorerGamingMemberId: row.querySelector(".ev-scorer").value.trim(),
+    competitionTeamIdSide: row.querySelector(".ev-team").value,
+    index: i,
+  })).filter((r) => r.scorerGamingMemberId);
+}
+function readAssistRows(container) {
+  return [...container.querySelectorAll(".event-row")].map((row) => ({
+    assistingGamingMemberId: row.querySelector(".ev-assister").value.trim(),
+    goalEventIndex: parseInt(row.querySelector(".ev-goal-index").value, 10),
+  })).filter((r) => r.assistingGamingMemberId && Number.isFinite(r.goalEventIndex));
+}
+function readAttestationRows(container) {
+  return [...container.querySelectorAll(".event-row")].map((row) => ({
+    gamingMemberId: row.querySelector(".ev-member").value.trim(),
+    actuallyParticipated: row.querySelector(".ev-participated").checked,
+  })).filter((r) => r.gamingMemberId);
+}
+
+function renderFixtureBlock(entryOrFixture, teams) {
+  const f = entryOrFixture.fixture || entryOrFixture;
+  const block = el(`<div class="fixture-block">
+    <div class="fixture-header">
+      <strong>${fixtureLabel(f.fixtureRole)}</strong>
+      <span class="pill ${f.state === "FINALIZED" || f.state === "CORRECTED_AND_FINALIZED" || f.state === "FORFEIT_FINALIZED" ? "good" : f.state === "VOID" ? "bad" : ""}">${f.state.replace(/_/g, " ")}</span>
+    </div>
+    <p class="msg">${teamNameOf(teams, f.teamACompetitionTeamId)} vs ${teamNameOf(teams, f.teamBCompetitionTeamId)} — ${new Date(f.scheduledAt).toLocaleString()}</p>
+    <div id="detail-${f.competitionFixtureId}"><button class="secondary btn-load-detail" data-fixture="${f.competitionFixtureId}">Load Fixture Detail</button></div>
+  </div>`);
+
+  block.querySelector(".btn-load-detail").addEventListener("click", async () => {
+    const detailContainer = block.querySelector(`#detail-${f.competitionFixtureId}`);
+    detailContainer.innerHTML = "Loading…";
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/admin-detail`);
+    if (res.status !== 200) { detailContainer.innerHTML = `<p class="msg error">${(res.json && res.json.error) || "Failed to load."}</p>`; return; }
+    detailContainer.innerHTML = "";
+    detailContainer.appendChild(renderFixtureDetail(f, res.json, teams));
+  });
+
+  return block;
+}
+
+function renderFixtureDetail(f, detail, teams) {
+  const wrap = el(`<div></div>`);
+
+  wrap.appendChild(el(`<p class="msg">Scorekeeper: ${f.scorekeeperGamingMemberId || "not appointed"}</p>`));
+
+  // Appoint scorekeeper
+  const skForm = el(`<fieldset><legend>Appoint Scorekeeper</legend>
+    <div class="row"><input class="sk-input" placeholder="scorekeeper gaming member ID" style="min-width:280px" /><button class="btn-appoint">Appoint</button></div>
+    <p class="msg sk-msg"></p></fieldset>`);
+  skForm.querySelector(".btn-appoint").addEventListener("click", async () => {
+    const scorekeeperGamingMemberId = skForm.querySelector(".sk-input").value.trim();
+    if (!scorekeeperGamingMemberId) return;
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/scorekeeper`, { method: "POST", body: JSON.stringify({ scorekeeperGamingMemberId }) });
+    if (res.status === 200) { setFormMsg(skForm, ".sk-msg", "Appointed.", "success"); }
+    else { setFormMsg(skForm, ".sk-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  wrap.appendChild(skForm);
+
+  // Rosters + check-ins
+  wrap.appendChild(el(`<h3>Rosters</h3>`));
+  wrap.appendChild(el(`<p class="msg">Team A (${teamNameOf(teams, f.teamACompetitionTeamId)}): ${detail.teamARoster ? detail.teamARoster.gamingMemberIds.join(", ") : "not declared"}</p>`));
+  wrap.appendChild(el(`<p class="msg">Team B (${teamNameOf(teams, f.teamBCompetitionTeamId)}): ${detail.teamBRoster ? detail.teamBRoster.gamingMemberIds.join(", ") : "not declared"}</p>`));
+  wrap.appendChild(el(`<p class="msg">Checked in: ${detail.checkIns.length ? detail.checkIns.map((c) => c.gamingMemberId.slice(0, 8) + "…").join(", ") : "none yet"}</p>`));
+
+  // Evidence submission (Scorekeeper)
+  const scoreEligible = f.state === "CHECKIN_OPEN" || f.state === "ROSTER_DECLARED";
+  const evidenceForm = el(`<fieldset><legend>Submit Evidence (Scorekeeper)</legend>
+    <div class="row"><input class="ev-score-a" type="number" min="0" placeholder="Team A score" style="max-width:120px" />
+    <input class="ev-score-b" type="number" min="0" placeholder="Team B score" style="max-width:120px" />
+    <select class="ev-shootout-winner"><option value="">No shootout</option><option value="A">Team A wins shootout</option><option value="B">Team B wins shootout</option></select></div>
+    <p class="msg">Goal events:</p><div class="ev-goals"></div><button type="button" class="secondary ev-add-goal">Add Goal Event</button>
+    <p class="msg">Assist events (goal event index refers to the goal row above, 0-based):</p><div class="ev-assists"></div><button type="button" class="secondary ev-add-assist">Add Assist Event</button>
+    <p class="msg">Participation attestations:</p><div class="ev-attestations"></div><button type="button" class="secondary ev-add-attestation">Add Attestation</button>
+    <div class="row" style="margin-top:10px"><button class="btn-submit-evidence">Submit Evidence</button></div>
+    <p class="msg ev-msg"></p></fieldset>`);
+  const goalsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-goals"), null, "goal");
+  const assistsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-assists"), null, "assist");
+  const attestationsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-attestations"), null, "attestation");
+  evidenceForm.querySelector(".ev-add-goal").addEventListener("click", () => goalsEditor.addRow(null));
+  evidenceForm.querySelector(".ev-add-assist").addEventListener("click", () => assistsEditor.addRow(null));
+  evidenceForm.querySelector(".ev-add-attestation").addEventListener("click", () => attestationsEditor.addRow(null));
+  evidenceForm.querySelector(".btn-submit-evidence").addEventListener("click", async () => {
+    const teamAScore = parseInt(evidenceForm.querySelector(".ev-score-a").value, 10);
+    const teamBScore = parseInt(evidenceForm.querySelector(".ev-score-b").value, 10);
+    const goalRows = readGoalRows(evidenceForm.querySelector(".ev-goals"));
+    const goalEvents = goalRows.map((r) => ({ scorerGamingMemberId: r.scorerGamingMemberId, competitionTeamId: r.competitionTeamIdSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId }));
+    const assistEvents = readAssistRows(evidenceForm.querySelector(".ev-assists"));
+    const participationAttestations = readAttestationRows(evidenceForm.querySelector(".ev-attestations"));
+    const shootoutSide = evidenceForm.querySelector(".ev-shootout-winner").value;
+    const penaltyShootoutWinningTeamId = shootoutSide ? (shootoutSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId) : null;
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/evidence`, {
+      method: "POST", body: JSON.stringify({ teamAScore, teamBScore, goalEvents, assistEvents, participationAttestations, penaltyShootoutWinningTeamId }),
+    });
+    if (res.status === 200 || res.status === 201) { setFormMsg(evidenceForm, ".ev-msg", "Evidence submitted.", "success"); }
+    else { setFormMsg(evidenceForm, ".ev-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  if (!scoreEligible && !detail.evidence) evidenceForm.style.opacity = "0.6";
+  wrap.appendChild(evidenceForm);
+
+  if (detail.evidence) {
+    wrap.appendChild(el(`<p class="msg success">Current evidence: ${detail.evidence.teamAScore} – ${detail.evidence.teamBScore}${detail.shootout ? ` (shootout won by ${teamNameOf(teams, detail.shootout.winningCompetitionTeamId)})` : ""}</p>`));
+  }
+
+  // Correct fixture (Organizer) — same shape, plus reason.
+  const correctForm = el(`<fieldset><legend>Correct Fixture (Organizer)</legend>
+    <div class="row"><input class="cor-reason" placeholder="Reason (required)" style="min-width:320px" /></div>
+    <div class="row"><input class="cor-score-a" type="number" min="0" placeholder="Team A score" style="max-width:120px" />
+    <input class="cor-score-b" type="number" min="0" placeholder="Team B score" style="max-width:120px" />
+    <select class="cor-shootout-winner"><option value="">No shootout</option><option value="A">Team A wins shootout</option><option value="B">Team B wins shootout</option></select></div>
+    <p class="msg">Goal events:</p><div class="cor-goals"></div><button type="button" class="secondary cor-add-goal">Add Goal Event</button>
+    <p class="msg">Assist events:</p><div class="cor-assists"></div><button type="button" class="secondary cor-add-assist">Add Assist Event</button>
+    <div class="row" style="margin-top:10px"><button class="btn-correct">Submit Correction</button></div>
+    <p class="msg cor-msg"></p></fieldset>`);
+  const corGoalsEditor = eventRowsEditor(correctForm.querySelector(".cor-goals"), null, "goal");
+  const corAssistsEditor = eventRowsEditor(correctForm.querySelector(".cor-assists"), null, "assist");
+  correctForm.querySelector(".cor-add-goal").addEventListener("click", () => corGoalsEditor.addRow(null));
+  correctForm.querySelector(".cor-add-assist").addEventListener("click", () => corAssistsEditor.addRow(null));
+  correctForm.querySelector(".btn-correct").addEventListener("click", async () => {
+    const reason = correctForm.querySelector(".cor-reason").value.trim();
+    if (!reason) { setFormMsg(correctForm, ".cor-msg", "Reason is required.", "error"); return; }
+    const teamAScore = parseInt(correctForm.querySelector(".cor-score-a").value, 10);
+    const teamBScore = parseInt(correctForm.querySelector(".cor-score-b").value, 10);
+    const goalRows = readGoalRows(correctForm.querySelector(".cor-goals"));
+    const goalEvents = goalRows.map((r) => ({ scorerGamingMemberId: r.scorerGamingMemberId, competitionTeamId: r.competitionTeamIdSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId }));
+    const assistEvents = readAssistRows(correctForm.querySelector(".cor-assists"));
+    const shootoutSide = correctForm.querySelector(".cor-shootout-winner").value;
+    const penaltyShootoutWinningTeamId = shootoutSide ? (shootoutSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId) : null;
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/correct`, {
+      method: "POST", body: JSON.stringify({ reason, teamAScore, teamBScore, goalEvents, assistEvents, penaltyShootoutWinningTeamId }),
+    });
+    if (res.status === 200) {
+      setFormMsg(correctForm, ".cor-msg", `Corrected. Cascade: ${res.json.result.cascadeOutcome}.`, "success");
+    } else { setFormMsg(correctForm, ".cor-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  wrap.appendChild(correctForm);
+
+  // Disputes
+  wrap.appendChild(el(`<h3>Disputes</h3>`));
+  const disputesList = el(`<div></div>`);
+  for (const d of detail.disputes) {
+    disputesList.appendChild(el(`<p class="msg">[${d.targetFactType}] ${d.reason} — ${d.resolutionAction || "open"}</p>`));
+  }
+  if (detail.disputes.length === 0) disputesList.appendChild(el(`<p class="msg">No disputes raised.</p>`));
+  wrap.appendChild(disputesList);
+  const disputeForm = el(`<div class="row">
+    <select class="dis-type"><option value="SCORE">SCORE</option><option value="GOAL_EVENT">GOAL_EVENT</option><option value="ASSIST_EVENT">ASSIST_EVENT</option><option value="PARTICIPATION_ATTESTATION">PARTICIPATION_ATTESTATION</option></select>
+    <input class="dis-target" placeholder="target fact ID" />
+    <input class="dis-reason" placeholder="Reason" style="min-width:220px" />
+    <button class="btn-dispute">Raise Dispute</button></div><p class="msg dis-msg"></p>`);
+  disputeForm.querySelector(".btn-dispute").addEventListener("click", async () => {
+    const targetFactType = disputeForm.querySelector(".dis-type").value;
+    const targetFactId = disputeForm.querySelector(".dis-target").value.trim();
+    const reason = disputeForm.querySelector(".dis-reason").value.trim();
+    if (!targetFactId || !reason) { setFormMsg(disputeForm, ".dis-msg", "Target fact ID and reason are required.", "error"); return; }
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/disputes`, { method: "POST", body: JSON.stringify({ targetFactType, targetFactId, reason }) });
+    if (res.status === 201) { setFormMsg(disputeForm, ".dis-msg", "Dispute raised.", "success"); }
+    else { setFormMsg(disputeForm, ".dis-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  wrap.appendChild(disputeForm);
+
+  // Finalize / Forfeit / Void
+  const closeForm = el(`<fieldset><legend>Close Fixture (Organizer)</legend>
+    <div class="row"><button class="btn-finalize">Finalize</button></div>
+    <div class="row"><select class="forfeit-team"><option value="${f.teamACompetitionTeamId}">${teamNameOf(teams, f.teamACompetitionTeamId)} forfeits</option><option value="${f.teamBCompetitionTeamId}">${teamNameOf(teams, f.teamBCompetitionTeamId)} forfeits</option></select>
+    <input class="forfeit-reason" placeholder="Forfeit reason" style="min-width:220px" /><button class="secondary btn-forfeit">Forfeit</button></div>
+    <div class="row"><input class="void-reason" placeholder="Void reason" style="min-width:220px" /><button class="danger btn-void">Void</button></div>
+    <p class="msg close-msg"></p></fieldset>`);
+  closeForm.querySelector(".btn-finalize").addEventListener("click", async () => {
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/finalize`, { method: "POST" });
+    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", `Finalized. Winner: ${teamNameOf(teams, res.json.result.winningCompetitionTeamId)}.`, "success"); }
+    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  closeForm.querySelector(".btn-forfeit").addEventListener("click", async () => {
+    const forfeitingCompetitionTeamId = closeForm.querySelector(".forfeit-team").value;
+    const reason = closeForm.querySelector(".forfeit-reason").value.trim();
+    if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/forfeit`, { method: "POST", body: JSON.stringify({ forfeitingCompetitionTeamId, reason }) });
+    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Forfeited.", "success"); }
+    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  closeForm.querySelector(".btn-void").addEventListener("click", async () => {
+    const reason = closeForm.querySelector(".void-reason").value.trim();
+    if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
+    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Voided — competition cancelled without a champion.", "success"); }
+    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+  });
+  wrap.appendChild(closeForm);
+
+  return wrap;
+}
+
+UrbanoAuth.onAuthStateChange(refreshAuthState);
+refreshAuthState();
+</script>
+
+</body>
+</html>
