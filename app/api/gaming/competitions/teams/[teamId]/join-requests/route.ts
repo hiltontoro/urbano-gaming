@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, requireCompetitionsSchemaReady, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
 
 /**
  * GET /api/gaming/competitions/teams/[teamId]/join-requests — pending
@@ -9,6 +9,9 @@ import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember } fr
  * member cannot enumerate another team's pending applicants.
  */
 export async function GET(request: Request, { params }: { params: { teamId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });
@@ -17,16 +20,23 @@ export async function GET(request: Request, { params }: { params: { teamId: stri
   if ("errorResponse" in auth) return auth.errorResponse;
 
   const repo = buildCompetitionsRepo(credentials);
-  const team = await repo.getCompetitionTeamById(params.teamId);
-  if (!team) return NextResponse.json({ error: "No such team exists." }, { status: 404 });
+  try {
+    const team = await repo.getCompetitionTeamById(params.teamId);
+    if (!team) return NextResponse.json({ error: "No such team exists." }, { status: 404 });
 
-  const competition = await repo.getCompetitionById(team.competitionId);
-  const isCaptain = team.captainGamingMemberId === auth.gamingMemberId;
-  const isOrganizer = competition?.organizerGamingMemberId === auth.gamingMemberId;
-  if (!isCaptain && !isOrganizer) {
-    return NextResponse.json({ error: "Only this team's captain or the competition organizer may view its pending join requests." }, { status: 403 });
+    const competition = await repo.getCompetitionById(team.competitionId);
+    const isCaptain = team.captainGamingMemberId === auth.gamingMemberId;
+    const isOrganizer = competition?.organizerGamingMemberId === auth.gamingMemberId;
+    if (!isCaptain && !isOrganizer) {
+      return NextResponse.json({ error: "Only this team's captain or the competition organizer may view its pending join requests." }, { status: 403 });
+    }
+
+    const joinRequests = await repo.getPendingJoinRequestsForTeam(params.teamId);
+    return NextResponse.json({ joinRequests });
+  } catch (err) {
+    const status = statusForCompetitionsError(err);
+    if (status) return NextResponse.json({ error: (err as Error).message }, { status });
+    console.error("GET_TEAM_JOIN_REQUESTS failed:", err);
+    return NextResponse.json({ error: "Failed to load pending join requests." }, { status: 500 });
   }
-
-  const joinRequests = await repo.getPendingJoinRequestsForTeam(params.teamId);
-  return NextResponse.json({ joinRequests });
 }

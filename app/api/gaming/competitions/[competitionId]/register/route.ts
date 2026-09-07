@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { registerForCompetition } from "@/lib/gaming/competitions/registerForCompetition";
 
 /** POST /api/gaming/competitions/[competitionId]/register — REGISTER_FOR_COMPETITION. isAdultSelfAttested is synthetic self-attestation only. */
 export async function POST(request: Request, { params }: { params: { competitionId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

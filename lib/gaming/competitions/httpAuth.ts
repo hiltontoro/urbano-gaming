@@ -51,6 +51,50 @@ import {
 
 /** Shared boilerplate every app/api/gaming/competitions/* route needs — mirrors lib/gaming/predictions/httpAuth.ts. */
 
+/**
+ * URBANO Gaming Competitions production-availability guard (UG-CR-
+ * GATE-036). Fail-closed by construction: only the exact string "true"
+ * enables the capability — absent, empty, "false", or any other value
+ * (a stray space, "TRUE", "1") all normalize to unavailable, with no
+ * per-case branching required. Never inferred by probing a table at
+ * runtime, and never derived from environment name, hostname, branch,
+ * Vercel context, or successful authentication — this environment
+ * variable is the ONLY signal. Read fresh on every call, never cached,
+ * so a value change takes effect immediately (this also allows a
+ * contract test to flip it between calls without stale state).
+ *
+ * Mirrors the accepted Pulse production-containment precedent (commit
+ * 18c4751, PULSE_PRODUCTION_SCHEMA_READY) — the same shape, centralized
+ * once here instead of duplicated across Competitions' 20 route
+ * handlers, since 19 independent copies of this same conditional would
+ * itself become a reviewability and drift risk.
+ */
+export function normalizeCompetitionsSchemaReady(rawValue: string | undefined): boolean {
+  return rawValue === "true";
+}
+
+export function isCompetitionsSchemaReady(): boolean {
+  return normalizeCompetitionsSchemaReady(process.env.COMPETITIONS_SCHEMA_READY);
+}
+
+const COMPETITIONS_UNAVAILABLE_MESSAGE =
+  "URBANO Gaming Competitions is temporarily unavailable while its database is being prepared.";
+
+/**
+ * The one call every Competitions route handler makes FIRST — before
+ * reading Supabase credentials, authenticating, parsing a request
+ * body, constructing a repository, or touching Supabase in any way.
+ * Returns the exact response to return immediately when unavailable,
+ * or null when the handler may proceed normally. The response body is
+ * deliberately generic: no stack trace, table/relation name, migration
+ * number, provider identifier, or raw environment value is ever
+ * included, here or anywhere else this constant is used.
+ */
+export function requireCompetitionsSchemaReady(): NextResponse | null {
+  if (isCompetitionsSchemaReady()) return null;
+  return NextResponse.json({ error: COMPETITIONS_UNAVAILABLE_MESSAGE }, { status: 503 });
+}
+
 export function getSupabaseCredentials(): { url: string; serviceKey: string } | null {
   const url = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

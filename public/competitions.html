@@ -173,6 +173,15 @@ function teamName(teams, teamId) {
 
 async function renderCompetitionList() {
   const res = await authedFetch("/api/gaming/competitions");
+  // A 503 (or any other non-200 — UG-CR-GATE-036) must never be mistaken
+  // for a genuine, successful empty catalog: this branch is checked
+  // BEFORE reading .competitions, so a database-not-ready guard response
+  // shows its own truthful message, never "no competitions have been
+  // created yet." A real `200 []` still falls through to that message
+  // below, unchanged.
+  if (res.status !== 200) {
+    return el(`<div class="empty-state">${(res.json && res.json.error) || "Failed to load competitions."}</div>`);
+  }
   const competitions = (res.json && res.json.competitions) || [];
   if (competitions.length === 0) {
     return el(`<div class="empty-state">No competitions have been created yet — ask an organizer to create one from the Competitions admin page.</div>`);
@@ -281,9 +290,15 @@ async function renderCompetitionDetail(competitionId) {
     const captainCard = el(`<div class="card"><h2>Pending Join Requests — ${capTeam.name}</h2><div id="pending-list-${capTeam.competitionTeamId}"><p class="msg">Loading…</p></div></div>`);
     wrap.appendChild(captainCard);
     authedFetch(`/api/gaming/competitions/teams/${capTeam.competitionTeamId}/join-requests`).then((r) => {
-      const pending = (r.json && r.json.joinRequests) || [];
       const listEl = captainCard.querySelector(`#pending-list-${capTeam.competitionTeamId}`);
       listEl.innerHTML = "";
+      // Same non-200-first check as renderCompetitionList (UG-CR-GATE-036) —
+      // a 503 must never be mistaken for a genuinely empty pending queue.
+      if (r.status !== 200) {
+        listEl.appendChild(el(`<p class="msg error">${(r.json && r.json.error) || "Failed to load pending join requests."}</p>`));
+        return;
+      }
+      const pending = (r.json && r.json.joinRequests) || [];
       if (pending.length === 0) { listEl.appendChild(el(`<p class="msg">No pending requests.</p>`)); return; }
       for (const jr of pending) {
         const row = el(`<div class="team-row"><span>Member ${jr.requestingGamingMemberId.slice(0, 8)}…</span>

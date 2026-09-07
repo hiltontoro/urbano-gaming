@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { getCompetitionView } from "@/lib/gaming/competitions/getCompetitionView";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/gaming/competitions/[competitionId] — the one role-aware projection every journey reads through. */
 export async function GET(request: Request, { params }: { params: { competitionId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

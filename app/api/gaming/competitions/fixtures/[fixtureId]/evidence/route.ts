@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { submitFixtureEvidence } from "@/lib/gaming/competitions/submitFixtureEvidence";
 import type { GoalEventInput, AssistEventInput, ParticipationAttestationInput } from "@/lib/gaming/competitions/types";
 
@@ -21,6 +21,9 @@ function isAttestations(value: unknown): value is ParticipationAttestationInput[
  * always the verified caller's own.
  */
 export async function POST(request: Request, { params }: { params: { fixtureId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { correctFixture } from "@/lib/gaming/competitions/correctFixture";
 import type { GoalEventInput, AssistEventInput } from "@/lib/gaming/competitions/types";
 
@@ -18,6 +18,9 @@ function isAssistEvents(value: unknown): value is AssistEventInput[] {
  * winner changes — see UG-CR-RPT-024 §7.
  */
 export async function POST(request: Request, { params }: { params: { fixtureId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

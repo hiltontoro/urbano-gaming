@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { forfeitFixture } from "@/lib/gaming/competitions/forfeitFixture";
 
 /** POST /api/gaming/competitions/fixtures/[fixtureId]/forfeit — FORFEIT_FIXTURE. Organizer-only, reason required; idempotent on retry. */
 export async function POST(request: Request, { params }: { params: { fixtureId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

@@ -1,13 +1,17 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 
 // Hoisted by Vitest above every import in this file. Mocks the ONE module
 // boundary between an app/api/gaming/competitions/* route and the outside
 // world (credentials, repository construction, caller identity resolution,
 // error-status mapping) — the narrow fake this correction calls for at the
 // route boundary, mirroring the fake CompetitionsRepository used above at
-// the command boundary. statusForCompetitionsError keeps its REAL
-// implementation (via importActual) since it is pure, Competitions-owned
-// logic worth exercising for real, not faking.
+// the command boundary. statusForCompetitionsError AND
+// requireCompetitionsSchemaReady both keep their REAL implementation (via
+// importActual) — the former is pure, Competitions-owned logic worth
+// exercising for real rather than faking; the latter (UG-CR-GATE-036) is
+// the exact production-availability guard this file's own tests must
+// prove actually runs inside each real route handler, never a re-faked
+// stand-in that would just assume the wiring is correct.
 vi.mock("@/lib/gaming/competitions/httpAuth", async () => {
   const actual = await vi.importActual<typeof import("../lib/gaming/competitions/httpAuth")>("../lib/gaming/competitions/httpAuth");
   return {
@@ -15,6 +19,9 @@ vi.mock("@/lib/gaming/competitions/httpAuth", async () => {
     buildCompetitionsRepo: vi.fn(),
     requireGamingMember: vi.fn(),
     statusForCompetitionsError: actual.statusForCompetitionsError,
+    requireCompetitionsSchemaReady: actual.requireCompetitionsSchemaReady,
+    isCompetitionsSchemaReady: actual.isCompetitionsSchemaReady,
+    normalizeCompetitionsSchemaReady: actual.normalizeCompetitionsSchemaReady,
   };
 });
 
@@ -45,7 +52,7 @@ import { finalizeFixture } from "../lib/gaming/competitions/finalizeFixture";
 import { forfeitFixture } from "../lib/gaming/competitions/forfeitFixture";
 import { voidFixture } from "../lib/gaming/competitions/voidFixture";
 import { getCompetitionView } from "../lib/gaming/competitions/getCompetitionView";
-import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
+import { statusForCompetitionsError, normalizeCompetitionsSchemaReady, isCompetitionsSchemaReady, requireCompetitionsSchemaReady } from "../lib/gaming/competitions/httpAuth";
 import {
   CompetitionNotFoundError,
   CompetitionTeamNotFoundError,
@@ -92,7 +99,8 @@ import {
   TargetFactNotCurrentError,
   DisputeNotAuthorizedError,
 } from "../lib/gaming/competitions/types";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 /**
  * URBANO Gaming Competitions — targeted behavioral coverage (UG-CR-
@@ -486,7 +494,25 @@ describe("Competitions API routes — client-supplied field rejection and malfor
   let httpAuth: typeof import("../lib/gaming/competitions/httpAuth");
   let repo: CompetitionsRepository;
 
+  // UG-CR-GATE-036: every route handler now checks the REAL
+  // requireCompetitionsSchemaReady() first (see the vi.mock above), so
+  // every pre-existing test in this describe block — none of which is
+  // about availability — needs COMPETITIONS_SCHEMA_READY="true" simply to
+  // reach the code it actually means to exercise. Captured/restored
+  // around the whole describe block so this file never leaks a changed
+  // environment variable into any other test file's own process, and
+  // reset to "true" again in every beforeEach so a single test that
+  // deliberately disables it (see the dedicated guard describe below)
+  // can never leave a later test order-dependent on that disabling.
+  const ORIGINAL_COMPETITIONS_SCHEMA_READY = process.env.COMPETITIONS_SCHEMA_READY;
+
+  afterAll(() => {
+    if (ORIGINAL_COMPETITIONS_SCHEMA_READY === undefined) delete process.env.COMPETITIONS_SCHEMA_READY;
+    else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL_COMPETITIONS_SCHEMA_READY;
+  });
+
   beforeEach(async () => {
+    process.env.COMPETITIONS_SCHEMA_READY = "true";
     httpAuth = await import("../lib/gaming/competitions/httpAuth");
     vi.clearAllMocks();
     repo = makeFakeRepository();
@@ -646,6 +672,271 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     (repo.raiseDispute as ReturnType<typeof vi.fn>).mockRejectedValue(new UnsupportedTargetFactTypeError());
     const unsupported = await POST(jsonRequest("POST", { targetFactType: "SHOOTOUT", targetFactId: "sh-1", reason: "x" }), { params: { fixtureId: "fx-1" } });
     expect(unsupported.status).toBe(400);
+  });
+
+  it("GET teams/[teamId]/join-requests — an unexpected repository failure is now caught and returns the established controlled 500, never an uncaught exception (UG-CR-GATE-036 correction 5, previously unguarded)", async () => {
+    const { GET } = await import("../app/api/gaming/competitions/teams/[teamId]/join-requests/route");
+    (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("relation \"competition_teams\" does not exist"));
+
+    const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }), { params: { teamId: "team-1" } });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Failed to load pending join requests.");
+    expect(body.error).not.toMatch(/relation|does not exist/i);
+  });
+
+  it("GET teams/[teamId]/join-requests — a recognized domain error (e.g. not found) keeps its own specific status, never masked by the new generic catch", async () => {
+    const { GET } = await import("../app/api/gaming/competitions/teams/[teamId]/join-requests/route");
+    (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }), { params: { teamId: "team-1" } });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("GET fixtures/[fixtureId]/admin-detail — an unexpected repository failure is now caught and returns the established controlled 500, never an uncaught exception (UG-CR-GATE-036 correction 5, previously unguarded)", async () => {
+    const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+    (repo.getFixtureById as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("relation \"competition_fixtures\" does not exist"));
+
+    const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }), { params: { fixtureId: "fx-1" } });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Failed to load fixture detail.");
+    expect(body.error).not.toMatch(/relation|does not exist/i);
+  });
+
+  it("GET fixtures/[fixtureId]/admin-detail — a recognized domain error (fixture not found) keeps its own specific status, never masked by the new generic catch", async () => {
+    const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+    (repo.getFixtureById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }), { params: { fixtureId: "fx-1" } });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
+  describe("normalizeCompetitionsSchemaReady — the fail-closed truth table", () => {
+    const cases: Array<[string, string | undefined, boolean]> = [
+      ["undefined (the variable is absent)", undefined, false],
+      ["empty string", "", false],
+      ['"false"', "false", false],
+      ['"true" — the only accepted value', "true", true],
+      ["uppercase TRUE", "TRUE", false],
+      ["leading space", " true", false],
+      ["trailing space", "true ", false],
+      ['numeric "1"', "1", false],
+      ['"yes"', "yes", false],
+      ["mixed case True", "True", false],
+      ["an arbitrary malformed string", "enabled-please", false],
+    ];
+    it.each(cases)("%s -> %s", (_label, input, expected) => {
+      expect(normalizeCompetitionsSchemaReady(input)).toBe(expected);
+    });
+  });
+
+  describe("isCompetitionsSchemaReady / requireCompetitionsSchemaReady — reading the real environment variable", () => {
+    const ORIGINAL = process.env.COMPETITIONS_SCHEMA_READY;
+    afterEach(() => {
+      if (ORIGINAL === undefined) delete process.env.COMPETITIONS_SCHEMA_READY;
+      else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
+    });
+
+    it("missing variable returns a guard response with status 503", () => {
+      delete process.env.COMPETITIONS_SCHEMA_READY;
+      expect(isCompetitionsSchemaReady()).toBe(false);
+      const res = requireCompetitionsSchemaReady();
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(503);
+    });
+
+    it("empty value returns 503", () => {
+      process.env.COMPETITIONS_SCHEMA_READY = "";
+      expect(requireCompetitionsSchemaReady()!.status).toBe(503);
+    });
+
+    it('"false" returns 503', () => {
+      process.env.COMPETITIONS_SCHEMA_READY = "false";
+      expect(requireCompetitionsSchemaReady()!.status).toBe(503);
+    });
+
+    it("a malformed value returns 503", () => {
+      process.env.COMPETITIONS_SCHEMA_READY = "TRUE";
+      expect(requireCompetitionsSchemaReady()!.status).toBe(503);
+    });
+
+    it('only "true" enables execution — the guard returns null, not a response', () => {
+      process.env.COMPETITIONS_SCHEMA_READY = "true";
+      expect(isCompetitionsSchemaReady()).toBe(true);
+      expect(requireCompetitionsSchemaReady()).toBeNull();
+    });
+
+    it("the unavailable response carries exactly one field, a truthful non-sensitive message, and never a stack trace, relation name, migration number, or provider identifier", async () => {
+      delete process.env.COMPETITIONS_SCHEMA_READY;
+      const res = requireCompetitionsSchemaReady()!;
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(Object.keys(body)).toEqual(["error"]);
+      expect(body.error).toBe("URBANO Gaming Competitions is temporarily unavailable while its database is being prepared.");
+      const text = JSON.stringify(body);
+      expect(text).not.toMatch(/relation|does not exist|supabase|postgres|migration|0125|stack|at Object|at eval/i);
+    });
+  });
+
+  describe("no readiness value is ever returned through /api/gaming/config or any other public config surface", () => {
+    it("GET /api/gaming/config never mentions COMPETITIONS_SCHEMA_READY, regardless of the variable's value", async () => {
+      process.env.COMPETITIONS_SCHEMA_READY = "true";
+      process.env.SUPABASE_URL = "http://fake";
+      process.env.SUPABASE_ANON_KEY = "fake-anon-key";
+      const { GET } = await import("../app/api/gaming/config/route");
+      const res = await GET();
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(Object.keys(body).sort()).toEqual(["supabaseAnonKey", "supabaseUrl"]);
+      expect(JSON.stringify(body)).not.toMatch(/COMPETITIONS_SCHEMA_READY/i);
+    });
+  });
+
+  describe("every Competitions route handler is guarded — structural coverage, not a source-text search", () => {
+    // Discovers every app/api/gaming/competitions/**/route.ts file from the
+    // real filesystem (never a hand-maintained list) — a future handler
+    // added without this loop being updated is still discovered and still
+    // tested; if it lacks the guard, the assertions below fail for real,
+    // not merely because a name wasn't typed into this file.
+    function findRouteFiles(dir: string): string[] {
+      let files: string[] = [];
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) files = files.concat(findRouteFiles(full));
+        else if (entry === "route.ts") files.push(full);
+      }
+      return files;
+    }
+
+    const competitionsDir = join(process.cwd(), "app/api/gaming/competitions");
+    const routeFiles = findRouteFiles(competitionsDir);
+    const routeSpecifiers = routeFiles.map((f) => "../" + relative(process.cwd(), f).replace(/\.ts$/, ""));
+
+    let httpAuth: typeof import("../lib/gaming/competitions/httpAuth");
+    let repo: CompetitionsRepository;
+    const ORIGINAL = process.env.COMPETITIONS_SCHEMA_READY;
+
+    beforeEach(async () => {
+      httpAuth = await import("../lib/gaming/competitions/httpAuth");
+      vi.clearAllMocks();
+      repo = makeFakeRepository();
+      vi.mocked(httpAuth.getSupabaseCredentials).mockReturnValue({ url: "http://fake", serviceKey: "fake" });
+      vi.mocked(httpAuth.buildCompetitionsRepo).mockReturnValue(repo as unknown as ReturnType<typeof httpAuth.buildCompetitionsRepo>);
+      vi.mocked(httpAuth.requireGamingMember).mockResolvedValue({ gamingMemberId: "auth-derived-member" });
+    });
+    afterEach(() => {
+      if (ORIGINAL === undefined) delete process.env.COMPETITIONS_SCHEMA_READY;
+      else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
+    });
+
+    it("discovered exactly the 19 known route files (canary — bump this alongside the review if a route is genuinely added or removed)", () => {
+      expect(routeFiles).toHaveLength(19);
+    });
+
+    it("with readiness disabled, every one of the 20 discovered handlers (GET+POST both counted on the base route) returns 503 immediately, WITHOUT authenticating, parsing the request body, or constructing a repository", async () => {
+      delete process.env.COMPETITIONS_SCHEMA_READY;
+      let handlersTested = 0;
+
+      for (const specifier of routeSpecifiers) {
+        const mod = (await import(specifier)) as Record<string, unknown>;
+        const paramNames = [...specifier.matchAll(/\[(\w+)\]/g)].map((m) => m[1]);
+        const params = Object.fromEntries(paramNames.map((name) => [name, "test-id"]));
+
+        for (const method of ["GET", "POST"] as const) {
+          const handler = mod[method];
+          if (typeof handler !== "function") continue;
+          handlersTested += 1;
+          vi.clearAllMocks();
+
+          // A deliberately UNPARSEABLE body: if the guard failed to run
+          // first, a POST handler would hit `request.json()` and this
+          // test would observe a 400 ("must be valid JSON"), not a 503 —
+          // proving conclusively that body-parsing never happened.
+          const request = new Request("http://localhost/probe", {
+            method,
+            headers: { authorization: "Bearer token" },
+            body: method === "POST" ? "not valid json {{{" : undefined,
+          });
+
+          const res = await (handler as (req: Request, ctx?: unknown) => Promise<Response>)(request, { params });
+
+          expect(res.status, `${specifier} [${method}] should return 503 when readiness is disabled`).toBe(503);
+          const body = (await res.json()) as Record<string, unknown>;
+          expect(body.error, `${specifier} [${method}]`).toBe(
+            "URBANO Gaming Competitions is temporarily unavailable while its database is being prepared."
+          );
+          expect(httpAuth.requireGamingMember, `${specifier} [${method}] must not authenticate`).not.toHaveBeenCalled();
+          expect(httpAuth.buildCompetitionsRepo, `${specifier} [${method}] must not construct a repository`).not.toHaveBeenCalled();
+        }
+      }
+
+      expect(handlersTested).toBe(20);
+    });
+  });
+});
+
+describe("Competitions UI — truthful unavailable state, never a masked empty/auth/broken state (UG-CR-GATE-036)", () => {
+  const html = readFileSync("public/competitions.html", "utf-8");
+  const adminHtml = readFileSync("public/competitions-admin.html", "utf-8");
+
+  it("renderCompetitionList checks res.status before ever reading res.json.competitions — a 503 can never fall through to the empty-catalog message", () => {
+    const fnStart = html.indexOf("async function renderCompetitionList() {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const statusCheckIndex = html.indexOf("res.status !== 200", fnStart);
+    const emptyMessageIndex = html.indexOf("No competitions have been created yet", fnStart);
+    expect(statusCheckIndex).toBeGreaterThan(fnStart);
+    expect(emptyMessageIndex).toBeGreaterThan(statusCheckIndex);
+  });
+
+  it("renderCompetitionList's unavailable branch returns before any interactive competition row is built — no consequential control is ever rendered alongside it", () => {
+    const fnStart = html.indexOf("async function renderCompetitionList() {");
+    const statusCheckIndex = html.indexOf("res.status !== 200", fnStart);
+    const rowLoopIndex = html.indexOf("for (const c of competitions)", fnStart);
+    expect(statusCheckIndex).toBeGreaterThan(fnStart);
+    expect(statusCheckIndex).toBeLessThan(rowLoopIndex);
+  });
+
+  it("the captain's pending-join-requests panel also checks status before reading .joinRequests, so a 503 there never renders as \"No pending requests.\"", () => {
+    const fnStart = html.indexOf("teams/${capTeam.competitionTeamId}/join-requests");
+    expect(fnStart).toBeGreaterThan(-1);
+    const statusCheckIndex = html.indexOf("r.status !== 200", fnStart);
+    const emptyMessageIndex = html.indexOf("No pending requests.", fnStart);
+    expect(statusCheckIndex).toBeGreaterThan(fnStart);
+    expect(statusCheckIndex).toBeLessThan(emptyMessageIndex);
+  });
+
+  it("renderCompetitionDetail already surfaces the server's own truthful error message for any non-200 (unchanged since UG-CR-GATE-031/032) — a 503 here shows the guard's own message, never a generic broken page", () => {
+    const fnStart = html.indexOf("async function renderCompetitionDetail(competitionId) {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const statusCheckIndex = html.indexOf("res.status !== 200", fnStart);
+    expect(statusCheckIndex).toBeGreaterThan(fnStart);
+    const preamble = html.slice(fnStart, statusCheckIndex);
+    // The check is the very first thing the function does after its own fetch — no
+    // intervening logic could act on a body shape a 503 response doesn't have.
+    expect(preamble).toContain("await authedFetch");
+  });
+
+  it("admin loadCompetitions checks status before populating the dropdown or leaving it silently empty", () => {
+    const fnStart = adminHtml.indexOf("async function loadCompetitions() {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const statusCheckIndex = adminHtml.indexOf("res.status !== 200", fnStart);
+    const dropdownFillIndex = adminHtml.indexOf("for (const c of cachedCompetitions)", fnStart);
+    expect(statusCheckIndex).toBeGreaterThan(fnStart);
+    expect(statusCheckIndex).toBeLessThan(dropdownFillIndex);
+  });
+
+  it("neither Competitions page ever polls the Competitions API automatically — the one existing setInterval (competitions.html's own return-to-intent auth poll, UG-CR-GATE-031) targets only UrbanoAuth.getState(), never /api/gaming/competitions", () => {
+    for (const [name, source] of [["competitions.html", html], ["competitions-admin.html", adminHtml]] as const) {
+      const intervalBodies = [...source.matchAll(/setInterval\(([\s\S]{0,300}?)\}, \d+\)/g)].map((m) => m[1]);
+      for (const body of intervalBodies) {
+        expect(body, `${name}'s setInterval body must never call the Competitions API`).not.toMatch(/api\/gaming\/competitions/);
+      }
+    }
   });
 });
 

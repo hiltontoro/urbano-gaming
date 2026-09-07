@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { decideJoinRequest } from "@/lib/gaming/competitions/decideJoinRequest";
 
 /**
@@ -10,6 +10,9 @@ import { decideJoinRequest } from "@/lib/gaming/competitions/decideJoinRequest";
  * re-verified server-side inside the RPC, never trusted at face value.
  */
 export async function POST(request: Request, { params }: { params: { joinRequestId: string } }) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });

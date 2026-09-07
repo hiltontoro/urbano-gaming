@@ -158,9 +158,17 @@ async function refreshAuthState() {
 
 async function loadCompetitions() {
   const res = await authedFetch("/api/gaming/competitions");
-  cachedCompetitions = (res.json && res.json.competitions) || [];
   const select = document.getElementById("comp-select");
   select.innerHTML = "";
+  // A 503 (or any other non-200 — UG-CR-GATE-036) must never render as a
+  // silent, unexplained empty dropdown — the organizer would have no way
+  // to tell "nothing exists yet" apart from "the service is down."
+  if (res.status !== 200) {
+    cachedCompetitions = [];
+    setMsg("msg-load", (res.json && res.json.error) || "Failed to load competitions.", "error");
+    return;
+  }
+  cachedCompetitions = (res.json && res.json.competitions) || [];
   for (const c of cachedCompetitions) {
     const opt = document.createElement("option");
     opt.value = c.competitionId;

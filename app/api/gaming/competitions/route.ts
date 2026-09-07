@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { createCompetition } from "@/lib/gaming/competitions/createCompetition";
 
 export const dynamic = "force-dynamic";
 
 /** GET /api/gaming/competitions — every competition (any authenticated Gaming Member; local demo has no public browsing). */
 export async function GET(request: Request) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });
@@ -25,6 +28,9 @@ export async function GET(request: Request) {
  * authority — enforced inside the atomic RPC (UG-CR-REV-026 condition 1).
  */
 export async function POST(request: Request) {
+  const unavailable = requireCompetitionsSchemaReady();
+  if (unavailable) return unavailable;
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json({ error: "Server misconfiguration: Supabase credentials not set." }, { status: 500 });
