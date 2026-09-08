@@ -4,49 +4,101 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Competitions Admin — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
-   * Smallest founder/operator surface for Soccer Slice 001: Organizer
-   * (create/publish/appoint/correct/finalize/forfeit/void) and
-   * Scorekeeper (submit evidence) actions in one page, mirroring
-   * predictions-admin.html. Desktop-oriented, plain functional tool —
-   * every action's real authority check lives inside its atomic RPC,
-   * never only in this UI, so an unauthorized click still fails safely
-   * server-side with a clear error.
+   * Founder/operator surface for Soccer Slice 001: Organizer
+   * (create/open-registration/accept-or-reject-teams/close-registration/
+   * publish/appoint/correct/finalize/forfeit/void) and Scorekeeper
+   * (submit evidence) actions in one page, mirroring
+   * predictions-admin.html. Desktop-first, but branded to the canonical
+   * URBANO Gaming visual system (UG-CR-RPT-041/042 §6/§11) for the parts
+   * of this page that are ON the live presentation script — the
+   * fixture-management tooling (roster/evidence/correct/dispute/close)
+   * deliberately keeps its existing plain functional styling, per "do
+   * not redesign unrelated organizer functionality." Every action's
+   * real authority check lives inside its atomic RPC, never only in
+   * this UI, so an unauthorized click still fails safely server-side
+   * with a clear error.
    */
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0a0a; color: #f5f1e8; margin: 0; padding: 24px; }
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
+    --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --primary-fill: #f5f1e8; --primary-ink: #0a0a0a;
+    --good: #4ade80; --bad: #f87171; --gold: #d4af37;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; }
+  .shell-header { display: flex; align-items: center; justify-content: space-between; max-width: 1000px; margin: 0 auto; padding: 20px 24px 0; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before { content: ""; position: absolute; inset: -9px; background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%); filter: blur(4px); z-index: 0; }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge { background: var(--exp-purple-bg); border: 1px solid var(--exp-purple); color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+  .back-link { max-width: 1000px; margin: 14px auto 0; padding: 0 24px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link:hover { color: var(--ink); }
   h1 { font-size: 20px; }
-  h2 { font-size: 15px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; margin-top: 34px; }
-  h3 { font-size: 13px; color: #9b9689; text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
-  section { max-width: 960px; }
+  h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-top: 34px; }
+  h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  section { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+  .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 18px 20px; margin: 0 0 16px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-  input, select, textarea { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #2a2a2a; background: #161616; color: #f5f1e8; }
-  button { font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: none; background: #f5f1e8; color: #0a0a0a; cursor: pointer; }
-  button.secondary { background: transparent; border: 1px solid #f5f1e8; color: #f5f1e8; }
-  button.danger { background: transparent; border: 1px solid #f87171; color: #f87171; }
+  input, select, textarea { font-family: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); }
+  button { font-family: inherit; font-size: 13px; font-weight: 700; padding: 9px 15px; border-radius: 8px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--ink); color: var(--ink); }
+  button.danger { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c1c1c; }
-  .msg { font-size: 12.5px; color: #9b9689; margin: 6px 0; }
-  .msg.error { color: #f87171; }
-  .msg.success { color: #4ade80; }
-  .fixture-block { border: 1px solid #2a2a2a; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .msg { font-size: 12.5px; color: var(--muted); margin: 6px 0; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+  .fixture-block { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
   .fixture-header { display: flex; justify-content: space-between; align-items: center; }
-  .pill { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid #2a2a2a; color: #9b9689; }
-  .pill.good { color: #4ade80; border-color: #4ade80; }
-  .pill.bad { color: #f87171; border-color: #f87171; }
+  .pill { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.good { color: var(--good); border-color: var(--good); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.gold { color: var(--gold); border-color: var(--gold); }
   .event-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
   .event-row input, .event-row select { max-width: 200px; }
-  fieldset { border: 1px solid #2a2a2a; border-radius: 8px; margin: 10px 0; padding: 10px; }
-  legend { font-size: 12px; color: #9b9689; padding: 0 6px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+  legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
+  .capacity-badge { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  /* Inline organizer rejection interaction (UG-CR-RPT-043 Condition B) —
+     replaces window.prompt(), which this domain's own browser-automation
+     tooling cannot drive and which offers no busy/typed-failure state of
+     its own. */
+  .reject-panel { margin: 6px 0 2px; padding: 10px 12px; border: 1px solid var(--bad); border-radius: 8px; background: rgba(248, 113, 113, 0.06); }
+  .reject-panel p.msg { margin: 0 0 8px; }
+  .reject-panel label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .reject-panel textarea { width: 100%; min-height: 54px; resize: vertical; }
+  .reject-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .reject-status { min-height: 16px; }
+  h3:focus { outline: 2px solid var(--exp-purple); outline-offset: 3px; }
 </style>
 </head>
 <body>
 
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+</div>
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<section style="padding-top:16px;">
 <h1>Competitions — Organizer &amp; Scorekeeper Admin</h1>
 <div class="row">
   <button id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
   <span class="msg" id="auth-status">Not signed in.</span>
 </div>
+</section>
 
 <section id="admin-sections" style="display:none;">
 
@@ -69,14 +121,29 @@
     <h3 id="comp-title"></h3>
     <span class="pill" id="comp-state-pill"></span>
 
-    <h3>Teams</h3>
-    <table id="table-teams"><thead><tr><th>Name</th><th>Captain</th></tr></thead><tbody></tbody></table>
+    <div class="row" id="registration-controls" style="margin-top:12px;">
+      <button id="btn-open-registration">Open Team Registration</button>
+      <button class="secondary" id="btn-close-registration">Close Team Registration</button>
+      <span class="capacity-badge" id="capacity-badge"></span>
+    </div>
+    <p class="msg" id="msg-registration"></p>
+
+    <h3>Accepted Teams</h3>
+    <table id="table-teams"><thead><tr><th>Name</th><th>Captain</th><th>Invitation</th></tr></thead><tbody></tbody></table>
     <div class="row" id="add-team-row">
       <input id="t-name" placeholder="Team name" />
       <input id="t-captain" placeholder="Captain gaming member ID" style="min-width:280px" />
-      <button id="btn-add-team">Add Team</button>
+      <button id="btn-add-team">Add Team (Organizer)</button>
     </div>
     <p class="msg" id="msg-team"></p>
+
+    <h3 id="pending-teams-heading" tabindex="-1">Proposed Teams — Pending Approval</h3>
+    <table id="table-pending-teams"><thead><tr><th>Name</th><th>Proposed by</th><th>Decision</th></tr></thead><tbody></tbody></table>
+    <p class="msg" id="msg-pending-teams"></p>
+
+    <h3>Rejected Team History</h3>
+    <table id="table-rejected-teams"><thead><tr><th>Name</th><th>Proposed by</th><th>Reason</th></tr></thead><tbody></tbody></table>
+    <p class="msg" id="msg-rejected-teams">No rejected proposals.</p>
 
     <h3>Publish</h3>
     <div id="publish-form">
@@ -104,6 +171,18 @@ function el(html) {
   const div = document.createElement("div");
   div.innerHTML = html.trim();
   return div.firstElementChild;
+}
+
+// el() cannot be used for a bare <tr> — the HTML parser silently strips
+// <tr>/<td> tags when the innerHTML target isn't a real table element
+// (they need "in table" insertion mode to be recognized at all), so
+// div.innerHTML = "<tr>...</tr>" ends up dropping the <tr> and <td>
+// wrapper entirely and leaving only their loose inner content. Parsing
+// inside an actual <table> gives the tags a valid context to land in.
+function elRow(html) {
+  const table = document.createElement("table");
+  table.innerHTML = html.trim();
+  return table.querySelector("tr");
 }
 
 async function authedFetch(path, options) {
@@ -142,12 +221,24 @@ function fixtureLabel(role) {
   return role === "SEMIFINAL_1" ? "Semifinal 1" : role === "SEMIFINAL_2" ? "Semifinal 2" : "Final";
 }
 
+function humanizeCompetitionState(state) {
+  const labels = {
+    DRAFT: "Draft (not yet open)",
+    TEAM_REGISTRATION_OPEN: "Open for team registration",
+    READY_TO_PUBLISH: "Ready to publish",
+    PUBLISHED: "Published",
+    COMPLETE: "Complete",
+    CANCELLED_WITHOUT_CHAMPION: "Cancelled",
+  };
+  return labels[state] || String(state).replace(/_/g, " ");
+}
+
 async function refreshAuthState() {
   const state = await UrbanoAuth.getState();
   const statusEl = document.getElementById("auth-status");
   const sections = document.getElementById("admin-sections");
   if (state.status === "authenticated") {
-    statusEl.textContent = "Signed in as " + state.displayName + " (" + state.gamingMemberId + ").";
+    statusEl.textContent = "Signed in as " + state.displayName + ".";
     sections.style.display = "block";
     await loadCompetitions();
   } else {
@@ -172,7 +263,7 @@ async function loadCompetitions() {
   for (const c of cachedCompetitions) {
     const opt = document.createElement("option");
     opt.value = c.competitionId;
-    opt.textContent = `${c.name} (${c.state})`;
+    opt.textContent = `${c.name} (${humanizeCompetitionState(c.state)})`;
     select.appendChild(opt);
   }
 }
@@ -203,24 +294,178 @@ async function loadCompetitionDetail(competitionId) {
   renderCompetitionDetail();
 }
 
+/** Same bounded deep link competitions.html's captain view builds — competitionId + teamId only (accepted decisions §3/§10). */
+function buildInvitationLink(competitionId, teamId) {
+  const url = new URL(window.location.origin + "/competitions.html");
+  url.searchParams.set("competitionId", competitionId);
+  url.searchParams.set("teamId", teamId);
+  return url.toString();
+}
+
+async function copyTextSafely(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch (err) { /* fall through */ }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text; textarea.style.position = "fixed"; textarea.style.opacity = "0";
+    document.body.appendChild(textarea); textarea.focus(); textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch (err) { return false; }
+}
+
+/**
+ * Inline, branded, accessible replacement for window.prompt() (UG-CR-RPT-043
+ * Condition B) — a real-browser-automation tool cannot drive a native
+ * prompt() dialog, and prompt() itself offers no busy/success/typed-failure
+ * state and no way to keep focus inside the page. This builds one hidden
+ * table row per pending proposal, shown only when its own Reject button is
+ * clicked; team name and proposer are shown by display name only, never a
+ * raw competitionTeamId. The server-side authorization and append-only
+ * rejection history in DECIDE_COMPETITION_TEAM are unchanged — this panel
+ * only replaces how the reason is collected in the browser.
+ */
+function buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn) {
+  const reasonId = "reject-reason-" + t.competitionTeamId;
+  const row = elRow(`<tr class="reject-panel-row" hidden>
+    <td colspan="3">
+      <div class="reject-panel" role="group" aria-label="Reject ${t.name}">
+        <p class="msg">Reject <strong>${t.name}</strong>, proposed by <strong>${t.captainDisplayName || "Unknown"}</strong>?</p>
+        <label for="${reasonId}">Reason (required)</label>
+        <textarea id="${reasonId}" class="reject-reason-input" rows="2" placeholder="Explain why this team is being rejected"></textarea>
+        <div class="reject-actions">
+          <button type="button" class="secondary reject-cancel-btn">Cancel</button>
+          <button type="button" class="danger reject-confirm-btn" disabled>Confirm Rejection</button>
+        </div>
+        <p class="msg reject-status" aria-live="polite"></p>
+      </div>
+    </td>
+  </tr>`);
+
+  const reasonInput = row.querySelector(".reject-reason-input");
+  const cancelBtn = row.querySelector(".reject-cancel-btn");
+  const confirmBtn = row.querySelector(".reject-confirm-btn");
+  const statusEl = row.querySelector(".reject-status");
+
+  function resetAndClose(focusEl) {
+    row.hidden = true;
+    reasonInput.value = "";
+    confirmBtn.disabled = true;
+    statusEl.textContent = ""; statusEl.className = "msg reject-status";
+    acceptBtn.hidden = false; rejectBtn.hidden = false;
+    (focusEl || rejectBtn).focus();
+  }
+
+  reasonInput.addEventListener("input", () => {
+    confirmBtn.disabled = reasonInput.value.trim().length === 0;
+  });
+  reasonInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); resetAndClose(); }
+  });
+  cancelBtn.addEventListener("click", () => resetAndClose());
+
+  confirmBtn.addEventListener("click", async () => {
+    // Disabling synchronously, before the first await, is what actually
+    // prevents a double-click from firing two requests — a second click
+    // dispatched while this one is in flight lands on an already-disabled
+    // button and never reaches this handler at all.
+    if (confirmBtn.disabled) return;
+    const reason = reasonInput.value.trim();
+    if (!reason) { statusEl.textContent = "A reason is required to reject."; statusEl.className = "msg reject-status error"; return; }
+    confirmBtn.disabled = true; cancelBtn.disabled = true; reasonInput.disabled = true;
+    statusEl.textContent = "Rejecting…"; statusEl.className = "msg reject-status";
+    const res = await authedFetch(`/api/gaming/competitions/teams/${t.competitionTeamId}/decide`, { method: "POST", body: JSON.stringify({ decision: "REJECT", reason }) });
+    if (res.status === 200) {
+      statusEl.textContent = "Rejected."; statusEl.className = "msg reject-status success";
+      await loadCompetitionDetail(competition.competitionId);
+      const heading = document.getElementById("pending-teams-heading");
+      if (heading) heading.focus();
+    } else {
+      cancelBtn.disabled = false; reasonInput.disabled = false;
+      confirmBtn.disabled = reasonInput.value.trim().length === 0;
+      statusEl.textContent = (res.json && res.json.error) || "Failed to reject."; statusEl.className = "msg reject-status error";
+      confirmBtn.focus();
+    }
+  });
+
+  return row;
+}
+
 function renderCompetitionDetail() {
-  const { competition, teams, fixtures } = currentView;
+  const { competition, teams, pendingTeamProposals, rejectedTeamProposals, fixtures } = currentView;
   document.getElementById("comp-title").textContent = competition.name;
   const pill = document.getElementById("comp-state-pill");
-  pill.textContent = competition.state;
+  pill.textContent = humanizeCompetitionState(competition.state);
   pill.className = "pill" + (competition.state === "COMPLETE" ? " good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? " bad" : "");
+
+  document.getElementById("capacity-badge").textContent = `${teams.length} of 4 teams accepted`;
+  document.getElementById("btn-open-registration").style.display = competition.state === "DRAFT" ? "" : "none";
+  document.getElementById("btn-close-registration").style.display = competition.state === "TEAM_REGISTRATION_OPEN" ? "" : "none";
+  document.getElementById("registration-controls").style.display =
+    (competition.state === "DRAFT" || competition.state === "TEAM_REGISTRATION_OPEN") ? "flex" : "none";
 
   const tbody = document.querySelector("#table-teams tbody");
   tbody.innerHTML = "";
   for (const t of teams) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${t.name}</td><td>${t.captainGamingMemberId}</td>`;
+    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
+    const captainTd = document.createElement("td"); captainTd.textContent = t.captainDisplayName || "Unknown";
+    const inviteTd = document.createElement("td");
+    const inviteBtn = document.createElement("button");
+    inviteBtn.className = "secondary"; inviteBtn.textContent = "Copy Invitation Link";
+    inviteBtn.addEventListener("click", async () => {
+      const ok = await copyTextSafely(buildInvitationLink(competition.competitionId, t.competitionTeamId));
+      inviteBtn.textContent = ok ? "Copied!" : "Copy failed";
+      setTimeout(() => { inviteBtn.textContent = "Copy Invitation Link"; }, 1800);
+    });
+    inviteTd.appendChild(inviteBtn);
+    tr.appendChild(nameTd); tr.appendChild(captainTd); tr.appendChild(inviteTd);
     tbody.appendChild(tr);
   }
 
-  document.getElementById("add-team-row").style.display = competition.state === "DRAFT" ? "flex" : "none";
-  document.getElementById("publish-form").style.display = (competition.state === "DRAFT" && teams.length === 4) ? "block" : "none";
-  if (competition.state === "DRAFT" && teams.length === 4) {
+  const pendingTbody = document.querySelector("#table-pending-teams tbody");
+  pendingTbody.innerHTML = "";
+  document.getElementById("msg-pending-teams").textContent = pendingTeamProposals.length === 0 ? "No proposals awaiting a decision." : "";
+  for (const t of pendingTeamProposals) {
+    const tr = document.createElement("tr");
+    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
+    const proposerTd = document.createElement("td"); proposerTd.textContent = t.captainDisplayName || "Unknown";
+    const decisionTd = document.createElement("td");
+    const acceptBtn = document.createElement("button"); acceptBtn.textContent = "Accept";
+    const rejectBtn = document.createElement("button"); rejectBtn.className = "danger reject-open-btn"; rejectBtn.textContent = "Reject";
+    const decisionMsg = document.createElement("span"); decisionMsg.className = "msg"; decisionMsg.style.marginLeft = "8px";
+    acceptBtn.addEventListener("click", async () => {
+      const res = await authedFetch(`/api/gaming/competitions/teams/${t.competitionTeamId}/decide`, { method: "POST", body: JSON.stringify({ decision: "APPROVE" }) });
+      if (res.status === 200) { await loadCompetitionDetail(competition.competitionId); }
+      else { decisionMsg.textContent = (res.json && res.json.error) || "Failed to accept."; decisionMsg.className = "msg error"; }
+    });
+    decisionTd.appendChild(acceptBtn); decisionTd.appendChild(rejectBtn); decisionTd.appendChild(decisionMsg);
+    tr.appendChild(nameTd); tr.appendChild(proposerTd); tr.appendChild(decisionTd);
+    pendingTbody.appendChild(tr);
+
+    const panelRow = buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn);
+    pendingTbody.appendChild(panelRow);
+    rejectBtn.addEventListener("click", () => {
+      acceptBtn.hidden = true; rejectBtn.hidden = true;
+      panelRow.hidden = false;
+      panelRow.querySelector(".reject-reason-input").focus();
+    });
+  }
+
+  const rejectedTbody = document.querySelector("#table-rejected-teams tbody");
+  rejectedTbody.innerHTML = "";
+  document.getElementById("msg-rejected-teams").style.display = rejectedTeamProposals.length === 0 ? "block" : "none";
+  for (const t of rejectedTeamProposals) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${t.name}</td><td>${t.captainDisplayName || "Unknown"}</td><td>${t.rejectionReason || ""}</td>`;
+    rejectedTbody.appendChild(tr);
+  }
+
+  document.getElementById("add-team-row").style.display = (competition.state === "DRAFT" || competition.state === "TEAM_REGISTRATION_OPEN") ? "flex" : "none";
+  document.getElementById("publish-form").style.display = (competition.state === "READY_TO_PUBLISH" && teams.length === 4) ? "block" : "none";
+  if (competition.state === "READY_TO_PUBLISH" && teams.length === 4) {
     for (const selId of ["p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b"]) {
       const sel = document.getElementById(selId);
       sel.innerHTML = "";
@@ -239,6 +484,17 @@ function renderCompetitionDetail() {
     fixturesList.appendChild(renderFixtureBlock(f, teams));
   }
 }
+
+document.getElementById("btn-open-registration").addEventListener("click", async () => {
+  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/open-team-registration`, { method: "POST" });
+  if (res.status === 200) { setMsg("msg-registration", "Team registration opened.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
+  else setMsg("msg-registration", (res.json && res.json.error) || "Failed to open team registration.", "error");
+});
+document.getElementById("btn-close-registration").addEventListener("click", async () => {
+  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/close-team-registration`, { method: "POST" });
+  if (res.status === 200) { setMsg("msg-registration", "Team registration closed — ready to publish.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
+  else setMsg("msg-registration", (res.json && res.json.error) || "Failed to close team registration.", "error");
+});
 
 document.getElementById("btn-add-team").addEventListener("click", async () => {
   const name = document.getElementById("t-name").value.trim();

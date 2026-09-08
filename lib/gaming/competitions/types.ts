@@ -12,7 +12,15 @@
  * 1), checked once, server-side, never stored here.
  */
 
-export type CompetitionState = "DRAFT" | "PUBLISHED" | "COMPLETE" | "CANCELLED_WITHOUT_CHAMPION";
+/**
+ * DRAFT -> TEAM_REGISTRATION_OPEN -> READY_TO_PUBLISH -> PUBLISHED ->
+ * COMPLETE | CANCELLED_WITHOUT_CHAMPION (UG-CR-RPT-041 §3/§4; Founder
+ * decision 1 — one unified lifecycle for both organizer-created and
+ * member-proposed teams). TEAM_REGISTRATION_OPEN and READY_TO_PUBLISH
+ * are the two states this correction inserts between the original
+ * DRAFT and PUBLISHED; every other transition is unchanged.
+ */
+export type CompetitionState = "DRAFT" | "TEAM_REGISTRATION_OPEN" | "READY_TO_PUBLISH" | "PUBLISHED" | "COMPLETE" | "CANCELLED_WITHOUT_CHAMPION";
 
 export interface CompetitionRecord {
   competitionId: string;
@@ -25,11 +33,31 @@ export interface CompetitionRecord {
   publishedAt: string | null;
 }
 
+/**
+ * status/provenance (UG-CR-RPT-041 §4): every organizer-created row
+ * (add_competition_team_atomically) is ACCEPTED/ORGANIZER_CREATED from
+ * insertion; a member-proposed row (propose_competition_team_atomically)
+ * starts PENDING_ORGANIZER_APPROVAL/MEMBER_PROPOSED and only becomes
+ * ACCEPTED (or REJECTED, permanently, with a required reason) via
+ * decide_competition_team_atomically. captainGamingMemberId is always
+ * the proposer for a MEMBER_PROPOSED row — there is no separate
+ * "proposed by" field, since Founder decision 9 makes the proposer and
+ * the eventual captain the same person by construction.
+ */
+export type CompetitionTeamStatus = "PENDING_ORGANIZER_APPROVAL" | "ACCEPTED" | "REJECTED";
+export type CompetitionTeamProvenance = "ORGANIZER_CREATED" | "MEMBER_PROPOSED";
+
 export interface CompetitionTeamRecord {
   competitionTeamId: string;
   competitionId: string;
   name: string;
   captainGamingMemberId: string;
+  captainDisplayName?: string;
+  status: CompetitionTeamStatus;
+  provenance: CompetitionTeamProvenance;
+  decidedAt: string | null;
+  decidedByGamingMemberId: string | null;
+  rejectionReason: string | null;
   createdAt: string;
 }
 
@@ -48,6 +76,7 @@ export interface CompetitionJoinRequestRecord {
   competitionId: string;
   competitionTeamId: string;
   requestingGamingMemberId: string;
+  requestingGamingMemberDisplayName?: string;
   status: JoinRequestStatus;
   decidedByGamingMemberId: string | null;
   decidedAt: string | null;
@@ -61,6 +90,7 @@ export interface CompetitionTeamMembershipRecord {
   competitionId: string;
   competitionTeamId: string;
   gamingMemberId: string;
+  gamingMemberDisplayName?: string;
   approvedAt: string;
   approvedByGamingMemberId: string;
 }
@@ -232,6 +262,29 @@ export interface AddCompetitionTeamResult {
   createdAt: string;
 }
 
+export interface OpenTeamRegistrationResult {
+  competitionId: string;
+  state: CompetitionState;
+}
+
+export interface ProposeCompetitionTeamResult {
+  competitionTeamId: string;
+  status: CompetitionTeamStatus;
+  createdAt: string;
+}
+
+export interface DecideCompetitionTeamResult {
+  competitionTeamId: string;
+  status: CompetitionTeamStatus;
+  decidedAt: string;
+  competitionTeamMembershipId: string | null;
+}
+
+export interface CloseTeamRegistrationResult {
+  competitionId: string;
+  state: CompetitionState;
+}
+
 export interface PublishCompetitionResult {
   competitionId: string;
   state: CompetitionState;
@@ -323,15 +376,35 @@ export interface VoidFixtureResult {
   alreadyFinalized: boolean;
 }
 
-/** Role-aware read model for GET_COMPETITION — see getCompetitionView.ts. */
+/**
+ * Role-aware read model for GET_COMPETITION — see getCompetitionView.ts.
+ *
+ * UG-CR-RPT-041 §7/§10: `teams` is always ACCEPTED-only, for every
+ * viewer — a pending or rejected proposal never appears there,
+ * regardless of who is looking, so "the real teams in this tournament"
+ * keeps one truthful meaning independent of role. `pendingTeamProposals`
+ * and `rejectedTeamProposals` are organizer-only (empty arrays for
+ * every other viewer) — the review queue and rejection history.
+ * `myTeamProposals` is the one proposer-visibility exception: every
+ * viewer, organizer or not, sees their OWN pending/rejected proposals
+ * (with reason) here, and only their own — never another member's
+ * rejected attempt. `myTeamMemberships` lists the confirmed members
+ * (with display names) of the caller's OWN current team, when they
+ * have one — never another team's roster of members.
+ */
 export interface CompetitionView {
   competition: CompetitionRecord;
   teams: CompetitionTeamRecord[];
+  pendingTeamProposals: CompetitionTeamRecord[];
+  rejectedTeamProposals: CompetitionTeamRecord[];
+  myTeamProposals: CompetitionTeamRecord[];
   fixtures: CompetitionFixtureViewEntry[];
   myRegistration: CompetitionRegistrationRecord | null;
   myTeamMembership: CompetitionTeamMembershipRecord | null;
+  myTeamMemberships: CompetitionTeamMembershipRecord[];
   myPendingJoinRequest: CompetitionJoinRequestRecord | null;
   myPersistentRecords: CompetitionMemberParticipationRecord[];
+  isOrganizer: boolean;
 }
 
 export interface CompetitionFixtureViewEntry {
@@ -383,7 +456,31 @@ export class CompetitionPairingInvalidError extends Error {
   constructor(message: string) { super(message); this.name = "CompetitionPairingInvalidError"; }
 }
 export class CompetitionNotPublishedError extends Error {
-  constructor() { super("Registration is only open while the competition is PUBLISHED."); this.name = "CompetitionNotPublishedError"; }
+  constructor() { super("Registration is only open once the organizer has opened team registration."); this.name = "CompetitionNotPublishedError"; }
+}
+export class CompetitionNotReadyToPublishError extends Error {
+  constructor() { super("A competition may only be published once team registration has been closed with exactly four accepted teams."); this.name = "CompetitionNotReadyToPublishError"; }
+}
+export class TeamRegistrationNotOpenError extends Error {
+  constructor(message = "Team registration is not currently open.") { super(message); this.name = "TeamRegistrationNotOpenError"; }
+}
+export class TeamRegistrationCapacityNotReachedError extends Error {
+  constructor(message = "Exactly four accepted teams are required to close team registration.") { super(message); this.name = "TeamRegistrationCapacityNotReachedError"; }
+}
+export class TeamCapacityReachedError extends Error {
+  constructor() { super("Four teams have already been accepted for this competition."); this.name = "TeamCapacityReachedError"; }
+}
+export class TeamDecisionAlreadyMadeError extends Error {
+  constructor() { super("This team proposal has already been decided."); this.name = "TeamDecisionAlreadyMadeError"; }
+}
+export class DuplicateTeamNameError extends Error {
+  constructor() { super("A team with this name already exists in this competition."); this.name = "DuplicateTeamNameError"; }
+}
+export class AlreadyCaptainOrMemberError extends Error {
+  constructor() { super("This member already holds an active team role in this competition."); this.name = "AlreadyCaptainOrMemberError"; }
+}
+export class TeamNotAcceptedError extends Error {
+  constructor() { super("This team has not yet been accepted for this competition."); this.name = "TeamNotAcceptedError"; }
 }
 export class CompetitionTeamNotFoundError extends Error {
   constructor() { super("No such team exists in this competition."); this.name = "CompetitionTeamNotFoundError"; }

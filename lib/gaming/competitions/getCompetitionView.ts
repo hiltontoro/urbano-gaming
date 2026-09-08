@@ -28,7 +28,9 @@ export async function getCompetitionView(
   const competition = await repo.getCompetitionById(competitionId);
   if (!competition) throw new CompetitionNotFoundError();
 
-  const [teams, fixtures, myRegistration, myTeamMembership, myPendingJoinRequest, myPersistentRecords] = await Promise.all([
+  const isOrganizer = competition.organizerGamingMemberId === callerGamingMemberId;
+
+  const [allTeams, fixtures, myRegistration, myTeamMembership, myPendingJoinRequest, myPersistentRecords] = await Promise.all([
     repo.getCompetitionTeams(competitionId),
     repo.getCompetitionFixtures(competitionId),
     repo.getMyRegistration(competitionId, callerGamingMemberId),
@@ -36,6 +38,41 @@ export async function getCompetitionView(
     repo.getMyPendingJoinRequest(competitionId, callerGamingMemberId),
     repo.getMemberParticipationRecords(competitionId, callerGamingMemberId),
   ]);
+
+  // UG-CR-RPT-041 §7/§10: `teams` (the shared, general-purpose list every
+  // viewer reads) is always ACCEPTED-only, regardless of role — a
+  // pending or rejected proposal never appears there. The organizer's
+  // own review queue and rejection history are separate, organizer-only
+  // fields; a non-organizer never receives them (empty arrays), and
+  // `myTeamProposals` is the one proposer-visibility exception, scoped
+  // to the caller's own captaincy only, for every viewer regardless of
+  // role.
+  const acceptedTeams = allTeams.filter((t) => t.status === "ACCEPTED");
+  const pendingTeamProposals = isOrganizer ? allTeams.filter((t) => t.status === "PENDING_ORGANIZER_APPROVAL") : [];
+  const rejectedTeamProposals = isOrganizer ? allTeams.filter((t) => t.status === "REJECTED") : [];
+  const myTeamProposals = allTeams.filter(
+    (t) => t.captainGamingMemberId === callerGamingMemberId && t.status !== "ACCEPTED"
+  );
+
+  const displayNameIds = new Set<string>();
+  for (const t of acceptedTeams) displayNameIds.add(t.captainGamingMemberId);
+  for (const t of pendingTeamProposals) displayNameIds.add(t.captainGamingMemberId);
+  for (const t of rejectedTeamProposals) displayNameIds.add(t.captainGamingMemberId);
+
+  let myTeamMemberships: CompetitionView["myTeamMemberships"] = [];
+  if (myTeamMembership) {
+    const rawMemberships = await repo.getTeamMemberships(myTeamMembership.competitionTeamId);
+    for (const m of rawMemberships) displayNameIds.add(m.gamingMemberId);
+    myTeamMemberships = rawMemberships; // display names attached below, once resolved
+  }
+
+  const displayNames = await repo.getDisplayNames(Array.from(displayNameIds));
+  const withCaptainName = (t: (typeof allTeams)[number]) => ({ ...t, captainDisplayName: displayNames[t.captainGamingMemberId] });
+  const teams = acceptedTeams.map(withCaptainName);
+  const pendingTeamProposalsNamed = pendingTeamProposals.map(withCaptainName);
+  const rejectedTeamProposalsNamed = rejectedTeamProposals.map(withCaptainName);
+  const myTeamProposalsNamed = myTeamProposals.map(withCaptainName);
+  myTeamMemberships = myTeamMemberships.map((m) => ({ ...m, gamingMemberDisplayName: displayNames[m.gamingMemberId] }));
 
   const fixtureViews: CompetitionFixtureViewEntry[] = await Promise.all(
     fixtures.map(async (fixture): Promise<CompetitionFixtureViewEntry> => {
@@ -110,10 +147,15 @@ export async function getCompetitionView(
   return {
     competition,
     teams,
+    pendingTeamProposals: pendingTeamProposalsNamed,
+    rejectedTeamProposals: rejectedTeamProposalsNamed,
+    myTeamProposals: myTeamProposalsNamed,
     fixtures: fixtureViews,
     myRegistration,
     myTeamMembership,
+    myTeamMemberships,
     myPendingJoinRequest,
     myPersistentRecords,
+    isOrganizer,
   };
 }

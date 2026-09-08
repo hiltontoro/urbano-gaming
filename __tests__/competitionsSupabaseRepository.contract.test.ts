@@ -8,6 +8,10 @@ import { SupabaseCompetitionsRepository } from "../lib/gaming/competitions/db/su
 import { SupabaseGamingRepository } from "../lib/gaming/db/supabaseGamingRepository";
 import { createCompetition } from "../lib/gaming/competitions/createCompetition";
 import { addCompetitionTeam } from "../lib/gaming/competitions/addCompetitionTeam";
+import { openTeamRegistration } from "../lib/gaming/competitions/openTeamRegistration";
+import { proposeCompetitionTeam } from "../lib/gaming/competitions/proposeCompetitionTeam";
+import { decideCompetitionTeam } from "../lib/gaming/competitions/decideCompetitionTeam";
+import { closeTeamRegistration } from "../lib/gaming/competitions/closeTeamRegistration";
 import { publishCompetition } from "../lib/gaming/competitions/publishCompetition";
 import { registerForCompetition } from "../lib/gaming/competitions/registerForCompetition";
 import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
@@ -35,6 +39,20 @@ import {
   TargetFactFixtureMismatchError,
   TargetFactNotCurrentError,
   DisputeNotAuthorizedError,
+  CompetitionAccessDeniedError,
+  ReasonRequiredError,
+  CompetitionNotDraftError,
+  CompetitionNotPublishedError,
+  CompetitionNotReadyToPublishError,
+  CompetitionRegistrationRequiredError,
+  TeamRegistrationNotOpenError,
+  TeamRegistrationCapacityNotReachedError,
+  TeamCapacityReachedError,
+  TeamDecisionAlreadyMadeError,
+  TeamNotAcceptedError,
+  DuplicateTeamNameError,
+  AlreadyCaptainOrMemberError,
+  AlreadyTeamMemberError,
 } from "../lib/gaming/competitions/types";
 import type { GoalEventInput, AssistEventInput, ParticipationAttestationInput } from "../lib/gaming/competitions/types";
 
@@ -141,11 +159,40 @@ async function setUpCompetitionWith4Teams() {
     const team = await addCompetitionTeam(repo, competition.competitionId, organizer.gamingMemberId, `Team ${String.fromCharCode(65 + i)}`, captains[i].gamingMemberId);
     teams.push({ competitionTeamId: team.competitionTeamId, captainId: captains[i].gamingMemberId });
   }
+  // UG-CR-RPT-041/042 §3/§4 (Founder decision 1 — one unified lifecycle):
+  // PUBLISH_COMPETITION now requires READY_TO_PUBLISH, reached only via
+  // OPEN_TEAM_REGISTRATION -> (all four teams already ACCEPTED above,
+  // added while still DRAFT, which ADD_COMPETITION_TEAM still allows) ->
+  // CLOSE_TEAM_REGISTRATION. Every existing fixture-level contract test
+  // that builds its own context through this helper is unaffected beyond
+  // this: the resulting competition is still exactly four ACCEPTED
+  // organizer-created teams, just reached through the two additional,
+  // deliberate organizer checkpoints the corrected lifecycle now shares
+  // with the member-proposal path.
+  await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+  await closeTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
   return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId, teams };
 }
 
 function futureIso(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
+}
+
+/** A competition with team registration already open, no teams yet — the entry point for the Branded Team Registration and Invitation Journey's own contract tests (UG-CR-RPT-041/042). */
+async function setUpCompetitionForTeamRegistration() {
+  const organizer = await createRealGamingMember("Organizer");
+  await grantOperationalAuthority(organizer.gamingMemberId);
+  const competition = await createCompetition(repo, organizer.gamingMemberId, `Registration Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+  createdCompetitionIds.push(competition.competitionId);
+  await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+  return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId };
+}
+
+/** A registered member, ready to propose or request-join a team. */
+async function registeredMember(competitionId: string, displayName: string) {
+  const member = await createRealGamingMember(displayName);
+  await registerForCompetition(repo, competitionId, member.gamingMemberId, true);
+  return member;
 }
 
 async function publishDefault(competitionId: string, organizerId: string, teams: Array<{ competitionTeamId: string }>) {
@@ -962,6 +1009,424 @@ describe("SupabaseCompetitionsRepository contract", () => {
       expect(goalRow!.is_current).toBe(true);
       expect(goalRow!.scorer_gaming_member_id).toBe(ctx.team0Players[0]);
       expect(goalRow!.competition_team_id).toBe(ctx.teams[0].competitionTeamId);
+    });
+  });
+});
+
+describe("Branded Team Registration and Invitation Journey — corrected lifecycle contract (UG-CR-RPT-041/042)", () => {
+  describe("lifecycle transitions", () => {
+    it("registration works in TEAM_REGISTRATION_OPEN and READY_TO_PUBLISH, not only PUBLISHED — a strict widening of the original PUBLISHED-only rule", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const memberInOpen = await createRealGamingMember("Member In Open");
+      const reg1 = await registerForCompetition(repo, ctx.competitionId, memberInOpen.gamingMemberId, true);
+      expect(reg1.alreadyRegistered).toBe(false);
+
+      // Advance to READY_TO_PUBLISH via 4 accepted organizer-created teams.
+      const captains = await Promise.all([1, 2, 3, 4].map((i) => createRealGamingMember(`Cap ${i}`)));
+      for (let i = 0; i < 4; i++) {
+        await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Team ${i}`, captains[i].gamingMemberId);
+      }
+      await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
+
+      const memberInReady = await createRealGamingMember("Member In Ready");
+      const reg2 = await registerForCompetition(repo, ctx.competitionId, memberInReady.gamingMemberId, true);
+      expect(reg2.alreadyRegistered).toBe(false);
+    });
+
+    it("registration still fails from DRAFT (before team registration ever opens)", async () => {
+      const organizer = await createRealGamingMember("Draft Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Draft Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const member = await createRealGamingMember("Eager Member");
+
+      await expect(registerForCompetition(repo, competition.competitionId, member.gamingMemberId, true)).rejects.toBeInstanceOf(CompetitionNotPublishedError);
+    });
+
+    it("OPEN_TEAM_REGISTRATION is organizer-only and DRAFT-only", async () => {
+      const organizer = await createRealGamingMember("Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const impostor = await createRealGamingMember("Impostor");
+
+      await expect(openTeamRegistration(repo, competition.competitionId, impostor.gamingMemberId)).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
+
+      await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+      await expect(openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId)).rejects.toBeInstanceOf(CompetitionNotDraftError);
+    });
+
+    it("PUBLISH_COMPETITION fails from DRAFT and from TEAM_REGISTRATION_OPEN — only READY_TO_PUBLISH is accepted", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captains = await Promise.all([1, 2, 3, 4].map((i) => createRealGamingMember(`Cap ${i}`)));
+      const teams = [];
+      for (let i = 0; i < 4; i++) {
+        const t = await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Team ${i}`, captains[i].gamingMemberId);
+        teams.push(t.competitionTeamId);
+      }
+      const publishArgs = [
+        ctx.competitionId, ctx.organizerId, teams[0], teams[1], teams[2], teams[3],
+        futureIso(60000), futureIso(120000), futureIso(180000),
+      ] as const;
+
+      // Still TEAM_REGISTRATION_OPEN — not yet closed.
+      await expect(publishCompetition(repo, ...publishArgs)).rejects.toBeInstanceOf(CompetitionNotReadyToPublishError);
+
+      await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
+      const published = await publishCompetition(repo, ...publishArgs);
+      expect(published.state).toBe("PUBLISHED");
+    });
+
+    it("CLOSE_TEAM_REGISTRATION requires exactly four ACCEPTED teams, and is organizer-only", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const impostor = await createRealGamingMember("Impostor");
+      await expect(closeTeamRegistration(repo, ctx.competitionId, impostor.gamingMemberId)).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
+      await expect(closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId)).rejects.toBeInstanceOf(TeamRegistrationCapacityNotReachedError);
+
+      const captains = await Promise.all([1, 2, 3].map((i) => createRealGamingMember(`Cap ${i}`)));
+      for (let i = 0; i < 3; i++) await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Team ${i}`, captains[i].gamingMemberId);
+      await expect(closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId)).rejects.toBeInstanceOf(TeamRegistrationCapacityNotReachedError);
+
+      const fourth = await createRealGamingMember("Cap 4");
+      await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team 4", fourth.gamingMemberId);
+      const closed = await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
+      expect(closed.state).toBe("READY_TO_PUBLISH");
+    });
+
+    it("ADD_COMPETITION_TEAM (the organizer-created path) is ALSO hard-capped at four — a fifth organizer-created team fails with TeamCapacityReachedError rather than being silently accepted", async () => {
+      // Regression coverage for a real defect caught only by live browser
+      // validation (UG-CR-RPT-042 §15): the organizer-created path used
+      // its own `competitions` row lock, never the shared
+      // 'competition_team_scope:<id>' advisory lock that
+      // DECIDE_COMPETITION_TEAM's APPROVE branch and
+      // CLOSE_TEAM_REGISTRATION already use, and never rechecked the
+      // four-accepted-team count at all — so a fifth organizer-created
+      // team was accepted outright, producing "5 of 4 teams accepted".
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captains = await Promise.all([1, 2, 3, 4, 5].map((i) => createRealGamingMember(`ACT Cap ${i}`)));
+      for (let i = 0; i < 4; i++) {
+        await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `ACT Team ${i}`, captains[i].gamingMemberId);
+      }
+      await expect(
+        addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "ACT Team 4", captains[4].gamingMemberId)
+      ).rejects.toBeInstanceOf(TeamCapacityReachedError);
+
+      const accepted = await repo.getCompetitionTeams(ctx.competitionId);
+      expect(accepted.filter((t) => t.status === "ACCEPTED")).toHaveLength(4);
+    });
+
+    it("a fifth team accepted via one path is refused via the OTHER path too — ADD_COMPETITION_TEAM and DECIDE_COMPETITION_TEAM share the same capacity count", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const organizerCaptains = await Promise.all([1, 2, 3].map((i) => createRealGamingMember(`Mixed Cap ${i}`)));
+      for (let i = 0; i < 3; i++) {
+        await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Mixed Team ${i}`, organizerCaptains[i].gamingMemberId);
+      }
+      const proposer = await registeredMember(ctx.competitionId, "Mixed Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Mixed Proposed Team", proposer.gamingMemberId);
+      const decision = await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      expect(decision.status).toBe("ACCEPTED"); // 4th accepted team, via the proposal path
+
+      const fifthCaptain = await createRealGamingMember("Mixed Cap 5");
+      await expect(
+        addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Mixed Team 3", fifthCaptain.gamingMemberId)
+      ).rejects.toBeInstanceOf(TeamCapacityReachedError);
+    });
+  });
+
+  describe("team proposal, decision, and atomic captain/membership confirmation", () => {
+    it("a registered member may propose a team while registration is open; it starts PENDING_ORGANIZER_APPROVAL and consumes no accepted slot", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const member = await registeredMember(ctx.competitionId, "Proposer");
+
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Proposed United", member.gamingMemberId);
+      expect(proposal.status).toBe("PENDING_ORGANIZER_APPROVAL");
+
+      const teams = await repo.getCompetitionTeams(ctx.competitionId);
+      const row = teams.find((t) => t.competitionTeamId === proposal.competitionTeamId)!;
+      expect(row.status).toBe("PENDING_ORGANIZER_APPROVAL");
+      expect(row.provenance).toBe("MEMBER_PROPOSED");
+      expect(row.captainGamingMemberId).toBe(member.gamingMemberId);
+
+      const membership = await repo.getMyTeamMembership(ctx.competitionId, member.gamingMemberId);
+      expect(membership).toBeNull(); // no membership yet — only organizer acceptance confirms it
+    });
+
+    it("proposing without registering first fails with CompetitionRegistrationRequiredError", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const unregistered = await createRealGamingMember("Unregistered");
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "No Registration FC", unregistered.gamingMemberId)).rejects.toBeInstanceOf(CompetitionRegistrationRequiredError);
+    });
+
+    it("proposing outside TEAM_REGISTRATION_OPEN fails with TeamRegistrationNotOpenError", async () => {
+      const organizer = await createRealGamingMember("Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Draft Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const member = await createRealGamingMember("Eager Member");
+      await expect(proposeCompetitionTeam(repo, competition.competitionId, "Too Early FC", member.gamingMemberId)).rejects.toBeInstanceOf(TeamRegistrationNotOpenError);
+    });
+
+    it("a duplicate team name (case/whitespace normalized) is rejected — but rejected history does not block a later proposal reusing the same normalized name", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const first = await registeredMember(ctx.competitionId, "First Proposer");
+      const second = await registeredMember(ctx.competitionId, "Second Proposer");
+      const third = await registeredMember(ctx.competitionId, "Third Proposer");
+
+      await proposeCompetitionTeam(repo, ctx.competitionId, "United FC", first.gamingMemberId);
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "  united fc  ", second.gamingMemberId)).rejects.toBeInstanceOf(DuplicateTeamNameError);
+
+      // Reject the first, freeing the normalized name for reuse.
+      const teams = await repo.getCompetitionTeams(ctx.competitionId);
+      const firstTeam = teams.find((t) => t.captainGamingMemberId === first.gamingMemberId)!;
+      await decideCompetitionTeam(repo, firstTeam.competitionTeamId, ctx.organizerId, "REJECT", "Duplicate submission.");
+
+      const reproposed = await proposeCompetitionTeam(repo, ctx.competitionId, "United FC", third.gamingMemberId);
+      expect(reproposed.status).toBe("PENDING_ORGANIZER_APPROVAL");
+    });
+
+    it("a member already holding a confirmed team membership cannot propose a second team", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await registeredMember(ctx.competitionId, "Captain");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Team One", captain.gamingMemberId);
+      await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "Team Two", captain.gamingMemberId)).rejects.toBeInstanceOf(AlreadyTeamMemberError);
+    });
+
+    it("a member already holding an active (pending or accepted) captaincy cannot propose a second team", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await registeredMember(ctx.competitionId, "Captain");
+      await proposeCompetitionTeam(repo, ctx.competitionId, "Team One", captain.gamingMemberId);
+
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "Team Two", captain.gamingMemberId)).rejects.toBeInstanceOf(AlreadyCaptainOrMemberError);
+    });
+
+    it("organizer acceptance atomically confirms the proposer as captain AND creates exactly one team membership — no separate join-request or approval step", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Atomic FC", proposer.gamingMemberId);
+
+      const decision = await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      expect(decision.status).toBe("ACCEPTED");
+      expect(decision.competitionTeamMembershipId).not.toBeNull();
+
+      const team = await repo.getCompetitionTeamById(proposal.competitionTeamId);
+      expect(team!.status).toBe("ACCEPTED");
+      expect(team!.captainGamingMemberId).toBe(proposer.gamingMemberId);
+
+      const membership = await repo.getMyTeamMembership(ctx.competitionId, proposer.gamingMemberId);
+      expect(membership).not.toBeNull();
+      expect(membership!.competitionTeamId).toBe(proposal.competitionTeamId);
+      expect(membership!.approvedByGamingMemberId).toBe(ctx.organizerId);
+    });
+
+    it("the creator never requests entry to their own team, and is never separately approved — request-join against their OWN pending team fails as TEAM_NOT_ACCEPTED, and once accepted their membership already exists so a self-request would fail as ALREADY_TEAM_MEMBER", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Self Proof FC", proposer.gamingMemberId);
+
+      // While pending: cannot request-join at all (team not accepted yet).
+      await expect(requestJoinTeam(repo, ctx.competitionId, proposal.competitionTeamId, proposer.gamingMemberId)).rejects.toBeInstanceOf(TeamNotAcceptedError);
+
+      await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+
+      // Once accepted, the proposer already has a membership from acceptance itself.
+      await expect(requestJoinTeam(repo, ctx.competitionId, proposal.competitionTeamId, proposer.gamingMemberId)).rejects.toBeInstanceOf(AlreadyTeamMemberError);
+    });
+
+    it("rejecting a team proposal requires a reason, and retains the row (never deleted) with that reason attached", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Rejected FC", proposer.gamingMemberId);
+
+      await expect(decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "REJECT", "")).rejects.toBeInstanceOf(ReasonRequiredError);
+
+      const decision = await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "REJECT", "Roster incomplete.");
+      expect(decision.status).toBe("REJECTED");
+
+      const team = await repo.getCompetitionTeamById(proposal.competitionTeamId);
+      expect(team).not.toBeNull(); // retained, never deleted
+      expect(team!.status).toBe("REJECTED");
+      expect(team!.rejectionReason).toBe("Roster incomplete.");
+    });
+
+    it("rejection and resubmission — a rejected proposer may propose a brand-new team; the original rejected row is untouched", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const first = await proposeCompetitionTeam(repo, ctx.competitionId, "First Attempt", proposer.gamingMemberId);
+      await decideCompetitionTeam(repo, first.competitionTeamId, ctx.organizerId, "REJECT", "Not ready.");
+
+      const second = await proposeCompetitionTeam(repo, ctx.competitionId, "Second Attempt", proposer.gamingMemberId);
+      expect(second.competitionTeamId).not.toBe(first.competitionTeamId);
+
+      const firstStillRejected = await repo.getCompetitionTeamById(first.competitionTeamId);
+      expect(firstStillRejected!.status).toBe("REJECTED");
+      expect(firstStillRejected!.rejectionReason).toBe("Not ready.");
+    });
+
+    it("DECIDE_COMPETITION_TEAM is idempotent for a repeated identical decision, but rejects a conflicting re-decision", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Idempotent FC", proposer.gamingMemberId);
+
+      const first = await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      const second = await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      expect(second.competitionTeamMembershipId).toBe(first.competitionTeamMembershipId);
+      expect(second.decidedAt).toBe(first.decidedAt);
+
+      await expect(decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "REJECT", "changed my mind")).rejects.toBeInstanceOf(TeamDecisionAlreadyMadeError);
+    });
+
+    it("acceptance is hard-capped at four — a fifth ACCEPT attempt fails with TeamCapacityReachedError, and the rejected fifth team's own row is untouched", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposers = await Promise.all([1, 2, 3, 4, 5].map((i) => registeredMember(ctx.competitionId, `Proposer ${i}`)));
+      const proposals = [];
+      for (let i = 0; i < 5; i++) {
+        proposals.push(await proposeCompetitionTeam(repo, ctx.competitionId, `Team ${i}`, proposers[i].gamingMemberId));
+      }
+      for (let i = 0; i < 4; i++) {
+        const decision = await decideCompetitionTeam(repo, proposals[i].competitionTeamId, ctx.organizerId, "APPROVE", null);
+        expect(decision.status).toBe("ACCEPTED");
+      }
+      await expect(decideCompetitionTeam(repo, proposals[4].competitionTeamId, ctx.organizerId, "APPROVE", null)).rejects.toBeInstanceOf(TeamCapacityReachedError);
+
+      const fifthTeam = await repo.getCompetitionTeamById(proposals[4].competitionTeamId);
+      expect(fifthTeam!.status).toBe("PENDING_ORGANIZER_APPROVAL"); // untouched — organizer may still explicitly reject it later
+    });
+  });
+
+  describe("captaincy and membership exclusivity across proposal and join-request paths", () => {
+    it("a member holding an active captaincy (pending or accepted) cannot be approved into another team via join-request", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await registeredMember(ctx.competitionId, "Captain");
+      await proposeCompetitionTeam(repo, ctx.competitionId, "Own Team", captain.gamingMemberId);
+
+      const otherProposer = await registeredMember(ctx.competitionId, "Other Proposer");
+      const otherTeam = await proposeCompetitionTeam(repo, ctx.competitionId, "Other Team", otherProposer.gamingMemberId);
+      await decideCompetitionTeam(repo, otherTeam.competitionTeamId, ctx.organizerId, "APPROVE", null);
+
+      // The early, friendly rejection at request time (captain already holds an active role).
+      await expect(requestJoinTeam(repo, ctx.competitionId, otherTeam.competitionTeamId, captain.gamingMemberId)).rejects.toBeInstanceOf(AlreadyCaptainOrMemberError);
+    });
+
+    it("a confirmed team member cannot also propose a team (the reverse exclusivity direction) — reported as AlreadyTeamMemberError, the more precise of the two exclusivity errors for a MEMBER (as opposed to a captain)", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await registeredMember(ctx.competitionId, "Captain");
+      const team = await proposeCompetitionTeam(repo, ctx.competitionId, "Home Team", captain.gamingMemberId);
+      await decideCompetitionTeam(repo, team.competitionTeamId, ctx.organizerId, "APPROVE", null);
+
+      const joiner = await registeredMember(ctx.competitionId, "Joiner");
+      const joinRequest = await requestJoinTeam(repo, ctx.competitionId, team.competitionTeamId, joiner.gamingMemberId);
+      await decideJoinRequest(repo, joinRequest.competitionJoinRequestId, captain.gamingMemberId, "APPROVE", false);
+
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "Second Team", joiner.gamingMemberId)).rejects.toBeInstanceOf(AlreadyTeamMemberError);
+    });
+
+    it("request-join against a PENDING_ORGANIZER_APPROVAL team fails with TeamNotAcceptedError — an invitation opened before acceptance cannot be used to join", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Still Pending FC", proposer.gamingMemberId);
+      const wouldBeJoiner = await registeredMember(ctx.competitionId, "Would-be Joiner");
+
+      await expect(requestJoinTeam(repo, ctx.competitionId, proposal.competitionTeamId, wouldBeJoiner.gamingMemberId)).rejects.toBeInstanceOf(TeamNotAcceptedError);
+    });
+
+    it("request-join against a REJECTED team also fails with TeamNotAcceptedError", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Proposer");
+      const proposal = await proposeCompetitionTeam(repo, ctx.competitionId, "Doomed FC", proposer.gamingMemberId);
+      await decideCompetitionTeam(repo, proposal.competitionTeamId, ctx.organizerId, "REJECT", "Not viable.");
+      const wouldBeJoiner = await registeredMember(ctx.competitionId, "Would-be Joiner");
+
+      await expect(requestJoinTeam(repo, ctx.competitionId, proposal.competitionTeamId, wouldBeJoiner.gamingMemberId)).rejects.toBeInstanceOf(TeamNotAcceptedError);
+    });
+  });
+
+  describe("concurrency — real Postgres, not merely an application precheck", () => {
+    it("concurrent fifth-team accept attempts cannot produce five accepted teams — the advisory lock plus the recount serializes them correctly", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposers = await Promise.all([1, 2, 3, 4, 5].map((i) => registeredMember(ctx.competitionId, `Racer ${i}`)));
+      const proposals = [];
+      for (let i = 0; i < 5; i++) {
+        proposals.push(await proposeCompetitionTeam(repo, ctx.competitionId, `Racer Team ${i}`, proposers[i].gamingMemberId));
+      }
+      // Accept the first three sequentially, then race the last two for the final slot.
+      for (let i = 0; i < 3; i++) {
+        await decideCompetitionTeam(repo, proposals[i].competitionTeamId, ctx.organizerId, "APPROVE", null);
+      }
+      const results = await Promise.allSettled([
+        decideCompetitionTeam(repo, proposals[3].competitionTeamId, ctx.organizerId, "APPROVE", null),
+        decideCompetitionTeam(repo, proposals[4].competitionTeamId, ctx.organizerId, "APPROVE", null),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(TeamCapacityReachedError);
+
+      const teams = await repo.getCompetitionTeams(ctx.competitionId);
+      expect(teams.filter((t) => t.status === "ACCEPTED")).toHaveLength(4);
+    });
+
+    it("concurrent duplicate-normalized-name proposals produce at most one active (non-rejected) proposal", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposerA = await registeredMember(ctx.competitionId, "Proposer A");
+      const proposerB = await registeredMember(ctx.competitionId, "Proposer B");
+
+      const results = await Promise.allSettled([
+        proposeCompetitionTeam(repo, ctx.competitionId, "Race Condition FC", proposerA.gamingMemberId),
+        proposeCompetitionTeam(repo, ctx.competitionId, "race condition fc", proposerB.gamingMemberId),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(DuplicateTeamNameError);
+
+      const teams = await repo.getCompetitionTeams(ctx.competitionId);
+      expect(teams.filter((t) => t.status !== "REJECTED")).toHaveLength(1);
+    });
+
+    it("a proposal race and a membership-approval race for the SAME member cannot place them across conflicting teams", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const contested = await registeredMember(ctx.competitionId, "Contested Member");
+      const otherProposer = await registeredMember(ctx.competitionId, "Other Proposer");
+      const otherTeam = await proposeCompetitionTeam(repo, ctx.competitionId, "Other Team", otherProposer.gamingMemberId);
+      await decideCompetitionTeam(repo, otherTeam.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      const joinRequest = await requestJoinTeam(repo, ctx.competitionId, otherTeam.competitionTeamId, contested.gamingMemberId);
+
+      // Race: the contested member's own team proposal vs. the captain approving their join request into a DIFFERENT team.
+      const results = await Promise.allSettled([
+        proposeCompetitionTeam(repo, ctx.competitionId, "Contested Team", contested.gamingMemberId),
+        decideJoinRequest(repo, joinRequest.competitionJoinRequestId, otherProposer.gamingMemberId, "APPROVE", false),
+      ]);
+      const fulfilledCount = results.filter((r) => r.status === "fulfilled").length;
+      expect(fulfilledCount).toBe(1); // exactly one of the two conflicting outcomes wins
+
+      const membership = await repo.getMyTeamMembership(ctx.competitionId, contested.gamingMemberId);
+      const proposedTeams = (await repo.getCompetitionTeams(ctx.competitionId)).filter((t) => t.captainGamingMemberId === contested.gamingMemberId);
+      // Never both: a confirmed membership on one team AND an active captaincy proposal on another.
+      expect(membership !== null && proposedTeams.some((t) => t.status !== "REJECTED")).toBe(false);
+    });
+  });
+
+  describe("organizer-created teams migrate/insert truthfully", () => {
+    it("an organizer-created team is ACCEPTED/ORGANIZER_CREATED from the moment it is created, and ADD_COMPETITION_TEAM still works from TEAM_REGISTRATION_OPEN (not only DRAFT)", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await createRealGamingMember("Organizer-Assigned Captain");
+      const team = await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Organizer Team", captain.gamingMemberId);
+
+      const row = await repo.getCompetitionTeamById(team.competitionTeamId);
+      expect(row!.status).toBe("ACCEPTED");
+      expect(row!.provenance).toBe("ORGANIZER_CREATED");
+    });
+
+    it("an organizer cannot assign the same captain to two teams in the same competition (the shared one-active-captaincy index applies to organizer-created teams too)", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const sharedCaptain = await createRealGamingMember("Double-Booked Captain");
+      await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team One", sharedCaptain.gamingMemberId);
+
+      await expect(addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team Two", sharedCaptain.gamingMemberId)).rejects.toBeInstanceOf(AlreadyCaptainOrMemberError);
     });
   });
 });

@@ -120,19 +120,81 @@ const content = document.getElementById("content");
 // unit-tested competitionsIntent.js loaded above; this page only ever
 // supplies real location/history values to it and applies the result.
 
-/** Reflects the currently-viewed competition into the URL (same page, no navigation) using only a server-confirmed id. */
-function setCompetitionIntentInUrl(competitionId) {
-  const next = CompetitionsIntent.computeUrlWithCompetitionId(window.location.href, competitionId);
+/** Reflects the currently-viewed competition (and, for an opened invitation, its team) into the URL (same page, no navigation) using only server-confirmed ids. */
+function setIntentInUrl(competitionId, teamId) {
+  const next = CompetitionsIntent.computeUrlWithIntent(window.location.href, competitionId, teamId || null);
   if (next) window.history.replaceState(null, "", next);
 }
 
-/** Clears any competition intent from the URL. */
-function clearCompetitionIntentFromUrl() {
-  const next = CompetitionsIntent.computeUrlWithoutCompetitionId(window.location.href);
+/** Clears any competition/team intent from the URL. */
+function clearIntentFromUrl() {
+  const next = CompetitionsIntent.computeUrlWithoutIntent(window.location.href);
   if (next) window.history.replaceState(null, "", next);
 }
 
 let currentCompetitionId = CompetitionsIntent.getIntentCompetitionIdFromSearch(window.location.search);
+// The teamId intent (UG-CR-RPT-041/042 §8/§11) is only ever meaningful
+// alongside a competitionId — an invitation always carries both. It is
+// preserved as-is across sign-in/profile-completion (never cleared
+// here), exactly like currentCompetitionId already was, so the SAME
+// in-page sign-in panel naturally resumes the exact invited team once
+// authentication completes.
+let currentTeamId = currentCompetitionId ? CompetitionsIntent.getIntentTeamIdFromSearch(window.location.search) : null;
+
+/** Human-readable label for a raw enum value this page renders (competition/fixture state, team status) — never the raw underscored string. */
+function humanizeState(kind, value) {
+  const labels = {
+    competition: {
+      DRAFT: "Not yet open",
+      TEAM_REGISTRATION_OPEN: "Open for team registration",
+      READY_TO_PUBLISH: "Finalizing bracket",
+      PUBLISHED: "In progress",
+      COMPLETE: "Complete",
+      CANCELLED_WITHOUT_CHAMPION: "Cancelled",
+    },
+    teamStatus: {
+      PENDING_ORGANIZER_APPROVAL: "Pending approval",
+      ACCEPTED: "Accepted",
+      REJECTED: "Not accepted",
+    },
+  };
+  return (labels[kind] && labels[kind][value]) || String(value).replace(/_/g, " ");
+}
+
+/** Builds the safe, non-secret invitation deep link for an accepted team — competitionId + teamId only (accepted decisions §10; UG-CR-RPT-041/042 §8). */
+function buildInvitationLink(competitionId, teamId) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("competitionId", competitionId);
+  url.searchParams.set("teamId", teamId);
+  return url.toString();
+}
+
+/** Copy-to-clipboard with a safe fallback for a browser/context without Clipboard API access — never throws, always reports success/failure via the returned boolean. */
+async function copyTextSafely(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (err) {
+    // fall through to the manual-selection fallback below
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch (err) {
+    return false;
+  }
+}
 
 function el(html) {
   const div = document.createElement("div");
@@ -191,15 +253,15 @@ async function renderCompetitionList() {
   for (const c of competitions) {
     const row = el(`<div class="team-row" style="cursor:pointer" data-id="${c.competitionId}">
       <span>${c.name}</span>
-      <span class="status-pill ${c.state === "COMPLETE" ? "good" : c.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${c.state}</span>
+      <span class="status-pill ${c.state === "COMPLETE" ? "good" : c.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${humanizeState("competition", c.state)}</span>
     </div>`);
-    row.addEventListener("click", () => { currentCompetitionId = c.competitionId; setCompetitionIntentInUrl(c.competitionId); renderApp(); });
+    row.addEventListener("click", () => { currentCompetitionId = c.competitionId; currentTeamId = null; setIntentInUrl(c.competitionId, null); renderApp(); });
     wrap.appendChild(row);
   }
   return wrap;
 }
 
-async function renderCompetitionDetail(competitionId) {
+async function renderCompetitionDetail(competitionId, teamId) {
   const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);
   if (res.status !== 200) {
     // A malformed, expired, or otherwise unresolvable intent (including
@@ -208,7 +270,8 @@ async function renderCompetitionDetail(competitionId) {
     // the URL, with an explicit path back to the list rather than a
     // dead-end message.
     currentCompetitionId = null;
-    clearCompetitionIntentFromUrl();
+    currentTeamId = null;
+    clearIntentFromUrl();
     const wrap = el(`<div></div>`);
     wrap.appendChild(el(`<a class="back-link" style="padding:0;margin:0 0 14px;" id="back-to-list">← All competitions</a>`));
     wrap.appendChild(el(`<div class="empty-state">${(res.json && res.json.error) || "This competition could not be found."}</div>`));
@@ -216,29 +279,39 @@ async function renderCompetitionDetail(competitionId) {
     return wrap;
   }
   const view = res.json.view;
-  const { competition, teams, fixtures, myRegistration, myTeamMembership, myPendingJoinRequest, myPersistentRecords } = view;
+  const {
+    competition, teams, pendingTeamProposals, rejectedTeamProposals, myTeamProposals, fixtures,
+    myRegistration, myTeamMembership, myTeamMemberships, myPendingJoinRequest, myPersistentRecords, isOrganizer,
+  } = view;
   const authState = await UrbanoAuth.getState();
   const myGamingMemberId = authState.gamingMemberId;
 
-  // Reflect the server-CONFIRMED id (never the raw client-supplied one
+  // Reflect the server-CONFIRMED ids (never the raw client-supplied ones
   // directly) back into the URL, so a reload/bookmark/share of this
-  // exact page returns here again.
-  setCompetitionIntentInUrl(competition.competitionId);
+  // exact page returns here again. teamId is only ever set here to a
+  // value that came from an ALREADY-validated intent (see initializePage
+  // below) — this call never re-derives it from anything untrusted.
+  setIntentInUrl(competition.competitionId, teamId || null);
 
   const wrap = el(`<div></div>`);
   wrap.appendChild(el(`<a class="back-link" style="padding:0;margin:0 0 14px;" id="back-to-list">← All competitions</a>`));
-  wrap.querySelector("#back-to-list").addEventListener("click", () => { currentCompetitionId = null; clearCompetitionIntentFromUrl(); renderApp(); });
+  wrap.querySelector("#back-to-list").addEventListener("click", () => { currentCompetitionId = null; currentTeamId = null; clearIntentFromUrl(); renderApp(); });
 
   wrap.appendChild(el(`<div class="card accent">
     <h1>${competition.name}</h1>
-    <span class="status-pill ${competition.state === "COMPLETE" ? "good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${competition.state}</span>
+    <span class="status-pill ${competition.state === "COMPLETE" ? "good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? "bad" : ""}">${humanizeState("competition", competition.state)}</span>
     ${competition.cancelledReason ? `<p class="msg error">${competition.cancelledReason}</p>` : ""}
   </div>`));
 
-  // --- Registration ---
+  const acceptingRegistration = competition.state === "TEAM_REGISTRATION_OPEN" || competition.state === "READY_TO_PUBLISH" || competition.state === "PUBLISHED";
+  const teamRegistrationOpen = competition.state === "TEAM_REGISTRATION_OPEN";
+
+  // --- Registration — a separate, distinct state from team proposal/
+  // membership (URBANO identity continuity: these must never be
+  // visually conflated). ---
   if (!myRegistration) {
-    if (competition.state !== "PUBLISHED") {
-      wrap.appendChild(el(`<div class="card"><p class="msg">Registration opens once the organizer publishes this competition.</p></div>`));
+    if (!acceptingRegistration) {
+      wrap.appendChild(el(`<div class="card"><p class="msg">Registration opens once the organizer opens team registration for this tournament.</p></div>`));
     } else {
       const regCard = el(`<div class="card">
         <h2>Register</h2>
@@ -257,13 +330,50 @@ async function renderCompetitionDetail(competitionId) {
     return wrap;
   }
 
-  // --- Team selection / join request ---
+  // --- Team proposal / pending / rejected — a separate, distinct state
+  // from confirmed team membership. myTeamProposals never includes an
+  // ACCEPTED row (that becomes myTeamMembership instead, via the SAME
+  // atomic organizer-acceptance call — never a second, separate step). ---
+  const myPendingProposal = myTeamProposals.find((t) => t.status === "PENDING_ORGANIZER_APPROVAL");
+  const myRejectedProposals = myTeamProposals.filter((t) => t.status === "REJECTED");
+
   if (!myTeamMembership) {
-    if (myPendingJoinRequest) {
+    for (const rejected of myRejectedProposals) {
+      wrap.appendChild(el(`<div class="card">
+        <h2>Your Team Proposal</h2>
+        <p class="msg">Your proposed team <strong>${rejected.name}</strong> was not accepted.</p>
+        ${rejected.rejectionReason ? `<p class="msg error">Reason: ${rejected.rejectionReason}</p>` : ""}
+      </div>`));
+    }
+
+    if (myPendingProposal) {
+      wrap.appendChild(el(`<div class="card"><h2>Your Team Proposal</h2><p class="msg">Your proposed team <strong>${myPendingProposal.name}</strong> is pending the organizer's approval.</p></div>`));
+    } else if (myPendingJoinRequest) {
       wrap.appendChild(el(`<div class="card"><p class="msg">Your request to join a team is pending the captain's approval.</p></div>`));
     } else {
-      const teamsCard = el(`<div class="card"><h2>Choose a Team</h2><div class="team-list" id="teams-list"></div><p class="msg" id="join-msg"></p></div>`);
+      if (teamRegistrationOpen) {
+        const createCard = el(`<div class="card">
+          <h2>Create Your Team</h2>
+          <p class="msg">Propose a team for this tournament — you'll be its captain once the organizer accepts it.</p>
+          <div class="field"><input id="new-team-name" placeholder="Team name" /></div>
+          <button class="btn-primary" id="btn-create-team">Propose Team</button>
+          <p class="msg" id="create-team-msg"></p>
+        </div>`);
+        createCard.querySelector("#btn-create-team").addEventListener("click", async () => {
+          const name = createCard.querySelector("#new-team-name").value.trim();
+          if (!name) { setFormMsg(createCard, "#create-team-msg", "A team name is required.", "error"); return; }
+          const r = await authedFetch(`/api/gaming/competitions/${competitionId}/teams/propose`, { method: "POST", body: JSON.stringify({ name }) });
+          if (r.status === 201) renderApp();
+          else setFormMsg(createCard, "#create-team-msg", (r.json && r.json.error) || "Failed to propose team.", "error");
+        });
+        wrap.appendChild(createCard);
+      }
+
+      const teamsCard = el(`<div class="card"><h2>Join a Team</h2><div class="team-list" id="teams-list"></div><p class="msg" id="join-msg"></p></div>`);
       const list = teamsCard.querySelector("#teams-list");
+      if (teams.length === 0) {
+        list.appendChild(el(`<p class="msg">No accepted teams yet — check back soon, or create your own above.</p>`));
+      }
       for (const t of teams) {
         const row = el(`<div class="team-row"><span>${t.name}</span><button class="btn-secondary" data-team="${t.competitionTeamId}">Request to Join</button></div>`);
         row.querySelector("button").addEventListener("click", async () => {
@@ -278,7 +388,51 @@ async function renderCompetitionDetail(competitionId) {
   } else {
     const myTeam = teams.find((t) => t.competitionTeamId === myTeamMembership.competitionTeamId);
     const isCaptain = myTeam && myTeam.captainGamingMemberId === myGamingMemberId;
-    wrap.appendChild(el(`<div class="card"><h2>Your Team</h2><p class="msg">You are a member of <strong>${myTeam ? myTeam.name : "?"}</strong>${isCaptain ? " — you are the captain." : "."}</p></div>`));
+    const teamCard = el(`<div class="card"><h2>Your Team</h2><p class="msg">You are a member of <strong>${myTeam ? myTeam.name : "?"}</strong>${isCaptain ? " — you are the captain." : "."}</p>
+      <div id="team-members-list"></div>
+    </div>`);
+    const membersList = teamCard.querySelector("#team-members-list");
+    if (myTeamMemberships && myTeamMemberships.length > 0) {
+      membersList.appendChild(el(`<h3>Confirmed Members</h3>`));
+      for (const m of myTeamMemberships) {
+        membersList.appendChild(el(`<div class="record-row"><span>${m.gamingMemberDisplayName || "Member"}</span>${m.gamingMemberId === myTeam.captainGamingMemberId ? '<span class="status-pill gold">Captain</span>' : ""}</div>`));
+      }
+    }
+    wrap.appendChild(teamCard);
+
+    // --- Invitation — captain (or the organizer, for any accepted team
+    // — accepted decisions §3) only, and only once the team is ACCEPTED
+    // (myTeamMembership existing already guarantees this). Navigation
+    // only: the link carries competitionId + teamId and nothing else. ---
+    if (isCaptain && myTeam) {
+      const link = buildInvitationLink(competitionId, myTeam.competitionTeamId);
+      const inviteCard = el(`<div class="card">
+        <h2>Invite Teammates</h2>
+        <p class="msg">Share this link so others can join <strong>${myTeam.name}</strong>. Opening it never adds anyone automatically — they still register and request to join.</p>
+        <div class="field"><input id="invite-link" value="${link}" readonly style="font-size:12.5px;" /></div>
+        <div class="checkbox-row" style="gap:8px;">
+          <button class="btn-secondary" id="btn-copy-invite">Copy Invitation Link</button>
+          <button class="btn-secondary" id="btn-share-invite" style="display:none;">Share</button>
+        </div>
+        <p class="msg" id="invite-msg"></p>
+      </div>`);
+      inviteCard.querySelector("#btn-copy-invite").addEventListener("click", async () => {
+        const ok = await copyTextSafely(link);
+        setFormMsg(inviteCard, "#invite-msg", ok ? "Link copied." : "Could not copy automatically — select and copy the link above.", ok ? "success" : "error");
+      });
+      if (typeof navigator.share === "function") {
+        const shareBtn = inviteCard.querySelector("#btn-share-invite");
+        shareBtn.style.display = "";
+        shareBtn.addEventListener("click", async () => {
+          try {
+            await navigator.share({ title: `Join ${myTeam.name} — ${competition.name}`, url: link });
+          } catch (err) {
+            // A cancelled share sheet is not an error — leave the message untouched.
+          }
+        });
+      }
+      wrap.appendChild(inviteCard);
+    }
   }
 
   // Pending join requests for any team this viewer captains — shown
@@ -301,7 +455,7 @@ async function renderCompetitionDetail(competitionId) {
       const pending = (r.json && r.json.joinRequests) || [];
       if (pending.length === 0) { listEl.appendChild(el(`<p class="msg">No pending requests.</p>`)); return; }
       for (const jr of pending) {
-        const row = el(`<div class="team-row"><span>Member ${jr.requestingGamingMemberId.slice(0, 8)}…</span>
+        const row = el(`<div class="team-row"><span>${jr.requestingGamingMemberDisplayName || "Member"}</span>
           <span><button class="btn-secondary" data-approve="${jr.competitionJoinRequestId}">Approve</button> <button class="btn-secondary" data-reject="${jr.competitionJoinRequestId}">Reject</button></span></div>`);
         row.querySelector("[data-approve]").addEventListener("click", async () => {
           await authedFetch(`/api/gaming/competitions/join-requests/${jr.competitionJoinRequestId}/decide`, { method: "POST", body: JSON.stringify({ decision: "APPROVE" }) });
@@ -449,12 +603,16 @@ async function renderCompetitionDetail(competitionId) {
 // first-time "choose a display name" step) is a plain server call with
 // no such event of its own, so a FIRST-TIME member's real transition
 // into "authenticated" would otherwise never re-trigger renderApp(),
-// leaving this exact intent-restoration screen stuck even though the
-// member is, by then, genuinely signed in. This poll is the local,
-// narrowly-scoped fix: while showing the "sign in to continue" message
-// with a pending intent, briefly re-check auth state until it resolves
-// or a short timeout elapses — never fetching or mutating anything
-// itself, and never running once the authenticated view is showing.
+// leaving the "sign in to continue" screen stuck even though the member
+// is, by then, genuinely signed in — including on a fresh landing with
+// no invitation intent at all (UG-CR-RPT-041/042 §12: this is squarely
+// the "member without an invitation" journey's own sign-in step, so it
+// must resolve on its own, not only when an invitation happened to be
+// present). This poll is the local, narrowly-scoped fix: while showing
+// the "sign in to continue" message, briefly re-check auth state until
+// it resolves or a short timeout elapses — never fetching or mutating
+// anything itself, and never running once the authenticated view is
+// showing.
 let intentAuthPollTimer = null;
 function stopIntentAuthPoll() {
   if (intentAuthPollTimer) { clearInterval(intentAuthPollTimer); intentAuthPollTimer = null; }
@@ -486,31 +644,71 @@ function startIntentAuthPoll() {
 // latest call's output is ever shown.
 let renderGeneration = 0;
 
+/**
+ * The unauthenticated invitation landing (UG-CR-RPT-041/042 §8/§9/§12):
+ * a visitor who opened a `?competitionId=&teamId=` link before signing
+ * in must still see WHAT they were invited to. Calls the one guarded,
+ * unauthenticated preview route — no bearer token is ever attached, and
+ * this performs no mutation of any kind. Rendered branded, truthful, and
+ * safe even for a fabricated/mismatched pair or a pending/rejected team.
+ */
+async function renderInvitationPreview(competitionId, teamId) {
+  const res = await fetch(`/api/gaming/competitions/${competitionId}/teams/${teamId}/invitation-preview`, { cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (res.status !== 200 || !json || !json.preview) {
+    return el(`<div class="empty-state">${(json && json.error) || "This invitation link is no longer valid."}</div>`);
+  }
+  const p = json.preview;
+  let statusLine;
+  if (p.teamAccepted) {
+    statusLine = `<p class="msg">Sign in with URBANO to register and request to join.</p>`;
+  } else if (p.teamStatus === "PENDING_ORGANIZER_APPROVAL") {
+    statusLine = `<p class="msg">This team is still awaiting the organizer's approval — you can create your URBANO identity now and come back once it's accepted.</p>`;
+  } else {
+    statusLine = `<p class="msg error">This team was not accepted for this tournament.</p>`;
+  }
+  return el(`<div class="card accent">
+    <h1>You're invited</h1>
+    <p class="msg"><strong>${p.competitionName}</strong> — <span class="status-pill">${humanizeState("competition", p.competitionState)}</span></p>
+    <p class="msg">Team: <strong>${p.teamName}</strong> <span class="status-pill ${p.teamAccepted ? "good" : p.teamStatus === "REJECTED" ? "bad" : ""}">${humanizeState("teamStatus", p.teamStatus)}</span></p>
+    <p class="msg">Captain: ${p.captainDisplayName || "Unknown"}</p>
+    ${statusLine}
+  </div>`);
+}
+
 async function renderApp() {
   const myGeneration = ++renderGeneration;
   const authState = await UrbanoAuth.getState();
   if (myGeneration !== renderGeneration) return;
 
   if (authState.status !== "authenticated") {
-    // currentCompetitionId, if present, came only from a validated URL
-    // query parameter (or a prior successful, server-confirmed view) —
-    // it is preserved as-is across sign-in (never cleared here) so that
-    // completing the SAME in-page sign-in panel naturally resumes this
-    // exact view once authentication actually completes. Nothing is
-    // fetched, mutated, or auto-submitted while signed out — this
-    // branch only ever renders a static message (plus the poll above,
-    // which itself only ever calls the read-only getState()).
-    const message = currentCompetitionId
-      ? "Sign in with URBANO to continue to this competition."
-      : "Sign in with URBANO to view and join Competitions.";
+    // currentCompetitionId/currentTeamId, if present, came only from a
+    // validated URL query parameter (or a prior successful, server-
+    // confirmed view) — both are preserved as-is across sign-in (never
+    // cleared here) so that completing the SAME in-page sign-in panel
+    // naturally resumes this exact view once authentication actually
+    // completes. Nothing is fetched, mutated, or auto-submitted while
+    // signed out beyond the one safe, unauthenticated invitation
+    // preview read below (plus the poll above, which itself only ever
+    // calls the read-only getState()).
     content.innerHTML = "";
-    content.appendChild(el(`<div class="empty-state">${message}</div>`));
-    if (currentCompetitionId) startIntentAuthPoll();
+    if (currentCompetitionId && currentTeamId) {
+      const preview = await renderInvitationPreview(currentCompetitionId, currentTeamId);
+      if (myGeneration !== renderGeneration) return;
+      content.appendChild(preview);
+      content.appendChild(el(`<div class="empty-state">Sign in with URBANO to continue.</div>`));
+    } else {
+      const message = currentCompetitionId
+        ? "Sign in with URBANO to continue to this competition."
+        : "Sign in with URBANO to view and join Competitions.";
+      content.appendChild(el(`<div class="empty-state">${message}</div>`));
+    }
+    startIntentAuthPoll();
     return;
   }
   stopIntentAuthPoll();
   const rendered = currentCompetitionId
-    ? await renderCompetitionDetail(currentCompetitionId)
+    ? await renderCompetitionDetail(currentCompetitionId, currentTeamId)
     : await renderCompetitionList();
   if (myGeneration !== renderGeneration) return;
   content.innerHTML = "";

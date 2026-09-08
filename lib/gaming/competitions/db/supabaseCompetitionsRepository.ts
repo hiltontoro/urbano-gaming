@@ -21,6 +21,9 @@ import {
   InvalidForfeitingTeamError, UnsupportedActivityKeyError, MinimumParticipationNotMetError,
   UnsupportedTargetFactTypeError, TargetFactNotFoundError, TargetFactFixtureMismatchError,
   TargetFactNotCurrentError, DisputeNotAuthorizedError,
+  CompetitionNotReadyToPublishError, TeamRegistrationNotOpenError, TeamRegistrationCapacityNotReachedError,
+  TeamCapacityReachedError, TeamDecisionAlreadyMadeError, DuplicateTeamNameError, AlreadyCaptainOrMemberError,
+  TeamNotAcceptedError,
 } from "../types";
 
 /** Translates a P0001-coded RPC error into its typed domain error. */
@@ -71,6 +74,14 @@ function translateError(error: { code?: string; message?: string }): Error {
     ["TARGET_FACT_FIXTURE_MISMATCH", () => new TargetFactFixtureMismatchError()],
     ["TARGET_FACT_NOT_CURRENT", () => new TargetFactNotCurrentError()],
     ["DISPUTE_NOT_AUTHORIZED", () => new DisputeNotAuthorizedError()],
+    ["COMPETITION_NOT_READY_TO_PUBLISH", () => new CompetitionNotReadyToPublishError()],
+    ["TEAM_REGISTRATION_NOT_OPEN", () => new TeamRegistrationNotOpenError(msg)],
+    ["TEAM_REGISTRATION_CAPACITY_NOT_REACHED", () => new TeamRegistrationCapacityNotReachedError(msg)],
+    ["TEAM_CAPACITY_REACHED", () => new TeamCapacityReachedError()],
+    ["TEAM_DECISION_ALREADY_MADE", () => new TeamDecisionAlreadyMadeError()],
+    ["DUPLICATE_TEAM_NAME", () => new DuplicateTeamNameError()],
+    ["ALREADY_CAPTAIN_OR_MEMBER", () => new AlreadyCaptainOrMemberError()],
+    ["TEAM_NOT_ACCEPTED", () => new TeamNotAcceptedError()],
   ];
   for (const [code, build] of table) {
     if (error.code === "P0001" && msg.includes(code)) return build();
@@ -104,6 +115,43 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     if (error) throw translateError(error);
     const row = Array.isArray(data) ? data[0] : data;
     return { competitionTeamId: row.competition_team_id, createdAt: row.created_at };
+  }
+
+  async openTeamRegistration(competitionId: string, organizerGamingMemberId: string) {
+    const { data, error } = await this.client.rpc("open_team_registration_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionId: row.competition_id, state: row.state };
+  }
+
+  async proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string) {
+    const { data, error } = await this.client.rpc("propose_competition_team_atomically", {
+      p_competition_id: competitionId, p_name: name, p_proposing_gaming_member_id: proposingGamingMemberId,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionTeamId: row.competition_team_id, status: row.status, createdAt: row.created_at };
+  }
+
+  async decideCompetitionTeam(competitionTeamId: string, organizerGamingMemberId: string, decision: "APPROVE" | "REJECT", reason: string | null) {
+    const { data, error } = await this.client.rpc("decide_competition_team_atomically", {
+      p_competition_team_id: competitionTeamId, p_organizer_gaming_member_id: organizerGamingMemberId,
+      p_decision: decision, p_reason: reason,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionTeamId: row.competition_team_id, status: row.status, decidedAt: row.decided_at, competitionTeamMembershipId: row.competition_team_membership_id ?? null };
+  }
+
+  async closeTeamRegistration(competitionId: string, organizerGamingMemberId: string) {
+    const { data, error } = await this.client.rpc("close_team_registration_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionId: row.competition_id, state: row.state };
   }
 
   async publishCompetition(
@@ -289,14 +337,32 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
   async getCompetitionTeams(competitionId: string): Promise<CompetitionTeamRecord[]> {
     const { data, error } = await this.client.from("competition_teams").select("*").eq("competition_id", competitionId);
     if (error) throw error;
-    return (data ?? []).map((r) => ({ competitionTeamId: r.competition_team_id, competitionId: r.competition_id, name: r.name, captainGamingMemberId: r.captain_gaming_member_id, createdAt: r.created_at }));
+    return (data ?? []).map(mapTeam);
   }
 
   async getCompetitionTeamById(competitionTeamId: string): Promise<CompetitionTeamRecord | null> {
     const { data, error } = await this.client.from("competition_teams").select("*").eq("competition_team_id", competitionTeamId).maybeSingle();
     if (error) throw error;
-    if (!data) return null;
-    return { competitionTeamId: data.competition_team_id, competitionId: data.competition_id, name: data.name, captainGamingMemberId: data.captain_gaming_member_id, createdAt: data.created_at };
+    return data ? mapTeam(data) : null;
+  }
+
+  async getTeamMemberships(competitionTeamId: string): Promise<CompetitionTeamMembershipRecord[]> {
+    const { data, error } = await this.client.from("competition_team_memberships").select("*").eq("competition_team_id", competitionTeamId);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      competitionTeamMembershipId: r.competition_team_membership_id, competitionId: r.competition_id, competitionTeamId: r.competition_team_id,
+      gamingMemberId: r.gaming_member_id, approvedAt: r.approved_at, approvedByGamingMemberId: r.approved_by_gaming_member_id,
+    }));
+  }
+
+  async getDisplayNames(gamingMemberIds: string[]): Promise<Record<string, string>> {
+    const uniqueIds = Array.from(new Set(gamingMemberIds));
+    if (uniqueIds.length === 0) return {};
+    const { data, error } = await this.client.from("gaming_members").select("gaming_member_id, display_name").in("gaming_member_id", uniqueIds);
+    if (error) throw error;
+    const map: Record<string, string> = {};
+    for (const row of data ?? []) map[row.gaming_member_id as string] = row.display_name as string;
+    return map;
   }
 
   async getCompetitionFixtures(competitionId: string): Promise<CompetitionFixtureRecord[]> {
@@ -422,6 +488,16 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
       assists: r.assists, derivedFromFinalizationId: r.derived_from_finalization_id, derivedAt: r.derived_at, isCurrent: r.is_current,
     }));
   }
+}
+
+function mapTeam(r: Record<string, unknown>): CompetitionTeamRecord {
+  return {
+    competitionTeamId: r.competition_team_id as string, competitionId: r.competition_id as string, name: r.name as string,
+    captainGamingMemberId: r.captain_gaming_member_id as string,
+    status: r.status as CompetitionTeamRecord["status"], provenance: r.provenance as CompetitionTeamRecord["provenance"],
+    decidedAt: (r.decided_at as string | null) ?? null, decidedByGamingMemberId: (r.decided_by_gaming_member_id as string | null) ?? null,
+    rejectionReason: (r.rejection_reason as string | null) ?? null, createdAt: r.created_at as string,
+  };
 }
 
 function mapFixture(r: Record<string, unknown>): CompetitionFixtureRecord {

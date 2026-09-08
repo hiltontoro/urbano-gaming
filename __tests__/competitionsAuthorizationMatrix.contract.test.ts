@@ -83,6 +83,10 @@ const COMPETITIONS_TABLES = [
 const COMPETITIONS_RPCS = [
   "create_competition_atomically",
   "add_competition_team_atomically",
+  "open_team_registration_atomically",
+  "propose_competition_team_atomically",
+  "decide_competition_team_atomically",
+  "close_team_registration_atomically",
   "publish_competition_atomically",
   "register_for_competition_atomically",
   "request_join_competition_team_atomically",
@@ -114,6 +118,10 @@ const COMPETITIONS_RPCS = [
 const RPC_ARGS: Record<(typeof COMPETITIONS_RPCS)[number], Record<string, unknown>> = {
   create_competition_atomically: { p_organizer_gaming_member_id: randomUUID(), p_name: "Authz Probe", p_activity_key: "SOCCER_5V5" },
   add_competition_team_atomically: { p_competition_id: randomUUID(), p_organizer_gaming_member_id: randomUUID(), p_name: "Authz Probe", p_captain_gaming_member_id: randomUUID() },
+  open_team_registration_atomically: { p_competition_id: randomUUID(), p_organizer_gaming_member_id: randomUUID() },
+  propose_competition_team_atomically: { p_competition_id: randomUUID(), p_name: "Authz Probe", p_proposing_gaming_member_id: randomUUID() },
+  decide_competition_team_atomically: { p_competition_team_id: randomUUID(), p_organizer_gaming_member_id: randomUUID(), p_decision: "APPROVE", p_reason: null },
+  close_team_registration_atomically: { p_competition_id: randomUUID(), p_organizer_gaming_member_id: randomUUID() },
   publish_competition_atomically: {
     p_competition_id: randomUUID(), p_organizer_gaming_member_id: randomUUID(),
     p_semifinal_1_team_a_id: randomUUID(), p_semifinal_1_team_b_id: randomUUID(),
@@ -142,9 +150,14 @@ const RPC_ARGS: Record<(typeof COMPETITIONS_RPCS)[number], Record<string, unknow
 };
 
 describe("Competitions authorization and direct-access matrix (UG-CR-RPT-030 correction 5)", () => {
-  it(`this file's own table/function lists are kept in sync with the schema (${COMPETITIONS_TABLES.length} tables, ${COMPETITIONS_RPCS.length} functions — cross-checked against \`grep\` over the migration files in UG-CR-RPT-030 §5, not derivable through PostgREST itself since pg_catalog is not exposed to it)`, () => {
+  it(`this file's own table/function lists are kept in sync with the schema (${COMPETITIONS_TABLES.length} tables, ${COMPETITIONS_RPCS.length} functions — cross-checked against \`grep\` over the migration files in UG-CR-RPT-030 §5 / UG-CR-RPT-041/042 §6, not derivable through PostgREST itself since pg_catalog is not exposed to it)`, () => {
+    // Table count unchanged by UG-CR-RPT-041/042 — competition_teams
+    // gained columns, not a new table. Function count grew by 4:
+    // open_team_registration_atomically, propose_competition_team_
+    // atomically, decide_competition_team_atomically, close_team_
+    // registration_atomically.
     expect(COMPETITIONS_TABLES.length).toBe(18);
-    expect(COMPETITIONS_RPCS.length).toBe(16);
+    expect(COMPETITIONS_RPCS.length).toBe(20);
   });
 
   describe.each(COMPETITIONS_TABLES)("table %s", (table) => {

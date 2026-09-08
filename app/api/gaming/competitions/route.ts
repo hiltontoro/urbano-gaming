@@ -4,7 +4,14 @@ import { createCompetition } from "@/lib/gaming/competitions/createCompetition";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/gaming/competitions — every competition (any authenticated Gaming Member; local demo has no public browsing). */
+/**
+ * GET /api/gaming/competitions — every competition the caller may
+ * discover. UG-CR-RPT-041 §4/§7: a DRAFT competition is organizer-only —
+ * an organizer preparing a tournament before opening it must not be
+ * visible to an ordinary member browsing the list. This filter is the
+ * actual privacy boundary; it is enforced here, server-side, on every
+ * request — never left to client-side presentation alone.
+ */
 export async function GET(request: Request) {
   const unavailable = requireCompetitionsSchemaReady();
   if (unavailable) return unavailable;
@@ -17,7 +24,10 @@ export async function GET(request: Request) {
   if ("errorResponse" in auth) return auth.errorResponse;
 
   const repo = buildCompetitionsRepo(credentials);
-  const competitions = await repo.listCompetitions();
+  const allCompetitions = await repo.listCompetitions();
+  const competitions = allCompetitions.filter(
+    (c) => c.state !== "DRAFT" || c.organizerGamingMemberId === auth.gamingMemberId
+  );
   return NextResponse.json({ competitions });
 }
 

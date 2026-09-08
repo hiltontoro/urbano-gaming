@@ -32,7 +32,12 @@ export async function GET(request: Request, { params }: { params: { teamId: stri
     }
 
     const joinRequests = await repo.getPendingJoinRequestsForTeam(params.teamId);
-    return NextResponse.json({ joinRequests });
+    const displayNames = await repo.getDisplayNames(joinRequests.map((jr) => jr.requestingGamingMemberId));
+    const withDisplayNames = joinRequests.map((jr) => ({
+      ...jr,
+      requestingGamingMemberDisplayName: displayNames[jr.requestingGamingMemberId],
+    }));
+    return NextResponse.json({ joinRequests: withDisplayNames });
   } catch (err) {
     const status = statusForCompetitionsError(err);
     if (status) return NextResponse.json({ error: (err as Error).message }, { status });

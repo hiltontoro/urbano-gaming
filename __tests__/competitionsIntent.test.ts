@@ -177,7 +177,9 @@ describe("competitions.html — structural proof that restoring intent never red
   });
 
   it("renderCompetitionDetail always performs a fresh GET on every call — no cached view is ever reused across a restoration", () => {
-    const functionStart = html.indexOf("async function renderCompetitionDetail(competitionId) {");
+    // Signature grew a second parameter, teamId, for the Branded Team
+    // Registration and Invitation Journey (UG-CR-RPT-041/042 §8/§11).
+    const functionStart = html.indexOf("async function renderCompetitionDetail(competitionId, teamId) {");
     expect(functionStart).toBeGreaterThan(-1);
     const fetchStatement = "const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);";
     const fetchIndex = html.indexOf(fetchStatement, functionStart);
@@ -189,11 +191,14 @@ describe("competitions.html — structural proof that restoring intent never red
   });
 
   it("a failed restoration clears the intent from both state and the URL rather than leaving a dead end", () => {
-    expect(html).toContain("currentCompetitionId = null;\n    clearCompetitionIntentFromUrl();");
+    // UG-CR-RPT-041/042 §8/§11: also clears currentTeamId now, and calls
+    // the renamed clearIntentFromUrl() (strips both competitionId and
+    // teamId — see competitionsIntent.js's own computeUrlWithoutIntent).
+    expect(html).toContain("currentCompetitionId = null;\n    currentTeamId = null;\n    clearIntentFromUrl();");
   });
 
-  it("a successful restoration reflects only the server-confirmed competitionId back into the URL, never the raw client-supplied value", () => {
-    expect(html).toContain("setCompetitionIntentInUrl(competition.competitionId);");
+  it("a successful restoration reflects only the server-confirmed competitionId (and, for an opened invitation, teamId) back into the URL, never a raw client-supplied value", () => {
+    expect(html).toContain("setIntentInUrl(competition.competitionId, teamId || null);");
   });
 
   it("no bearer token, OTP code, or service-role credential is ever assigned into a URL or history call", () => {

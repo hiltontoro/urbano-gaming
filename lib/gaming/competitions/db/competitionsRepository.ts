@@ -20,6 +20,10 @@ import type {
   ParticipationAttestationInput,
   StartCompetitionResult,
   AddCompetitionTeamResult,
+  OpenTeamRegistrationResult,
+  ProposeCompetitionTeamResult,
+  DecideCompetitionTeamResult,
+  CloseTeamRegistrationResult,
   PublishCompetitionResult,
   RegisterForCompetitionResult,
   RequestJoinTeamResult,
@@ -47,6 +51,10 @@ import type {
 export interface CompetitionsRepository {
   createCompetition(organizerGamingMemberId: string, name: string, activityKey: string): Promise<StartCompetitionResult>;
   addCompetitionTeam(competitionId: string, organizerGamingMemberId: string, name: string, captainGamingMemberId: string): Promise<AddCompetitionTeamResult>;
+  openTeamRegistration(competitionId: string, organizerGamingMemberId: string): Promise<OpenTeamRegistrationResult>;
+  proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string): Promise<ProposeCompetitionTeamResult>;
+  decideCompetitionTeam(competitionTeamId: string, organizerGamingMemberId: string, decision: "APPROVE" | "REJECT", reason: string | null): Promise<DecideCompetitionTeamResult>;
+  closeTeamRegistration(competitionId: string, organizerGamingMemberId: string): Promise<CloseTeamRegistrationResult>;
   publishCompetition(
     competitionId: string,
     organizerGamingMemberId: string,
@@ -116,6 +124,9 @@ export interface CompetitionsRepository {
   getMyTeamMembership(competitionId: string, gamingMemberId: string): Promise<CompetitionTeamMembershipRecord | null>;
   getMyPendingJoinRequest(competitionId: string, gamingMemberId: string): Promise<CompetitionJoinRequestRecord | null>;
   getPendingJoinRequestsForTeam(competitionTeamId: string): Promise<CompetitionJoinRequestRecord[]>;
+  getTeamMemberships(competitionTeamId: string): Promise<CompetitionTeamMembershipRecord[]>;
+  /** Batched display-name lookup — never a per-id round trip. Missing ids (a deleted/never-created member) are simply absent from the returned map. */
+  getDisplayNames(gamingMemberIds: string[]): Promise<Record<string, string>>;
   getCurrentRoster(competitionFixtureId: string, competitionTeamId: string): Promise<CompetitionRosterRevisionRecord | null>;
   getCheckIns(competitionFixtureId: string): Promise<CompetitionCheckInRecord[]>;
   getCurrentAttestations(competitionFixtureId: string): Promise<CompetitionParticipationAttestationRecord[]>;

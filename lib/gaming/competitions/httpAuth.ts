@@ -47,6 +47,14 @@ import {
   TargetFactFixtureMismatchError,
   TargetFactNotCurrentError,
   DisputeNotAuthorizedError,
+  CompetitionNotReadyToPublishError,
+  TeamRegistrationNotOpenError,
+  TeamRegistrationCapacityNotReachedError,
+  TeamCapacityReachedError,
+  TeamDecisionAlreadyMadeError,
+  DuplicateTeamNameError,
+  AlreadyCaptainOrMemberError,
+  TeamNotAcceptedError,
 } from "./types";
 
 /** Shared boilerplate every app/api/gaming/competitions/* route needs — mirrors lib/gaming/predictions/httpAuth.ts. */
@@ -172,7 +180,15 @@ export function statusForCompetitionsError(err: unknown): number | null {
     err instanceof EvidenceParticipantNotAttestedError ||
     err instanceof RegulationScoreEventMismatchError ||
     err instanceof MinimumParticipationNotMetError ||
-    err instanceof TargetFactNotCurrentError
+    err instanceof TargetFactNotCurrentError ||
+    err instanceof CompetitionNotReadyToPublishError ||
+    err instanceof TeamRegistrationNotOpenError ||
+    err instanceof TeamRegistrationCapacityNotReachedError ||
+    err instanceof TeamCapacityReachedError ||
+    err instanceof TeamDecisionAlreadyMadeError ||
+    err instanceof DuplicateTeamNameError ||
+    err instanceof AlreadyCaptainOrMemberError ||
+    err instanceof TeamNotAcceptedError
   ) {
     return 409;
   }
