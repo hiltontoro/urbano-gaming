@@ -3,6 +3,7 @@ import { joinEvent } from "@/lib/gaming/race/joinEvent";
 import { SupabaseRaceRepository } from "@/lib/gaming/race/db/supabaseRaceRepository";
 import { isValidIdempotencyKey } from "@/lib/gaming/race/idempotencyKey";
 import { RaceEventFullError, RaceEventNotFoundError, RaceIdempotencyKeyConflictError } from "@/lib/gaming/race/types";
+import { requireRaceSchemaReady } from "@/lib/gaming/race/schemaAvailability";
 
 /**
  * POST /api/gaming/race/events/[raceEventId]/join — JOIN_EVENT
@@ -16,6 +17,9 @@ import { RaceEventFullError, RaceEventNotFoundError, RaceIdempotencyKeyConflictE
  * consume the other slot.
  */
 export async function POST(request: Request, { params }: { params: { raceEventId: string } }) {
+  const unavailable = requireRaceSchemaReady();
+  if (unavailable) return unavailable;
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

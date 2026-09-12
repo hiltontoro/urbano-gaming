@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRaceEventProjection } from "@/lib/gaming/race/getProjection";
 import { SupabaseRaceRepository } from "@/lib/gaming/race/db/supabaseRaceRepository";
 import { RaceEventNotFoundError } from "@/lib/gaming/race/types";
+import { requireRaceSchemaReady } from "@/lib/gaming/race/schemaAvailability";
 
 /**
  * GET /api/gaming/race/events/[raceEventId] — GET_PROJECTION
@@ -18,6 +19,9 @@ import { RaceEventNotFoundError } from "@/lib/gaming/race/types";
  * requiring a move first.
  */
 export async function GET(request: Request, { params }: { params: { raceEventId: string } }) {
+  const unavailable = requireRaceSchemaReady();
+  if (unavailable) return unavailable;
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

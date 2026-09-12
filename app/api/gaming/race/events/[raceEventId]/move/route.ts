@@ -12,6 +12,7 @@ import {
   RaceScenarioNotFoundError,
   RaceStaleAttemptStateError,
 } from "@/lib/gaming/race/types";
+import { requireRaceSchemaReady } from "@/lib/gaming/race/schemaAvailability";
 
 /**
  * POST /api/gaming/race/events/[raceEventId]/move — APPLY_MOVE
@@ -24,6 +25,9 @@ import {
  * retry.
  */
 export async function POST(request: Request, { params }: { params: { raceEventId: string } }) {
+  const unavailable = requireRaceSchemaReady();
+  if (unavailable) return unavailable;
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

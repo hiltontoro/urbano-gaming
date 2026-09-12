@@ -106,6 +106,7 @@
     border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
   }
   .scenario-btn[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px rgba(245,241,232,.2); }
+  .scenario-btn:disabled { opacity: .4; cursor: default; }
   .scenario-btn strong { display: block; font-size: 14px; margin-bottom: 3px; }
   .scenario-btn span { display: block; font-size: 12px; color: var(--muted); }
 
@@ -217,8 +218,8 @@
     <div class="scenario-picker" id="scenario-picker" role="group" aria-label="Choose a Towers scenario"></div>
     <button class="btn primary" id="btn-create" disabled>Create a Race</button>
     <div class="btn-row">
-      <input type="text" id="join-code-input" placeholder="Paste a Race event id to join" aria-label="Race event id to join" style="flex:2; padding:11px 12px; border-radius:8px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); font-size:13px;" />
-      <button class="btn" id="btn-join" style="flex:1;">Join</button>
+      <input type="text" id="join-code-input" placeholder="Paste a Race event id to join" aria-label="Race event id to join" disabled style="flex:2; padding:11px 12px; border-radius:8px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); font-size:13px;" />
+      <button class="btn" id="btn-join" disabled style="flex:1;">Join</button>
     </div>
   </div>
 
@@ -290,6 +291,21 @@ let countdownInterval = null;
 let remainingInterval = null;
 let illegalBannerTimeout = null;
 let lastPhase = null;
+
+// -----------------------------------------------------------------------
+// Client-side availability state (Race Disabled-State UI and Polling
+// Containment Correction). One explicit state, never multiple booleans
+// that can drift: "unknown" (nothing has proven the capability safe to
+// use yet — treated identically to "unavailable" for control-gating),
+// "available", "unavailable". This is a UI-layer safety net ON TOP OF
+// the server-side guard (schemaAvailability.ts's requireRaceSchemaReady,
+// present as the literal first statement of all 7 route handlers) — the
+// API remains the sole authority; this state only controls what the
+// page itself offers the user, and separately governs whether passive
+// projection polling runs.
+// -----------------------------------------------------------------------
+let raceAvailability = "unknown";
+const AVAILABILITY_PROBE_ID = "00000000-0000-0000-0000-000000000000";
 
 // -----------------------------------------------------------------------
 // Idempotency key contract (UG-CR-GATE-026) — one shared contract across
@@ -468,6 +484,21 @@ function renderOpBanner(state) {
     el.appendChild(document.createElement("br"));
     el.appendChild(btn);
   }
+  if (state.kind === "error" && typeof state.onCheckAgain === "function") {
+    // The one explicit availability-retry control (Race Disabled-State UI
+    // and Polling Containment Correction) — distinct from a mutation's own
+    // "Retry" above, which resumes THAT specific operation. This button
+    // only ever re-checks availability; it never replays a pending
+    // mutation.
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "btn-check-again";
+    btn.className = "btn primary";
+    btn.textContent = "Check Again";
+    btn.addEventListener("click", state.onCheckAgain);
+    el.appendChild(document.createElement("br"));
+    el.appendChild(btn);
+  }
   if (state.kind === "recovered") {
     recoveredBannerTimeout = setTimeout(() => renderOpBanner(null), 2500);
   }
@@ -485,6 +516,152 @@ function setButtonBusy(id, busy, busyLabel) {
     if (btn.dataset.originalLabel) { btn.textContent = btn.dataset.originalLabel; delete btn.dataset.originalLabel; }
     btn.disabled = false;
     btn.removeAttribute("aria-busy");
+  }
+}
+
+// -----------------------------------------------------------------------
+// Availability-driven control suppression (Race Disabled-State UI and
+// Polling Containment Correction). The server-side guard remains the
+// sole authority for every request; this layer exists only so the page
+// itself never advertises a mutation as actionable while raceAvailability
+// is anything other than "available".
+// -----------------------------------------------------------------------
+const RACE_UNAVAILABLE_FALLBACK_MESSAGE =
+  "URBANO Race is temporarily unavailable while its database is being prepared.";
+
+// Buttons with no OTHER code path that ever sets their own `disabled` —
+// forced disabled here when blocked, and explicitly restored in
+// setAvailable() below, since nothing else will. btn-ready and btn-undo
+// are deliberately excluded from that restoration list: their own
+// game-state logic (the youReady flag in applyProjection, the
+// outcome-in-progress check in updateUndoButton) always correctly
+// re-derives their enabled state on the very next successful projection,
+// which runs immediately after every availability recovery.
+const AVAILABILITY_GATED_BUTTON_IDS = [
+  "btn-join", "btn-organizer-join", "btn-organizer-cancel", "btn-ready", "btn-undo", "btn-live-cancel",
+];
+
+function syncMutationControlsToAvailability() {
+  const blocked = raceAvailability !== "available";
+  const joinInput = document.getElementById("join-code-input");
+  if (joinInput) joinInput.disabled = blocked;
+  AVAILABILITY_GATED_BUTTON_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && blocked) el.disabled = true;
+  });
+}
+
+/**
+ * Confirmed available. Unblocks the controls this function owns outright
+ * (§ AVAILABILITY_GATED_BUTTON_IDS, minus btn-ready/btn-undo — see the
+ * comment there). Never auto-replays a pending mutation: if one is still
+ * preserved, its OWN explicit Retry/Recover affordance is surfaced here
+ * (reannounceUnresolvedOperation) rather than the banner being cleared —
+ * only a subsequent user click on that control may finalize or retry it.
+ */
+function setAvailable() {
+  raceAvailability = "available";
+  ["btn-join", "btn-organizer-join", "btn-organizer-cancel", "btn-live-cancel"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
+  const joinInput = document.getElementById("join-code-input");
+  if (joinInput) joinInput.disabled = false;
+  // Race Disabled-State Defect 1: becoming available must never itself
+  // replay a pending mutation. If one is still preserved (from a reload
+  // that deferred it, or an outage that interrupted it), surface its own
+  // explicit Retry/Recover affordance here instead of clearing the
+  // banner — only a subsequent user click on that control may finalize
+  // or retry it, reusing its original key, payload, caller, and stored
+  // result exactly as persisted.
+  const pending = loadPendingOperation();
+  if (pending) {
+    reannounceUnresolvedOperation(pending);
+  } else {
+    renderOpBanner(null);
+  }
+}
+
+/**
+ * Confirmed unavailable (a genuine 503 from the schema-availability
+ * guard) — the ONLY thing that ever sets this. Stops passive projection
+ * polling immediately and unconditionally, so the request that
+ * discovered this is the LAST automatic one until an explicit Check
+ * Again — polling is never restarted by authentication, rendering, a
+ * countdown tick, or stale local state. The banner itself defers to any
+ * currently in-flight mutation's own banner (matching the prior gate's
+ * !operationInFlight precedent), but the state flip and the polling stop
+ * happen regardless.
+ */
+function setUnavailable(message) {
+  raceAvailability = "unavailable";
+  stopPolling();
+  syncMutationControlsToAvailability();
+  if (!operationInFlight) {
+    renderOpBanner({
+      kind: "error",
+      message: message || RACE_UNAVAILABLE_FALLBACK_MESSAGE,
+      onCheckAgain: handleCheckAgain,
+    });
+  }
+}
+
+/**
+ * The one explicit user action permitted after "unavailable". With a
+ * known raceEventId, startPolling() itself performs exactly one
+ * immediate refreshProjection (which is this click's single request) and
+ * only resumes the 1500ms interval if that request succeeds — a renewed
+ * 503 calls setUnavailable() again (stopPolling() is idempotent), so
+ * polling remains stopped. With no raceEventId yet (still on the landing
+ * card), checkAvailability() performs the equivalent single probe.
+ */
+function handleCheckAgain() {
+  if (raceEventId) {
+    startPolling();
+  } else {
+    checkAvailability();
+  }
+}
+
+/**
+ * Availability probe used only when no raceEventId exists yet (a fresh
+ * landing, or Check Again clicked before ever creating/joining an
+ * event). Reuses the same guarded GET_PROJECTION endpoint every other
+ * availability signal already goes through, against a syntactically
+ * valid but unusable nil UUID that no real event can ever be assigned:
+ * the guard's own 503 means unavailable; a definite non-503 outcome (a
+ * 404 from real domain logic, in practice) proves the guard is open,
+ * i.e. available — there is never a real projection to render either
+ * way, so this never calls applyProjection.
+ */
+let checkAvailabilityInFlight = false;
+async function checkAvailability() {
+  // Race Disabled-State Defect 3 (repeated/rapid Check Again must not
+  // overlap probes): a second call while one is already resolving is a
+  // no-op, never a second request.
+  if (checkAvailabilityInFlight) return;
+  checkAvailabilityInFlight = true;
+  try {
+    await getJson(`/api/gaming/race/events/${AVAILABILITY_PROBE_ID}`);
+    setAvailable();
+    renderScenarioPicker();
+  } catch (err) {
+    if (err && err.status === 503) {
+      setUnavailable(err.body && err.body.error);
+      return;
+    }
+    if (err && typeof err.status === "number") {
+      setAvailable();
+      renderScenarioPicker();
+      return;
+    }
+    // A thrown network-level error with no status at all (fetch itself
+    // failed) — genuinely unknown, not reclassified as unavailable OR
+    // available. A later check (reload, or another Check Again click)
+    // will resolve it; this matches the page's existing pattern of never
+    // surfacing a general error affordance for a plain connectivity blip.
+  } finally {
+    checkAvailabilityInFlight = false;
   }
 }
 
@@ -732,8 +909,18 @@ async function finalizeSuccess(envelope, { isResume, buttonId, freshlyReceived }
 function reannounceUnresolvedOperation(pending) {
   const def = OPERATIONS[pending.operationKind];
   if (pending.status === "SUCCESS_RECEIVED") {
-    renderOpBanner({ kind: "working", message: "Finishing your last action…" });
-    finalizeSuccess(pending, { isResume: true });
+    // Race Disabled-State Defect 1: even though the server already
+    // confirmed success and finishing here sends no further request,
+    // applying it (storing credentials, advancing the UI) is still a
+    // mutation-adjacent effect that must wait for an explicit user
+    // action — never invoked automatically just because this envelope
+    // was reannounced (by availability being confirmed, or by another
+    // control being attempted while it was still unresolved).
+    renderOpBanner({
+      kind: "retry",
+      message: "Your last action was confirmed by the server. Recover it to finish — this will not repeat the action.",
+      onRetry: () => finalizeSuccess(pending, { isResume: true }),
+    });
     return;
   }
   renderOpBanner({
@@ -745,6 +932,26 @@ function reannounceUnresolvedOperation(pending) {
 
 /** Begins a genuinely NEW logical action: mints a fresh key, persists the envelope, sends it. */
 function beginOperation(operationKind, { raceEventId: eventId, payload, callerToken, buttonId } = {}) {
+  if (raceAvailability !== "available") {
+    // Race Disabled-State Defect 2: fail closed for BOTH "unavailable"
+    // and "unknown" — a mutation may begin only once availability has
+    // been explicitly confirmed as "available". Defense in depth only:
+    // the server-side guard (schemaAvailability.ts) remains the sole
+    // authority and this is never relied upon in its place; it simply
+    // keeps the client from issuing a mutation, or minting a key, that
+    // it cannot yet know is safe. Only a genuinely confirmed-unavailable
+    // state re-asserts the truthful unavailable banner here — "unknown"
+    // is left exactly as it is, since a mutation attempt is not what
+    // resolves it (an availability probe is: checkAvailability() /
+    // startPolling()).
+    if (raceAvailability === "unavailable") setUnavailable();
+    return Promise.resolve({
+      ok: false,
+      blocked: true,
+      unavailable: raceAvailability === "unavailable",
+      unknown: raceAvailability === "unknown",
+    });
+  }
   if (operationInFlight) return Promise.resolve({ ok: false, blocked: true });
   const pending = loadPendingOperation();
   if (pending) {
@@ -767,18 +974,6 @@ function beginOperation(operationKind, { raceEventId: eventId, payload, callerTo
   return executeOperation(envelope, { isResume: false, buttonId });
 }
 
-/** Resumes a PREVIOUSLY PERSISTED envelope — reload recovery or an explicit page-load retry. Never mints a new key. */
-async function resumePendingOperationOnLoad() {
-  const pending = loadPendingOperation();
-  if (!pending) return false;
-  if (pending.raceEventId) raceEventId = pending.raceEventId;
-  organizerToken = sessionStorage.getItem("urbano_race_organizer_token") || null;
-  competitorToken = sessionStorage.getItem("urbano_race_competitor_token") || null;
-  renderOpBanner({ kind: "working", message: "Recovering your last action…" });
-  await executeOperation(pending, { isResume: true });
-  return true;
-}
-
 // --- Landing: scenario picker + create/join ---
 let selectedScenarioId = "towers-001";
 function renderScenarioPicker() {
@@ -788,12 +983,17 @@ function renderScenarioPicker() {
     const btn = document.createElement("button");
     btn.className = "scenario-btn";
     btn.type = "button";
+    btn.disabled = raceAvailability !== "available";
     btn.setAttribute("aria-pressed", String(s.scenarioId === selectedScenarioId));
     btn.innerHTML = `<strong>${s.scenarioId}</strong><span>${Object.values(s.initialStacks).reduce((n, st) => n + st.length, 0)} pieces${s.knownMinimumMoves ? " · optimal " + s.knownMinimumMoves + " moves" : ""}</span>`;
     btn.addEventListener("click", () => { selectedScenarioId = s.scenarioId; renderScenarioPicker(); });
     wrap.appendChild(btn);
   });
-  document.getElementById("btn-create").disabled = false;
+  // Availability-gated (Race Disabled-State UI and Polling Containment
+  // Correction) — never unconditionally enabled the way this line used
+  // to read; re-derived here on every render from the single explicit
+  // raceAvailability state.
+  document.getElementById("btn-create").disabled = raceAvailability !== "available";
 }
 renderScenarioPicker();
 
@@ -839,14 +1039,34 @@ document.getElementById("btn-live-cancel").addEventListener("click", () => {
 });
 
 // --- Polling / projection-driven state machine ---
-function startPolling() {
+let pollStartInFlight = false;
+
+/**
+ * Race Disabled-State Defect 3: performs and AWAITS exactly one
+ * immediate availability/projection request before ever creating the
+ * recurring interval. A slow response — even one exceeding the normal
+ * 1500ms cadence — cannot produce a second request or a duplicate
+ * interval, because the interval is only ever created AFTER this single
+ * probe has fully settled, never alongside it. Re-entrant calls (rapid
+ * Check Again clicks) are inert while one is already resolving.
+ */
+async function startPolling() {
+  if (pollStartInFlight) return;
   stopPolling();
-  // Fire immediately — waiting for the first interval tick would leave
-  // stale content from whichever card was visible before this call
-  // (e.g. "waiting for an opponent" briefly shown right after an
-  // organizer's own join completes) visible for up to 1.5s.
-  refreshProjection();
-  pollInterval = setInterval(refreshProjection, 1500);
+  pollStartInFlight = true;
+  try {
+    await refreshProjection();
+  } finally {
+    pollStartInFlight = false;
+  }
+  // Only schedule the recurring interval if that single probe left Race
+  // confirmed available, no interval already exists (defensive — none
+  // should), and the projection it returned did not itself terminalize
+  // the event (applyProjection's own COMPLETED branch already stops
+  // polling deliberately; this must not restart it for a finished Race).
+  if (raceAvailability === "available" && lastPhase !== "COMPLETED" && !pollInterval) {
+    pollInterval = setInterval(refreshProjection, 1500);
+  }
 }
 function stopPolling() {
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
@@ -858,10 +1078,29 @@ async function refreshProjection() {
   let projection;
   try {
     projection = await getJson(`/api/gaming/race/events/${raceEventId}`, token);
-  } catch {
+  } catch (err) {
+    // Race Disabled-State UI and Polling Containment Correction: a 503
+    // means the WHOLE capability is deliberately unavailable, not a
+    // one-off blip. setUnavailable() stops polling unconditionally — this
+    // exact tick is the LAST automatic request until an explicit Check
+    // Again — and, deferring to any in-flight mutation's own banner,
+    // surfaces the truthful message via the same shared banner mechanism.
+    // Every OTHER failure here (a stale/not-found event, a transient
+    // network blip mid-poll) keeps its pre-existing silent-swallow
+    // behavior completely unchanged — this page still has no general
+    // error surface for a single missed poll tick, by design, and an
+    // unrelated failure must never be reclassified as schema-unavailable.
+    if (err && err.status === 503) {
+      setUnavailable(err.body && err.body.error);
+    }
     return;
   }
+  // applyProjection runs FIRST so any now-moot pending envelope is
+  // reconciled against the freshest state before setAvailable() decides
+  // whether a still-unresolved envelope needs its Retry/Recover
+  // affordance surfaced (Race Disabled-State Defect 1).
   applyProjection(projection);
+  if (raceAvailability !== "available") setAvailable();
 }
 
 /**
@@ -1093,6 +1332,11 @@ function updateUndoButton() {
 }
 
 function onTowerTap(towerId) {
+  // Race Disabled-State Defect 2: fail closed for BOTH "unavailable" and
+  // "unknown" — Move has no dedicated button to disable, so this is its
+  // own gate, and it must match beginOperation()'s own internal contract
+  // exactly (mutation permitted only when explicitly "available").
+  if (raceAvailability !== "available") return;
   if (outcome !== "IN_PROGRESS") return;
   if (operationInFlight) return; // a move (or any other action) is already in flight — ignore further taps
   const pending = loadPendingOperation();
@@ -1129,34 +1373,68 @@ function showIllegalBanner(message) {
 }
 
 // --- Reconnect ---
+/** Returns whether a stored session existed to restore. startPolling()
+ * itself performs the one immediate refreshProjection this reload needs
+ * (which doubles as this load's own availability determination) and then
+ * begins the normal 1500ms cadence — never a redundant extra fetch before
+ * it. refreshProjection() never throws (every failure path returns
+ * normally), so no try/catch is needed here.
+ */
 async function restoreFromStorage() {
   const storedId = sessionStorage.getItem("urbano_race_event_id");
-  if (!storedId) return;
+  if (!storedId) return false;
   raceEventId = storedId;
   organizerToken = sessionStorage.getItem("urbano_race_organizer_token") || null;
   competitorToken = sessionStorage.getItem("urbano_race_competitor_token") || null;
-  try {
-    await refreshProjection();
-    startPolling();
-  } catch {
-    clearSession();
-  }
+  await startPolling();
+  return true;
 }
 
 /**
- * Page entry point. A pending operation (Create/Join before credentials
- * were ever received, or any other mutation left AMBIGUOUS by a
- * dropped response, timeout, or reload) is resumed FIRST, reusing its
- * exact persisted key and payload — never a freshly generated one. Only
- * once no pending operation remains does the page fall through to the
- * ordinary reconnect-by-session-credentials path; while a resume is
- * still ambiguous (showing its own Retry banner), the normal
- * reconnect/landing flow is deliberately not started underneath it.
+ * Page entry point.
+ *
+ * Race Disabled-State Defect 1: a pending operation (Create/Join before
+ * credentials were ever received, or any other mutation left AMBIGUOUS
+ * or SUCCESS_RECEIVED by a dropped response, timeout, or reload) is
+ * NEVER automatically resumed, finalized, or transmitted here — this
+ * function never calls executeOperation()/finalizeSuccess() directly
+ * (the prior gate's own resumePendingOperationOnLoad(), which did, has
+ * been removed as no longer safe to call from page load at all).
+ * Availability is determined
+ * FIRST, through the same ordinary read-only single-probe path every
+ * other availability signal already uses (startPolling() when the
+ * pending envelope's own raceEventId is already known — including a
+ * pending Create's post-success result.raceEventId — or
+ * checkAvailability()'s nil-UUID probe when it is not). Only once that
+ * probe resolves to "available" does setAvailable() itself notice the
+ * still-preserved envelope and surface its existing explicit
+ * Retry/Recover affordance (reannounceUnresolvedOperation) — never
+ * auto-invoked. A 503 instead leaves the envelope exactly as persisted,
+ * byte-for-byte, and shows the truthful unavailable state with its own
+ * Check Again action.
+ *
+ * When no pending operation exists, ordinary stored-session reconnect
+ * (restoreFromStorage(), itself just one probe via startPolling()) or,
+ * failing that, one landing-page availability probe runs exactly as
+ * before — unchanged from the prior gate.
  */
 async function initializePage() {
-  await resumePendingOperationOnLoad();
-  if (!loadPendingOperation()) {
-    await restoreFromStorage();
+  const pending = loadPendingOperation();
+  if (pending) {
+    const probeEventId = pending.raceEventId || (pending.result && pending.result.raceEventId) || null;
+    organizerToken = sessionStorage.getItem("urbano_race_organizer_token") || null;
+    competitorToken = sessionStorage.getItem("urbano_race_competitor_token") || null;
+    if (probeEventId) {
+      raceEventId = probeEventId;
+      await startPolling();
+    } else {
+      await checkAvailability();
+    }
+    return;
+  }
+  const restored = await restoreFromStorage();
+  if (!restored) {
+    await checkAvailability();
   }
 }
 

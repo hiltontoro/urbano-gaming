@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { confirmReadiness } from "@/lib/gaming/race/confirmReadiness";
 import { SupabaseRaceRepository } from "@/lib/gaming/race/db/supabaseRaceRepository";
 import { RaceEventNotFoundError, RaceInvalidTokenError, RaceScenarioNotFoundError } from "@/lib/gaming/race/types";
+import { requireRaceSchemaReady } from "@/lib/gaming/race/schemaAvailability";
 
 /**
  * POST /api/gaming/race/events/[raceEventId]/ready — CONFIRM_READINESS
@@ -11,6 +12,9 @@ import { RaceEventNotFoundError, RaceInvalidTokenError, RaceScenarioNotFoundErro
  * timestamp both clients must count down to.
  */
 export async function POST(request: Request, { params }: { params: { raceEventId: string } }) {
+  const unavailable = requireRaceSchemaReady();
+  if (unavailable) return unavailable;
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

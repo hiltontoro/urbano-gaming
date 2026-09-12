@@ -3,6 +3,7 @@ import { createEvent } from "@/lib/gaming/race/createEvent";
 import { SupabaseRaceRepository } from "@/lib/gaming/race/db/supabaseRaceRepository";
 import { isValidIdempotencyKey } from "@/lib/gaming/race/idempotencyKey";
 import { RaceIdempotencyKeyConflictError, RaceScenarioNotFoundError } from "@/lib/gaming/race/types";
+import { requireRaceSchemaReady } from "@/lib/gaming/race/schemaAvailability";
 
 /**
  * POST /api/gaming/race/events — CREATE_EVENT
@@ -17,6 +18,9 @@ import { RaceIdempotencyKeyConflictError, RaceScenarioNotFoundError } from "@/li
  * second one.
  */
 export async function POST(request: Request) {
+  const unavailable = requireRaceSchemaReady();
+  if (unavailable) return unavailable;
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
