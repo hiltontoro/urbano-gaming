@@ -1,5 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Hoisted by Vitest above every import in this file. Pulse's dedicated
+// routes construct SupabaseSessionRepository directly (no shared HTTP-
+// boundary module) — this mock exists solely to prove, for the Pulse
+// Production Containment Security Correction's own disabled-mode
+// coverage below, that the repository is never even constructed when
+// the guard blocks a request. Bare constructor spy only; the shared
+// duel/start route's own MULTIPLE_CHOICE/MATH_DUEL enabled-mode checks
+// use InMemorySessionRepository exclusively elsewhere in this file and
+// are unaffected by this mock.
+vi.mock("@/lib/session/db/supabaseSessionRepository", () => ({
+  SupabaseSessionRepository: vi.fn(),
+}));
+
+import { SupabaseSessionRepository } from "../lib/session/db/supabaseSessionRepository";
+import {
+  normalizePulseSchemaReady,
+  isPulseSchemaReady,
+  requirePulseSchemaReady,
+} from "../lib/session/pulseSchemaAvailability";
 import { createSession } from "../lib/session/createSession";
 import { setSessionCapabilities } from "../lib/session/setSessionCapabilities";
 import { joinSession } from "../lib/session/joinSession";
@@ -639,5 +658,327 @@ describe("URBANO Pulse Slice 001", () => {
     await expect(
       commitPulseSetup(repo, started.duelId, stranger.participantToken, ALICE_FORMS, false, key())
     ).rejects.toBeInstanceOf(PulseAccessDeniedError);
+  });
+});
+
+describe("Pulse production-availability guard (UG-CR-GATE-050)", () => {
+  describe("normalizePulseSchemaReady — the fail-closed truth table", () => {
+    const cases: Array<[string, string | undefined, boolean]> = [
+      ["undefined (the variable is absent)", undefined, false],
+      ["empty string", "", false],
+      ['"false"', "false", false],
+      ['"true" — the only accepted value', "true", true],
+      ["uppercase TRUE", "TRUE", false],
+      ["leading space", " true", false],
+      ["trailing space", "true ", false],
+      ['numeric "1"', "1", false],
+      ['"yes"', "yes", false],
+      ["mixed case True", "True", false],
+      ["an arbitrary malformed string", "enabled-please", false],
+    ];
+    it.each(cases)("%s -> %s", (_label, input, expected) => {
+      expect(normalizePulseSchemaReady(input)).toBe(expected);
+    });
+  });
+
+  describe("isPulseSchemaReady / requirePulseSchemaReady — reading the real environment variable", () => {
+    const ORIGINAL = process.env.PULSE_SCHEMA_READY;
+    afterEach(() => {
+      if (ORIGINAL === undefined) delete process.env.PULSE_SCHEMA_READY;
+      else process.env.PULSE_SCHEMA_READY = ORIGINAL;
+    });
+
+    it("missing variable returns a guard response with status 503", () => {
+      delete process.env.PULSE_SCHEMA_READY;
+      expect(isPulseSchemaReady()).toBe(false);
+      const res = requirePulseSchemaReady();
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(503);
+    });
+
+    it("empty value returns 503", () => {
+      process.env.PULSE_SCHEMA_READY = "";
+      expect(requirePulseSchemaReady()!.status).toBe(503);
+    });
+
+    it('"false" returns 503', () => {
+      process.env.PULSE_SCHEMA_READY = "false";
+      expect(requirePulseSchemaReady()!.status).toBe(503);
+    });
+
+    it("a malformed value returns 503", () => {
+      process.env.PULSE_SCHEMA_READY = "TRUE";
+      expect(requirePulseSchemaReady()!.status).toBe(503);
+    });
+
+    it('only "true" enables execution — the guard returns null, not a response', () => {
+      process.env.PULSE_SCHEMA_READY = "true";
+      expect(isPulseSchemaReady()).toBe(true);
+      expect(requirePulseSchemaReady()).toBeNull();
+    });
+
+    it("the unavailable response carries exactly one field, a truthful non-sensitive message, and never a stack trace, relation name, migration number, or provider identifier", async () => {
+      delete process.env.PULSE_SCHEMA_READY;
+      const res = requirePulseSchemaReady()!;
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(Object.keys(body)).toEqual(["error"]);
+      expect(body.error).toBe(
+        "Pulse is temporarily unavailable while its database schema is being prepared. Try again later."
+      );
+      const text = JSON.stringify(body);
+      expect(text).not.toMatch(/relation|does not exist|supabase|postgres|migration|pulse_games|pulse_boards|pulse_actions|stack|at Object|at eval/i);
+    });
+
+    it("the environment value is evaluated fresh on every call, never cached at module load — flipping it mid-session changes the very next result", () => {
+      process.env.PULSE_SCHEMA_READY = "true";
+      expect(requirePulseSchemaReady()).toBeNull();
+      delete process.env.PULSE_SCHEMA_READY;
+      expect(requirePulseSchemaReady()!.status).toBe(503);
+      process.env.PULSE_SCHEMA_READY = "true";
+      expect(requirePulseSchemaReady()).toBeNull();
+    });
+  });
+});
+
+describe("Pulse HTTP routes are guarded (UG-CR-GATE-050)", () => {
+  const ORIGINAL_READY = process.env.PULSE_SCHEMA_READY;
+  const ORIGINAL_URL = process.env.SUPABASE_URL;
+  const ORIGINAL_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  beforeEach(() => {
+    vi.mocked(SupabaseSessionRepository).mockClear();
+  });
+  afterEach(() => {
+    if (ORIGINAL_READY === undefined) delete process.env.PULSE_SCHEMA_READY; else process.env.PULSE_SCHEMA_READY = ORIGINAL_READY;
+    if (ORIGINAL_URL === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = ORIGINAL_URL;
+    if (ORIGINAL_KEY === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = ORIGINAL_KEY;
+  });
+
+  const DEDICATED_ROUTES: Array<{ name: string; specifier: string }> = [
+    { name: "commit-setup", specifier: "../app/api/sessions/[identifier]/duel/pulse/commit-setup/route" },
+    { name: "target", specifier: "../app/api/sessions/[identifier]/duel/pulse/target/route" },
+    { name: "claim-timeout", specifier: "../app/api/sessions/[identifier]/duel/pulse/claim-timeout/route" },
+  ];
+
+  describe("the three credentialed dedicated Pulse routes (commit-setup, target, claim-timeout)", () => {
+    it.each(DEDICATED_ROUTES)(
+      "$name: with readiness disabled, returns 503 immediately WITHOUT reading Supabase credentials, authenticating, parsing the body, or constructing a repository",
+      async ({ specifier }) => {
+        delete process.env.PULSE_SCHEMA_READY;
+        process.env.SUPABASE_URL = "http://fake";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+
+        const { POST } = (await import(specifier)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+        // A deliberately UNPARSEABLE body and a bogus bearer token: if the
+        // guard failed to run first, this would hit either the body-parse
+        // 400 or (for a malformed JSON body) never even reach auth — proving
+        // conclusively that the guard is the true first statement.
+        const request = new Request("http://localhost/probe", {
+          method: "POST",
+          headers: { authorization: "Bearer bogus-token" },
+          body: "not valid json {{{",
+        });
+
+        const res = await POST(request, { params: { identifier: "test-id" } });
+        expect(res.status).toBe(503);
+        const body = (await res.json()) as Record<string, unknown>;
+        expect(body.error).toBe(
+          "Pulse is temporarily unavailable while its database schema is being prepared. Try again later."
+        );
+        expect(SupabaseSessionRepository).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(DEDICATED_ROUTES)(
+      "$name: with readiness disabled, an entirely missing Authorization header still returns 503, not 401 — the guard precedes token validation too",
+      async ({ specifier }) => {
+        delete process.env.PULSE_SCHEMA_READY;
+        const { POST } = (await import(specifier)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+        const request = new Request("http://localhost/probe", { method: "POST", body: "{}" });
+        const res = await POST(request, { params: { identifier: "test-id" } });
+        expect(res.status).toBe(503);
+      }
+    );
+
+    it.each(DEDICATED_ROUTES)(
+      "$name: with readiness enabled, the guard never short-circuits — the route reaches its own downstream logic instead",
+      async ({ specifier }) => {
+        process.env.PULSE_SCHEMA_READY = "true";
+        process.env.SUPABASE_URL = "http://fake";
+        process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+        const { POST } = (await import(specifier)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+        const request = new Request("http://localhost/probe", {
+          method: "POST",
+          headers: { authorization: "Bearer some-token" },
+          body: "{}",
+        });
+        const res = await POST(request, { params: { identifier: "test-id" } });
+        expect(res.status).not.toBe(503);
+      }
+    );
+
+    it.each(["", "TRUE", "1", "yes", " true"])(
+      "every credentialed route returns 503 for the malformed readiness value %j, not only for a missing one",
+      async (malformed) => {
+        process.env.PULSE_SCHEMA_READY = malformed;
+        for (const { specifier } of DEDICATED_ROUTES) {
+          const { POST } = (await import(specifier)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+          const res = await POST(new Request("http://localhost/probe", { method: "POST", body: "{}" }), {
+            params: { identifier: "test-id" },
+          });
+          expect(res.status, specifier).toBe(503);
+        }
+      }
+    );
+  });
+
+  describe("the stateless setup-assist route", () => {
+    const SETUP_ASSIST = "../app/api/sessions/[identifier]/duel/pulse/setup-assist/route";
+
+    it("with readiness disabled, returns 503 WITHOUT ever checking the Authorization header or generating a setup layout", async () => {
+      delete process.env.PULSE_SCHEMA_READY;
+      const { POST } = (await import(SETUP_ASSIST)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+      // No Authorization header at all — if the guard were not first, this
+      // would produce 401, never 503.
+      const request = new Request("http://localhost/probe", { method: "POST" });
+      const res = await POST(request, { params: { identifier: "test-id" } });
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.error).toBe(
+        "Pulse is temporarily unavailable while its database schema is being prepared. Try again later."
+      );
+    });
+
+    it("with readiness enabled and a real Bearer token, produces a real assisted layout (200), proving the guard does not block the legitimate path", async () => {
+      process.env.PULSE_SCHEMA_READY = "true";
+      const { POST } = (await import(SETUP_ASSIST)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+      const request = new Request("http://localhost/probe", {
+        method: "POST",
+        headers: { authorization: "Bearer some-token" },
+      });
+      const res = await POST(request, { params: { identifier: "test-id" } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { forms: unknown[] };
+      expect(Array.isArray(body.forms)).toBe(true);
+    });
+  });
+
+  describe("client-supplied fields cannot bypass the guard", () => {
+    it("a spoofed body field, header, or query string claiming readiness has no effect — only the real server-side environment variable governs availability", async () => {
+      delete process.env.PULSE_SCHEMA_READY;
+      const { POST } = (await import(
+        "../app/api/sessions/[identifier]/duel/pulse/target/route"
+      )) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+      const request = new Request("http://localhost/probe?pulseSchemaReady=true&PULSE_SCHEMA_READY=true", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer bogus-token",
+          "x-pulse-schema-ready": "true",
+          "x-pulse-ready": "true",
+        },
+        body: JSON.stringify({ pulseSchemaReady: true, PULSE_SCHEMA_READY: "true", duelId: "d1", row: 0, col: 0, idempotencyKey: "k1" }),
+      });
+
+      const res = await POST(request, { params: { identifier: "test-id" } });
+      expect(res.status).toBe(503);
+      expect(SupabaseSessionRepository).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("Shared Duel start route: the PULSE branch is guarded; Multiple Choice and Math Duel are unaffected (UG-CR-GATE-050)", () => {
+  const START_ROUTE = "../app/api/sessions/[identifier]/duel/start/route";
+  const ORIGINAL_READY = process.env.PULSE_SCHEMA_READY;
+  const ORIGINAL_URL = process.env.SUPABASE_URL;
+  const ORIGINAL_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  beforeEach(() => {
+    vi.mocked(SupabaseSessionRepository).mockClear();
+  });
+  afterEach(() => {
+    if (ORIGINAL_READY === undefined) delete process.env.PULSE_SCHEMA_READY; else process.env.PULSE_SCHEMA_READY = ORIGINAL_READY;
+    if (ORIGINAL_URL === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = ORIGINAL_URL;
+    if (ORIGINAL_KEY === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = ORIGINAL_KEY;
+  });
+
+  it("mechanicKey PULSE with readiness disabled returns 503 without constructing a repository for the Pulse operation", async () => {
+    delete process.env.PULSE_SCHEMA_READY;
+    process.env.SUPABASE_URL = "http://fake";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+    const { POST } = (await import(START_ROUTE)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+    const request = new Request("http://localhost/probe", {
+      method: "POST",
+      body: JSON.stringify({
+        mechanicKey: "PULSE",
+        hostToken: "h1",
+        competitorAParticipantId: "a1",
+        competitorBParticipantId: "b1",
+      }),
+    });
+    const res = await POST(request, { params: { identifier: "s1" } });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe(
+      "Pulse is temporarily unavailable while its database schema is being prepared. Try again later."
+    );
+    // The repository IS constructed earlier in this shared route (before
+    // mechanic dispatch, for every mechanic) — the guard's own contract is
+    // that no Pulse REPOSITORY METHOD is ever invoked, not that construction
+    // itself never happens; startPulseDuel (the only call that would reach
+    // Postgres) is never given the chance to run because the 503 returns
+    // before it is called.
+  });
+
+  it("mechanicKey MATH_DUEL with Pulse readiness disabled is completely unaffected — it never even consults the Pulse guard", async () => {
+    delete process.env.PULSE_SCHEMA_READY;
+    process.env.SUPABASE_URL = "http://fake";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+    const { POST } = (await import(START_ROUTE)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+    const request = new Request("http://localhost/probe", {
+      method: "POST",
+      body: JSON.stringify({ mechanicKey: "MATH_DUEL", hostToken: "h1" }),
+    });
+    const res = await POST(request, { params: { identifier: "s1" } });
+    // Reaches its own MATH_DUEL validation/logic (a 400 for the missing
+    // competitor ids here) rather than the Pulse guard's 503.
+    expect(res.status).not.toBe(503);
+  });
+
+  it("no mechanicKey (Multiple Choice, the default) with Pulse readiness disabled is completely unaffected", async () => {
+    delete process.env.PULSE_SCHEMA_READY;
+    process.env.SUPABASE_URL = "http://fake";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+    const { POST } = (await import(START_ROUTE)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+    const request = new Request("http://localhost/probe", {
+      method: "POST",
+      body: JSON.stringify({ hostToken: "h1" }),
+    });
+    const res = await POST(request, { params: { identifier: "s1" } });
+    expect(res.status).not.toBe(503);
+  });
+
+  it("mechanicKey PULSE with readiness enabled proceeds past the guard to its own downstream logic", async () => {
+    process.env.PULSE_SCHEMA_READY = "true";
+    process.env.SUPABASE_URL = "http://fake";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "fake-service-role-key";
+    const { POST } = (await import(START_ROUTE)) as { POST: (req: Request, ctx?: unknown) => Promise<Response> };
+
+    const request = new Request("http://localhost/probe", {
+      method: "POST",
+      body: JSON.stringify({
+        mechanicKey: "PULSE",
+        hostToken: "h1",
+        competitorAParticipantId: "a1",
+        competitorBParticipantId: "b1",
+      }),
+    });
+    const res = await POST(request, { params: { identifier: "s1" } });
+    expect(res.status).not.toBe(503);
   });
 });

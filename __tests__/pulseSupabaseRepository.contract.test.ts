@@ -601,3 +601,140 @@ describe("Session-completion vs. Pulse-mutation concurrency (UG-CR-GATE-004)", (
     ).rejects.toBeInstanceOf(PulseNotActiveError);
   });
 });
+
+describe("Pulse RPC privilege matrix (UG-CR-GATE-050 Production Containment Security Correction)", () => {
+  // Mirrors __tests__/competitionsAuthorizationMatrix.contract.test.ts's
+  // own established real-anon/real-authenticated-JWT technique exactly
+  // (that file is Competitions-owned and out of this gate's scope, so
+  // the small amount of client/helper setup is duplicated here rather
+  // than imported, keeping this file self-contained). Well-formed (but
+  // fake-data) arguments are used throughout — a WRONG shape would make
+  // PostgREST fail to resolve the function overload at all (PGRST202),
+  // which even service_role would hit identically, proving nothing
+  // about anon/authenticated specifically. A well-formed call lets
+  // PostgREST resolve the real function, so the only way anon/
+  // authenticated can fail is the EXECUTE-privilege check itself
+  // (42501) — a strictly stronger, unambiguous proof than a
+  // missing-row or malformed-argument error would be.
+  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
+  if (!supabaseAnonKey) {
+    throw new Error("SUPABASE_ANON_KEY is required for the Pulse RPC privilege matrix.");
+  }
+
+  const anonClient = createClient(supabaseUrl, supabaseAnonKey);
+  const createdAuthUserIds: string[] = [];
+
+  async function createAuthenticatedClient() {
+    const email = `pulse-privilege-matrix-${randomUUID()}@example.com`;
+    const { data: created, error: createErr } = await cleanupClient.auth.admin.createUser({ email, email_confirm: true });
+    if (createErr || !created.user) throw createErr ?? new Error("Failed to create test auth user.");
+    createdAuthUserIds.push(created.user.id);
+
+    const { data: link, error: linkErr } = await cleanupClient.auth.admin.generateLink({ type: "magiclink", email });
+    if (linkErr) throw linkErr;
+    const { data: verified, error: verifyErr } = await anonClient.auth.verifyOtp({
+      token_hash: link.properties.hashed_token,
+      type: "magiclink",
+    });
+    if (verifyErr || !verified.session) throw verifyErr ?? new Error("Failed to establish an authenticated session.");
+
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${verified.session.access_token}` } },
+    });
+  }
+
+  afterAll(async () => {
+    for (const authUserId of createdAuthUserIds) {
+      await cleanupClient.auth.admin.deleteUser(authUserId);
+    }
+  });
+
+  const PULSE_RPC_ARGS: Record<string, Record<string, unknown>> = {
+    start_pulse_duel_atomically: {
+      p_session_id: randomUUID(),
+      p_host_token: "privilege-probe-host-token",
+      p_competitor_a_participant_id: randomUUID(),
+      p_competitor_b_participant_id: randomUUID(),
+    },
+    commit_pulse_setup_atomically: {
+      p_duel_id: randomUUID(),
+      p_participant_token: "privilege-probe-participant-token",
+      p_forms: [],
+      p_was_assisted: false,
+      p_idempotency_key: `privilege-probe-${randomUUID()}`,
+    },
+    apply_pulse_target_atomically: {
+      p_duel_id: randomUUID(),
+      p_participant_token: "privilege-probe-participant-token",
+      p_row: 0,
+      p_col: 0,
+      p_idempotency_key: `privilege-probe-${randomUUID()}`,
+    },
+    claim_pulse_timeout_atomically: {
+      p_duel_id: randomUUID(),
+      p_participant_token: "privilege-probe-participant-token",
+    },
+  };
+
+  describe.each(Object.keys(PULSE_RPC_ARGS))("function %s", (fn) => {
+    it("denies direct execution to the anon role with a strict permission error (42501), never reaching the function's own body/logic", async () => {
+      const { error } = await anonClient.rpc(fn, PULSE_RPC_ARGS[fn]);
+      expect(error).not.toBeNull();
+      expect(error!.code).toBe("42501");
+    });
+
+    it("denies direct execution to a genuinely authenticated JWT client with the same strict 42501", async () => {
+      const authedClient = await createAuthenticatedClient();
+      const { error } = await authedClient.rpc(fn, PULSE_RPC_ARGS[fn]);
+      expect(error).not.toBeNull();
+      expect(error!.code).toBe("42501");
+    });
+  });
+
+  it("this file's own function list is kept in sync with UG-CR-REV-034's four exact signatures", () => {
+    expect(Object.keys(PULSE_RPC_ARGS).sort()).toEqual(
+      [
+        "apply_pulse_target_atomically",
+        "claim_pulse_timeout_atomically",
+        "commit_pulse_setup_atomically",
+        "start_pulse_duel_atomically",
+      ].sort()
+    );
+  });
+
+  it("the same four operations succeed through the intended privileged server repository path using synthetic local data (service_role, via SupabaseSessionRepository, unaffected by the revocation)", async () => {
+    // Reuses this file's own established setup helpers exactly as the
+    // domain-behavior suite above does — the privilege-specific claim
+    // under test is narrow: these repository calls (all four RPCs,
+    // exercised end-to-end below) succeed AT ALL post-migration, as
+    // service_role. A REVOKE that had also blocked service_role would
+    // make every one of these very calls fail with 42501, exactly like
+    // the anon/authenticated calls above.
+    const { session, participants } = await setupPulseReadySession(["PrivilegeProbeA", "PrivilegeProbeB"]);
+    const [a, b] = participants;
+
+    const started = await startAPulseDuel(session, a.participantId, b.participantId);
+    expect(started.duelId).toBeTruthy();
+    expect(started.lifecycleState).toBe("ACTIVE");
+
+    const afterCommit = await commitBoth(started.duelId, a.participantToken, b.participantToken);
+    expect(afterCommit.currentActorParticipantId).not.toBeNull();
+
+    const game = await repository.getPulseGame(started.duelId);
+    const actorToken = game!.currentActorParticipantId === a.participantId ? a.participantToken : b.participantToken;
+    const targetResult = await repository.applyPulseTarget(started.duelId, actorToken, 1, 7, testKey());
+    expect(targetResult.result).toBeDefined();
+
+    // claim_pulse_timeout_atomically: called immediately, the turn has
+    // not yet expired, so the ONLY question this specific assertion
+    // cares about is that the call reaches real domain logic at all
+    // (any outcome, success or a genuine PULSE_* domain rejection) —
+    // never a raw Postgres permission-denied (42501), which is what a
+    // service_role privilege regression would produce instead.
+    try {
+      await repository.claimPulseTimeout(started.duelId, actorToken);
+    } catch (err) {
+      expect((err as { message?: string })?.message ?? "").not.toMatch(/permission denied|42501/i);
+    }
+  });
+});

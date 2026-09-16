@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { commitPulseSetup } from "@/lib/session/commitPulseSetup";
+import { requirePulseSchemaReady } from "@/lib/session/pulseSchemaAvailability";
 import { SupabaseSessionRepository } from "@/lib/session/db/supabaseSessionRepository";
 import {
   PulseNotFoundError,
@@ -18,6 +19,9 @@ import {
  * server always fully revalidates forms regardless of wasAssisted.
  */
 export async function POST(request: Request, { params }: { params: { identifier: string } }) {
+  const pulseUnavailable = requirePulseSchemaReady();
+  if (pulseUnavailable) return pulseUnavailable;
+
   void params.identifier;
 
   const supabaseUrl = process.env.SUPABASE_URL;
