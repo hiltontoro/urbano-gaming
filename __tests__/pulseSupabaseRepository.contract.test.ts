@@ -602,23 +602,26 @@ describe("Session-completion vs. Pulse-mutation concurrency (UG-CR-GATE-004)", (
   });
 });
 
-describe("Pulse RPC privilege matrix (UG-CR-GATE-050 Production Containment Security Correction)", () => {
+describe("Pulse server-only containment: RPC privilege matrix and table boundary (UG-CR-GATE-050, UG-CR-GATE-058)", () => {
   // Mirrors __tests__/competitionsAuthorizationMatrix.contract.test.ts's
   // own established real-anon/real-authenticated-JWT technique exactly
   // (that file is Competitions-owned and out of this gate's scope, so
   // the small amount of client/helper setup is duplicated here rather
   // than imported, keeping this file self-contained). Well-formed (but
-  // fake-data) arguments are used throughout — a WRONG shape would make
-  // PostgREST fail to resolve the function overload at all (PGRST202),
-  // which even service_role would hit identically, proving nothing
-  // about anon/authenticated specifically. A well-formed call lets
-  // PostgREST resolve the real function, so the only way anon/
-  // authenticated can fail is the EXECUTE-privilege check itself
-  // (42501) — a strictly stronger, unambiguous proof than a
-  // missing-row or malformed-argument error would be.
+  // fake-data) arguments are used throughout for the RPC matrix — a
+  // WRONG shape would make PostgREST fail to resolve the function
+  // overload at all (PGRST202), which even service_role would hit
+  // identically, proving nothing about anon/authenticated specifically.
+  // A well-formed call lets PostgREST resolve the real function, so the
+  // only way anon/authenticated can fail is the EXECUTE-privilege check
+  // itself (42501) — a strictly stronger, unambiguous proof than a
+  // missing-row or malformed-argument error would be. Shared here (not
+  // duplicated per describe block) since both the RPC matrix (UG-CR-
+  // GATE-050) and the table boundary (UG-CR-GATE-058) need the same
+  // real anon client and real authenticated-JWT client.
   const supabaseAnonKey = env.SUPABASE_ANON_KEY;
   if (!supabaseAnonKey) {
-    throw new Error("SUPABASE_ANON_KEY is required for the Pulse RPC privilege matrix.");
+    throw new Error("SUPABASE_ANON_KEY is required for the Pulse privilege matrix.");
   }
 
   const anonClient = createClient(supabaseUrl, supabaseAnonKey);
@@ -736,5 +739,118 @@ describe("Pulse RPC privilege matrix (UG-CR-GATE-050 Production Containment Secu
     } catch (err) {
       expect((err as { message?: string })?.message ?? "").not.toMatch(/permission denied|42501/i);
     }
+  });
+
+  describe("table privilege boundary (UG-CR-GATE-058 Migration Atomicity and Table Boundary Correction)", () => {
+    // Mirrors the RPC matrix's own real-anon/real-authenticated-JWT
+    // technique. Every operation targets a real committed row's
+    // coordinates where relevant (never a nonexistent id), so a 42501
+    // is unambiguous evidence of the privilege boundary itself — never
+    // an artifact of a malformed request or an empty result that could
+    // be confused with "no such row."
+    const PULSE_TABLES = ["pulse_boards", "pulse_games", "pulse_actions"] as const;
+
+    describe.each(PULSE_TABLES)("table %s", (table) => {
+      it("denies direct SELECT to the anon role (42501, not an empty result)", async () => {
+        const { error } = await anonClient.from(table).select("*").limit(1);
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct SELECT to a genuinely authenticated JWT client (42501, not an empty result)", async () => {
+        const authedClient = await createAuthenticatedClient();
+        const { error } = await authedClient.from(table).select("*").limit(1);
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct INSERT to the anon role (42501) — the privilege check fails before any constraint on the row shape is ever evaluated", async () => {
+        const { error } = await anonClient.from(table).insert({});
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct INSERT to a genuinely authenticated JWT client with the same 42501", async () => {
+        const authedClient = await createAuthenticatedClient();
+        const { error } = await authedClient.from(table).insert({});
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct UPDATE to the anon role (42501)", async () => {
+        const { error } = await anonClient.from(table).update({}).eq("duel_id", randomUUID());
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct UPDATE to a genuinely authenticated JWT client with the same 42501", async () => {
+        const authedClient = await createAuthenticatedClient();
+        const { error } = await authedClient.from(table).update({}).eq("duel_id", randomUUID());
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct DELETE to the anon role (42501)", async () => {
+        const { error } = await anonClient.from(table).delete().eq("duel_id", randomUUID());
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+
+      it("denies direct DELETE to a genuinely authenticated JWT client with the same 42501", async () => {
+        const authedClient = await createAuthenticatedClient();
+        const { error } = await authedClient.from(table).delete().eq("duel_id", randomUUID());
+        expect(error).not.toBeNull();
+        expect(error!.code).toBe("42501");
+      });
+    });
+
+    it("this file's own table list is kept in sync with UG-CR-REV-038's three affected tables", () => {
+      expect([...PULSE_TABLES].sort()).toEqual(["pulse_actions", "pulse_boards", "pulse_games"].sort());
+    });
+
+    // service_role's own full CRUD on all three tables is proven directly,
+    // not merely cross-referenced: the dedicated repository-path test
+    // above already performs a real service_role SELECT/INSERT/UPDATE
+    // against pulse_boards (commitBoth), pulse_games (startAPulseDuel/
+    // commitBoth/applyPulseTarget), and pulse_actions (applyPulseTarget)
+    // end to end, post-migration — a table-level regression that also
+    // blocked service_role would have failed that test with 42501
+    // already, and the private-board test directly below performs a
+    // further real service_role SELECT against pulse_boards.
+
+    it("a private committed board layout cannot be read directly by client roles — service_role genuinely sees it, but anon/authenticated SELECT is denied at the privilege layer (42501), never merely filtered to an empty result", async () => {
+      const { session, participants } = await setupPulseReadySession(["BoardPrivacyA", "BoardPrivacyB"]);
+      const [a, b] = participants;
+      const started = await startAPulseDuel(session, a.participantId, b.participantId);
+      await commitBoth(started.duelId, a.participantToken, b.participantToken);
+
+      const { data: viaServiceRole, error: serviceRoleError } = await cleanupClient
+        .from("pulse_boards")
+        .select("forms")
+        .eq("duel_id", started.duelId)
+        .eq("participant_id", a.participantId)
+        .single();
+      if (serviceRoleError) throw serviceRoleError;
+      expect(viaServiceRole!.forms).not.toBeNull();
+
+      const { data: viaAnon, error: anonError } = await anonClient
+        .from("pulse_boards")
+        .select("forms")
+        .eq("duel_id", started.duelId)
+        .eq("participant_id", a.participantId);
+      expect(anonError).not.toBeNull();
+      expect(anonError!.code).toBe("42501");
+      expect(viaAnon).toBeNull();
+
+      const authedClient = await createAuthenticatedClient();
+      const { data: viaAuthed, error: authedError } = await authedClient
+        .from("pulse_boards")
+        .select("forms")
+        .eq("duel_id", started.duelId)
+        .eq("participant_id", a.participantId);
+      expect(authedError).not.toBeNull();
+      expect(authedError!.code).toBe("42501");
+      expect(viaAuthed).toBeNull();
+    });
   });
 });

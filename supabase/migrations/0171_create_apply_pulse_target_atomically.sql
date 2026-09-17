@@ -270,3 +270,13 @@ begin
   return query select v_result, v_completed_form_id, false, null::uuid, v_next_actor, v_next_deadline, false;
 end;
 $$;
+
+-- URBANO Pulse — Migration Atomicity Correction (UG-CR-GATE-058,
+-- UG-CR-REV-038). See 0169's own matching comment — revoked/granted
+-- immediately after creation, in this same migration, to close the
+-- default-PUBLIC-EXECUTE window rather than leaving it open until the
+-- later corrective migration. Exact signature only.
+revoke execute on function public.apply_pulse_target_atomically(uuid, text, integer, integer, text)
+  from public, anon, authenticated;
+grant execute on function public.apply_pulse_target_atomically(uuid, text, integer, integer, text)
+  to service_role;

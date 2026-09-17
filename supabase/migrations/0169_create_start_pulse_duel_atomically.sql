@@ -133,3 +133,16 @@ begin
   return query select v_duel_id, 'ACTIVE'::text, v_created_at;
 end;
 $$;
+
+-- URBANO Pulse — Migration Atomicity Correction (UG-CR-GATE-058,
+-- UG-CR-REV-038). PostgreSQL grants EXECUTE on a newly created
+-- function to PUBLIC by default; revoking it in this SAME migration,
+-- immediately after creation, closes the access window that existed
+-- between this function's own creation and the later corrective
+-- migration 20260916010956 (which remains unchanged as redundant
+-- final-state defense). Exact signature only — never the bare
+-- function name.
+revoke execute on function public.start_pulse_duel_atomically(uuid, text, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.start_pulse_duel_atomically(uuid, text, uuid, uuid)
+  to service_role;

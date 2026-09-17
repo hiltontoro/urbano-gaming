@@ -43,3 +43,18 @@ create table pulse_actions (
 );
 
 create index pulse_actions_duel_id_idx on pulse_actions (duel_id);
+
+-- URBANO Pulse — Migration Atomicity and Table Boundary Correction
+-- (UG-CR-GATE-058, UG-CR-REV-038). This table owns the append-only
+-- action/evidence stream (see the header comment above) — a direct
+-- client write could insert a fabricated HIT/MISS row or forge
+-- sequence_number/idempotency_key evidence outside the atomic RPC that
+-- computes them under lock. RLS with zero client policies plus an
+-- explicit revoke/grant boundary, in this SAME migration, closes the
+-- table from the instant it is created; service_role bypasses RLS and
+-- is the only role this repository's server-side code ever uses to
+-- reach it. No sequence grant: pulse_action_id defaults via
+-- gen_random_uuid(), not an identity/serial sequence.
+alter table public.pulse_actions enable row level security;
+revoke all on table public.pulse_actions from public, anon, authenticated;
+grant select, insert, update, delete on table public.pulse_actions to service_role;

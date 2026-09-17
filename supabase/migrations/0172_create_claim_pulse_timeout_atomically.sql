@@ -126,3 +126,13 @@ begin
   return query select true, 'FORFEIT'::text, v_winner_participant_id, false;
 end;
 $$;
+
+-- URBANO Pulse — Migration Atomicity Correction (UG-CR-GATE-058,
+-- UG-CR-REV-038). See 0169's own matching comment — revoked/granted
+-- immediately after creation, in this same migration, to close the
+-- default-PUBLIC-EXECUTE window rather than leaving it open until the
+-- later corrective migration. Exact signature only.
+revoke execute on function public.claim_pulse_timeout_atomically(uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.claim_pulse_timeout_atomically(uuid, text)
+  to service_role;

@@ -32,3 +32,18 @@ create table pulse_games (
   constraint pulse_games_target_counts_nonnegative
     check (target_count_a >= 0 and target_count_b >= 0)
 );
+
+-- URBANO Pulse — Migration Atomicity and Table Boundary Correction
+-- (UG-CR-GATE-058, UG-CR-REV-038). This is the single serialization
+-- point for every Pulse turn-authority mutation (see the header
+-- comment above) — a direct client write here could forge the current
+-- actor, deadline, or score without ever going through the atomic RPCs
+-- that enforce turn order and evidence. RLS with zero client policies
+-- plus an explicit revoke/grant boundary, in this SAME migration,
+-- closes the table from the instant it is created; service_role
+-- bypasses RLS and is the only role this repository's server-side code
+-- ever uses to reach it. No sequence grant: duel_id is the primary key
+-- and carries no identity/serial default.
+alter table public.pulse_games enable row level security;
+revoke all on table public.pulse_games from public, anon, authenticated;
+grant select, insert, update, delete on table public.pulse_games to service_role;
