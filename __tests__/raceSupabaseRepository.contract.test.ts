@@ -16,24 +16,15 @@ import {
   RaceIdempotencyKeyConflictError,
   RaceInvalidTokenError,
 } from "../lib/gaming/race/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for contract tests.");
-}
-// This project's committed .env.local targets the linked REMOTE Supabase
-// project; contract tests must run only against the confirmed local
-// stack. Fail loudly rather than silently mutating a non-local database
-// if SUPABASE_URL was not explicitly overridden to 127.0.0.1 for this
-// run (see UG-CR-RPT-025's baseline-verification section).
-if (!/127\.0\.0\.1|localhost/.test(supabaseUrl)) {
-  throw new Error(
-    `Refusing to run Race contract tests against a non-local SUPABASE_URL (${supabaseUrl}). ` +
-      "Export SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY for the local stack before running this file."
-  );
 }
 
 const repo = new SupabaseRaceRepository(supabaseUrl, supabaseServiceRoleKey);

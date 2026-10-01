@@ -13,31 +13,17 @@ import {
   PulseTurnExpiredError,
   PulseNotActiveError,
 } from "../lib/session/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   throw new Error(
     "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for contract tests."
-  );
-}
-
-/**
- * URBANO Pulse Slice 001 (UG-CR-GATE-002). Mandatory environment guard
- * — the gate explicitly requires proving this suite targets the local
- * Postgres stack before it runs any mutation, given that a private
- * board layout is genuinely at stake if this suite is ever pointed at
- * the cloud project by an unedited .env.local. Refuse outright rather
- * than trusting the ambient environment.
- */
-if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(supabaseUrl)) {
-  throw new Error(
-    `Pulse contract suite refuses to run against a non-local SUPABASE_URL ("${supabaseUrl}"). ` +
-      "Export SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY for the local `supabase status` stack " +
-      "before running npm run test:contract — never edit .env.local for this."
   );
 }
 

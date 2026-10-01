@@ -55,25 +55,16 @@ import {
   AlreadyTeamMemberError,
 } from "../lib/gaming/competitions/types";
 import type { GoalEventInput, AssistEventInput, ParticipationAttestationInput } from "../lib/gaming/competitions/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY are required for contract tests.");
-}
-// This project's committed .env.local targets the linked REMOTE Supabase
-// project; contract tests must run only against the confirmed local
-// stack — fail loudly rather than silently mutating a non-local database
-// if SUPABASE_URL was not explicitly overridden to 127.0.0.1 for this run
-// (see raceSupabaseRepository.contract.test.ts's identical guard).
-if (!/127\.0\.0\.1|localhost/.test(supabaseUrl)) {
-  throw new Error(
-    `Refusing to run Competitions contract tests against a non-local SUPABASE_URL (${supabaseUrl}). ` +
-      "Export SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY for the local stack before running this file."
-  );
 }
 
 const repo = new SupabaseCompetitionsRepository(supabaseUrl, supabaseServiceRoleKey);

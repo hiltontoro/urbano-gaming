@@ -9,9 +9,11 @@ import { undoMove } from "../lib/gaming/rutas/undoMove";
 import { restartAttempt } from "../lib/gaming/rutas/restartAttempt";
 import { getAttempt } from "../lib/gaming/rutas/getAttempt";
 import { RutasIllegalMoveError, RutasNothingToUndoError } from "../lib/gaming/rutas/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {

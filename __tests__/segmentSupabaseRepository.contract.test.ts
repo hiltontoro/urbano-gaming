@@ -7,10 +7,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SupabaseSessionRepository } from "../lib/session/db/supabaseSessionRepository";
 import type { ParticipantRecord } from "../lib/session/db/sessionRepository";
 import { PreviousInteractionNotRevealedError, type SessionRecord } from "../lib/session/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {

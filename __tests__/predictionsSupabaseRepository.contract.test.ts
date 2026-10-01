@@ -14,9 +14,11 @@ import { cancelMatch } from "../lib/gaming/predictions/adminCatalog";
 import { InvalidGoalscorerSelectionError, InvalidGoalMinuteError, MatchCancelledError, XpEligibilityLockedError } from "../lib/gaming/predictions/types";
 import { SupabaseAuditRepository } from "../lib/gaming/audit/db/supabaseAuditRepository";
 import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../lib/gaming/authority/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {

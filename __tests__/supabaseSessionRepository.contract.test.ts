@@ -15,9 +15,11 @@ import {
   CapabilityNotAuthorizedError,
   type SessionRecord,
 } from "../lib/session/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 const env = loadEnv("development", process.cwd(), "");
 
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey =
   env.SUPABASE_SERVICE_ROLE_KEY;
 

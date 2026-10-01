@@ -10,9 +10,11 @@ import { createSession } from "../lib/session/createSession";
 import { createTable } from "../lib/gaming/poker/createTable";
 import { resolveRoom } from "../lib/rooms/resolveRoom";
 import { RoomNotFoundError, AmbiguousRoomError } from "../lib/rooms/types";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {

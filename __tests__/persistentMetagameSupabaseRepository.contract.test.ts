@@ -8,9 +8,11 @@ import { SupabaseMetagameRepository } from "../lib/gaming/metagame/db/supabaseMe
 import { SupabaseGamingRepository } from "../lib/gaming/db/supabaseGamingRepository";
 import { recordExperienceSummary } from "../lib/gaming/metagame/recordExperienceSummary";
 import { processExperienceSummaryConsequences } from "../lib/gaming/metagame/processExperienceSummaryConsequences";
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {

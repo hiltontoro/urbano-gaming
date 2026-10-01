@@ -4,6 +4,8 @@ import { loadEnv } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
+
 /**
  * URBANO Gaming Competitions — Correction 5 (UG-CR-RPT-030): a complete
  * table-driven authorization and direct-access matrix, independent of
@@ -18,17 +20,12 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const env = loadEnv("development", process.cwd(), "");
 const supabaseUrl = env.SUPABASE_URL;
+requireLocalSupabase(supabaseUrl);
 const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY are required for contract tests.");
-}
-if (!/127\.0\.0\.1|localhost/.test(supabaseUrl)) {
-  throw new Error(
-    `Refusing to run the Competitions authorization matrix against a non-local SUPABASE_URL (${supabaseUrl}). ` +
-      "Export SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY for the local stack before running this file."
-  );
 }
 
 const cleanupClient = createClient(supabaseUrl, supabaseServiceRoleKey);
