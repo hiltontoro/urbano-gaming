@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { loadEnv } from "vite";
 import { createClient } from "@supabase/supabase-js";
+import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SupabaseCompetitionsRepository } from "../lib/gaming/competitions/db/supabaseCompetitionsRepository";
@@ -16,6 +19,7 @@ import { publishCompetition } from "../lib/gaming/competitions/publishCompetitio
 import { registerForCompetition } from "../lib/gaming/competitions/registerForCompetition";
 import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
 import { decideJoinRequest } from "../lib/gaming/competitions/decideJoinRequest";
+import { organizerReviewJoinRequest } from "../lib/gaming/competitions/organizerReviewJoinRequest";
 import { declareRoster } from "../lib/gaming/competitions/declareRoster";
 import { checkIn } from "../lib/gaming/competitions/checkIn";
 import { appointScorekeeper } from "../lib/gaming/competitions/appointScorekeeper";
@@ -25,6 +29,9 @@ import { correctFixture } from "../lib/gaming/competitions/correctFixture";
 import { finalizeFixture } from "../lib/gaming/competitions/finalizeFixture";
 import { forfeitFixture } from "../lib/gaming/competitions/forfeitFixture";
 import { voidFixture } from "../lib/gaming/competitions/voidFixture";
+import { resolveCompetitionByPublicCode } from "../lib/gaming/competitions/resolveCompetitionByPublicCode";
+import { resolveCompetitionTeamByPublicCode } from "../lib/gaming/competitions/resolveCompetitionTeamByPublicCode";
+import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
 import {
   ScorekeeperConflictOfInterestError,
   OperationalAuthorityRequiredError,
@@ -53,6 +60,10 @@ import {
   DuplicateTeamNameError,
   AlreadyCaptainOrMemberError,
   AlreadyTeamMemberError,
+  CompetitionNotFoundError,
+  CompetitionTeamNotFoundError,
+  CompetitionNotCancellableError,
+  CompetitionCancelledError,
 } from "../lib/gaming/competitions/types";
 import type { GoalEventInput, AssistEventInput, ParticipationAttestationInput } from "../lib/gaming/competitions/types";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1418,6 +1429,718 @@ describe("Branded Team Registration and Invitation Journey — corrected lifecyc
       await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team One", sharedCaptain.gamingMemberId);
 
       await expect(addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team Two", sharedCaptain.gamingMemberId)).rejects.toBeInstanceOf(AlreadyCaptainOrMemberError);
+    });
+  });
+});
+
+describe("Opaque public_code resolution and incomplete-competition cancellation (UG-CR-GATE-081 Phase 3A/3E)", () => {
+  describe("public_code assignment and resolution", () => {
+    it("createCompetition, addCompetitionTeam, and proposeCompetitionTeam each persist a real, non-empty, non-uuid-shaped public_code distinct from the row's own primary key", async () => {
+      const organizer = await createRealGamingMember("Code Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Code Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+
+      const competitionRow = await repo.getCompetitionById(competition.competitionId);
+      expect(competitionRow!.publicCode).toBeTruthy();
+      expect(competitionRow!.publicCode).not.toBe(competition.competitionId);
+      // Never a UUID shape — a cosmetic transform of the real id is exactly
+      // what this gate forbids.
+      expect(competitionRow!.publicCode).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+      const captain = await createRealGamingMember("Code Captain");
+      const addedTeam = await addCompetitionTeam(repo, competition.competitionId, organizer.gamingMemberId, "Code Team", captain.gamingMemberId);
+      const teamRow = await repo.getCompetitionTeamById(addedTeam.competitionTeamId);
+      expect(teamRow!.publicCode).toBeTruthy();
+      expect(teamRow!.publicCode).not.toBe(addedTeam.competitionTeamId);
+      expect(teamRow!.publicCode).not.toBe(competitionRow!.publicCode);
+    });
+
+    it("two competitions never collide on public_code (the unique index is real, not just a TypeScript-level assumption)", async () => {
+      const organizer = await createRealGamingMember("Code Organizer 2");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const a = await createCompetition(repo, organizer.gamingMemberId, `Code Cup A ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      const b = await createCompetition(repo, organizer.gamingMemberId, `Code Cup B ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(a.competitionId, b.competitionId);
+
+      const rowA = await repo.getCompetitionById(a.competitionId);
+      const rowB = await repo.getCompetitionById(b.competitionId);
+      expect(rowA!.publicCode).not.toBe(rowB!.publicCode);
+    });
+
+    it("resolveCompetitionByPublicCode round-trips to the exact real competitionId", async () => {
+      const organizer = await createRealGamingMember("Resolve Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Resolve Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const row = await repo.getCompetitionById(competition.competitionId);
+
+      const resolved = await resolveCompetitionByPublicCode(repo, row!.publicCode);
+
+      expect(resolved.competitionId).toBe(competition.competitionId);
+    });
+
+    it("an unknown public_code raises CompetitionNotFoundError — never a silent null or an empty success", async () => {
+      await expect(resolveCompetitionByPublicCode(repo, "no-such-code-" + randomUUID())).rejects.toBeInstanceOf(CompetitionNotFoundError);
+    });
+
+    it("resolveCompetitionTeamByPublicCode round-trips to the exact real (competitionId, competitionTeamId) pair", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const member = await registeredMember(ctx.competitionId, "Resolve Captain");
+      const proposed = await proposeCompetitionTeam(repo, ctx.competitionId, "Resolve Team", member.gamingMemberId);
+      const competitionRow = await repo.getCompetitionById(ctx.competitionId);
+      const teamRow = await repo.getCompetitionTeamById(proposed.competitionTeamId);
+
+      const resolved = await resolveCompetitionTeamByPublicCode(repo, competitionRow!.publicCode, teamRow!.publicCode);
+
+      expect(resolved).toEqual({ competitionId: ctx.competitionId, competitionTeamId: proposed.competitionTeamId });
+    });
+
+    it("a team public_code that is real but paired with the WRONG competition's public_code fails as not-found — codes are not independently valid, the pairing is checked", async () => {
+      const ctxA = await setUpCompetitionForTeamRegistration();
+      const ctxB = await setUpCompetitionForTeamRegistration();
+      const memberA = await registeredMember(ctxA.competitionId, "Cross-Pair Captain");
+      const proposed = await proposeCompetitionTeam(repo, ctxA.competitionId, "Cross-Pair Team", memberA.gamingMemberId);
+      const competitionRowB = await repo.getCompetitionById(ctxB.competitionId);
+      const teamRowA = await repo.getCompetitionTeamById(proposed.competitionTeamId);
+
+      await expect(resolveCompetitionTeamByPublicCode(repo, competitionRowB!.publicCode, teamRowA!.publicCode)).rejects.toBeInstanceOf(CompetitionTeamNotFoundError);
+    });
+
+    it("an opaque code alone cannot bypass authorization — resolving a code only yields the real id; every subsequent write still independently re-enforces its own organizer/captain/membership checks exactly as if the real id had been used directly", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const competitionRow = await repo.getCompetitionById(ctx.competitionId);
+      const resolved = await resolveCompetitionByPublicCode(repo, competitionRow!.publicCode);
+      const impostor = await createRealGamingMember("Not The Organizer");
+
+      // Knowing the public_code (and therefore the resolved real id)
+      // grants nothing: an organizer-only action still fails for anyone
+      // who isn't that competition's real organizer.
+      await expect(closeTeamRegistration(repo, resolved.competitionId, impostor.gamingMemberId)).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
+    });
+  });
+
+  describe("cancel_incomplete_competition_atomically", () => {
+    it("the organizer can cancel a DRAFT competition with a reason, and the result is truthful and terminal", async () => {
+      const organizer = await createRealGamingMember("Cancel Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Cancel Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+
+      const result = await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "Not enough interest from players");
+
+      expect(result.state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      expect(result.cancelledReason).toBe("Not enough interest from players");
+      expect(result.alreadyCancelled).toBe(false);
+
+      const row = await repo.getCompetitionById(competition.competitionId);
+      expect(row!.state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      expect(row!.cancelledReason).toBe("Not enough interest from players");
+    });
+
+    it("the organizer can cancel a TEAM_REGISTRATION_OPEN competition", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const result = await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Venue fell through");
+      expect(result.state).toBe("CANCELLED_WITHOUT_CHAMPION");
+    });
+
+    it("a non-organizer cannot cancel someone else's competition", async () => {
+      const organizer = await createRealGamingMember("Real Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Protected Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const impostor = await createRealGamingMember("Impostor");
+
+      await expect(cancelCompetition(repo, competition.competitionId, impostor.gamingMemberId, "x")).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
+
+      const row = await repo.getCompetitionById(competition.competitionId);
+      expect(row!.state).toBe("DRAFT");
+    });
+
+    it("an empty reason is rejected with ReasonRequiredError, and nothing changes", async () => {
+      const organizer = await createRealGamingMember("Reason Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Reason Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+
+      await expect(cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "")).rejects.toBeInstanceOf(ReasonRequiredError);
+
+      const row = await repo.getCompetitionById(competition.competitionId);
+      expect(row!.state).toBe("DRAFT");
+    });
+
+    it("is idempotent: cancelling an already-cancelled competition again returns the same cancellation truthfully rather than erroring", async () => {
+      const organizer = await createRealGamingMember("Idempotent Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Idempotent Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+
+      const first = await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "First reason");
+      const second = await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "A different reason this time");
+
+      expect(first.alreadyCancelled).toBe(false);
+      expect(second.alreadyCancelled).toBe(true);
+      // The idempotent replay never overwrites the original reason with
+      // whatever a later caller happened to pass.
+      expect(second.cancelledReason).toBe("First reason");
+    });
+
+    it("a PUBLISHED competition cannot be cancelled this way — CompetitionNotCancellableError, and the existing fixture-void cascade remains the only path for a published competition", async () => {
+      const ctx = await setUpCompetitionWith4Teams();
+      const teams = await repo.getCompetitionTeams(ctx.competitionId);
+      const now = new Date();
+      await publishCompetition(
+        repo, ctx.competitionId, ctx.organizerId,
+        teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,
+        new Date(now.getTime() + 3600_000).toISOString(), new Date(now.getTime() + 7200_000).toISOString(), new Date(now.getTime() + 10800_000).toISOString()
+      );
+
+      await expect(cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Too late now")).rejects.toBeInstanceOf(CompetitionNotCancellableError);
+
+      const row = await repo.getCompetitionById(ctx.competitionId);
+      expect(row!.state).toBe("PUBLISHED");
+    });
+
+    it("once cancelled, the competition's own pre-existing state guards block every later write — team registration cannot be (re)opened on a cancelled competition", async () => {
+      const organizer = await createRealGamingMember("Blocked Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Blocked Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "Cancelled before registration");
+
+      await expect(openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId)).rejects.toBeInstanceOf(CompetitionNotDraftError);
+    });
+
+    it("a cancelled competition cannot accept a new member registration", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled mid-registration");
+      const member = await createRealGamingMember("Late Registrant");
+
+      await expect(registerForCompetition(repo, ctx.competitionId, member.gamingMemberId, true)).rejects.toBeInstanceOf(CompetitionNotPublishedError);
+    });
+
+    it("a cancelled competition cannot accept a new team proposal", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const member = await registeredMember(ctx.competitionId, "Late Proposer");
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled mid-registration");
+
+      await expect(proposeCompetitionTeam(repo, ctx.competitionId, "Too Late Team", member.gamingMemberId)).rejects.toBeInstanceOf(TeamRegistrationNotOpenError);
+    });
+  });
+});
+
+async function setUpCancelledPublishedCompetition() {
+  const ctx = await setUpCompetitionWith4Teams();
+  const published = await publishDefault(ctx.competitionId, ctx.organizerId, ctx.teams);
+  // Voiding ANY of the three required knockout fixtures cascades the
+  // WHOLE competition to CANCELLED_WITHOUT_CHAMPION (the pre-existing
+  // void_competition_fixture_atomically behavior) — semifinal1 itself is
+  // deliberately left untouched (still SCHEDULED) so every guard test
+  // below targets a fixture that has nothing wrong with it except that
+  // its competition has, in the meantime, been cancelled via a SIBLING
+  // fixture's void.
+  await voidFixture(repo, published.semifinal2FixtureId, ctx.organizerId, "Voiding semifinal 2 to reach CANCELLED_WITHOUT_CHAMPION for guard testing");
+  return { ...ctx, published };
+}
+
+describe("UG-CR-GATE-082 corrections (UG-CR-REV-053)", () => {
+  describe("#1/#2 — one canonical public_code shape, produced by both the old and the new RPC signatures", () => {
+    it("the OLD (pre-GATE-081) create_competition_atomically signature still succeeds against the migrated schema and produces a code matching the exact client-validated shape", async () => {
+      const organizer = await createRealGamingMember("Legacy Shape Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const { data, error } = await cleanupClient.rpc("create_competition_atomically", {
+        p_organizer_gaming_member_id: organizer.gamingMemberId,
+        p_name: `Legacy Cup ${randomUUID().slice(0, 8)}`,
+        p_activity_key: "SOCCER_5V5",
+      });
+      expect(error).toBeNull();
+      const competitionId = data![0].competition_id as string;
+      createdCompetitionIds.push(competitionId);
+
+      const row = await repo.getCompetitionById(competitionId);
+      // The exact PUBLIC_CODE_PATTERN public/competitionsIntent.js
+      // enforces client-side — a row the OLD signature inserted (relying
+      // entirely on the column DEFAULT, exactly like a pre-existing,
+      // never-migrated row would) must be indistinguishable in shape
+      // from one the NEW signature inserted explicitly.
+      expect(row!.publicCode).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    });
+
+    it("the OLD (pre-GATE-081) add_competition_team_atomically signature still succeeds and produces a code matching the exact client-validated shape", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await createRealGamingMember("Legacy Captain");
+      const { data, error } = await cleanupClient.rpc("add_competition_team_atomically", {
+        p_competition_id: ctx.competitionId,
+        p_organizer_gaming_member_id: ctx.organizerId,
+        p_name: `Legacy Team ${randomUUID().slice(0, 6)}`,
+        p_captain_gaming_member_id: captain.gamingMemberId,
+      });
+      expect(error).toBeNull();
+      const teamId = data![0].competition_team_id as string;
+
+      const teamRow = await repo.getCompetitionTeamById(teamId);
+      expect(teamRow!.publicCode).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    });
+
+    it("the OLD (pre-GATE-081) propose_competition_team_atomically signature still succeeds and produces a code matching the exact client-validated shape", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const member = await registeredMember(ctx.competitionId, "Legacy Proposer");
+      const { data, error } = await cleanupClient.rpc("propose_competition_team_atomically", {
+        p_competition_id: ctx.competitionId,
+        p_name: `Legacy Proposed ${randomUUID().slice(0, 6)}`,
+        p_proposing_gaming_member_id: member.gamingMemberId,
+      });
+      expect(error).toBeNull();
+      const teamId = data![0].competition_team_id as string;
+
+      const teamRow = await repo.getCompetitionTeamById(teamId);
+      expect(teamRow!.publicCode).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    });
+
+    it("a code produced by the OLD signature resolves through resolveCompetitionByPublicCode exactly like a new-signature code — proving a pre-existing row's link works through the real browser validation rule, end to end", async () => {
+      const organizer = await createRealGamingMember("Legacy Resolve Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const { data, error } = await cleanupClient.rpc("create_competition_atomically", {
+        p_organizer_gaming_member_id: organizer.gamingMemberId,
+        p_name: `Legacy Resolve Cup ${randomUUID().slice(0, 8)}`,
+        p_activity_key: "SOCCER_5V5",
+      });
+      expect(error).toBeNull();
+      const competitionId = data![0].competition_id as string;
+      createdCompetitionIds.push(competitionId);
+      const row = await repo.getCompetitionById(competitionId);
+
+      const resolved = await resolveCompetitionByPublicCode(repo, row!.publicCode);
+      expect(resolved.competitionId).toBe(competitionId);
+    });
+  });
+
+  describe("#3 — cancellation is genuinely audited", () => {
+    it("cancelling records the actor and a timestamp on the competition row, and inserts exactly one immutable admin_audit_events row; idempotent replay creates no duplicate event", async () => {
+      const organizer = await createRealGamingMember("Audit Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Audit Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+
+      await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "Audit trail check");
+
+      const { data: compRow, error: compErr } = await cleanupClient
+        .from("competitions")
+        .select("cancelled_by_gaming_member_id, cancelled_at")
+        .eq("competition_id", competition.competitionId)
+        .single();
+      expect(compErr).toBeNull();
+      expect(compRow!.cancelled_by_gaming_member_id).toBe(organizer.gamingMemberId);
+      expect(compRow!.cancelled_at).toBeTruthy();
+
+      const { data: events, error: eventsErr } = await cleanupClient
+        .from("admin_audit_events")
+        .select("*")
+        .eq("target_type", "competitions")
+        .eq("target_id", competition.competitionId);
+      expect(eventsErr).toBeNull();
+      expect(events).toHaveLength(1);
+      expect(events![0].action_type).toBe("CANCEL_INCOMPLETE_COMPETITION");
+      expect(events![0].actor_kind).toBe("GAMING_MEMBER");
+      expect(events![0].actor_id).toBe(organizer.gamingMemberId);
+      expect(events![0].outcome).toBe("SUCCESS");
+      expect(events![0].reason).toBe("Audit trail check");
+      expect(events![0].occurred_at).toBeTruthy();
+
+      // Idempotent replay — a second cancel call on the same competition
+      // must not insert a second audit event, and must not touch the
+      // first event's own recorded reason.
+      await cancelCompetition(repo, competition.competitionId, organizer.gamingMemberId, "A different reason on replay");
+      const { data: eventsAfterReplay } = await cleanupClient
+        .from("admin_audit_events")
+        .select("*")
+        .eq("target_type", "competitions")
+        .eq("target_id", competition.competitionId);
+      expect(eventsAfterReplay).toHaveLength(1);
+      expect(eventsAfterReplay![0].reason).toBe("Audit trail check");
+    });
+  });
+
+  describe("#3 — comprehensive post-cancellation write denial", () => {
+    it("a pending team proposal can no longer be approved or rejected once its competition is cancelled", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Guard Proposer");
+      const proposed = await proposeCompetitionTeam(repo, ctx.competitionId, "Guard Pending Team", proposer.gamingMemberId);
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled with a pending team decision outstanding");
+
+      await expect(decideCompetitionTeam(repo, proposed.competitionTeamId, ctx.organizerId, "APPROVE", null)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("a new join request can no longer be created once its competition is cancelled, even against an already-accepted team", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Guard Team Captain");
+      const proposed = await proposeCompetitionTeam(repo, ctx.competitionId, "Guard Accepted Team", proposer.gamingMemberId);
+      await decideCompetitionTeam(repo, proposed.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      const wouldBeJoiner = await registeredMember(ctx.competitionId, "Guard Would-Be Joiner");
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled before any join request");
+
+      await expect(requestJoinTeam(repo, ctx.competitionId, proposed.competitionTeamId, wouldBeJoiner.gamingMemberId)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("an existing REQUESTED join request can no longer be decided once its competition is cancelled", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Guard Captain 2");
+      const proposed = await proposeCompetitionTeam(repo, ctx.competitionId, "Guard Team 2", proposer.gamingMemberId);
+      await decideCompetitionTeam(repo, proposed.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      const joiner = await registeredMember(ctx.competitionId, "Guard Joiner 2");
+      const joinRequest = await requestJoinTeam(repo, ctx.competitionId, proposed.competitionTeamId, joiner.gamingMemberId);
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled with a pending join decision outstanding");
+
+      await expect(decideJoinRequest(repo, joinRequest.competitionJoinRequestId, proposer.gamingMemberId, "APPROVE", false)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("an organizer can no longer override an already-rejected join request once the competition is cancelled", async () => {
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const proposer = await registeredMember(ctx.competitionId, "Guard Captain 3");
+      const proposed = await proposeCompetitionTeam(repo, ctx.competitionId, "Guard Team 3", proposer.gamingMemberId);
+      await decideCompetitionTeam(repo, proposed.competitionTeamId, ctx.organizerId, "APPROVE", null);
+      const joiner = await registeredMember(ctx.competitionId, "Guard Joiner 3");
+      const joinRequest = await requestJoinTeam(repo, ctx.competitionId, proposed.competitionTeamId, joiner.gamingMemberId);
+      await decideJoinRequest(repo, joinRequest.competitionJoinRequestId, proposer.gamingMemberId, "REJECT", false);
+      await cancelCompetition(repo, ctx.competitionId, ctx.organizerId, "Cancelled with a rejected join request outstanding");
+
+      await expect(organizerReviewJoinRequest(repo, joinRequest.competitionJoinRequestId, ctx.organizerId, "APPROVE", "Override after cancellation")).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("declareRoster is denied once the competition is cancelled via a sibling fixture's void, even though the targeted fixture itself is untouched", async () => {
+      const { teams, published } = await setUpCancelledPublishedCompetition();
+      await expect(
+        declareRoster(repo, published.semifinal1FixtureId, teams[0].competitionTeamId, teams[0].captainId, false, null, [teams[0].captainId])
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("checkIn is denied once the competition is cancelled", async () => {
+      const { teams, published } = await setUpCancelledPublishedCompetition();
+      await expect(checkIn(repo, published.semifinal1FixtureId, teams[0].captainId)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("appointScorekeeper is denied once the competition is cancelled", async () => {
+      const { organizerId, published } = await setUpCancelledPublishedCompetition();
+      const candidate = await createRealGamingMember("Guard Scorekeeper Candidate");
+      await expect(appointScorekeeper(repo, published.semifinal1FixtureId, organizerId, candidate.gamingMemberId)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("submitFixtureEvidence is denied once the competition is cancelled", async () => {
+      const { published } = await setUpCancelledPublishedCompetition();
+      const scorekeeper = await createRealGamingMember("Guard Evidence Scorekeeper");
+      await expect(
+        submitFixtureEvidence(repo, published.semifinal1FixtureId, scorekeeper.gamingMemberId, 1, 0, [], [], [], null)
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("raiseDispute is denied once the competition is cancelled", async () => {
+      const { published } = await setUpCancelledPublishedCompetition();
+      const member = await createRealGamingMember("Guard Disputer");
+      await expect(
+        raiseDispute(repo, published.semifinal1FixtureId, member.gamingMemberId, "SCORE", randomUUID(), "Trying to dispute after cancellation")
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("correctFixture is denied once the competition is cancelled", async () => {
+      const { organizerId, published } = await setUpCancelledPublishedCompetition();
+      await expect(
+        correctFixture(repo, published.semifinal1FixtureId, organizerId, "Trying to correct after cancellation", 1, 0, [], [], null)
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("finalizeFixture is denied once the competition is cancelled", async () => {
+      const { organizerId, published } = await setUpCancelledPublishedCompetition();
+      await expect(finalizeFixture(repo, published.semifinal1FixtureId, organizerId)).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("forfeitFixture is denied once the competition is cancelled", async () => {
+      const { organizerId, teams, published } = await setUpCancelledPublishedCompetition();
+      await expect(
+        forfeitFixture(repo, published.semifinal1FixtureId, organizerId, teams[0].competitionTeamId, "Trying to forfeit after cancellation")
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+
+    it("voidFixture on a DIFFERENT fixture of the same competition is denied once the competition is already cancelled", async () => {
+      const { organizerId, published } = await setUpCancelledPublishedCompetition();
+      await expect(
+        voidFixture(repo, published.semifinal1FixtureId, organizerId, "Trying to void a second fixture after cancellation")
+      ).rejects.toBeInstanceOf(CompetitionCancelledError);
+    });
+  });
+});
+
+// UG-CR-GATE-083 Correction A (per UG-CR-REV-054 finding 1). Raw pg clients
+// are used because supabase-js .rpc() auto-commits each call in its own
+// transaction, which cannot hold a lock across two calls. The database URL
+// is supplied explicitly through COMPETITIONS_LOCAL_DB_URL, is never read
+// from .env.local, and must be a loopback Postgres URL.
+const supabaseDbUrl = process.env.COMPETITIONS_LOCAL_DB_URL ?? "";
+if (!/^postgresql:\/\/[^@]+@(127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(supabaseDbUrl)) {
+  throw new Error("COMPETITIONS_LOCAL_DB_URL must be set to a loopback Postgres URL for serialization tests.");
+}
+
+async function connectRawDb(): Promise<Client> {
+  const client = new Client({ connectionString: supabaseDbUrl, statement_timeout: 20000 });
+  await client.connect();
+  return client;
+}
+
+async function waitUntilBlockedOnLock(observer: Client, backendPid: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const { rows } = await observer.query("select wait_event_type from pg_stat_activity where pid = $1", [backendPid]);
+    if (rows[0]?.wait_event_type === "Lock") return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`backend ${backendPid} was never observed waiting on a lock`);
+}
+
+async function setUpDraftCompetitionForSerialization() {
+  const organizer = await createRealGamingMember("Organizer");
+  await grantOperationalAuthority(organizer.gamingMemberId);
+  const competition = await createCompetition(repo, organizer.gamingMemberId, `Serialization Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+  createdCompetitionIds.push(competition.competitionId);
+  return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId };
+}
+
+describe("UG-CR-GATE-083 corrections (UG-CR-REV-054 finding 1) — competition-scoped serialization", () => {
+  describe("locking invariant — deterministic, no timing assumptions", () => {
+    const serializationMigrations = readdirSync(path.join(process.cwd(), "supabase/migrations"))
+      .filter((name) => /^20261005090\d{3}_add_serialization_lock_to_.*\.sql$/.test(name))
+      .sort();
+
+    it("exactly the twenty-two serialization migrations are present (twenty GATE-083 plus two GATE-084 legacy overloads)", () => {
+      expect(serializationMigrations).toHaveLength(22);
+    });
+
+    for (const migrationName of serializationMigrations) {
+      it(`${migrationName}: takes competition_scope before any row lock or write of the function body`, () => {
+        const sql = readFileSync(path.join(process.cwd(), "supabase/migrations", migrationName), "utf8");
+        const body = sql.slice(sql.indexOf("as $$"));
+        const lockAt = body.indexOf("hashtext('competition_scope:'");
+        expect(lockAt).toBeGreaterThan(-1);
+        for (const marker of ["for update", "insert into", "\n  update "]) {
+          const at = body.indexOf(marker);
+          if (at !== -1) expect(lockAt).toBeLessThan(at);
+        }
+      });
+    }
+
+    it("a competition_scope lock held by another session blocks each competition-level mutation (live pg_advisory lock)", async () => {
+      const { organizerId, competitionId } = await setUpDraftCompetitionForSerialization();
+      const holder = await connectRawDb();
+      const probe = await connectRawDb();
+      try {
+        await holder.query("begin");
+        await holder.query("select pg_advisory_xact_lock(hashtext($1))", [`competition_scope:${competitionId}`]);
+
+        const mutations: Array<[string, unknown[]]> = [
+          ["select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competitionId, organizerId, "probe"]],
+          ["select * from open_team_registration_atomically($1, $2)", [competitionId, organizerId]],
+          ["select * from close_team_registration_atomically($1, $2)", [competitionId, organizerId]],
+          ["select * from add_competition_team_atomically($1, $2, $3, $4)", [competitionId, organizerId, "Probe Team", randomUUID()]],
+          ["select * from propose_competition_team_atomically($1, $2, $3)", [competitionId, "Probe Proposal", randomUUID()]],
+        ];
+        for (const [sql, params] of mutations) {
+          await probe.query("begin");
+          await probe.query("set local lock_timeout = '150ms'");
+          await expect(probe.query(sql, params)).rejects.toMatchObject({ code: "55P03" });
+          await probe.query("rollback");
+        }
+
+        // Control: once the holder releases, the same call is no longer blocked by the lock.
+        await holder.query("rollback");
+        await probe.query("begin");
+        await probe.query("set local lock_timeout = '2s'");
+        await expect(probe.query(mutations[0][0], mutations[0][1])).resolves.toBeDefined();
+        await probe.query("rollback");
+      } finally {
+        await holder.end().catch(() => undefined);
+        await probe.end().catch(() => undefined);
+      }
+    });
+  });
+
+  describe("controlled concurrent cancellation-versus-mutation", () => {
+    it("cancellation holds the lock first; a racing open blocks, then is rejected and never writes after cancellation", async () => {
+      const { organizerId, competitionId } = await setUpDraftCompetitionForSerialization();
+      const canceller = await connectRawDb();
+      const opener = await connectRawDb();
+      const observer = await connectRawDb();
+      try {
+        await canceller.query("begin");
+        await canceller.query("select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competitionId, organizerId, "Serialization test cancel"]);
+
+        const openerPid = (await opener.query("select pg_backend_pid() as pid")).rows[0].pid as number;
+        await opener.query("begin");
+        const racingOpen = opener
+          .query("select * from open_team_registration_atomically($1, $2)", [competitionId, organizerId])
+          .then(() => ({ rejected: false as const, message: "" }), (err: Error) => ({ rejected: true as const, message: err.message }));
+
+        await waitUntilBlockedOnLock(observer, openerPid);
+        await canceller.query("commit");
+
+        const outcome = await racingOpen;
+        await opener.query("rollback");
+
+        // open's own DRAFT check is the authoritative rejection here, matching the
+        // accepted GATE-082 expectation for opening a cancelled competition.
+        expect(outcome.rejected).toBe(true);
+        expect(outcome.message).toContain("COMPETITION_NOT_DRAFT");
+        const { rows } = await observer.query("select state, cancelled_reason from competitions where competition_id = $1", [competitionId]);
+        expect(rows[0].state).toBe("CANCELLED_WITHOUT_CHAMPION");
+        expect(rows[0].cancelled_reason).toBe("Serialization test cancel");
+      } finally {
+        await canceller.end().catch(() => undefined);
+        await opener.end().catch(() => undefined);
+        await observer.end().catch(() => undefined);
+      }
+    });
+
+    it("a plain-read guard racing cancellation cannot commit a join request after cancellation (the REV-054 shape)", async () => {
+      const organizer = await createRealGamingMember("Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const competition = await createCompetition(repo, organizer.gamingMemberId, `Join Race Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(competition.competitionId);
+      const captain = await createRealGamingMember("Race Captain");
+      const team = await addCompetitionTeam(repo, competition.competitionId, organizer.gamingMemberId, "Race Team", captain.gamingMemberId);
+      await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+      const requester = await registeredMember(competition.competitionId, "Racing Requester");
+
+      const canceller = await connectRawDb();
+      const requesting = await connectRawDb();
+      const observer = await connectRawDb();
+      try {
+        await canceller.query("begin");
+        await canceller.query("select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competition.competitionId, organizer.gamingMemberId, "Join race cancel"]);
+
+        const requestingPid = (await requesting.query("select pg_backend_pid() as pid")).rows[0].pid as number;
+        await requesting.query("begin");
+        const racingJoin = requesting
+          .query("select * from request_join_competition_team_atomically($1, $2, $3)", [competition.competitionId, team.competitionTeamId, requester.gamingMemberId])
+          .then(() => ({ rejected: false as const, message: "" }), (err: Error) => ({ rejected: true as const, message: err.message }));
+
+        await waitUntilBlockedOnLock(observer, requestingPid);
+        await canceller.query("commit");
+
+        const outcome = await racingJoin;
+        await requesting.query(outcome.rejected ? "rollback" : "commit");
+
+        expect(outcome.rejected).toBe(true);
+        expect(outcome.message).toContain("COMPETITION_CANCELLED");
+        const { rows } = await observer.query(
+          "select count(*)::int as n from competition_join_requests where competition_id = $1 and requesting_gaming_member_id = $2",
+          [competition.competitionId, requester.gamingMemberId]
+        );
+        expect(rows[0].n).toBe(0);
+        const state = await observer.query("select state from competitions where competition_id = $1", [competition.competitionId]);
+        expect(state.rows[0].state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      } finally {
+        await canceller.end().catch(() => undefined);
+        await requesting.end().catch(() => undefined);
+        await observer.end().catch(() => undefined);
+      }
+    });
+
+    it("legacy four-argument add_competition_team_atomically racing cancellation waits, is rejected, and writes no team", async () => {
+      const { organizerId, competitionId } = await setUpDraftCompetitionForSerialization();
+      const captain = await createRealGamingMember("Legacy Captain");
+      const canceller = await connectRawDb();
+      const legacyAdder = await connectRawDb();
+      const observer = await connectRawDb();
+      try {
+        await canceller.query("begin");
+        await canceller.query("select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competitionId, organizerId, "Legacy add race cancel"]);
+
+        const adderPid = (await legacyAdder.query("select pg_backend_pid() as pid")).rows[0].pid as number;
+        await legacyAdder.query("begin");
+        const racingAdd = legacyAdder
+          .query("select * from add_competition_team_atomically($1, $2, $3, $4)", [competitionId, organizerId, "Legacy Race Team", captain.gamingMemberId])
+          .then(() => ({ rejected: false as const, message: "" }), (err: Error) => ({ rejected: true as const, message: err.message }));
+
+        await waitUntilBlockedOnLock(observer, adderPid);
+        await canceller.query("commit");
+
+        const outcome = await racingAdd;
+        await legacyAdder.query(outcome.rejected ? "rollback" : "commit");
+
+        expect(outcome.rejected).toBe(true);
+        expect(outcome.message).toContain("COMPETITION_NOT_DRAFT");
+        const teams = await observer.query("select count(*)::int as n from competition_teams where competition_id = $1 and name = $2", [competitionId, "Legacy Race Team"]);
+        expect(teams.rows[0].n).toBe(0);
+        const state = await observer.query("select state from competitions where competition_id = $1", [competitionId]);
+        expect(state.rows[0].state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      } finally {
+        await canceller.end().catch(() => undefined);
+        await legacyAdder.end().catch(() => undefined);
+        await observer.end().catch(() => undefined);
+      }
+    });
+
+    it("legacy three-argument propose_competition_team_atomically racing cancellation waits, is rejected, and writes no proposal", async () => {
+      const { organizerId, competitionId } = await setUpCompetitionForTeamRegistration();
+      const requester = await registeredMember(competitionId, "Legacy Proposer");
+      const canceller = await connectRawDb();
+      const legacyProposer = await connectRawDb();
+      const observer = await connectRawDb();
+      try {
+        await canceller.query("begin");
+        await canceller.query("select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competitionId, organizerId, "Legacy propose race cancel"]);
+
+        const proposerPid = (await legacyProposer.query("select pg_backend_pid() as pid")).rows[0].pid as number;
+        await legacyProposer.query("begin");
+        const racingPropose = legacyProposer
+          .query("select * from propose_competition_team_atomically($1, $2, $3)", [competitionId, "Legacy Race Proposal", requester.gamingMemberId])
+          .then(() => ({ rejected: false as const, message: "" }), (err: Error) => ({ rejected: true as const, message: err.message }));
+
+        await waitUntilBlockedOnLock(observer, proposerPid);
+        await canceller.query("commit");
+
+        const outcome = await racingPropose;
+        await legacyProposer.query(outcome.rejected ? "rollback" : "commit");
+
+        expect(outcome.rejected).toBe(true);
+        expect(outcome.message).toContain("TEAM_REGISTRATION_NOT_OPEN");
+        const proposals = await observer.query("select count(*)::int as n from competition_teams where competition_id = $1 and captain_gaming_member_id = $2", [competitionId, requester.gamingMemberId]);
+        expect(proposals.rows[0].n).toBe(0);
+        const state = await observer.query("select state from competitions where competition_id = $1", [competitionId]);
+        expect(state.rows[0].state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      } finally {
+        await canceller.end().catch(() => undefined);
+        await legacyProposer.end().catch(() => undefined);
+        await observer.end().catch(() => undefined);
+      }
+    });
+
+    it("a mutation that takes the lock first makes cancellation wait, then cancels the resulting state", async () => {
+      const { organizerId, competitionId } = await setUpDraftCompetitionForSerialization();
+      const opener = await connectRawDb();
+      const canceller = await connectRawDb();
+      const observer = await connectRawDb();
+      try {
+        await opener.query("begin");
+        await opener.query("select * from open_team_registration_atomically($1, $2)", [competitionId, organizerId]);
+
+        const cancellerPid = (await canceller.query("select pg_backend_pid() as pid")).rows[0].pid as number;
+        await canceller.query("begin");
+        const waitingCancel = canceller
+          .query("select * from cancel_incomplete_competition_atomically($1, $2, $3)", [competitionId, organizerId, "Reverse-order cancel"])
+          .then(() => ({ rejected: false as const, message: "" }), (err: Error) => ({ rejected: true as const, message: err.message }));
+
+        await waitUntilBlockedOnLock(observer, cancellerPid);
+        await opener.query("commit");
+
+        const outcome = await waitingCancel;
+        await canceller.query("commit");
+
+        expect(outcome.rejected).toBe(false);
+        const { rows } = await observer.query("select state from competitions where competition_id = $1", [competitionId]);
+        expect(rows[0].state).toBe("CANCELLED_WITHOUT_CHAMPION");
+      } finally {
+        await opener.end().catch(() => undefined);
+        await canceller.end().catch(() => undefined);
+        await observer.end().catch(() => undefined);
+      }
     });
   });
 });

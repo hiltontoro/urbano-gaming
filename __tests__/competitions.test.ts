@@ -107,11 +107,16 @@ import {
   DuplicateTeamNameError,
   AlreadyCaptainOrMemberError,
   TeamNotAcceptedError,
+  CompetitionNotCancellableError,
+  CompetitionCancelledError,
 } from "../lib/gaming/competitions/types";
 import { openTeamRegistration } from "../lib/gaming/competitions/openTeamRegistration";
 import { proposeCompetitionTeam } from "../lib/gaming/competitions/proposeCompetitionTeam";
 import { decideCompetitionTeam } from "../lib/gaming/competitions/decideCompetitionTeam";
 import { closeTeamRegistration } from "../lib/gaming/competitions/closeTeamRegistration";
+import { resolveCompetitionByPublicCode } from "../lib/gaming/competitions/resolveCompetitionByPublicCode";
+import { resolveCompetitionTeamByPublicCode } from "../lib/gaming/competitions/resolveCompetitionTeamByPublicCode";
+import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -153,6 +158,9 @@ function makeFakeRepository(): CompetitionsRepository {
     proposeCompetitionTeam: vi.fn(),
     decideCompetitionTeam: vi.fn(),
     closeTeamRegistration: vi.fn(),
+    resolveCompetitionByPublicCode: vi.fn(),
+    resolveCompetitionTeamByPublicCode: vi.fn(),
+    cancelCompetition: vi.fn(),
     publishCompetition: vi.fn(),
     registerForCompetition: vi.fn(),
     requestJoinTeam: vi.fn(),
@@ -174,6 +182,7 @@ function makeFakeRepository(): CompetitionsRepository {
     getCompetitionFixtures: vi.fn(),
     getFixtureById: vi.fn(),
     getMyRegistration: vi.fn(),
+    getCompetitionRegistrations: vi.fn(),
     getMyTeamMembership: vi.fn(),
     getMyPendingJoinRequest: vi.fn(),
     getPendingJoinRequestsForTeam: vi.fn(),
@@ -201,13 +210,16 @@ describe("Competitions command handlers — input mapping onto the repository (U
 
   it("createCompetition maps onto repo.createCompetition exactly", async () => {
     await createCompetition(repo, "org-1", "Cup", "SOCCER_5V5");
-    expect(repo.createCompetition).toHaveBeenCalledWith("org-1", "Cup", "SOCCER_5V5");
+    // The trailing arg is the opaque public_code (UG-CR-GATE-081 Phase
+    // 3A) — freshly generated per call, so only its shape (a non-empty
+    // string) is asserted here, never an exact value.
+    expect(repo.createCompetition).toHaveBeenCalledWith("org-1", "Cup", "SOCCER_5V5", expect.any(String));
     expect(repo.createCompetition).toHaveBeenCalledTimes(1);
   });
 
   it("addCompetitionTeam maps onto repo.addCompetitionTeam exactly", async () => {
     await addCompetitionTeam(repo, "comp-1", "org-1", "Team A", "cap-1");
-    expect(repo.addCompetitionTeam).toHaveBeenCalledWith("comp-1", "org-1", "Team A", "cap-1");
+    expect(repo.addCompetitionTeam).toHaveBeenCalledWith("comp-1", "org-1", "Team A", "cap-1", expect.any(String));
   });
 
   it("openTeamRegistration maps onto repo.openTeamRegistration exactly", async () => {
@@ -217,7 +229,7 @@ describe("Competitions command handlers — input mapping onto the repository (U
 
   it("proposeCompetitionTeam maps onto repo.proposeCompetitionTeam exactly — the proposer id is passed straight through, never re-derived or defaulted here", async () => {
     await proposeCompetitionTeam(repo, "comp-1", "My Team", "mem-1");
-    expect(repo.proposeCompetitionTeam).toHaveBeenCalledWith("comp-1", "My Team", "mem-1");
+    expect(repo.proposeCompetitionTeam).toHaveBeenCalledWith("comp-1", "My Team", "mem-1", expect.any(String));
   });
 
   it("decideCompetitionTeam maps onto repo.decideCompetitionTeam exactly, including a null reason on APPROVE", async () => {
@@ -350,6 +362,8 @@ describe("statusForCompetitionsError — complete domain-error to HTTP-status ma
     ["DuplicateTeamNameError", new DuplicateTeamNameError()],
     ["AlreadyCaptainOrMemberError", new AlreadyCaptainOrMemberError()],
     ["TeamNotAcceptedError", new TeamNotAcceptedError()],
+    ["CompetitionNotCancellableError", new CompetitionNotCancellableError()],
+    ["CompetitionCancelledError", new CompetitionCancelledError()],
   ];
   const BAD_REQUEST: [string, Error][] = [
     ["EmptyRosterError", new EmptyRosterError()],
@@ -417,7 +431,7 @@ describe("getCompetitionView — role-aware projection and privacy behavior (UG-
 
   beforeEach(() => {
     repo = makeFakeRepository();
-    (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" } satisfies CompetitionRecord);
+    (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" } satisfies CompetitionRecord);
     (repo.getCompetitionTeams as ReturnType<typeof vi.fn>).mockResolvedValue([] as CompetitionTeamRecord[]);
     (repo.getMyRegistration as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (repo.getMyTeamMembership as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -542,7 +556,7 @@ describe("getCompetitionView — role-aware projection and privacy behavior (UG-
 
 function team(overrides: Partial<CompetitionTeamRecord>): CompetitionTeamRecord {
   return {
-    competitionTeamId: "team-1", competitionId: "comp-1", name: "Team A", captainGamingMemberId: "cap-1",
+    competitionTeamId: "team-1", publicCode: "team-1-code", competitionId: "comp-1", name: "Team A", captainGamingMemberId: "cap-1",
     status: "ACCEPTED", provenance: "ORGANIZER_CREATED", decidedAt: null, decidedByGamingMemberId: null,
     rejectionReason: null, createdAt: "x",
     ...overrides,
@@ -554,7 +568,7 @@ describe("getCompetitionView — team status/provenance role-aware projection (U
 
   beforeEach(() => {
     repo = makeFakeRepository();
-    (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null } satisfies CompetitionRecord);
+    (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null } satisfies CompetitionRecord);
     (repo.getCompetitionFixtures as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (repo.getMyRegistration as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (repo.getMyPendingJoinRequest as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -692,7 +706,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     const res = await POST(jsonRequest("POST", { name: "Cup", activityKey: "SOCCER_5V5", organizerGamingMemberId: "attacker-supplied-id" }));
 
     expect(res.status).toBe(201);
-    expect(repo.createCompetition).toHaveBeenCalledWith("auth-derived-member", "Cup", "SOCCER_5V5");
+    expect(repo.createCompetition).toHaveBeenCalledWith("auth-derived-member", "Cup", "SOCCER_5V5", expect.any(String));
   });
 
   it("POST fixtures/[fixtureId]/finalize never reads or forwards a client-supplied winner, timestamp, or outcome type — it does not even parse a request body", async () => {
@@ -779,7 +793,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
       const res = await POST(jsonRequest("POST", { name: "My Team", captainGamingMemberId: "attacker-supplied-id", status: "ACCEPTED" }), { params: { competitionId: "comp-1" } });
 
       expect(res.status).toBe(201);
-      expect(repo.proposeCompetitionTeam).toHaveBeenCalledWith("comp-1", "My Team", "auth-derived-member");
+      expect(repo.proposeCompetitionTeam).toHaveBeenCalledWith("comp-1", "My Team", "auth-derived-member", expect.any(String));
     });
 
     it("rejects a malformed (non-JSON) body with 400, never reaching the repository", async () => {
@@ -887,7 +901,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
 
   describe("GET .../invitation-preview — the one deliberately unauthenticated Competitions route (UG-CR-RPT-041/042 §8/§9)", () => {
     it("never calls requireGamingMember, and still returns 200 for a valid accepted-team pair", async () => {
-      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
       (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team({ competitionTeamId: "team-1", competitionId: "comp-1", name: "Team A", captainGamingMemberId: "cap-1", status: "ACCEPTED" }));
       (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({ "cap-1": "Alice" });
       const { GET } = await import("../app/api/gaming/competitions/[competitionId]/teams/[teamId]/invitation-preview/route");
@@ -909,7 +923,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
 
     it("never returns a raw Gaming Member id, an organizer id, or any field beyond the documented safe subset", async () => {
-      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-secret-id", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" });
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-secret-id", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" });
       (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team({ competitionTeamId: "team-1", competitionId: "comp-1", captainGamingMemberId: "captain-secret-id", status: "ACCEPTED" }));
       (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({ "captain-secret-id": "Alice" });
       const { GET } = await import("../app/api/gaming/competitions/[competitionId]/teams/[teamId]/invitation-preview/route");
@@ -934,7 +948,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
 
     it("a teamId that belongs to a DIFFERENT competition fails safely with 404 rather than leaking cross-competition data", async () => {
-      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" });
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "PUBLISHED", cancelledReason: null, createdAt: "x", publishedAt: "x" });
       (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team({ competitionTeamId: "team-1", competitionId: "some-other-competition", status: "ACCEPTED" }));
       const { GET } = await import("../app/api/gaming/competitions/[competitionId]/teams/[teamId]/invitation-preview/route");
 
@@ -944,7 +958,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
 
     it("a PENDING_ORGANIZER_APPROVAL team is reported truthfully, never presented as accepted", async () => {
-      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
       (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team({ competitionTeamId: "team-1", competitionId: "comp-1", status: "PENDING_ORGANIZER_APPROVAL" }));
       (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const { GET } = await import("../app/api/gaming/competitions/[competitionId]/teams/[teamId]/invitation-preview/route");
@@ -957,7 +971,7 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
 
     it("a REJECTED team is reported truthfully, never presented as accepted", async () => {
-      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", publicCode: "comp-1-code", activityKey: "SOCCER_5V5", name: "Cup", organizerGamingMemberId: "org-1", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null });
       (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team({ competitionTeamId: "team-1", competitionId: "comp-1", status: "REJECTED" }));
       (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const { GET } = await import("../app/api/gaming/competitions/[competitionId]/teams/[teamId]/invitation-preview/route");
@@ -974,9 +988,9 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     it("excludes another organizer's DRAFT competition from the list, but includes the caller's OWN DRAFT and every non-DRAFT competition", async () => {
       const { GET } = await import("../app/api/gaming/competitions/route");
       (repo.listCompetitions as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { competitionId: "c-other-draft", activityKey: "SOCCER_5V5", name: "Other Draft", organizerGamingMemberId: "some-other-organizer", state: "DRAFT", cancelledReason: null, createdAt: "x", publishedAt: null },
-        { competitionId: "c-my-draft", activityKey: "SOCCER_5V5", name: "My Draft", organizerGamingMemberId: "auth-derived-member", state: "DRAFT", cancelledReason: null, createdAt: "x", publishedAt: null },
-        { competitionId: "c-open", activityKey: "SOCCER_5V5", name: "Open Cup", organizerGamingMemberId: "some-other-organizer", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null },
+        { competitionId: "c-other-draft", publicCode: "c-other-draft-code", activityKey: "SOCCER_5V5", name: "Other Draft", organizerGamingMemberId: "some-other-organizer", state: "DRAFT", cancelledReason: null, createdAt: "x", publishedAt: null },
+        { competitionId: "c-my-draft", publicCode: "c-my-draft-code", activityKey: "SOCCER_5V5", name: "My Draft", organizerGamingMemberId: "auth-derived-member", state: "DRAFT", cancelledReason: null, createdAt: "x", publishedAt: null },
+        { competitionId: "c-open", publicCode: "c-open-code", activityKey: "SOCCER_5V5", name: "Open Cup", organizerGamingMemberId: "some-other-organizer", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null },
       ]);
 
       const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }));
@@ -1090,6 +1104,179 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     const res = await GET(new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } }), { params: { fixtureId: "fx-1" } });
 
     expect(res.status).toBe(404);
+  });
+
+  describe("GET /competitions/resolve — opaque public_code to real id (UG-CR-GATE-081 Phase 3A), the second deliberately unauthenticated Competitions route", () => {
+    it("resolves `c` alone to { competitionId }, never calling requireGamingMember", async () => {
+      (repo.resolveCompetitionByPublicCode as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1" });
+      const { GET } = await import("../app/api/gaming/competitions/resolve/route");
+
+      const res = await GET(new Request("http://localhost/probe?c=some-code"));
+      const json = (await res.json()) as any;
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({ competitionId: "comp-1" });
+      expect(repo.resolveCompetitionByPublicCode).toHaveBeenCalledWith("some-code");
+      expect(httpAuth.requireGamingMember).not.toHaveBeenCalled();
+    });
+
+    it("resolves `c` + `t` together to { competitionId, teamId }", async () => {
+      (repo.resolveCompetitionTeamByPublicCode as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", competitionTeamId: "team-1" });
+      const { GET } = await import("../app/api/gaming/competitions/resolve/route");
+
+      const res = await GET(new Request("http://localhost/probe?c=comp-code&t=team-code"));
+      const json = (await res.json()) as any;
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({ competitionId: "comp-1", teamId: "team-1" });
+      expect(repo.resolveCompetitionTeamByPublicCode).toHaveBeenCalledWith("comp-code", "team-code");
+      expect(repo.resolveCompetitionByPublicCode).not.toHaveBeenCalled();
+    });
+
+    it("rejects a missing `c` with 400, never reaching the repository", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/resolve/route");
+
+      const res = await GET(new Request("http://localhost/probe"));
+
+      expect(res.status).toBe(400);
+      expect(repo.resolveCompetitionByPublicCode).not.toHaveBeenCalled();
+      expect(repo.resolveCompetitionTeamByPublicCode).not.toHaveBeenCalled();
+    });
+
+    it("an unknown or mismatched code fails safely with a generic 404 message — never discloses which half of a pair was wrong", async () => {
+      (repo.resolveCompetitionByPublicCode as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionNotFoundError());
+      const { GET } = await import("../app/api/gaming/competitions/resolve/route");
+
+      const res = await GET(new Request("http://localhost/probe?c=does-not-exist"));
+      const json = (await res.json()) as any;
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe("This link is no longer valid.");
+    });
+
+    it("a mismatched team-within-competition pairing also fails safely with the same generic 404", async () => {
+      (repo.resolveCompetitionTeamByPublicCode as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionTeamNotFoundError());
+      const { GET } = await import("../app/api/gaming/competitions/resolve/route");
+
+      const res = await GET(new Request("http://localhost/probe?c=comp-code&t=wrong-team-code"));
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /competitions/{id}/cancel — CANCEL_INCOMPLETE_COMPETITION (UG-CR-GATE-081 Phase 3E)", () => {
+    it("never forwards a client-supplied organizerGamingMemberId — the acting identity is always the one requireGamingMember resolved", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", state: "CANCELLED_WITHOUT_CHAMPION", cancelledReason: "Not enough interest", alreadyCancelled: false });
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "Not enough interest", organizerGamingMemberId: "attacker-supplied-id" }), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(200);
+      expect(repo.cancelCompetition).toHaveBeenCalledWith("comp-1", "auth-derived-member", "Not enough interest");
+    });
+
+    it("rejects a missing reason with 400, never reaching the repository", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", {}), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(400);
+      expect(repo.cancelCompetition).not.toHaveBeenCalled();
+    });
+
+    it("rejects a whitespace-only reason with 400", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "   " }), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(400);
+      expect(repo.cancelCompetition).not.toHaveBeenCalled();
+    });
+
+    it("trims the reason before passing it to the repository", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", state: "CANCELLED_WITHOUT_CHAMPION", cancelledReason: "Low turnout", alreadyCancelled: false });
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      await POST(jsonRequest("POST", { reason: "  Low turnout  " }), { params: { competitionId: "comp-1" } });
+
+      expect(repo.cancelCompetition).toHaveBeenCalledWith("comp-1", "auth-derived-member", "Low turnout");
+    });
+
+    it("rejects malformed JSON with 400", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+      const badRequest = new Request("http://localhost/probe", { method: "POST", headers: { authorization: "Bearer token" }, body: "not valid json {{{" });
+
+      const res = await POST(badRequest, { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(400);
+      expect(repo.cancelCompetition).not.toHaveBeenCalled();
+    });
+
+    it("maps COMPETITION_ACCESS_DENIED to 403 — a non-organizer cannot cancel someone else's competition", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionAccessDeniedError("only this competition's own organizer may cancel it"));
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "x" }), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("maps COMPETITION_NOT_CANCELLABLE to 409 — a PUBLISHED/COMPLETE competition cannot be cancelled this way", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionNotCancellableError());
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "x" }), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(409);
+    });
+
+    it("maps COMPETITION_NOT_FOUND to 404", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionNotFoundError());
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "x" }), { params: { competitionId: "comp-1" } });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("an already-cancelled competition is idempotent — the route simply reflects alreadyCancelled: true, never erroring on a repeat cancel", async () => {
+      (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", state: "CANCELLED_WITHOUT_CHAMPION", cancelledReason: "Low turnout", alreadyCancelled: true });
+      const { POST } = await import("../app/api/gaming/competitions/[competitionId]/cancel/route");
+
+      const res = await POST(jsonRequest("POST", { reason: "x" }), { params: { competitionId: "comp-1" } });
+      const json = (await res.json()) as any;
+
+      expect(res.status).toBe(200);
+      expect(json.result.alreadyCancelled).toBe(true);
+    });
+  });
+});
+
+describe("Competitions domain commands — resolve and cancel (UG-CR-GATE-081)", () => {
+  let repo: CompetitionsRepository;
+
+  beforeEach(() => {
+    repo = makeFakeRepository();
+  });
+
+  it("resolveCompetitionByPublicCode maps onto repo.resolveCompetitionByPublicCode exactly", async () => {
+    (repo.resolveCompetitionByPublicCode as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1" });
+    const result = await resolveCompetitionByPublicCode(repo, "some-code");
+    expect(repo.resolveCompetitionByPublicCode).toHaveBeenCalledWith("some-code");
+    expect(result).toEqual({ competitionId: "comp-1" });
+  });
+
+  it("resolveCompetitionTeamByPublicCode maps onto repo.resolveCompetitionTeamByPublicCode exactly", async () => {
+    (repo.resolveCompetitionTeamByPublicCode as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", competitionTeamId: "team-1" });
+    const result = await resolveCompetitionTeamByPublicCode(repo, "comp-code", "team-code");
+    expect(repo.resolveCompetitionTeamByPublicCode).toHaveBeenCalledWith("comp-code", "team-code");
+    expect(result).toEqual({ competitionId: "comp-1", competitionTeamId: "team-1" });
+  });
+
+  it("cancelCompetition maps onto repo.cancelCompetition exactly — the proposer/organizer id is passed straight through, never re-derived here", async () => {
+    (repo.cancelCompetition as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionId: "comp-1", state: "CANCELLED_WITHOUT_CHAMPION", cancelledReason: "x", alreadyCancelled: false });
+    await cancelCompetition(repo, "comp-1", "org-1", "x");
+    expect(repo.cancelCompetition).toHaveBeenCalledWith("comp-1", "org-1", "x");
   });
 });
 
@@ -1210,11 +1397,11 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
       else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
     });
 
-    it("discovered exactly the 24 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview)", () => {
-      expect(routeFiles).toHaveLength(24);
+    it("discovered exactly the 26 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel)", () => {
+      expect(routeFiles).toHaveLength(26);
     });
 
-    it("with readiness disabled, every one of the 25 discovered handlers (GET+POST both counted on the base route) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview route — the schema-readiness guard fires before even that route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
+    it("with readiness disabled, every one of the 27 discovered handlers (GET+POST both counted on the base route) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
       delete process.env.COMPETITIONS_SCHEMA_READY;
       let handlersTested = 0;
 
@@ -1251,8 +1438,95 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
         }
       }
 
-      expect(handlersTested).toBe(25);
+      expect(handlersTested).toBe(27);
     });
+  });
+});
+
+describe("Competitions UI — no raw competition/team UUID in user-visible navigation or invitations (UG-CR-GATE-081 Phase 3A/4)", () => {
+  const html = readFileSync("public/competitions.html", "utf-8");
+  const adminHtml = readFileSync("public/competitions-admin.html", "utf-8");
+  const intentJs = readFileSync("public/competitionsIntent.js", "utf-8");
+
+  it("competitions.html's invitation link is built exclusively from publicCode fields, never competitionId/competitionTeamId", () => {
+    const fnStart = html.indexOf("function buildInvitationLink(competitionCode, teamCode) {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnEnd = html.indexOf("\n}", fnStart);
+    const fnBody = html.slice(fnStart, fnEnd);
+    expect(fnBody).not.toMatch(/competitionId|competitionTeamId/);
+    expect(fnBody).toContain('url.searchParams.set("c", competitionCode)');
+    expect(fnBody).toContain('url.searchParams.set("t", teamCode)');
+  });
+
+  it("neither Competitions page ever calls searchParams.set with the legacy raw-id keys `competitionId`/`teamId`", () => {
+    expect(html).not.toMatch(/searchParams\.set\(\s*["']competitionId["']/);
+    expect(html).not.toMatch(/searchParams\.set\(\s*["']teamId["']/);
+    expect(adminHtml).not.toMatch(/searchParams\.set\(\s*["']competitionId["']/);
+    expect(adminHtml).not.toMatch(/searchParams\.set\(\s*["']teamId["']/);
+  });
+
+  it("competitionsIntent.js reads only the opaque `c`/`t` query parameters, never `competitionId`/`teamId`, and validates them against the public_code shape, never a UUID pattern", () => {
+    expect(intentJs).toContain('.get("c")');
+    expect(intentJs).toContain('.get("t")');
+    expect(intentJs).not.toMatch(/\.get\(\s*["']competitionId["']\s*\)/);
+    expect(intentJs).not.toMatch(/\.get\(\s*["']teamId["']\s*\)/);
+    expect(intentJs).not.toMatch(/[0-9a-fA-F]{8}-\[0-9a-fA-F\]/); // no UUID-shaped regex literal survives
+  });
+
+  it("the organizer admin page's invitation link is also built exclusively from publicCode fields", () => {
+    const fnStart = adminHtml.indexOf("function buildInvitationLink(competitionCode, teamCode) {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnEnd = adminHtml.indexOf("\n}", fnStart);
+    const fnBody = adminHtml.slice(fnStart, fnEnd);
+    expect(fnBody).not.toMatch(/competitionId|competitionTeamId/);
+  });
+
+  it("the organizer admin page's \"Add Team\" control no longer asks for a raw gaming-member ID — the captain-ID text input is gone entirely", () => {
+    expect(adminHtml).not.toMatch(/placeholder="Captain gaming member ID"/);
+    expect(adminHtml).not.toContain('id="t-captain"');
+    expect(adminHtml).not.toContain('id="btn-add-team"');
+  });
+});
+
+describe("Competitions UI — no raw gaming-member ID entry or display in match-day UI (UG-CR-GATE-082 Phase 4 / UG-CR-REV-053 #4)", () => {
+  const html = readFileSync("public/competitions.html", "utf-8");
+  const adminHtml = readFileSync("public/competitions-admin.html", "utf-8");
+
+  it("the admin page's scorekeeper, scorer, assister, and attestation fields are no longer raw-UUID text inputs", () => {
+    expect(adminHtml).not.toMatch(/placeholder="scorekeeper gaming member ID"/);
+    expect(adminHtml).not.toMatch(/placeholder="scorer gaming member ID"/);
+    expect(adminHtml).not.toMatch(/placeholder="assisting gaming member ID"/);
+    expect(adminHtml).not.toMatch(/placeholder="gaming member ID"/);
+  });
+
+  it("the admin page builds every member selector from this competition's own eligibleMembers, via the shared populateMemberOptions helper (DOM APIs, UG-CR-GATE-083) — never free text", () => {
+    expect(adminHtml).toContain("function populateMemberOptions(select, eligibleMembers, selectedId)");
+    expect(adminHtml).toContain("populateMemberOptions(skForm.querySelector(\".sk-input\"), detail.eligibleMembers, f.scorekeeperGamingMemberId);");
+    expect(adminHtml).toContain('eventRowsEditor(evidenceForm.querySelector(".ev-goals"), detail.eligibleMembers, "goal")');
+    expect(adminHtml).toContain('eventRowsEditor(evidenceForm.querySelector(".ev-assists"), detail.eligibleMembers, "assist")');
+    expect(adminHtml).toContain('eventRowsEditor(evidenceForm.querySelector(".ev-attestations"), detail.eligibleMembers, "attestation")');
+    expect(adminHtml).toContain('eventRowsEditor(correctForm.querySelector(".cor-goals"), detail.eligibleMembers, "goal")');
+    expect(adminHtml).toContain('eventRowsEditor(correctForm.querySelector(".cor-assists"), detail.eligibleMembers, "assist")');
+  });
+
+  it("the admin page renders the scorekeeper, both rosters, and check-ins by display name, never a raw gaming-member id", () => {
+    expect(adminHtml).toContain("detail.displayNames[f.scorekeeperGamingMemberId]");
+    expect(adminHtml).not.toMatch(/Scorekeeper: \$\{f\.scorekeeperGamingMemberId \|\| "not appointed"\}/);
+    expect(adminHtml).not.toMatch(/gamingMemberIds\.join/);
+    expect(adminHtml).not.toMatch(/c\.gamingMemberId\.slice\(0,\s*8\)/);
+  });
+
+  it("the member-facing roster declaration is a checklist of this team's own already-confirmed members, never a free-text comma-separated gaming-member-ID list", () => {
+    expect(html).not.toMatch(/placeholder="member-id-1, member-id-2/);
+    expect(html).not.toContain('class="roster-input"');
+    expect(html).toContain('class="roster-member-check"');
+    expect(html).toContain("for (const m of myTeamMemberships || [])");
+  });
+
+  it("the admin page's repository/API layer exposes a competition-scoped registrant list — eligibleMembers is never built by enumerating all platform members", () => {
+    const routeTs = readFileSync("app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route.ts", "utf-8");
+    expect(routeTs).toContain("repo.getCompetitionRegistrations(fixture.competitionId)");
+    expect(routeTs).toContain("const eligibleMembers = registrations");
   });
 });
 
@@ -1287,12 +1561,14 @@ describe("Competitions UI — truthful unavailable state, never a masked empty/a
   });
 
   it("renderCompetitionDetail already surfaces the server's own truthful error message for any non-200 (unchanged since UG-CR-GATE-031/032) — a 503 here shows the guard's own message, never a generic broken page", () => {
-    // Signature grew a second parameter, teamId, for the Branded Team
-    // Registration and Invitation Journey (UG-CR-RPT-041/042 §8/§11) —
-    // the search string below follows that rename; the guarantee itself
-    // (status checked immediately after the fetch, before anything else)
-    // is otherwise unchanged.
-    const fnStart = html.indexOf("async function renderCompetitionDetail(competitionId, teamId) {");
+    // Signature grew a teamId parameter for the Branded Team Registration
+    // and Invitation Journey, then a competitionCode parameter under
+    // UG-CR-GATE-081 Phase 3A (so the detail view can re-reflect the
+    // competition's own opaque public_code into the URL) — the search
+    // string below follows both renames; the guarantee itself (status
+    // checked immediately after the fetch, before anything else) is
+    // otherwise unchanged.
+    const fnStart = html.indexOf("async function renderCompetitionDetail(competitionId, competitionCode, teamId) {");
     expect(fnStart).toBeGreaterThan(-1);
     const statusCheckIndex = html.indexOf("res.status !== 200", fnStart);
     expect(statusCheckIndex).toBeGreaterThan(fnStart);
@@ -1376,8 +1652,12 @@ describe("competitions-admin.html — inline organizer rejection interaction rep
     const fnEnd = adminHtml.indexOf("\nfunction renderCompetitionDetail() {", fnStart);
     expect(fnEnd).toBeGreaterThan(fnStart);
     const fnBody = adminHtml.slice(fnStart, fnEnd);
-    expect(fnBody).toContain("${t.name}");
-    expect(fnBody).toContain("${t.captainDisplayName || \"Unknown\"}");
+    // UG-CR-GATE-083: names are assigned via .textContent, never interpolated
+    // into the markup string parsed by el().
+    expect(fnBody).toContain('row.querySelector(".reject-team-name").textContent = t.name;');
+    expect(fnBody).toContain('row.querySelector(".reject-captain-name").textContent = t.captainDisplayName || "Unknown";');
+    expect(fnBody).not.toContain("${t.name}");
+    expect(fnBody).not.toContain("${t.captainDisplayName");
     // t.competitionTeamId is used only inside the reason input's `id`
     // attribute and the fetch URL — never interpolated into a rendered
     // <p>, <strong>, or aria-label text node.

@@ -24,6 +24,8 @@ export type CompetitionState = "DRAFT" | "TEAM_REGISTRATION_OPEN" | "READY_TO_PU
 
 export interface CompetitionRecord {
   competitionId: string;
+  /** Opaque, non-identifying public identifier (UG-CR-GATE-081 Phase 3A) — the only competition identifier ever placed in a user-visible URL or invitation. Never derived from competitionId; see lib/gaming/competitions/publicCode.ts. */
+  publicCode: string;
   activityKey: "SOCCER_5V5";
   name: string;
   organizerGamingMemberId: string;
@@ -49,6 +51,8 @@ export type CompetitionTeamProvenance = "ORGANIZER_CREATED" | "MEMBER_PROPOSED";
 
 export interface CompetitionTeamRecord {
   competitionTeamId: string;
+  /** Opaque, non-identifying public identifier (UG-CR-GATE-081 Phase 3A) — paired with the owning competition's own publicCode to form an invitation link; never derived from competitionTeamId. */
+  publicCode: string;
   competitionId: string;
   name: string;
   captainGamingMemberId: string;
@@ -376,6 +380,25 @@ export interface VoidFixtureResult {
   alreadyFinalized: boolean;
 }
 
+/** RESOLVE_COMPETITION_PUBLIC_CODE (UG-CR-GATE-081 Phase 3A) — the bare real id, nothing else; authorization for whatever happens next is unaffected by this lookup. */
+export interface ResolveCompetitionPublicCodeResult {
+  competitionId: string;
+}
+
+/** RESOLVE_COMPETITION_TEAM_PUBLIC_CODE — both bare real ids, nothing else. */
+export interface ResolveCompetitionTeamPublicCodeResult {
+  competitionId: string;
+  competitionTeamId: string;
+}
+
+/** CANCEL_INCOMPLETE_COMPETITION (UG-CR-GATE-081 Phase 3E). */
+export interface CancelCompetitionResult {
+  competitionId: string;
+  state: CompetitionState;
+  cancelledReason: string;
+  alreadyCancelled: boolean;
+}
+
 /**
  * Role-aware read model for GET_COMPETITION — see getCompetitionView.ts.
  *
@@ -592,4 +615,11 @@ export class TargetFactNotCurrentError extends Error {
 }
 export class DisputeNotAuthorizedError extends Error {
   constructor() { super("You are not authorized to dispute this fact."); this.name = "DisputeNotAuthorizedError"; }
+}
+export class CompetitionNotCancellableError extends Error {
+  constructor(message = "Only a draft, registering, or ready-to-publish competition may be cancelled this way.") { super(message); this.name = "CompetitionNotCancellableError"; }
+}
+/** UG-CR-GATE-082 (REV-053 #3) — raised by every mutation this domain's cancellation must deny once a competition is CANCELLED_WITHOUT_CHAMPION. */
+export class CompetitionCancelledError extends Error {
+  constructor() { super("This competition has been cancelled and no longer accepts this action."); this.name = "CompetitionCancelledError"; }
 }

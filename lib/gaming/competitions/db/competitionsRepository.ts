@@ -38,6 +38,9 @@ import type {
   FinalizeFixtureResult,
   ForfeitFixtureResult,
   VoidFixtureResult,
+  ResolveCompetitionPublicCodeResult,
+  ResolveCompetitionTeamPublicCodeResult,
+  CancelCompetitionResult,
 } from "../types";
 
 /**
@@ -49,12 +52,18 @@ import type {
  * itself — never a fast-path-only guarantee.
  */
 export interface CompetitionsRepository {
-  createCompetition(organizerGamingMemberId: string, name: string, activityKey: string): Promise<StartCompetitionResult>;
-  addCompetitionTeam(competitionId: string, organizerGamingMemberId: string, name: string, captainGamingMemberId: string): Promise<AddCompetitionTeamResult>;
+  createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string): Promise<StartCompetitionResult>;
+  addCompetitionTeam(competitionId: string, organizerGamingMemberId: string, name: string, captainGamingMemberId: string, publicCode: string): Promise<AddCompetitionTeamResult>;
   openTeamRegistration(competitionId: string, organizerGamingMemberId: string): Promise<OpenTeamRegistrationResult>;
-  proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string): Promise<ProposeCompetitionTeamResult>;
+  proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string, publicCode: string): Promise<ProposeCompetitionTeamResult>;
   decideCompetitionTeam(competitionTeamId: string, organizerGamingMemberId: string, decision: "APPROVE" | "REJECT", reason: string | null): Promise<DecideCompetitionTeamResult>;
   closeTeamRegistration(competitionId: string, organizerGamingMemberId: string): Promise<CloseTeamRegistrationResult>;
+  /** RESOLVE_COMPETITION_PUBLIC_CODE (UG-CR-GATE-081 Phase 3A) — opaque public_code to real competitionId; grants nothing by itself. */
+  resolveCompetitionByPublicCode(publicCode: string): Promise<ResolveCompetitionPublicCodeResult>;
+  /** RESOLVE_COMPETITION_TEAM_PUBLIC_CODE — opaque (competition, team) public_code pair to real ids; grants nothing by itself. */
+  resolveCompetitionTeamByPublicCode(competitionPublicCode: string, teamPublicCode: string): Promise<ResolveCompetitionTeamPublicCodeResult>;
+  /** CANCEL_INCOMPLETE_COMPETITION (UG-CR-GATE-081 Phase 3E). Organizer only, DRAFT/TEAM_REGISTRATION_OPEN/READY_TO_PUBLISH only, reason required. */
+  cancelCompetition(competitionId: string, organizerGamingMemberId: string, reason: string): Promise<CancelCompetitionResult>;
   publishCompetition(
     competitionId: string,
     organizerGamingMemberId: string,
@@ -121,6 +130,8 @@ export interface CompetitionsRepository {
   getCompetitionFixtures(competitionId: string): Promise<CompetitionFixtureRecord[]>;
   getFixtureById(competitionFixtureId: string): Promise<CompetitionFixtureRecord | null>;
   getMyRegistration(competitionId: string, gamingMemberId: string): Promise<CompetitionRegistrationRecord | null>;
+  /** UG-CR-GATE-082 (REV-053 #4) — every member registered for this competition, the "competition-scoped eligible members" source for human-readable, non-enumerating selection (e.g. scorekeeper appointment). */
+  getCompetitionRegistrations(competitionId: string): Promise<CompetitionRegistrationRecord[]>;
   getMyTeamMembership(competitionId: string, gamingMemberId: string): Promise<CompetitionTeamMembershipRecord | null>;
   getMyPendingJoinRequest(competitionId: string, gamingMemberId: string): Promise<CompetitionJoinRequestRecord | null>;
   getPendingJoinRequestsForTeam(competitionTeamId: string): Promise<CompetitionJoinRequestRecord[]>;

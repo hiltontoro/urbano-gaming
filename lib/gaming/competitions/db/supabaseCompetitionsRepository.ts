@@ -23,7 +23,7 @@ import {
   TargetFactNotCurrentError, DisputeNotAuthorizedError,
   CompetitionNotReadyToPublishError, TeamRegistrationNotOpenError, TeamRegistrationCapacityNotReachedError,
   TeamCapacityReachedError, TeamDecisionAlreadyMadeError, DuplicateTeamNameError, AlreadyCaptainOrMemberError,
-  TeamNotAcceptedError,
+  TeamNotAcceptedError, CompetitionNotCancellableError, CompetitionCancelledError,
 } from "../types";
 
 /** Translates a P0001-coded RPC error into its typed domain error. */
@@ -82,6 +82,8 @@ function translateError(error: { code?: string; message?: string }): Error {
     ["DUPLICATE_TEAM_NAME", () => new DuplicateTeamNameError()],
     ["ALREADY_CAPTAIN_OR_MEMBER", () => new AlreadyCaptainOrMemberError()],
     ["TEAM_NOT_ACCEPTED", () => new TeamNotAcceptedError()],
+    ["COMPETITION_NOT_CANCELLABLE", () => new CompetitionNotCancellableError(msg)],
+    ["COMPETITION_CANCELLED", () => new CompetitionCancelledError()],
   ];
   for (const [code, build] of table) {
     if (error.code === "P0001" && msg.includes(code)) return build();
@@ -98,19 +100,20 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     });
   }
 
-  async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string) {
+  async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {
     const { data, error } = await this.client.rpc("create_competition_atomically", {
       p_organizer_gaming_member_id: organizerGamingMemberId, p_name: name, p_activity_key: activityKey,
+      p_public_code: publicCode,
     });
     if (error) throw translateError(error);
     const row = Array.isArray(data) ? data[0] : data;
     return { competitionId: row.competition_id, state: row.state, createdAt: row.created_at };
   }
 
-  async addCompetitionTeam(competitionId: string, organizerGamingMemberId: string, name: string, captainGamingMemberId: string) {
+  async addCompetitionTeam(competitionId: string, organizerGamingMemberId: string, name: string, captainGamingMemberId: string, publicCode: string) {
     const { data, error } = await this.client.rpc("add_competition_team_atomically", {
       p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_name: name,
-      p_captain_gaming_member_id: captainGamingMemberId,
+      p_captain_gaming_member_id: captainGamingMemberId, p_public_code: publicCode,
     });
     if (error) throw translateError(error);
     const row = Array.isArray(data) ? data[0] : data;
@@ -126,9 +129,10 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     return { competitionId: row.competition_id, state: row.state };
   }
 
-  async proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string) {
+  async proposeCompetitionTeam(competitionId: string, name: string, proposingGamingMemberId: string, publicCode: string) {
     const { data, error } = await this.client.rpc("propose_competition_team_atomically", {
       p_competition_id: competitionId, p_name: name, p_proposing_gaming_member_id: proposingGamingMemberId,
+      p_public_code: publicCode,
     });
     if (error) throw translateError(error);
     const row = Array.isArray(data) ? data[0] : data;
@@ -152,6 +156,33 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     if (error) throw translateError(error);
     const row = Array.isArray(data) ? data[0] : data;
     return { competitionId: row.competition_id, state: row.state };
+  }
+
+  async resolveCompetitionByPublicCode(publicCode: string) {
+    const { data, error } = await this.client.rpc("resolve_competition_public_code_atomically", {
+      p_public_code: publicCode,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionId: row.competition_id };
+  }
+
+  async resolveCompetitionTeamByPublicCode(competitionPublicCode: string, teamPublicCode: string) {
+    const { data, error } = await this.client.rpc("resolve_competition_team_public_code_atomically", {
+      p_competition_public_code: competitionPublicCode, p_team_public_code: teamPublicCode,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionId: row.competition_id, competitionTeamId: row.competition_team_id };
+  }
+
+  async cancelCompetition(competitionId: string, organizerGamingMemberId: string, reason: string) {
+    const { data, error } = await this.client.rpc("cancel_incomplete_competition_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_reason: reason,
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    return { competitionId: row.competition_id, state: row.state, cancelledReason: row.cancelled_reason, alreadyCancelled: row.already_cancelled };
   }
 
   async publishCompetition(
@@ -317,7 +348,7 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     const { data, error } = await this.client.from("competitions").select("*").order("created_at", { ascending: false });
     if (error) throw error;
     return (data ?? []).map((data) => ({
-      competitionId: data.competition_id, activityKey: data.activity_key, name: data.name,
+      competitionId: data.competition_id, publicCode: data.public_code, activityKey: data.activity_key, name: data.name,
       organizerGamingMemberId: data.organizer_gaming_member_id, state: data.state, cancelledReason: data.cancelled_reason ?? null,
       createdAt: data.created_at, publishedAt: data.published_at ?? null,
     }));
@@ -328,7 +359,7 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     if (error) throw error;
     if (!data) return null;
     return {
-      competitionId: data.competition_id, activityKey: data.activity_key, name: data.name,
+      competitionId: data.competition_id, publicCode: data.public_code, activityKey: data.activity_key, name: data.name,
       organizerGamingMemberId: data.organizer_gaming_member_id, state: data.state, cancelledReason: data.cancelled_reason ?? null,
       createdAt: data.created_at, publishedAt: data.published_at ?? null,
     };
@@ -382,6 +413,15 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
     if (error) throw error;
     if (!data) return null;
     return { competitionRegistrationId: data.competition_registration_id, competitionId: data.competition_id, gamingMemberId: data.gaming_member_id, isAdultSelfAttested: data.is_adult_self_attested, registeredAt: data.registered_at };
+  }
+
+  async getCompetitionRegistrations(competitionId: string): Promise<CompetitionRegistrationRecord[]> {
+    const { data, error } = await this.client.from("competition_registrations").select("*").eq("competition_id", competitionId);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      competitionRegistrationId: r.competition_registration_id, competitionId: r.competition_id,
+      gamingMemberId: r.gaming_member_id, isAdultSelfAttested: r.is_adult_self_attested, registeredAt: r.registered_at,
+    }));
   }
 
   async getMyTeamMembership(competitionId: string, gamingMemberId: string): Promise<CompetitionTeamMembershipRecord | null> {
@@ -492,7 +532,7 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
 
 function mapTeam(r: Record<string, unknown>): CompetitionTeamRecord {
   return {
-    competitionTeamId: r.competition_team_id as string, competitionId: r.competition_id as string, name: r.name as string,
+    competitionTeamId: r.competition_team_id as string, publicCode: r.public_code as string, competitionId: r.competition_id as string, name: r.name as string,
     captainGamingMemberId: r.captain_gaming_member_id as string,
     status: r.status as CompetitionTeamRecord["status"], provenance: r.provenance as CompetitionTeamRecord["provenance"],
     decidedAt: (r.decided_at as string | null) ?? null, decidedByGamingMemberId: (r.decided_by_gaming_member_id as string | null) ?? null,

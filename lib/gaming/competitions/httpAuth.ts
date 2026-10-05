@@ -55,6 +55,8 @@ import {
   DuplicateTeamNameError,
   AlreadyCaptainOrMemberError,
   TeamNotAcceptedError,
+  CompetitionNotCancellableError,
+  CompetitionCancelledError,
 } from "./types";
 
 /** Shared boilerplate every app/api/gaming/competitions/* route needs — mirrors lib/gaming/predictions/httpAuth.ts. */
@@ -188,7 +190,9 @@ export function statusForCompetitionsError(err: unknown): number | null {
     err instanceof TeamDecisionAlreadyMadeError ||
     err instanceof DuplicateTeamNameError ||
     err instanceof AlreadyCaptainOrMemberError ||
-    err instanceof TeamNotAcceptedError
+    err instanceof TeamNotAcceptedError ||
+    err instanceof CompetitionNotCancellableError ||
+    err instanceof CompetitionCancelledError
   ) {
     return 409;
   }

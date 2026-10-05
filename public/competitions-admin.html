@@ -14,14 +14,21 @@
    * publish/appoint/correct/finalize/forfeit/void) and Scorekeeper
    * (submit evidence) actions in one page, mirroring
    * predictions-admin.html. Desktop-first, but branded to the canonical
-   * URBANO Gaming visual system (UG-CR-RPT-041/042 §6/§11) for the parts
-   * of this page that are ON the live presentation script — the
-   * fixture-management tooling (roster/evidence/correct/dispute/close)
-   * deliberately keeps its existing plain functional styling, per "do
-   * not redesign unrelated organizer functionality." Every action's
-   * real authority check lives inside its atomic RPC, never only in
-   * this UI, so an unauthorized click still fails safely server-side
-   * with a clear error.
+   * URBANO Gaming visual system for the parts of this page that are ON
+   * the live presentation script — the fixture-management tooling
+   * (roster/evidence/correct/dispute/close) deliberately keeps its
+   * existing plain functional styling, per "do not redesign unrelated
+   * organizer functionality." Every action's real authority check lives
+   * inside its atomic RPC, never only in this UI, so an unauthorized
+   * click still fails safely server-side with a clear error.
+   *
+   * UG-CR-GATE-081 Phase 3: the raw "Captain gaming member ID" add-team
+   * control is removed (the normal path is a registered member's own
+   * proposal, accepted/rejected below — already present); a lifecycle
+   * progress rail and one dominant next action replace a plain state
+   * label; invitation links now carry only opaque public_codes; a
+   * reason-required, organizer-only, non-deleting cancellation is added
+   * for an incomplete competition.
    */
   :root {
     --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
@@ -31,7 +38,8 @@
     --good: #4ade80; --bad: #f87171; --gold: #d4af37;
   }
   * { box-sizing: border-box; }
-  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; font-size: 16px; }
+  :focus-visible { outline: 2px solid var(--exp-purple); outline-offset: 2px; border-radius: 4px; }
   .shell-header { display: flex; align-items: center; justify-content: space-between; max-width: 1000px; margin: 0 auto; padding: 20px 24px 0; }
   .brand { display: inline-flex; align-items: center; gap: 10px; }
   .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
@@ -39,42 +47,58 @@
   .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
   .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
   .brand-badge { background: var(--exp-purple-bg); border: 1px solid var(--exp-purple); color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
-  .back-link { max-width: 1000px; margin: 14px auto 0; padding: 0 24px; font-size: 13px; color: var(--muted); display: block; }
+  .back-link { max-width: 1000px; margin: 14px auto 0; padding: 0 24px; font-size: 14px; color: var(--muted); display: block; }
   .back-link:hover { color: var(--ink); }
   h1 { font-size: 20px; }
-  h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-top: 34px; }
-  h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  h2 { font-size: 16px; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-top: 34px; }
+  h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
   section { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
   .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 18px 20px; margin: 0 0 16px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-  input, select, textarea { font-family: inherit; font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); }
-  button { font-family: inherit; font-size: 13px; font-weight: 700; padding: 9px 15px; border-radius: 8px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; }
+  input, select, textarea { font-family: inherit; font-size: 14px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); max-width: 100%; }
+  label { font-size: 14px; color: var(--muted); }
+  button { font-family: inherit; font-size: 14px; font-weight: 700; padding: 9px 15px; border-radius: 8px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.secondary { background: transparent; border: 1px solid var(--ink); color: var(--ink); }
   button.danger { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-  .msg { font-size: 12.5px; color: var(--muted); margin: 6px 0; }
+  button.dominant { background: var(--exp-purple); color: var(--ink); box-shadow: 0 0 0 1px var(--exp-purple), 0 0 20px var(--exp-purple-glow); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .msg { font-size: 14px; color: var(--muted); margin: 6px 0; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
   .fixture-block { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
   .fixture-header { display: flex; justify-content: space-between; align-items: center; }
-  .pill { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .pill.good { color: var(--good); border-color: var(--good); }
   .pill.bad { color: var(--bad); border-color: var(--bad); }
   .pill.gold { color: var(--gold); border-color: var(--gold); }
   .event-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
   .event-row input, .event-row select { max-width: 200px; }
-  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
-  legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
-  .capacity-badge { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; min-width: 0; max-width: 100%; }
+  legend { font-size: 13px; color: var(--muted); padding: 0 6px; }
+  .capacity-badge { font-size: 14px; color: var(--muted); font-weight: 600; }
+  /* Lifecycle progress rail (UG-CR-GATE-081 Phase 3C). */
+  .lifecycle-rail { display: flex; flex-wrap: wrap; gap: 0; margin: 14px 0; }
+  .lifecycle-step { display: flex; align-items: center; gap: 8px; padding: 8px 14px 8px 0; font-size: 13px; color: var(--muted); }
+  .lifecycle-step .dot { width: 20px; height: 20px; border-radius: 999px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .lifecycle-step.complete .dot { background: var(--good); border-color: var(--good); color: var(--primary-ink); }
+  .lifecycle-step.current .dot { border-color: var(--exp-purple); color: var(--exp-purple); }
+  .lifecycle-step.current { color: var(--ink); font-weight: 700; }
+  .lifecycle-connector { width: 20px; height: 2px; background: var(--line); align-self: center; margin: 0 2px; }
+  .lifecycle-connector.complete { background: var(--good); }
+  .blocker-note { font-size: 14px; color: var(--muted); background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .cancelled-banner { border: 1px solid var(--bad); background: rgba(248,113,113,0.08); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .cancel-panel { margin: 10px 0; padding: 12px 14px; border: 1px solid var(--bad); border-radius: 8px; background: rgba(248, 113, 113, 0.06); }
+  .cancel-panel textarea { width: 100%; min-height: 54px; resize: vertical; margin: 6px 0; }
+  .invite-link-box { font-size: 12px; color: var(--muted); word-break: break-all; }
   /* Inline organizer rejection interaction (UG-CR-RPT-043 Condition B) —
      replaces window.prompt(), which this domain's own browser-automation
      tooling cannot drive and which offers no busy/typed-failure state of
      its own. */
   .reject-panel { margin: 6px 0 2px; padding: 10px 12px; border: 1px solid var(--bad); border-radius: 8px; background: rgba(248, 113, 113, 0.06); }
   .reject-panel p.msg { margin: 0 0 8px; }
-  .reject-panel label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .reject-panel label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .reject-panel textarea { width: 100%; min-height: 54px; resize: vertical; }
   .reject-actions { display: flex; gap: 8px; margin-top: 8px; }
   .reject-status { min-height: 16px; }
@@ -104,15 +128,15 @@
 
   <h2>Create Competition</h2>
   <div class="row">
-    <input id="c-name" placeholder="Competition name" style="min-width:240px" />
-    <select id="c-activity"><option value="SOCCER_5V5">SOCCER_5V5</option></select>
-    <button id="btn-create-competition">Create</button>
+    <div class="field"><label for="c-name">Competition name</label><br /><input id="c-name" placeholder="Competition name" style="min-width:min(240px,100%)" /></div>
+    <div class="field"><label for="c-activity">Format</label><br /><select id="c-activity"><option value="SOCCER_5V5">SOCCER_5V5</option></select></div>
+    <button id="btn-create-competition" style="align-self:flex-end;">Create</button>
   </div>
   <p class="msg" id="msg-competition">Requires active platform OPERATIONAL authority.</p>
 
   <h2>Select Competition</h2>
   <div class="row">
-    <select id="comp-select" style="min-width:320px"></select>
+    <select id="comp-select" style="min-width:min(320px,100%)"></select>
     <button id="btn-load-competition">Load</button>
   </div>
   <p class="msg" id="msg-load"></p>
@@ -121,21 +145,38 @@
     <h3 id="comp-title"></h3>
     <span class="pill" id="comp-state-pill"></span>
 
-    <div class="row" id="registration-controls" style="margin-top:12px;">
+    <div id="cancelled-banner" class="cancelled-banner" style="display:none;">
+      <strong>This competition was cancelled.</strong>
+      <p class="msg" id="cancelled-reason-text" style="margin-top:4px;"></p>
+    </div>
+
+    <div id="lifecycle-rail" class="lifecycle-rail"></div>
+    <p class="msg blocker-note" id="lifecycle-blocker" style="display:none;"></p>
+
+    <div class="row" id="registration-controls" style="margin-top:4px;">
       <button id="btn-open-registration">Open Team Registration</button>
       <button class="secondary" id="btn-close-registration">Close Team Registration</button>
       <span class="capacity-badge" id="capacity-badge"></span>
     </div>
-    <p class="msg" id="msg-registration"></p>
+    <p class="msg" id="msg-registration" aria-live="polite"></p>
+
+    <div id="cancel-section" style="margin-top:10px;">
+      <button class="danger" id="btn-open-cancel" type="button">Cancel This Competition</button>
+      <div id="cancel-panel" class="cancel-panel" hidden>
+        <p class="msg">Cancelling is permanent and visible to everyone registered. Nothing is deleted — the competition, its teams, and its history remain, marked cancelled.</p>
+        <label for="cancel-reason">Reason (required)</label>
+        <textarea id="cancel-reason" placeholder="Why is this competition being cancelled?"></textarea>
+        <div class="row">
+          <button type="button" class="secondary" id="btn-cancel-dismiss">Keep Competition</button>
+          <button type="button" class="danger" id="btn-cancel-confirm" disabled>Confirm Cancellation</button>
+        </div>
+        <p class="msg" id="cancel-status" aria-live="polite"></p>
+      </div>
+    </div>
 
     <h3>Accepted Teams</h3>
     <table id="table-teams"><thead><tr><th>Name</th><th>Captain</th><th>Invitation</th></tr></thead><tbody></tbody></table>
-    <div class="row" id="add-team-row">
-      <input id="t-name" placeholder="Team name" />
-      <input id="t-captain" placeholder="Captain gaming member ID" style="min-width:280px" />
-      <button id="btn-add-team">Add Team (Organizer)</button>
-    </div>
-    <p class="msg" id="msg-team"></p>
+    <p class="msg">New teams come from a registered member's own proposal below, or the organizer accepting one — there is no separate organizer "add team by ID" control.</p>
 
     <h3 id="pending-teams-heading" tabindex="-1">Proposed Teams — Pending Approval</h3>
     <table id="table-pending-teams"><thead><tr><th>Name</th><th>Proposed by</th><th>Decision</th></tr></thead><tbody></tbody></table>
@@ -161,6 +202,7 @@
 </section>
 
 <script src="/urbanoAuth.js"></script>
+<script src="/competitionsLifecycle.js"></script>
 <script>
 UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("auth-status"));
 
@@ -221,12 +263,13 @@ function fixtureLabel(role) {
   return role === "SEMIFINAL_1" ? "Semifinal 1" : role === "SEMIFINAL_2" ? "Semifinal 2" : "Final";
 }
 
+/** Plain, participant-facing wording — kept identical to competitions.html's own humanizeState("competition", ...) map so the same state never reads two different ways across the two Competitions pages. */
 function humanizeCompetitionState(state) {
   const labels = {
-    DRAFT: "Draft (not yet open)",
+    DRAFT: "Not yet open",
     TEAM_REGISTRATION_OPEN: "Open for team registration",
-    READY_TO_PUBLISH: "Ready to publish",
-    PUBLISHED: "Published",
+    READY_TO_PUBLISH: "Finalizing bracket",
+    PUBLISHED: "In progress",
     COMPLETE: "Complete",
     CANCELLED_WITHOUT_CHAMPION: "Cancelled",
   };
@@ -250,6 +293,14 @@ async function refreshAuthState() {
 async function loadCompetitions() {
   const res = await authedFetch("/api/gaming/competitions");
   const select = document.getElementById("comp-select");
+  // This rebuild also runs from background events unrelated to anything
+  // the organizer just did (e.g. a Supabase session token refresh firing
+  // UrbanoAuth's onAuthStateChange — see refreshAuthState). Without
+  // restoring the previous selection, that silent rebuild would reset
+  // the dropdown to its first option — so a Load click right after could
+  // open a competition the organizer never chose, with no indication
+  // their selection had changed underneath them.
+  const previouslySelected = select.value;
   select.innerHTML = "";
   // A 503 (or any other non-200 — UG-CR-GATE-036) must never render as a
   // silent, unexplained empty dropdown — the organizer would have no way
@@ -265,6 +316,9 @@ async function loadCompetitions() {
     opt.value = c.competitionId;
     opt.textContent = `${c.name} (${humanizeCompetitionState(c.state)})`;
     select.appendChild(opt);
+  }
+  if (previouslySelected && cachedCompetitions.some((c) => c.competitionId === previouslySelected)) {
+    select.value = previouslySelected;
   }
 }
 
@@ -283,6 +337,19 @@ document.getElementById("btn-create-competition").addEventListener("click", asyn
 document.getElementById("btn-load-competition").addEventListener("click", async () => {
   const competitionId = document.getElementById("comp-select").value;
   if (!competitionId) { setMsg("msg-load", "Select a competition.", "error"); return; }
+  // Switching to a (possibly different) competition must never carry over
+  // another competition's own action feedback — e.g. "Team registration
+  // closed — ready to publish." from whatever was loaded before this
+  // click. Actions that refresh the SAME competition after a successful
+  // mutation (open/close registration, publish, cancel, accept/reject)
+  // call loadCompetitionDetail directly, bypassing this reset, so their
+  // own success/error message still survives that refresh as intended.
+  setMsg("msg-registration", "", "");
+  setMsg("msg-publish", "", "");
+  setMsg("cancel-status", "", "");
+  document.getElementById("cancel-panel").hidden = true;
+  document.getElementById("cancel-reason").value = "";
+  document.getElementById("btn-cancel-confirm").disabled = true;
   await loadCompetitionDetail(competitionId);
 });
 
@@ -294,11 +361,11 @@ async function loadCompetitionDetail(competitionId) {
   renderCompetitionDetail();
 }
 
-/** Same bounded deep link competitions.html's captain view builds — competitionId + teamId only (accepted decisions §3/§10). */
-function buildInvitationLink(competitionId, teamId) {
+/** Same bounded deep link competitions.html's captain view builds — opaque public_codes only (UG-CR-GATE-081 Phase 3A), never competitionId/competitionTeamId. */
+function buildInvitationLink(competitionCode, teamCode) {
   const url = new URL(window.location.origin + "/competitions.html");
-  url.searchParams.set("competitionId", competitionId);
-  url.searchParams.set("teamId", teamId);
+  url.searchParams.set("c", competitionCode);
+  url.searchParams.set("t", teamCode);
   return url.toString();
 }
 
@@ -331,8 +398,8 @@ function buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn) {
   const reasonId = "reject-reason-" + t.competitionTeamId;
   const row = elRow(`<tr class="reject-panel-row" hidden>
     <td colspan="3">
-      <div class="reject-panel" role="group" aria-label="Reject ${t.name}">
-        <p class="msg">Reject <strong>${t.name}</strong>, proposed by <strong>${t.captainDisplayName || "Unknown"}</strong>?</p>
+      <div class="reject-panel" role="group">
+        <p class="msg">Reject <strong class="reject-team-name"></strong>, proposed by <strong class="reject-captain-name"></strong>?</p>
         <label for="${reasonId}">Reason (required)</label>
         <textarea id="${reasonId}" class="reject-reason-input" rows="2" placeholder="Explain why this team is being rejected"></textarea>
         <div class="reject-actions">
@@ -343,6 +410,12 @@ function buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn) {
       </div>
     </td>
   </tr>`);
+  // aria-label and the two display names are set via setAttribute/
+  // textContent, never interpolated into the HTML parsed above
+  // (UG-CR-GATE-083 per UG-CR-REV-054 finding 2).
+  row.querySelector(".reject-panel").setAttribute("aria-label", "Reject " + t.name);
+  row.querySelector(".reject-team-name").textContent = t.name;
+  row.querySelector(".reject-captain-name").textContent = t.captainDisplayName || "Unknown";
 
   const reasonInput = row.querySelector(".reject-reason-input");
   const cancelBtn = row.querySelector(".reject-cancel-btn");
@@ -393,12 +466,83 @@ function buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn) {
   return row;
 }
 
+/** Renders the lifecycle step rail into #lifecycle-rail, the blocker note, and emphasizes whichever existing control is the one dominant next action — never a new, separate action control (UG-CR-GATE-081 Phase 3C). */
+function renderLifecycle(competition, acceptedTeamCount) {
+  const info = CompetitionsLifecycle.getOrganizerLifecycle(competition.state, acceptedTeamCount);
+  const rail = document.getElementById("lifecycle-rail");
+  const blocker = document.getElementById("lifecycle-blocker");
+  const cancelledBanner = document.getElementById("cancelled-banner");
+
+  rail.innerHTML = "";
+  if (info.cancelled) {
+    rail.style.display = "none";
+    blocker.style.display = "none";
+    cancelledBanner.style.display = "block";
+    document.getElementById("cancelled-reason-text").textContent = competition.cancelledReason || "No reason was recorded.";
+  } else {
+    rail.style.display = "flex";
+    cancelledBanner.style.display = "none";
+    info.steps.forEach((step, i) => {
+      if (i > 0) rail.appendChild(el(`<div class="lifecycle-connector ${info.steps[i - 1].status === "complete" ? "complete" : ""}"></div>`));
+      const mark = step.status === "complete" ? "✓" : String(i + 1);
+      rail.appendChild(el(`<div class="lifecycle-step ${step.status}"><span class="dot" aria-hidden="true">${mark}</span><span>${step.label}</span></div>`));
+    });
+    if (info.blocker) {
+      blocker.style.display = "block";
+      blocker.textContent = info.blocker;
+    } else {
+      blocker.style.display = "none";
+    }
+  }
+
+  const openBtn = document.getElementById("btn-open-registration");
+  const closeBtn = document.getElementById("btn-close-registration");
+  openBtn.classList.toggle("dominant", info.dominantActionKey === "OPEN_REGISTRATION");
+  closeBtn.classList.toggle("dominant", info.dominantActionKey === "CLOSE_REGISTRATION");
+
+  const cancelSection = document.getElementById("cancel-section");
+  cancelSection.style.display = CompetitionsLifecycle.isCancellable(competition.state) ? "block" : "none";
+}
+
+document.getElementById("btn-open-cancel").addEventListener("click", () => {
+  document.getElementById("cancel-panel").hidden = false;
+  document.getElementById("cancel-reason").focus();
+});
+document.getElementById("btn-cancel-dismiss").addEventListener("click", () => {
+  const panel = document.getElementById("cancel-panel");
+  panel.hidden = true;
+  document.getElementById("cancel-reason").value = "";
+  document.getElementById("btn-cancel-confirm").disabled = true;
+  setMsg("cancel-status", "", "");
+});
+document.getElementById("cancel-reason").addEventListener("input", (e) => {
+  document.getElementById("btn-cancel-confirm").disabled = e.target.value.trim().length === 0;
+});
+document.getElementById("btn-cancel-confirm").addEventListener("click", async () => {
+  const confirmBtn = document.getElementById("btn-cancel-confirm");
+  if (confirmBtn.disabled) return;
+  const reason = document.getElementById("cancel-reason").value.trim();
+  if (!reason) { setMsg("cancel-status", "A reason is required to cancel.", "error"); return; }
+  confirmBtn.disabled = true;
+  setMsg("cancel-status", "Cancelling…", "");
+  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+  if (res.status === 200) {
+    document.getElementById("cancel-panel").hidden = true;
+    await loadCompetitionDetail(currentView.competition.competitionId);
+  } else {
+    confirmBtn.disabled = false;
+    setMsg("cancel-status", (res.json && res.json.error) || "Failed to cancel.", "error");
+  }
+});
+
 function renderCompetitionDetail() {
   const { competition, teams, pendingTeamProposals, rejectedTeamProposals, fixtures } = currentView;
   document.getElementById("comp-title").textContent = competition.name;
   const pill = document.getElementById("comp-state-pill");
   pill.textContent = humanizeCompetitionState(competition.state);
   pill.className = "pill" + (competition.state === "COMPLETE" ? " good" : competition.state === "CANCELLED_WITHOUT_CHAMPION" ? " bad" : "");
+
+  renderLifecycle(competition, teams.length);
 
   document.getElementById("capacity-badge").textContent = `${teams.length} of 4 teams accepted`;
   document.getElementById("btn-open-registration").style.display = competition.state === "DRAFT" ? "" : "none";
@@ -416,7 +560,7 @@ function renderCompetitionDetail() {
     const inviteBtn = document.createElement("button");
     inviteBtn.className = "secondary"; inviteBtn.textContent = "Copy Invitation Link";
     inviteBtn.addEventListener("click", async () => {
-      const ok = await copyTextSafely(buildInvitationLink(competition.competitionId, t.competitionTeamId));
+      const ok = await copyTextSafely(buildInvitationLink(competition.publicCode, t.publicCode));
       inviteBtn.textContent = ok ? "Copied!" : "Copy failed";
       setTimeout(() => { inviteBtn.textContent = "Copy Invitation Link"; }, 1800);
     });
@@ -459,11 +603,13 @@ function renderCompetitionDetail() {
   document.getElementById("msg-rejected-teams").style.display = rejectedTeamProposals.length === 0 ? "block" : "none";
   for (const t of rejectedTeamProposals) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${t.name}</td><td>${t.captainDisplayName || "Unknown"}</td><td>${t.rejectionReason || ""}</td>`;
+    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
+    const captainTd = document.createElement("td"); captainTd.textContent = t.captainDisplayName || "Unknown";
+    const reasonTd = document.createElement("td"); reasonTd.textContent = t.rejectionReason || "";
+    tr.appendChild(nameTd); tr.appendChild(captainTd); tr.appendChild(reasonTd);
     rejectedTbody.appendChild(tr);
   }
 
-  document.getElementById("add-team-row").style.display = (competition.state === "DRAFT" || competition.state === "TEAM_REGISTRATION_OPEN") ? "flex" : "none";
   document.getElementById("publish-form").style.display = (competition.state === "READY_TO_PUBLISH" && teams.length === 4) ? "block" : "none";
   if (competition.state === "READY_TO_PUBLISH" && teams.length === 4) {
     for (const selId of ["p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b"]) {
@@ -496,20 +642,6 @@ document.getElementById("btn-close-registration").addEventListener("click", asyn
   else setMsg("msg-registration", (res.json && res.json.error) || "Failed to close team registration.", "error");
 });
 
-document.getElementById("btn-add-team").addEventListener("click", async () => {
-  const name = document.getElementById("t-name").value.trim();
-  const captainGamingMemberId = document.getElementById("t-captain").value.trim();
-  if (!name || !captainGamingMemberId) { setMsg("msg-team", "Name and captain ID are required.", "error"); return; }
-  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/teams`, {
-    method: "POST", body: JSON.stringify({ name, captainGamingMemberId }),
-  });
-  if (res.status === 201) {
-    setMsg("msg-team", "Team added.", "success");
-    document.getElementById("t-name").value = ""; document.getElementById("t-captain").value = "";
-    await loadCompetitionDetail(currentView.competition.competitionId);
-  } else setMsg("msg-team", (res.json && res.json.error) || "Failed to add team.", "error");
-});
-
 document.getElementById("btn-publish").addEventListener("click", async () => {
   const body = {
     semifinal1TeamAId: document.getElementById("p-sf1a").value,
@@ -533,31 +665,62 @@ function teamNameOf(teams, teamId) {
   return t ? t.name : "?";
 }
 
-function eventRowsEditor(container, players, kind) {
+/**
+ * Competition-scoped, human-readable <option> list (UG-CR-GATE-082 per
+ * UG-CR-REV-053 #4), built with DOM APIs rather than string interpolation
+ * into innerHTML (UG-CR-GATE-083 per UG-CR-REV-054 finding 2) — every
+ * option's value is still the real gamingMemberId the server expects,
+ * but the organizer/scorekeeper never sees or types one; eligibleMembers
+ * is already scoped to this one competition's own registrants, never
+ * the wider platform. displayName is assigned via .textContent, never
+ * parsed as markup, so a hostile display name can never inject an
+ * element or attribute here.
+ */
+function populateMemberOptions(select, eligibleMembers, selectedId) {
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select member…";
+  select.appendChild(placeholder);
+  for (const m of eligibleMembers || []) {
+    const opt = document.createElement("option");
+    opt.value = m.gamingMemberId;
+    opt.textContent = m.displayName;
+    if (m.gamingMemberId === selectedId) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+function eventRowsEditor(container, eligibleMembers, kind) {
   // kind: "goal" | "assist" | "attestation" — a tiny shared row-editor
   // used by both the Evidence and Correct forms so their payload shape
-  // never diverges.
+  // never diverges. Each member-identifying field is a <select> built
+  // from this competition's own eligibleMembers (UG-CR-GATE-082) —
+  // never a raw-UUID text input.
   function addRow(existing) {
     let row;
     if (kind === "goal") {
       row = el(`<div class="event-row">
-        <input class="ev-scorer" placeholder="scorer gaming member ID" value="${existing ? existing.scorerGamingMemberId : ""}" style="min-width:260px" />
+        <select class="ev-scorer" style="min-width:min(200px,100%)"></select>
         <select class="ev-team"><option value="A">Team A</option><option value="B">Team B</option></select>
         <button type="button" class="secondary ev-remove">Remove</button>
       </div>`);
+      populateMemberOptions(row.querySelector(".ev-scorer"), eligibleMembers, existing ? existing.scorerGamingMemberId : "");
       if (existing) row.querySelector(".ev-team").value = existing.teamSide;
     } else if (kind === "assist") {
       row = el(`<div class="event-row">
-        <input class="ev-assister" placeholder="assisting gaming member ID" value="${existing ? existing.assistingGamingMemberId : ""}" style="min-width:260px" />
+        <select class="ev-assister" style="min-width:min(200px,100%)"></select>
         <input class="ev-goal-index" type="number" min="0" placeholder="goal event index" value="${existing ? existing.goalEventIndex : ""}" style="max-width:140px" />
         <button type="button" class="secondary ev-remove">Remove</button>
       </div>`);
+      populateMemberOptions(row.querySelector(".ev-assister"), eligibleMembers, existing ? existing.assistingGamingMemberId : "");
     } else {
       row = el(`<div class="event-row">
-        <input class="ev-member" placeholder="gaming member ID" value="${existing ? existing.gamingMemberId : ""}" style="min-width:260px" />
+        <select class="ev-member" style="min-width:min(200px,100%)"></select>
         <label><input type="checkbox" class="ev-participated" ${!existing || existing.actuallyParticipated ? "checked" : ""} /> Actually participated</label>
         <button type="button" class="secondary ev-remove">Remove</button>
       </div>`);
+      populateMemberOptions(row.querySelector(".ev-member"), eligibleMembers, existing ? existing.gamingMemberId : "");
     }
     row.querySelector(".ev-remove").addEventListener("click", () => row.remove());
     container.appendChild(row);
@@ -592,15 +755,23 @@ function renderFixtureBlock(entryOrFixture, teams) {
       <strong>${fixtureLabel(f.fixtureRole)}</strong>
       <span class="pill ${f.state === "FINALIZED" || f.state === "CORRECTED_AND_FINALIZED" || f.state === "FORFEIT_FINALIZED" ? "good" : f.state === "VOID" ? "bad" : ""}">${f.state.replace(/_/g, " ")}</span>
     </div>
-    <p class="msg">${teamNameOf(teams, f.teamACompetitionTeamId)} vs ${teamNameOf(teams, f.teamBCompetitionTeamId)} — ${new Date(f.scheduledAt).toLocaleString()}</p>
+    <p class="msg"><span class="fixture-matchup"></span> — ${new Date(f.scheduledAt).toLocaleString()}</p>
     <div id="detail-${f.competitionFixtureId}"><button class="secondary btn-load-detail" data-fixture="${f.competitionFixtureId}">Load Fixture Detail</button></div>
   </div>`);
+  block.querySelector(".fixture-matchup").textContent = `${teamNameOf(teams, f.teamACompetitionTeamId)} vs ${teamNameOf(teams, f.teamBCompetitionTeamId)}`;
 
   block.querySelector(".btn-load-detail").addEventListener("click", async () => {
     const detailContainer = block.querySelector(`#detail-${f.competitionFixtureId}`);
-    detailContainer.innerHTML = "Loading…";
+    detailContainer.textContent = "Loading…";
     const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/admin-detail`);
-    if (res.status !== 200) { detailContainer.innerHTML = `<p class="msg error">${(res.json && res.json.error) || "Failed to load."}</p>`; return; }
+    if (res.status !== 200) {
+      detailContainer.innerHTML = "";
+      const errP = document.createElement("p");
+      errP.className = "msg error";
+      errP.textContent = (res.json && res.json.error) || "Failed to load.";
+      detailContainer.appendChild(errP);
+      return;
+    }
     detailContainer.innerHTML = "";
     detailContainer.appendChild(renderFixtureDetail(f, res.json, teams));
   });
@@ -611,12 +782,18 @@ function renderFixtureBlock(entryOrFixture, teams) {
 function renderFixtureDetail(f, detail, teams) {
   const wrap = el(`<div></div>`);
 
-  wrap.appendChild(el(`<p class="msg">Scorekeeper: ${f.scorekeeperGamingMemberId || "not appointed"}</p>`));
+  const scorekeeperP = el(`<p class="msg"></p>`);
+  scorekeeperP.textContent = "Scorekeeper: " + (f.scorekeeperGamingMemberId ? (detail.displayNames[f.scorekeeperGamingMemberId] || "Unknown") : "not appointed");
+  wrap.appendChild(scorekeeperP);
 
-  // Appoint scorekeeper
+  // Appoint scorekeeper — a competition-scoped, human-readable <select>
+  // (UG-CR-GATE-082 per UG-CR-REV-053 #4), never a raw-UUID text input.
+  // Server-side eligibility (not either competing captain, not on
+  // either roster) is unchanged and still the real enforcement.
   const skForm = el(`<fieldset><legend>Appoint Scorekeeper</legend>
-    <div class="row"><input class="sk-input" placeholder="scorekeeper gaming member ID" style="min-width:280px" /><button class="btn-appoint">Appoint</button></div>
+    <div class="row"><select class="sk-input" style="min-width:min(220px,100%)"></select><button class="btn-appoint">Appoint</button></div>
     <p class="msg sk-msg"></p></fieldset>`);
+  populateMemberOptions(skForm.querySelector(".sk-input"), detail.eligibleMembers, f.scorekeeperGamingMemberId);
   skForm.querySelector(".btn-appoint").addEventListener("click", async () => {
     const scorekeeperGamingMemberId = skForm.querySelector(".sk-input").value.trim();
     if (!scorekeeperGamingMemberId) return;
@@ -626,11 +803,21 @@ function renderFixtureDetail(f, detail, teams) {
   });
   wrap.appendChild(skForm);
 
-  // Rosters + check-ins
+  // Rosters + check-ins. Every team/display name below is assigned via
+  // .textContent after construction, never interpolated into the HTML
+  // parsed by el() (UG-CR-GATE-083 per UG-CR-REV-054 finding 2).
   wrap.appendChild(el(`<h3>Rosters</h3>`));
-  wrap.appendChild(el(`<p class="msg">Team A (${teamNameOf(teams, f.teamACompetitionTeamId)}): ${detail.teamARoster ? detail.teamARoster.gamingMemberIds.join(", ") : "not declared"}</p>`));
-  wrap.appendChild(el(`<p class="msg">Team B (${teamNameOf(teams, f.teamBCompetitionTeamId)}): ${detail.teamBRoster ? detail.teamBRoster.gamingMemberIds.join(", ") : "not declared"}</p>`));
-  wrap.appendChild(el(`<p class="msg">Checked in: ${detail.checkIns.length ? detail.checkIns.map((c) => c.gamingMemberId.slice(0, 8) + "…").join(", ") : "none yet"}</p>`));
+  const teamARosterP = el(`<p class="msg"></p>`);
+  teamARosterP.textContent = `Team A (${teamNameOf(teams, f.teamACompetitionTeamId)}): ` +
+    (detail.teamARoster ? detail.teamARoster.gamingMemberIds.map((id) => detail.displayNames[id] || "Unknown").join(", ") : "not declared");
+  wrap.appendChild(teamARosterP);
+  const teamBRosterP = el(`<p class="msg"></p>`);
+  teamBRosterP.textContent = `Team B (${teamNameOf(teams, f.teamBCompetitionTeamId)}): ` +
+    (detail.teamBRoster ? detail.teamBRoster.gamingMemberIds.map((id) => detail.displayNames[id] || "Unknown").join(", ") : "not declared");
+  wrap.appendChild(teamBRosterP);
+  const checkedInP = el(`<p class="msg"></p>`);
+  checkedInP.textContent = "Checked in: " + (detail.checkIns.length ? detail.checkIns.map((c) => detail.displayNames[c.gamingMemberId] || "Unknown").join(", ") : "none yet");
+  wrap.appendChild(checkedInP);
 
   // Evidence submission (Scorekeeper)
   const scoreEligible = f.state === "CHECKIN_OPEN" || f.state === "ROSTER_DECLARED";
@@ -643,9 +830,9 @@ function renderFixtureDetail(f, detail, teams) {
     <p class="msg">Participation attestations:</p><div class="ev-attestations"></div><button type="button" class="secondary ev-add-attestation">Add Attestation</button>
     <div class="row" style="margin-top:10px"><button class="btn-submit-evidence">Submit Evidence</button></div>
     <p class="msg ev-msg"></p></fieldset>`);
-  const goalsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-goals"), null, "goal");
-  const assistsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-assists"), null, "assist");
-  const attestationsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-attestations"), null, "attestation");
+  const goalsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-goals"), detail.eligibleMembers, "goal");
+  const assistsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-assists"), detail.eligibleMembers, "assist");
+  const attestationsEditor = eventRowsEditor(evidenceForm.querySelector(".ev-attestations"), detail.eligibleMembers, "attestation");
   evidenceForm.querySelector(".ev-add-goal").addEventListener("click", () => goalsEditor.addRow(null));
   evidenceForm.querySelector(".ev-add-assist").addEventListener("click", () => assistsEditor.addRow(null));
   evidenceForm.querySelector(".ev-add-attestation").addEventListener("click", () => attestationsEditor.addRow(null));
@@ -668,12 +855,15 @@ function renderFixtureDetail(f, detail, teams) {
   wrap.appendChild(evidenceForm);
 
   if (detail.evidence) {
-    wrap.appendChild(el(`<p class="msg success">Current evidence: ${detail.evidence.teamAScore} – ${detail.evidence.teamBScore}${detail.shootout ? ` (shootout won by ${teamNameOf(teams, detail.shootout.winningCompetitionTeamId)})` : ""}</p>`));
+    const evidenceP = el(`<p class="msg success"></p>`);
+    evidenceP.textContent = `Current evidence: ${detail.evidence.teamAScore} – ${detail.evidence.teamBScore}` +
+      (detail.shootout ? ` (shootout won by ${teamNameOf(teams, detail.shootout.winningCompetitionTeamId)})` : "");
+    wrap.appendChild(evidenceP);
   }
 
   // Correct fixture (Organizer) — same shape, plus reason.
   const correctForm = el(`<fieldset><legend>Correct Fixture (Organizer)</legend>
-    <div class="row"><input class="cor-reason" placeholder="Reason (required)" style="min-width:320px" /></div>
+    <div class="row"><input class="cor-reason" placeholder="Reason (required)" style="min-width:min(320px,100%)" /></div>
     <div class="row"><input class="cor-score-a" type="number" min="0" placeholder="Team A score" style="max-width:120px" />
     <input class="cor-score-b" type="number" min="0" placeholder="Team B score" style="max-width:120px" />
     <select class="cor-shootout-winner"><option value="">No shootout</option><option value="A">Team A wins shootout</option><option value="B">Team B wins shootout</option></select></div>
@@ -681,8 +871,8 @@ function renderFixtureDetail(f, detail, teams) {
     <p class="msg">Assist events:</p><div class="cor-assists"></div><button type="button" class="secondary cor-add-assist">Add Assist Event</button>
     <div class="row" style="margin-top:10px"><button class="btn-correct">Submit Correction</button></div>
     <p class="msg cor-msg"></p></fieldset>`);
-  const corGoalsEditor = eventRowsEditor(correctForm.querySelector(".cor-goals"), null, "goal");
-  const corAssistsEditor = eventRowsEditor(correctForm.querySelector(".cor-assists"), null, "assist");
+  const corGoalsEditor = eventRowsEditor(correctForm.querySelector(".cor-goals"), detail.eligibleMembers, "goal");
+  const corAssistsEditor = eventRowsEditor(correctForm.querySelector(".cor-assists"), detail.eligibleMembers, "assist");
   correctForm.querySelector(".cor-add-goal").addEventListener("click", () => corGoalsEditor.addRow(null));
   correctForm.querySelector(".cor-add-assist").addEventListener("click", () => corAssistsEditor.addRow(null));
   correctForm.querySelector(".btn-correct").addEventListener("click", async () => {
@@ -708,14 +898,16 @@ function renderFixtureDetail(f, detail, teams) {
   wrap.appendChild(el(`<h3>Disputes</h3>`));
   const disputesList = el(`<div></div>`);
   for (const d of detail.disputes) {
-    disputesList.appendChild(el(`<p class="msg">[${d.targetFactType}] ${d.reason} — ${d.resolutionAction || "open"}</p>`));
+    const disputeP = el(`<p class="msg"></p>`);
+    disputeP.textContent = `[${d.targetFactType}] ${d.reason} — ${d.resolutionAction || "open"}`;
+    disputesList.appendChild(disputeP);
   }
   if (detail.disputes.length === 0) disputesList.appendChild(el(`<p class="msg">No disputes raised.</p>`));
   wrap.appendChild(disputesList);
   const disputeForm = el(`<div class="row">
     <select class="dis-type"><option value="SCORE">SCORE</option><option value="GOAL_EVENT">GOAL_EVENT</option><option value="ASSIST_EVENT">ASSIST_EVENT</option><option value="PARTICIPATION_ATTESTATION">PARTICIPATION_ATTESTATION</option></select>
     <input class="dis-target" placeholder="target fact ID" />
-    <input class="dis-reason" placeholder="Reason" style="min-width:220px" />
+    <input class="dis-reason" placeholder="Reason" style="min-width:min(220px,100%)" />
     <button class="btn-dispute">Raise Dispute</button></div><p class="msg dis-msg"></p>`);
   disputeForm.querySelector(".btn-dispute").addEventListener("click", async () => {
     const targetFactType = disputeForm.querySelector(".dis-type").value;
@@ -731,10 +923,17 @@ function renderFixtureDetail(f, detail, teams) {
   // Finalize / Forfeit / Void
   const closeForm = el(`<fieldset><legend>Close Fixture (Organizer)</legend>
     <div class="row"><button class="btn-finalize">Finalize</button></div>
-    <div class="row"><select class="forfeit-team"><option value="${f.teamACompetitionTeamId}">${teamNameOf(teams, f.teamACompetitionTeamId)} forfeits</option><option value="${f.teamBCompetitionTeamId}">${teamNameOf(teams, f.teamBCompetitionTeamId)} forfeits</option></select>
-    <input class="forfeit-reason" placeholder="Forfeit reason" style="min-width:220px" /><button class="secondary btn-forfeit">Forfeit</button></div>
-    <div class="row"><input class="void-reason" placeholder="Void reason" style="min-width:220px" /><button class="danger btn-void">Void</button></div>
+    <div class="row"><select class="forfeit-team"></select>
+    <input class="forfeit-reason" placeholder="Forfeit reason" style="min-width:min(220px,100%)" /><button class="secondary btn-forfeit">Forfeit</button></div>
+    <div class="row"><input class="void-reason" placeholder="Void reason" style="min-width:min(220px,100%)" /><button class="danger btn-void">Void</button></div>
     <p class="msg close-msg"></p></fieldset>`);
+  const forfeitTeamSelect = closeForm.querySelector(".forfeit-team");
+  for (const sideTeamId of [f.teamACompetitionTeamId, f.teamBCompetitionTeamId]) {
+    const opt = document.createElement("option");
+    opt.value = sideTeamId;
+    opt.textContent = `${teamNameOf(teams, sideTeamId)} forfeits`;
+    forfeitTeamSelect.appendChild(opt);
+  }
   closeForm.querySelector(".btn-finalize").addEventListener("click", async () => {
     const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/finalize`, { method: "POST" });
     if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", `Finalized. Winner: ${teamNameOf(teams, res.json.result.winningCompetitionTeamId)}.`, "success"); }
