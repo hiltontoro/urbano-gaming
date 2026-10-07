@@ -1767,3 +1767,121 @@ describe("competitions-admin.html — inline organizer rejection interaction rep
     expect(adminHtml).not.toContain('const row = el(`<tr class="reject-panel-row"');
   });
 });
+
+describe("competitions-admin.html — mobile organizer team-table layout (UG-CR-GATE-087)", () => {
+  const adminHtml = readFileSync("public/competitions-admin.html", "utf-8");
+  const style = adminHtml.slice(adminHtml.indexOf("<style>"), adminHtml.indexOf("</style>"));
+
+  /** The body of the narrow-viewport (card layout) @media block, brace-matched. */
+  function phoneBlock(): string {
+    const start = style.indexOf("@media (max-width: 720px) {");
+    expect(start).toBeGreaterThan(-1);
+    let depth = 0;
+    for (let i = style.indexOf("{", start); i < style.length; i++) {
+      if (style[i] === "{") depth++;
+      else if (style[i] === "}" && --depth === 0) return style.slice(start, i + 1);
+    }
+    throw new Error("unterminated @media block");
+  }
+
+  it("cells wrap at word boundaries: the squeeze-inducing overflow-wrap: anywhere is gone", () => {
+    expect(style).not.toContain("overflow-wrap: anywhere");
+    expect(style).toMatch(/th, td \{[^}]*overflow-wrap: break-word;/);
+  });
+
+  it("tablet/desktop tables use a fixed layout with explicit column proportions, so an unbroken token can never widen the table past the viewport", () => {
+    expect(style).toMatch(/\btable \{[^}]*table-layout: fixed;/);
+    expect(style).toContain("th:nth-child(1) { width: 36%; }");
+    expect(style).toContain("th:nth-child(2) { width: 28%; }");
+    expect(style).toContain("th:nth-child(3) { width: 36%; }");
+  });
+
+  it("narrow viewports (phones and small windows, up to 720px) get stacked cards: rows and cells become blocks and each cell shows its own data-label", () => {
+    const media = phoneBlock();
+    expect(media).toContain("table.stack-table tr, table.stack-table td { display: block; }");
+    expect(media).toContain("table.stack-table td[data-label]::before { content: attr(data-label);");
+  });
+
+  it("the card layout keeps hidden rows hidden: an author display:block would otherwise override the [hidden] attribute on the rejection panel row", () => {
+    expect(phoneBlock()).toContain("table.stack-table tr[hidden] { display: none; }");
+  });
+
+  it("the open rejection panel is not double-framed inside a card row", () => {
+    expect(phoneBlock()).toContain("table.stack-table tr.reject-panel-row { border: none; background: none; padding: 0; }");
+  });
+
+  it("card buttons keep a comfortable 44px touch target, scoped to the team cells so the rejection panel's own buttons are untouched, and card text is not smaller than the 13px base", () => {
+    const media = phoneBlock();
+    expect(media).toMatch(/table\.stack-table td\[data-label\] > button \{[^}]*min-height: 44px;/);
+    expect(media).not.toMatch(/table\.stack-table td button/);
+    expect(media).toMatch(/table\.stack-table td \{[^}]*font-size: 14px;/);
+    expect(style).toMatch(/\btable \{[^}]*font-size: 13px;/);
+  });
+
+  it("any touch device, including landscape phones wider than the phone breakpoint, also gets the 44px target", () => {
+    expect(style).toContain("@media (pointer: coarse) { td[data-label] > button { min-height: 44px; } }");
+  });
+
+  it("adjacent team-table actions (Accept / Reject) are separated at every width", () => {
+    expect(style).toContain("td[data-label] > button + button { margin-left: 8px; }");
+  });
+
+  it("card labels are visual-only (alt text empty, with a plain fallback first) and never orphaned over hidden or empty content", () => {
+    const media = phoneBlock();
+    const rule = media.slice(media.indexOf("table.stack-table td[data-label]::before"));
+    expect(rule.indexOf("content: attr(data-label);")).toBeGreaterThan(-1);
+    expect(rule.indexOf('content: attr(data-label) / "";')).toBeGreaterThan(rule.indexOf("content: attr(data-label);"));
+    expect(media).toContain("table.stack-table td[data-label]:empty::before { display: none; }");
+    expect(media).toContain("table.stack-table td[data-label]:has(> button[hidden])::before { display: none; }");
+  });
+
+  it("the rejection panel's Cancel / Confirm row wraps as whole buttons, so a narrow phone never splits the Confirm Rejection label", () => {
+    expect(style).toContain(".reject-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }");
+  });
+
+  it("the header row stays in the document, visually hidden, rather than being removed", () => {
+    expect(phoneBlock()).toMatch(/table\.stack-table thead \{[^}]*position: absolute; width: 1px; height: 1px;/);
+    expect(phoneBlock()).not.toMatch(/table\.stack-table thead \{[^}]*display: none/);
+  });
+
+  it("all three team tables opt in to the card layout and carry explicit ARIA table roles, so phones keep table semantics where display:block would drop them", () => {
+    for (const id of ["table-teams", "table-pending-teams", "table-rejected-teams"]) {
+      const start = adminHtml.indexOf(`<table id="${id}" class="stack-table" role="table">`);
+      expect(start).toBeGreaterThan(-1);
+      const markup = adminHtml.slice(start, adminHtml.indexOf("</table>", start));
+      expect(markup).toContain('<thead role="rowgroup"><tr role="row">');
+      expect(markup.match(/<th role="columnheader">/g)).toHaveLength(3);
+      expect(markup).toContain('<tbody role="rowgroup">');
+    }
+  });
+
+  it("every team-table row and cell comes from makeRow / makeCell with its column label; no raw tr or td is created anywhere else", () => {
+    expect(adminHtml.match(/document\.createElement\("td"\)/g)).toHaveLength(1);
+    expect(adminHtml.match(/document\.createElement\("tr"\)/g)).toHaveLength(1);
+    expect(adminHtml.match(/= makeRow\(\);/g)).toHaveLength(3);
+    // Exact call counts across the three tables (Accepted, Pending, Rejected); the real
+    // per-table order, labels and roles are pinned by executing the page in the jsdom suite.
+    const counts: Array<[string, number]> = [
+      ['makeCell("Team", t.name)', 3],
+      ['makeCell("Captain", t.captainDisplayName || "Unknown")', 1],
+      ['makeCell("Invitation")', 1],
+      ['makeCell("Proposed by", t.captainDisplayName || "Unknown")', 2],
+      ['makeCell("Decision")', 1],
+      ['makeCell("Reason", t.rejectionReason || "")', 1],
+    ];
+    for (const [call, n] of counts) {
+      expect(adminHtml.split(call).length - 1).toBe(n);
+    }
+  });
+
+  it("the rejection panel row, built from an HTML template, receives the same row and cell roles", () => {
+    expect(adminHtml).toContain('row.setAttribute("role", "row");');
+    expect(adminHtml).toContain('row.firstElementChild.setAttribute("role", "cell");');
+  });
+
+  it("the copy-invitation behavior and its feedback labels are unchanged by the layout work", () => {
+    expect(adminHtml).toContain('inviteBtn.className = "secondary"; inviteBtn.textContent = "Copy Invitation Link";');
+    expect(adminHtml).toContain('inviteBtn.textContent = ok ? "Copied!" : "Copy failed";');
+    expect(adminHtml).toContain('setTimeout(() => { inviteBtn.textContent = "Copy Invitation Link"; }, 1800);');
+  });
+});

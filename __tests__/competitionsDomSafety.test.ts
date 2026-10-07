@@ -200,6 +200,143 @@ describe("UG-CR-GATE-083 corrections (UG-CR-REV-054 finding 2) — DOM-safety ho
     }
   });
 
+  describe("makeCell (competitions-admin.html) — team-table cells for the phone card layout (UG-CR-GATE-087)", () => {
+    const source = extractFunction(adminHtml, "makeCell");
+
+    for (const { label, value } of HOSTILE_PAYLOADS) {
+      it(`renders hostile text (${label}) literally and keeps the column label as plain data`, () => {
+        const win = makeRealm([source]);
+        const td = win.makeCell("Team", value) as Element;
+        assertNoLiveInjection(td);
+        expect(td.tagName).toBe("TD");
+        expect(td.textContent).toBe(value);
+        expect(td.children).toHaveLength(0);
+        expect(td.getAttribute("data-label")).toBe("Team");
+        // Exactly the label and the ARIA role: nothing else can ride in through the value.
+        expect(Array.from(td.attributes).map((a: Attr) => a.name).sort()).toEqual(["data-label", "role"]);
+        expect(td.getAttribute("role")).toBe("cell");
+      });
+    }
+
+    it("makeRow builds a bare tr carrying only the row role", () => {
+      const win = makeRealm([extractFunction(adminHtml, "makeRow")]);
+      const tr = win.makeRow() as Element;
+      expect(tr.tagName).toBe("TR");
+      expect(Array.from(tr.attributes).map((a: Attr) => a.name)).toEqual(["role"]);
+      expect(tr.getAttribute("role")).toBe("row");
+    });
+
+    it("builds an empty labelled cell when no text is given (the button cells)", () => {
+      const win = makeRealm([source]);
+      const td = win.makeCell("Invitation");
+      expect(td.textContent).toBe("");
+      expect(td.getAttribute("data-label")).toBe("Invitation");
+    });
+
+    it("keeps an explicitly empty string empty rather than treating it as missing (rejection reason)", () => {
+      const win = makeRealm([source]);
+      const td = win.makeCell("Reason", "");
+      expect(td.textContent).toBe("");
+      expect(td.getAttribute("data-label")).toBe("Reason");
+    });
+  });
+
+  describe("renderCompetitionDetail team tables — the real shipped render code, executed (UG-CR-GATE-087)", () => {
+    /** Loads the actual page script (plus the lifecycle script it depends on) into a jsdom window, with only the auth bridge stubbed. */
+    function loadAdminPage() {
+      const dom = new JSDOM(adminHtml.replace(/<script[^>]*src=[^>]*><\/script>/g, ""), {
+        runScripts: "outside-only",
+        url: "https://urbano.example.test/competitions-admin.html",
+      });
+      const w = dom.window as unknown as Window & Record<string, any>;
+      w.eval(readFileSync(path.join(process.cwd(), "public/competitionsLifecycle.js"), "utf8"));
+      w.eval(
+        "window.UrbanoAuth = { attachSignInButton() {}, onAuthStateChange() {}, async getState() { return { status: 'unauthenticated' }; }, async getAccessToken() { return null; } };"
+      );
+      const inline = /<script>([\s\S]*?)<\/script>/.exec(adminHtml);
+      if (!inline) throw new Error("the page's inline script was not found");
+      w.eval(inline[1] + "\nwindow.__render = (v) => { currentView = v; renderCompetitionDetail(); };");
+      return w;
+    }
+
+    const view = (name: string, captain: string) => ({
+      competition: { competitionId: "c1", publicCode: "cp", name: "Cup", state: "TEAM_REGISTRATION_OPEN", cancelledReason: null },
+      teams: [{ competitionTeamId: "t1", name, captainDisplayName: captain, publicCode: "tp1" }],
+      pendingTeamProposals: [{ competitionTeamId: "t2", name: name + " B", captainDisplayName: captain }],
+      rejectedTeamProposals: [{ competitionTeamId: "t3", name: name + " C", captainDisplayName: captain, rejectionReason: "No space left." }],
+      fixtures: [],
+    });
+
+    const TABLES: Array<{ id: string; headers: string[]; labels: string[] }> = [
+      { id: "table-teams", headers: ["Name", "Captain", "Invitation"], labels: ["Team", "Captain", "Invitation"] },
+      { id: "table-pending-teams", headers: ["Name", "Proposed by", "Decision"], labels: ["Team", "Proposed by", "Decision"] },
+      { id: "table-rejected-teams", headers: ["Name", "Proposed by", "Reason"], labels: ["Team", "Proposed by", "Reason"] },
+    ];
+
+    it("each table renders its header sequence, and every data row has three role=cell cells whose data-label sequence matches the header order", () => {
+      const w = loadAdminPage();
+      w.__render(view("Riverside Academy", "María Fernanda Rodríguez"));
+      for (const t of TABLES) {
+        const table = w.document.getElementById(t.id)!;
+        expect(table.getAttribute("role")).toBe("table");
+        expect(Array.from(table.querySelectorAll("thead th")).map((th: Element) => th.textContent)).toEqual(t.headers);
+        const rows = Array.from(table.querySelectorAll("tbody tr")).filter((r: Element) => !r.classList.contains("reject-panel-row"));
+        expect(rows).toHaveLength(1);
+        for (const row of rows as Element[]) {
+          expect(row.getAttribute("role")).toBe("row");
+          const cells = Array.from(row.children) as Element[];
+          expect(cells.map((c) => c.getAttribute("data-label"))).toEqual(t.labels);
+          expect(cells.every((c) => c.tagName === "TD" && c.getAttribute("role") === "cell")).toBe(true);
+        }
+      }
+    });
+
+    it("the cell texts, in order, are the team name, the captain, and the third-column content", () => {
+      const w = loadAdminPage();
+      w.__render(view("Riverside Academy", "María Fernanda Rodríguez"));
+      const text = (id: string) => Array.from(w.document.querySelector(`#${id} tbody tr`)!.children).map((c: Element) => c.textContent);
+      expect(text("table-teams")[0]).toBe("Riverside Academy");
+      expect(text("table-teams")[1]).toBe("María Fernanda Rodríguez");
+      expect(text("table-pending-teams").slice(0, 2)).toEqual(["Riverside Academy B", "María Fernanda Rodríguez"]);
+      expect(text("table-rejected-teams")).toEqual(["Riverside Academy C", "María Fernanda Rodríguez", "No space left."]);
+    });
+
+    it("the actions are in the right cells with their exact labels: Copy Invitation Link; Accept then Reject", () => {
+      const w = loadAdminPage();
+      w.__render(view("Riverside Academy", "María"));
+      const labels = (sel: string) => Array.from(w.document.querySelectorAll(sel)).map((b: Element) => b.textContent);
+      expect(labels("#table-teams tbody td[data-label='Invitation'] > button")).toEqual(["Copy Invitation Link"]);
+      expect(labels("#table-pending-teams tbody td[data-label='Decision'] > button")).toEqual(["Accept", "Reject"]);
+    });
+
+    it("a hidden rejection-panel row follows each pending row, keeps the row and cell roles, and carries no data-label", () => {
+      const w = loadAdminPage();
+      w.__render(view("Riverside Academy", "María"));
+      const rows = Array.from(w.document.querySelectorAll("#table-pending-teams tbody tr")) as Element[];
+      expect(rows).toHaveLength(2);
+      expect(rows[1].classList.contains("reject-panel-row")).toBe(true);
+      expect((rows[1] as HTMLElement).hidden).toBe(true);
+      expect(rows[1].getAttribute("role")).toBe("row");
+      expect(rows[1].firstElementChild!.getAttribute("role")).toBe("cell");
+      expect(rows[1].firstElementChild!.hasAttribute("data-label")).toBe(false);
+    });
+
+    for (const { label, value } of HOSTILE_PAYLOADS) {
+      it(`hostile team and captain names (${label}) render as literal text in all three tables, with no injected elements`, () => {
+        const w = loadAdminPage();
+        w.__render(view(value, value));
+        const root = w.document.getElementById("competition-detail") as Element;
+        assertNoLiveInjection(root);
+        for (const t of TABLES) {
+          const first = w.document.querySelector(`#${t.id} tbody tr`)!.children[0] as Element;
+          expect(first.children).toHaveLength(0);
+          expect(first.textContent!.startsWith(value)).toBe(true);
+        }
+        expect(w.document.querySelector("#table-teams tbody tr")!.children[1].textContent).toBe(value);
+      });
+    }
+  });
+
   describe("Negative control — proves this harness would have caught the original REV-054 defect", () => {
     // Reconstructs the EXACT pre-fix pattern this gate removed (the
     // original memberOptionsHtml: `<option>${displayName}</option>`

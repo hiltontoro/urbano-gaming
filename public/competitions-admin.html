@@ -62,8 +62,11 @@
   button.secondary { background: transparent; border: 1px solid var(--ink); color: var(--ink); }
   button.danger { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
   button.dominant { background: var(--exp-purple); color: var(--ink); box-shadow: 0 0 0 1px var(--exp-purple), 0 0 20px var(--exp-purple-glow); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; table-layout: fixed; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
+  th:nth-child(1) { width: 36%; } th:nth-child(2) { width: 28%; } th:nth-child(3) { width: 36%; }
+  td[data-label] > button + button { margin-left: 8px; }
+  @media (pointer: coarse) { td[data-label] > button { min-height: 44px; } }
   .msg { font-size: 14px; color: var(--muted); margin: 6px 0; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
@@ -100,9 +103,24 @@
   .reject-panel p.msg { margin: 0 0 8px; }
   .reject-panel label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .reject-panel textarea { width: 100%; min-height: 54px; resize: vertical; }
-  .reject-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .reject-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
   .reject-status { min-height: 16px; }
   h3:focus { outline: 2px solid var(--exp-purple); outline-offset: 3px; }
+  /* UG-CR-GATE-087: below 720px each team-table row becomes a stacked card, so
+     names and button labels wrap at word boundaries instead of being squeezed
+     into narrow columns. Cells carry their column name in data-label. */
+  @media (max-width: 720px) {
+    table.stack-table, table.stack-table tbody, table.stack-table tr, table.stack-table td { display: block; }
+    table.stack-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    table.stack-table tr { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-card); padding: 6px 12px; margin: 0 0 10px; }
+    table.stack-table tr[hidden] { display: none; }
+    table.stack-table tr.reject-panel-row { border: none; background: none; padding: 0; }
+    table.stack-table td { border-bottom: none; padding: 6px 0; font-size: 14px; }
+    table.stack-table td[data-label]::before { content: attr(data-label); content: attr(data-label) / ""; display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    table.stack-table td[data-label]:empty::before { display: none; }
+    table.stack-table td[data-label]:has(> button[hidden])::before { display: none; }
+    table.stack-table td[data-label] > button { min-height: 44px; margin: 0 8px 8px 0; }
+  }
 </style>
 </head>
 <body>
@@ -175,15 +193,15 @@
     </div>
 
     <h3>Accepted Teams</h3>
-    <table id="table-teams"><thead><tr><th>Name</th><th>Captain</th><th>Invitation</th></tr></thead><tbody></tbody></table>
+    <table id="table-teams" class="stack-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Captain</th><th role="columnheader">Invitation</th></tr></thead><tbody role="rowgroup"></tbody></table>
     <p class="msg">New teams come from a registered member's own proposal below, or the organizer accepting one — there is no separate organizer "add team by ID" control.</p>
 
     <h3 id="pending-teams-heading" tabindex="-1">Proposed Teams — Pending Approval</h3>
-    <table id="table-pending-teams"><thead><tr><th>Name</th><th>Proposed by</th><th>Decision</th></tr></thead><tbody></tbody></table>
+    <table id="table-pending-teams" class="stack-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Proposed by</th><th role="columnheader">Decision</th></tr></thead><tbody role="rowgroup"></tbody></table>
     <p class="msg" id="msg-pending-teams"></p>
 
     <h3>Rejected Team History</h3>
-    <table id="table-rejected-teams"><thead><tr><th>Name</th><th>Proposed by</th><th>Reason</th></tr></thead><tbody></tbody></table>
+    <table id="table-rejected-teams" class="stack-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Proposed by</th><th role="columnheader">Reason</th></tr></thead><tbody role="rowgroup"></tbody></table>
     <p class="msg" id="msg-rejected-teams">No rejected proposals.</p>
 
     <h3>Publish</h3>
@@ -413,6 +431,8 @@ function buildRejectionPanelRow(t, competition, acceptBtn, rejectBtn) {
   // aria-label and the two display names are set via setAttribute/
   // textContent, never interpolated into the HTML parsed above
   // (UG-CR-GATE-083 per UG-CR-REV-054 finding 2).
+  row.setAttribute("role", "row");
+  row.firstElementChild.setAttribute("role", "cell");
   row.querySelector(".reject-panel").setAttribute("aria-label", "Reject " + t.name);
   row.querySelector(".reject-team-name").textContent = t.name;
   row.querySelector(".reject-captain-name").textContent = t.captainDisplayName || "Unknown";
@@ -535,6 +555,22 @@ document.getElementById("btn-cancel-confirm").addEventListener("click", async ()
   }
 });
 
+/** A team-table row. role=row (like role=cell below) keeps the table semantics on phones, where display:block would otherwise let some browsers drop them (UG-CR-GATE-087). */
+function makeRow() {
+  const tr = document.createElement("tr");
+  tr.setAttribute("role", "row");
+  return tr;
+}
+
+/** A team-table cell carrying its column name for the phone card layout; untrusted text is assigned via textContent only (UG-CR-GATE-087). */
+function makeCell(label, text) {
+  const td = document.createElement("td");
+  td.setAttribute("role", "cell");
+  td.dataset.label = label;
+  if (text !== undefined) td.textContent = text;
+  return td;
+}
+
 function renderCompetitionDetail() {
   const { competition, teams, pendingTeamProposals, rejectedTeamProposals, fixtures } = currentView;
   document.getElementById("comp-title").textContent = competition.name;
@@ -553,10 +589,10 @@ function renderCompetitionDetail() {
   const tbody = document.querySelector("#table-teams tbody");
   tbody.innerHTML = "";
   for (const t of teams) {
-    const tr = document.createElement("tr");
-    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
-    const captainTd = document.createElement("td"); captainTd.textContent = t.captainDisplayName || "Unknown";
-    const inviteTd = document.createElement("td");
+    const tr = makeRow();
+    const nameTd = makeCell("Team", t.name);
+    const captainTd = makeCell("Captain", t.captainDisplayName || "Unknown");
+    const inviteTd = makeCell("Invitation");
     const inviteBtn = document.createElement("button");
     inviteBtn.className = "secondary"; inviteBtn.textContent = "Copy Invitation Link";
     inviteBtn.addEventListener("click", async () => {
@@ -573,10 +609,10 @@ function renderCompetitionDetail() {
   pendingTbody.innerHTML = "";
   document.getElementById("msg-pending-teams").textContent = pendingTeamProposals.length === 0 ? "No proposals awaiting a decision." : "";
   for (const t of pendingTeamProposals) {
-    const tr = document.createElement("tr");
-    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
-    const proposerTd = document.createElement("td"); proposerTd.textContent = t.captainDisplayName || "Unknown";
-    const decisionTd = document.createElement("td");
+    const tr = makeRow();
+    const nameTd = makeCell("Team", t.name);
+    const proposerTd = makeCell("Proposed by", t.captainDisplayName || "Unknown");
+    const decisionTd = makeCell("Decision");
     const acceptBtn = document.createElement("button"); acceptBtn.textContent = "Accept";
     const rejectBtn = document.createElement("button"); rejectBtn.className = "danger reject-open-btn"; rejectBtn.textContent = "Reject";
     const decisionMsg = document.createElement("span"); decisionMsg.className = "msg"; decisionMsg.style.marginLeft = "8px";
@@ -602,10 +638,10 @@ function renderCompetitionDetail() {
   rejectedTbody.innerHTML = "";
   document.getElementById("msg-rejected-teams").style.display = rejectedTeamProposals.length === 0 ? "block" : "none";
   for (const t of rejectedTeamProposals) {
-    const tr = document.createElement("tr");
-    const nameTd = document.createElement("td"); nameTd.textContent = t.name;
-    const captainTd = document.createElement("td"); captainTd.textContent = t.captainDisplayName || "Unknown";
-    const reasonTd = document.createElement("td"); reasonTd.textContent = t.rejectionReason || "";
+    const tr = makeRow();
+    const nameTd = makeCell("Team", t.name);
+    const captainTd = makeCell("Proposed by", t.captainDisplayName || "Unknown");
+    const reasonTd = makeCell("Reason", t.rejectionReason || "");
     tr.appendChild(nameTd); tr.appendChild(captainTd); tr.appendChild(reasonTd);
     rejectedTbody.appendChild(tr);
   }
