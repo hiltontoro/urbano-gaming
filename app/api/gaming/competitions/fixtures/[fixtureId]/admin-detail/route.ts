@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, requireCompetitionsSchemaReady, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { isActiveOrganizer } from "@/lib/gaming/competitions/organizerAccess";
 
 /**
  * GET /api/gaming/competitions/fixtures/[fixtureId]/admin-detail — the
@@ -26,8 +27,11 @@ export async function GET(request: Request, { params }: { params: { fixtureId: s
     if (!fixture) return NextResponse.json({ error: "No such fixture exists." }, { status: 404 });
 
     const competition = await repo.getCompetitionById(fixture.competitionId);
-    const isOrganizer = competition?.organizerGamingMemberId === auth.gamingMemberId;
-    const isScorekeeper = fixture.scorekeeperGamingMemberId === auth.gamingMemberId;
+    const isOrganizer = isActiveOrganizer(competition, auth.gamingMemberId);
+    // UG-CR-GATE-088: a former host (hosting access revoked) must not keep this
+    // administrative read by having appointed themselves scorekeeper.
+    const isRevokedHost = !!competition && competition.hostAccessRevoked === true && competition.organizerGamingMemberId === auth.gamingMemberId;
+    const isScorekeeper = !isRevokedHost && fixture.scorekeeperGamingMemberId === auth.gamingMemberId;
     if (!isOrganizer && !isScorekeeper) {
       return NextResponse.json({ error: "Only this competition's organizer or this fixture's appointed scorekeeper may view this detail." }, { status: 403 });
     }

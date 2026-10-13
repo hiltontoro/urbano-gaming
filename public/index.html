@@ -350,18 +350,41 @@
     },
   ];
 
-  const EXPERIENCES_CATALOG = [
-    {
-      title: "Community Voting",
-      sub: "Vote for your favorites in live moments.",
-      status: "soon",
-    },
-    {
-      title: "Level 33",
-      sub: "A new way to play together, coming to URBANO Gaming.",
-      status: "soon",
-    },
-  ];
+  // UG-CR-GATE-090: the Become a Host entry fails closed. It is NOT actionable (no link, no "Apply") until the server has said, in
+  // this page load, that applications are open. Every other outcome — the answer is still pending, the request fails or times out,
+  // the response is not exactly the expected shape, or the server says closed — leaves the card as the informational "not open yet"
+  // card below. The browser never sees or decides readiness itself: it only relays the server's bounded yes/no.
+  const HOST_ENTRY_CLOSED = {
+    title: "Become a Host",
+    sub: "Host applications are not open yet.",
+    status: "soon",
+  };
+  const HOST_ENTRY_OPEN = {
+    // The public entry to the Become a Host application. Anyone may read the page; applying requires an URBANO sign-in.
+    title: "Become a Host",
+    sub: "Apply to run a private, invite-only tournament at your venue, for adults you know.",
+    status: "playtest",
+    href: "/become-a-host.html",
+    action: "Apply →",
+  };
+  const HOST_AVAILABILITY_URL = "/api/gaming/host/availability";
+  const HOST_AVAILABILITY_TIMEOUT_MS = 4000;
+
+  function experiencesCatalog(hostOpen) {
+    return [
+      hostOpen === true ? HOST_ENTRY_OPEN : HOST_ENTRY_CLOSED,
+      {
+        title: "Community Voting",
+        sub: "Vote for your favorites in live moments.",
+        status: "soon",
+      },
+      {
+        title: "Level 33",
+        sub: "A new way to play together, coming to URBANO Gaming.",
+        status: "soon",
+      },
+    ];
+  }
 
   // Status vocabulary, deliberately kept to the smallest necessary
   // extension: "building" was added alongside the existing Featured/
@@ -394,8 +417,39 @@
     }).join("");
   }
 
+  // True only for HTTP 200 whose JSON body is exactly { "available": true }. Anything else — a network error, a timeout, a non-200
+  // status, a body that is not JSON, not an object, carries more or fewer keys, or holds any other value (including the string
+  // "true" or the number 1) — is "closed". Never throws.
+  async function resolveHostAvailability() {
+    let timer = null;
+    try {
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      if (controller) timer = setTimeout(() => controller.abort(), HOST_AVAILABILITY_TIMEOUT_MS);
+      const res = await fetch(HOST_AVAILABILITY_URL, {
+        method: "GET",
+        cache: "no-store",
+        credentials: "omit",
+        headers: { Accept: "application/json" },
+        signal: controller ? controller.signal : undefined,
+      });
+      if (!res || res.status !== 200) return false;
+      const body = await res.json();
+      if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+      const keys = Object.keys(body);
+      return keys.length === 1 && keys[0] === "available" && body.available === true;
+    } catch (_) {
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
-  renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
+  // First paint is always the closed card, so an actionable Become a Host card can never flash before readiness is known.
+  renderCatalog(experiencesCatalog(false), "experiences-carousel");
+  resolveHostAvailability().then((open) => {
+    if (open === true) renderCatalog(experiencesCatalog(true), "experiences-carousel");
+  });
 </script>
 
 </body>

@@ -75,6 +75,9 @@ const COMPETITIONS_TABLES = [
   "competition_fixture_corrections",
   "competition_fixture_finalizations",
   "competition_member_participation_records",
+  // UG-CR-GATE-088 (Become a Host)
+  "competition_host_applications",
+  "competition_host_capabilities",
 ] as const;
 
 const COMPETITIONS_RPCS = [
@@ -98,6 +101,16 @@ const COMPETITIONS_RPCS = [
   "finalize_competition_fixture_atomically",
   "forfeit_competition_fixture_atomically",
   "void_competition_fixture_atomically",
+  // UG-CR-GATE-088 (Become a Host)
+  "submit_host_application_atomically",
+  "withdraw_host_application_atomically",
+  "decide_host_application_atomically",
+  "revoke_host_capability_atomically",
+  "create_host_competition_atomically",
+  "get_host_status",
+  "list_host_applications_for_review",
+  "assert_competition_not_host_revoked",
+  "assert_actor_not_revoked_host",
 ] as const;
 
 /**
@@ -144,6 +157,18 @@ const RPC_ARGS: Record<(typeof COMPETITIONS_RPCS)[number], Record<string, unknow
   finalize_competition_fixture_atomically: { p_competition_fixture_id: randomUUID(), p_organizer_gaming_member_id: randomUUID() },
   forfeit_competition_fixture_atomically: { p_competition_fixture_id: randomUUID(), p_organizer_gaming_member_id: randomUUID(), p_forfeiting_competition_team_id: randomUUID(), p_reason: "probe" },
   void_competition_fixture_atomically: { p_competition_fixture_id: randomUUID(), p_organizer_gaming_member_id: randomUUID(), p_reason: "probe" },
+  submit_host_application_atomically: {
+    p_gaming_member_id: randomUUID(), p_venue_name: "Authz Probe", p_city_area: "Authz Probe", p_playing_fields: 1, p_venue_description: "Authz probe description of sufficient length.",
+    p_expected_window: "soon", p_expected_team_count: 4, p_confirm_all_adults: true, p_confirm_independent_scorekeepers: true, p_confirm_pilot_exclusions: true,
+  },
+  withdraw_host_application_atomically: { p_gaming_member_id: randomUUID(), p_public_code: "authzprobeauthzprobe00" },
+  decide_host_application_atomically: { p_reviewer_gaming_member_id: randomUUID(), p_public_code: "authzprobeauthzprobe00", p_decision: "APPROVE", p_reason: null },
+  revoke_host_capability_atomically: { p_reviewer_gaming_member_id: randomUUID(), p_public_code: "authzprobeauthzprobe00", p_reason: "probe" },
+  create_host_competition_atomically: { p_host_gaming_member_id: randomUUID(), p_name: "Authz Probe", p_activity_key: "SOCCER_5V5", p_public_code: "authzprobeauthzprobe00" },
+  get_host_status: { p_gaming_member_id: randomUUID() },
+  list_host_applications_for_review: { p_reviewer_gaming_member_id: randomUUID(), p_view: "PENDING" },
+  assert_competition_not_host_revoked: { p_competition_id: randomUUID() },
+  assert_actor_not_revoked_host: { p_competition_id: randomUUID(), p_actor_gaming_member_id: randomUUID() },
 };
 
 describe("Competitions authorization and direct-access matrix (UG-CR-RPT-030 correction 5)", () => {
@@ -153,8 +178,11 @@ describe("Competitions authorization and direct-access matrix (UG-CR-RPT-030 cor
     // open_team_registration_atomically, propose_competition_team_
     // atomically, decide_competition_team_atomically, close_team_
     // registration_atomically.
-    expect(COMPETITIONS_TABLES.length).toBe(18);
-    expect(COMPETITIONS_RPCS.length).toBe(20);
+    // UG-CR-GATE-088 (Become a Host) added 2 tables (competition_host_applications,
+    // competition_host_capabilities) and 9 functions (7 host operations + the two
+    // revocation guards the organizer functions call).
+    expect(COMPETITIONS_TABLES.length).toBe(20);
+    expect(COMPETITIONS_RPCS.length).toBe(29);
   });
 
   describe.each(COMPETITIONS_TABLES)("table %s", (table) => {

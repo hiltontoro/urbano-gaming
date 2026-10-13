@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, requireCompetitionsSchemaReady, statusForCompetitionsError } from "@/lib/gaming/competitions/httpAuth";
+import { isActiveOrganizer } from "@/lib/gaming/competitions/organizerAccess";
 
 /**
  * GET /api/gaming/competitions/teams/[teamId]/join-requests — pending
@@ -26,7 +27,7 @@ export async function GET(request: Request, { params }: { params: { teamId: stri
 
     const competition = await repo.getCompetitionById(team.competitionId);
     const isCaptain = team.captainGamingMemberId === auth.gamingMemberId;
-    const isOrganizer = competition?.organizerGamingMemberId === auth.gamingMemberId;
+    const isOrganizer = isActiveOrganizer(competition, auth.gamingMemberId);
     if (!isCaptain && !isOrganizer) {
       return NextResponse.json({ error: "Only this team's captain or the competition organizer may view its pending join requests." }, { status: 403 });
     }

@@ -33,6 +33,22 @@ export interface CompetitionRecord {
   cancelledReason: string | null;
   createdAt: string;
   publishedAt: string | null;
+  /**
+   * UG-CR-GATE-088 (Become a Host). True when this competition is the single
+   * pilot created through an approved host capability. It is then a private,
+   * unlisted competition reached through its invitation link, never through
+   * the shared competition list. Absent/false for every internally created
+   * (OPERATIONAL) competition, whose behavior is unchanged.
+   */
+  hostBound?: boolean;
+  /**
+   * UG-CR-GATE-088. True when the host capability bound to this competition
+   * has been revoked. The organizer id is kept (history is preserved), but the
+   * former host no longer holds organizer access: every TypeScript-side
+   * organizer check goes through isActiveOrganizer(), and every organizer RPC
+   * refuses with HOST_ACCESS_REVOKED.
+   */
+  hostAccessRevoked?: boolean;
 }
 
 /**
@@ -622,4 +638,18 @@ export class CompetitionNotCancellableError extends Error {
 /** UG-CR-GATE-082 (REV-053 #3) — raised by every mutation this domain's cancellation must deny once a competition is CANCELLED_WITHOUT_CHAMPION. */
 export class CompetitionCancelledError extends Error {
   constructor() { super("This competition has been cancelled and no longer accepts this action."); this.name = "CompetitionCancelledError"; }
+}
+
+/** UG-CR-GATE-088 — a former host acted on a competition after their hosting access was revoked. */
+export class HostAccessRevokedError extends Error {
+  constructor(message = "Your hosting access has been revoked. You can no longer administer this competition.") { super(message); this.name = "HostAccessRevokedError"; }
+}
+
+/**
+ * UG-CR-GATE-089 — a roster was declared for a team that is not one of the fixture's two team slots, or that belongs to
+ * another competition. One stable, bounded error for every identifier mismatch (including an unknown fixture): it says
+ * nothing about which fixtures, teams or competitions exist.
+ */
+export class FixtureTeamScopeError extends Error {
+  constructor() { super("This team is not part of this fixture."); this.name = "FixtureTeamScopeError"; }
 }

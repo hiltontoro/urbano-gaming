@@ -9,6 +9,8 @@ import {
   FixtureNotFoundError,
   EvidenceMissingError,
   CompetitionAccessDeniedError,
+  HostAccessRevokedError,
+  FixtureTeamScopeError,
   OperationalAuthorityRequiredError,
   NotTeamCaptainError,
   ScorekeeperConflictOfInterestError,
@@ -156,6 +158,8 @@ export function statusForCompetitionsError(err: unknown): number | null {
   }
   if (
     err instanceof CompetitionAccessDeniedError ||
+    err instanceof HostAccessRevokedError ||
+    err instanceof FixtureTeamScopeError ||
     err instanceof OperationalAuthorityRequiredError ||
     err instanceof NotTeamCaptainError ||
     err instanceof ScorekeeperConflictOfInterestError ||

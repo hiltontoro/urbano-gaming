@@ -124,6 +124,12 @@ export interface CompetitionsRepository {
   // Read accessors — role-aware projection is built above these by
   // getCompetitionView.ts, never by a route reading raw rows directly.
   listCompetitions(): Promise<CompetitionRecord[]>;
+  /**
+   * UG-CR-GATE-088 — the competitions in which this member holds a role: registrant, team member,
+   * team captain or proposer, join requester, or appointed scorekeeper. Used only to decide which
+   * private (host-bound) pilots the member may find in the list.
+   */
+  listCompetitionIdsInvolvingMember(gamingMemberId: string): Promise<string[]>;
   getCompetitionById(competitionId: string): Promise<CompetitionRecord | null>;
   getCompetitionTeams(competitionId: string): Promise<CompetitionTeamRecord[]>;
   getCompetitionTeamById(competitionTeamId: string): Promise<CompetitionTeamRecord | null>;

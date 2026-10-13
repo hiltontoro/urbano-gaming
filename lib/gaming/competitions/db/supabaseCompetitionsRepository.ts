@@ -23,11 +23,11 @@ import {
   TargetFactNotCurrentError, DisputeNotAuthorizedError,
   CompetitionNotReadyToPublishError, TeamRegistrationNotOpenError, TeamRegistrationCapacityNotReachedError,
   TeamCapacityReachedError, TeamDecisionAlreadyMadeError, DuplicateTeamNameError, AlreadyCaptainOrMemberError,
-  TeamNotAcceptedError, CompetitionNotCancellableError, CompetitionCancelledError,
+  TeamNotAcceptedError, CompetitionNotCancellableError, CompetitionCancelledError, HostAccessRevokedError, FixtureTeamScopeError,
 } from "../types";
 
-/** Translates a P0001-coded RPC error into its typed domain error. */
-function translateError(error: { code?: string; message?: string }): Error {
+/** Translates a P0001-coded RPC error into its typed domain error. Exported so contract tests can translate the one raw-RPC signature the repository itself does not call. */
+export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
     ["OPERATIONAL_AUTHORITY_REQUIRED", () => new OperationalAuthorityRequiredError()],
@@ -84,6 +84,8 @@ function translateError(error: { code?: string; message?: string }): Error {
     ["TEAM_NOT_ACCEPTED", () => new TeamNotAcceptedError()],
     ["COMPETITION_NOT_CANCELLABLE", () => new CompetitionNotCancellableError(msg)],
     ["COMPETITION_CANCELLED", () => new CompetitionCancelledError()],
+    ["HOST_ACCESS_REVOKED", () => new HostAccessRevokedError()],
+    ["FIXTURE_TEAM_SCOPE_MISMATCH", () => new FixtureTeamScopeError()],
   ];
   for (const [code, build] of table) {
     if (error.code === "P0001" && msg.includes(code)) return build();
@@ -344,25 +346,80 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
   // bypasses RLS by design — this is the one place service-role
   // credentials are used, entirely server-side; see UG-CR-RPT-024 §8) ---
 
-  async listCompetitions(): Promise<CompetitionRecord[]> {
-    const { data, error } = await this.client.from("competitions").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
-    return (data ?? []).map((data) => ({
+  /**
+   * UG-CR-GATE-088 — which competitions were created through a host capability,
+   * and whether that capability has since been revoked. Read from the service-role
+   * client like every other read here. If the host tables do not exist yet (the
+   * Become a Host migrations are not applied), no competition can be host-bound,
+   * so only that exact "relation missing" condition is treated as "none"; any other
+   * failure is rethrown, so a transient error can never make a revoked host look
+   * active.
+   */
+  private async hostBindings(competitionId?: string): Promise<Map<string, boolean>> {
+    const bindings = new Map<string, boolean>();
+    // PostgREST caps a response (1000 rows by default). Read in stable pages so the private-pilot filter can never
+    // fail open past the cap: a binding that was not read would make a pilot look like an ordinary public competition.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      let query = this.client
+        .from("competition_host_capabilities")
+        .select("competition_id, state")
+        .not("competition_id", "is", null)
+        .order("competition_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (competitionId) query = query.eq("competition_id", competitionId);
+      const { data, error } = await query;
+      if (error) {
+        const code = (error as { code?: string }).code;
+        if (code === "42P01" || code === "PGRST205") return new Map();
+        throw error;
+      }
+      for (const row of data ?? []) bindings.set(row.competition_id as string, row.state === "REVOKED");
+      if ((data ?? []).length < PAGE) return bindings;
+    }
+  }
+
+  async listCompetitionIdsInvolvingMember(gamingMemberId: string): Promise<string[]> {
+    const reads = [
+      this.client.from("competition_registrations").select("competition_id").eq("gaming_member_id", gamingMemberId),
+      this.client.from("competition_team_memberships").select("competition_id").eq("gaming_member_id", gamingMemberId),
+      this.client.from("competition_teams").select("competition_id").eq("captain_gaming_member_id", gamingMemberId),
+      this.client.from("competition_join_requests").select("competition_id").eq("requesting_gaming_member_id", gamingMemberId),
+      this.client.from("competition_fixtures").select("competition_id").eq("scorekeeper_gaming_member_id", gamingMemberId),
+    ];
+    const ids = new Set<string>();
+    for (const result of await Promise.all(reads)) {
+      if (result.error) throw result.error;
+      for (const row of result.data ?? []) ids.add(row.competition_id as string);
+    }
+    return Array.from(ids);
+  }
+
+  private mapCompetition(data: Record<string, any>, bindings: Map<string, boolean>): CompetitionRecord {
+    const record: CompetitionRecord = {
       competitionId: data.competition_id, publicCode: data.public_code, activityKey: data.activity_key, name: data.name,
       organizerGamingMemberId: data.organizer_gaming_member_id, state: data.state, cancelledReason: data.cancelled_reason ?? null,
       createdAt: data.created_at, publishedAt: data.published_at ?? null,
-    }));
+    };
+    if (bindings.has(data.competition_id)) {
+      record.hostBound = true;
+      record.hostAccessRevoked = bindings.get(data.competition_id) === true;
+    }
+    return record;
+  }
+
+  async listCompetitions(): Promise<CompetitionRecord[]> {
+    const { data, error } = await this.client.from("competitions").select("*").order("created_at", { ascending: false });
+    if (error) throw error;
+    const bindings = await this.hostBindings();
+    return (data ?? []).map((row) => this.mapCompetition(row, bindings));
   }
 
   async getCompetitionById(competitionId: string): Promise<CompetitionRecord | null> {
     const { data, error } = await this.client.from("competitions").select("*").eq("competition_id", competitionId).maybeSingle();
     if (error) throw error;
     if (!data) return null;
-    return {
-      competitionId: data.competition_id, publicCode: data.public_code, activityKey: data.activity_key, name: data.name,
-      organizerGamingMemberId: data.organizer_gaming_member_id, state: data.state, cancelledReason: data.cancelled_reason ?? null,
-      createdAt: data.created_at, publishedAt: data.published_at ?? null,
-    };
+    return this.mapCompetition(data, await this.hostBindings(competitionId));
   }
 
   async getCompetitionTeams(competitionId: string): Promise<CompetitionTeamRecord[]> {

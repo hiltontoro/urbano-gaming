@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Become a Host — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Become a Host — UG-CR-GATE-088. The application page for an external
+   * adult venue owner or organizer who wants to run ONE private pilot
+   * competition. Anyone may read this page; applying requires an URBANO
+   * sign-in. Nothing here decides who may do anything: every rule below is
+   * enforced again by the server and the database. The page only shows the
+   * applicant where they are — applying, waiting, approved, or hosting.
+   *
+   * Browser-safety rules this page follows:
+   *  - every server- or user-supplied string reaches the DOM through
+   *    textContent / value / setAttribute, never through innerHTML — static
+   *    markup shells contain no interpolated values;
+   *  - no identifier, token or application text is ever placed in the URL
+   *    or in browser storage by this page; a draft lives in memory only;
+   *  - an application is referred to only by its opaque code, and only to
+   *    address the withdraw request.
+   */
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
+    --ink: #f5f1e8; --muted: #a9a496; --line: #2a2a2a; --line-strong: #8f8a7c;
+    --gold: #d4af37; --gold-bg: rgba(212, 175, 55, 0.12);
+    --primary-fill: #f5f1e8; --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --good: #4ade80; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+  .shell-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; row-gap: 8px; max-width: 720px; margin: 0 auto; padding: 20px 20px 0; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before { content: ""; position: absolute; inset: -9px; background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%); filter: blur(4px); z-index: 0; }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge { background: var(--exp-purple-bg); border: 1px solid var(--exp-purple); color: var(--ink); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+  .signin-btn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 16px; border-radius: 8px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; min-height: 44px; max-width: 100%; overflow-wrap: anywhere; }
+  .signin-btn:hover { background: var(--surface-2); }
+  /* urbanoAuth.js injects this inline link next to the header button; the page gives it a real touch target. */
+  a[data-urbano-signout][style*="display: inline"] { display: inline-flex !important; align-items: center; min-height: 44px; padding: 0 12px; font-size: 13px !important; }
+  .signin-status { max-width: 720px; margin: 10px auto 0; padding: 10px 20px 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .back-link { max-width: 720px; margin: 4px auto 0; padding: 0 20px; font-size: 14px; color: var(--muted); display: flex; align-items: center; min-height: 44px; text-decoration: none; }
+  .back-link:hover { color: var(--ink); }
+  .content { max-width: 720px; margin: 18px auto 0; padding: 0 20px; }
+  .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 18px; }
+  .card.accent { border-color: var(--exp-purple); box-shadow: 0 0 0 1px rgba(124,58,237,0.14), 0 0 24px var(--exp-purple-glow); }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 8px; }
+  h2 { font-size: 18px; line-height: 1.3; margin: 0 0 10px; }
+  h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  p { margin: 0 0 12px; }
+  ul.program-list { margin: 0 0 12px; padding-left: 22px; }
+  ul.program-list li { margin: 0 0 8px; }
+  details.program { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 0; margin: 0 0 18px; }
+  details.program > summary { cursor: pointer; font-weight: 700; font-size: 16px; padding: 16px 20px; min-height: 48px; list-style-position: inside; }
+  details.program > .program-body { padding: 0 20px 8px; }
+  .field { margin-bottom: 16px; }
+  .field label, .group-legend { display: block; font-size: 14px; color: var(--ink); margin-bottom: 6px; font-weight: 600; }
+  .field .hint { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .field input, .field textarea { width: 100%; font-family: inherit; font-size: 16px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-card); color: var(--ink); min-height: 46px; }
+  .field textarea { min-height: 130px; resize: vertical; }
+  .field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--bad); }
+  .field-error { font-size: 14px; color: var(--bad); margin: 6px 0 0; }
+  .hint-required { font-size: 14px; color: var(--muted); margin: 0 0 14px; }
+  fieldset.group { border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 4px; margin: 0 0 16px; }
+  fieldset.group legend { padding: 0 6px; }
+  .checkbox-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 6px; font-size: 15px; min-height: 44px; }
+  .checkbox-row input[type="checkbox"] { width: 24px; height: 24px; flex-shrink: 0; margin: 10px 0 0; }
+  .checkbox-row label { font-weight: 400; cursor: pointer; flex: 1; padding: 10px 0; margin: 0; }
+  .btn-primary { font-family: inherit; font-size: 15px; font-weight: 700; padding: 13px 18px; border-radius: 10px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; width: 100%; min-height: 48px; }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-secondary { font-family: inherit; font-size: 14px; font-weight: 600; padding: 11px 16px; border-radius: 10px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; min-height: 46px; }
+  .btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-link { display: inline-block; font-size: 15px; font-weight: 700; padding: 13px 18px; border-radius: 10px; background: var(--primary-fill); color: var(--primary-ink); text-decoration: none; min-height: 48px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .status-pill { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--ink); border: 1px solid var(--line-strong); display: inline-block; }
+  .status-pill.good { color: var(--good); border-color: var(--good); }
+  .status-pill.bad { color: var(--bad); border-color: var(--bad); }
+  .status-pill.gold { color: var(--gold); border-color: var(--gold); }
+  .msg { font-size: 14px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+  .error-summary { border: 1px solid var(--bad); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; color: var(--bad); font-size: 15px; }
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 16px; }
+  dl.summary { margin: 14px 0 0; }
+  dl.summary dt { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 12px; }
+  dl.summary dd { margin: 2px 0 0; white-space: pre-wrap; }
+  .confirm-panel { border: 1px solid var(--line-strong); border-radius: 12px; padding: 14px; margin-top: 14px; background: var(--bg-card); }
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; } .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 11px 12px; }
+    .signin-status, .back-link, .content { padding-left: 16px; padding-right: 16px; }
+    h1 { font-size: 22px; }
+    .card { padding: 16px; }
+    .actions > * { flex: 1 1 100%; text-align: center; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
+</div>
+<p class="signin-status" id="signin-status" role="status" aria-live="polite"></p>
+
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<main class="content" id="main">
+  <h1 id="page-title">Become a Host</h1>
+  <p>Run a private, invite-only tournament at your venue for adults you know, with URBANO Gaming keeping the bracket, the rosters and the results.</p>
+
+  <details class="program" id="program-info" open>
+    <summary>About the pilot program</summary>
+    <div class="program-body">
+      <p><strong>Hosting is by application, not automatic.</strong> URBANO reviews every application. Approval is at URBANO's discretion and may be revoked.</p>
+      <p>The first program supports <strong>one private, invite-only pilot competition</strong> per approved host.</p>
+      <ul class="program-list">
+        <li>Known adults only: everyone who plays, scores, or helps is an adult you know.</li>
+        <li>Four teams with at least four players each.</li>
+        <li>Two semifinals and one final.</li>
+        <li>Independent scorekeepers: each match is scored by someone who is not playing in it.</li>
+        <li>You share the invitation links yourself, by hand. Nothing is sent automatically.</li>
+      </ul>
+      <p>The pilot does <strong>not</strong> include entry fees, prizes, sponsorships, minors, public statistics, automated invitations, or open registration.</p>
+      <p>Approval lets you create and run this one pilot. It does not make you an URBANO employee, partner, or certified organizer, and it is not a permanent affiliation.</p>
+      <p>Anyone can read this page. To apply you need to sign in with URBANO and have a display name.</p>
+    </div>
+  </details>
+
+  <div id="app" aria-busy="true">
+    <div class="empty-state">Loading…</div>
+  </div>
+</main>
+
+<script src="/urbanoAuth.js"></script>
+<script>
+UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("signin-status"));
+
+const appEl = document.getElementById("app");
+const programInfo = document.getElementById("program-info");
+
+// Every server- or user-supplied string below reaches the DOM through
+// textContent, .value or setAttribute — never through innerHTML. el() is
+// used only for STATIC shells that contain no interpolated value.
+function el(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html.trim();
+  return div.firstElementChild;
+}
+
+function node(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined && text !== null) n.textContent = text;
+  return n;
+}
+
+/** A transport failure must never leave the page stuck: it resolves to status 0 with no body. */
+async function authedFetch(path, options) {
+  // A request that never answers must not leave a button disabled forever: it is abandoned after 20 seconds and reported as unreachable.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const token = await UrbanoAuth.getAccessToken();
+    const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
+    if (token) headers.authorization = "Bearer " + token;
+    const res = await fetch(path, Object.assign({ cache: "no-store", signal: controller.signal }, options, { headers }));
+    const json = await res.json().catch(() => null);
+    return { status: res.status, json };
+  } catch (err) {
+    return { status: 0, json: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Plain-language message for a failed response. Server text is used only for the typed host errors, which are already written for people. */
+function messageFor(res, fallback) {
+  if (res.status === 0) return "We could not reach URBANO. Check your connection and try again.";
+  if (res.status === 401) return "Please sign in again to continue.";
+  if (res.status === 503) return "Become a Host is not open yet.";
+  if (res.json && typeof res.json.error === "string" && res.status >= 400 && res.status < 500) return res.json.error;
+  return fallback;
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
+// ---- Application form ---------------------------------------------------
+
+const FIELDS = [
+  { key: "venueName", label: "Venue or organization name", type: "text", minlength: 2, maxlength: 80, autocomplete: "organization", hint: "2–80 characters." },
+  { key: "cityArea", label: "City or area", type: "text", minlength: 2, maxlength: 80, autocomplete: "address-level2", hint: "2–80 characters." },
+  { key: "playingFields", label: "Number of playing fields", type: "number", min: 1, max: 50, inputmode: "numeric", hint: "A whole number from 1 to 50." },
+  { key: "venueDescription", label: "Your venue and tournament experience", type: "textarea", minlength: 20, maxlength: 800, hint: "A few sentences about your venue and any tournaments you have run (20–800 characters)." },
+  { key: "expectedWindow", label: "When do you expect to run the pilot?", type: "text", minlength: 3, maxlength: 100, hint: "A date or a window, for example \"weekend of 14 November\" or \"late November\"." },
+  { key: "expectedTeamCount", label: "How many teams do you expect to invite?", type: "number", min: 4, max: 16, inputmode: "numeric", hint: "The pilot runs with four teams. Tell us how many you expect to invite (4–16)." },
+];
+
+const CONFIRMS = [
+  { key: "confirmAllAdults", text: "Everyone who plays, scores, or helps in this tournament is an adult I know." },
+  { key: "confirmIndependentScorekeepers", text: "Every match will be scored by someone who is not playing in it." },
+  { key: "confirmPilotExclusions", text: "I understand the pilot has no entry fees, prizes, sponsorships, minors, public statistics, automated invitations, or open registration." },
+];
+
+function fieldBlock(spec) {
+  const wrap = node("div", "field");
+  const label = node("label", null, spec.label);
+  label.setAttribute("for", "f-" + spec.key);
+  wrap.appendChild(label);
+  const hint = node("p", "hint", spec.hint);
+  hint.id = "hint-" + spec.key;
+  wrap.appendChild(hint);
+  const input = document.createElement(spec.type === "textarea" ? "textarea" : "input");
+  if (spec.type !== "textarea") input.type = spec.type;
+  input.id = "f-" + spec.key;
+  input.name = spec.key;
+  input.required = true;
+  if (spec.minlength) input.minLength = spec.minlength;
+  if (spec.maxlength) input.maxLength = spec.maxlength;
+  if (spec.min !== undefined) input.min = String(spec.min);
+  if (spec.max !== undefined) input.max = String(spec.max);
+  if (spec.inputmode) input.setAttribute("inputmode", spec.inputmode);
+  if (spec.autocomplete) input.setAttribute("autocomplete", spec.autocomplete);
+  input.setAttribute("aria-describedby", "hint-" + spec.key + " err-" + spec.key);
+  wrap.appendChild(input);
+  const err = node("p", "field-error");
+  err.id = "err-" + spec.key;
+  err.hidden = true;
+  wrap.appendChild(err);
+  return wrap;
+}
+
+function setFieldError(form, key, message) {
+  const input = form.querySelector("#f-" + key) || form.querySelector("#c-" + key);
+  const err = form.querySelector("#err-" + key);
+  if (!err) return null;
+  err.textContent = message || "";
+  err.hidden = !message;
+  if (input) {
+    if (message) input.setAttribute("aria-invalid", "true");
+    else input.removeAttribute("aria-invalid");
+  }
+  return input;
+}
+
+/** Client-side check mirroring the server's rules. The server and database check again; this only saves a round trip. */
+function validateForm(form) {
+  const problems = [];
+  const text = (key) => (form.querySelector("#f-" + key).value || "").trim();
+  const whole = (key) => { const v = form.querySelector("#f-" + key).value; return /^\d+$/.test(String(v).trim()) ? Number(v) : NaN; };
+  const lengthOk = (value, min, max) => value.length >= min && value.length <= max;
+  const rules = [
+    ["venueName", lengthOk(text("venueName"), 2, 80), "Enter the venue or organization name (2–80 characters)."],
+    ["cityArea", lengthOk(text("cityArea"), 2, 80), "Enter the city or area (2–80 characters)."],
+    ["playingFields", whole("playingFields") >= 1 && whole("playingFields") <= 50, "Enter a whole number of playing fields from 1 to 50."],
+    ["venueDescription", lengthOk(text("venueDescription"), 20, 800), "Describe your venue and experience in 20–800 characters."],
+    ["expectedWindow", lengthOk(text("expectedWindow"), 3, 100), "Enter a date or window (3–100 characters)."],
+    ["expectedTeamCount", whole("expectedTeamCount") >= 4 && whole("expectedTeamCount") <= 16, "Enter how many teams you expect, from 4 to 16."],
+  ];
+  for (const [key, ok, message] of rules) {
+    const input = setFieldError(form, key, ok ? "" : message);
+    if (!ok) problems.push({ key, input });
+  }
+  const allChecked = CONFIRMS.every((c) => form.querySelector("#c-" + c.key).checked);
+  const confirmInput = setFieldError(form, "confirmations", allChecked ? "" : "Please confirm all three statements to apply.");
+  if (!allChecked) problems.push({ key: "confirmations", input: form.querySelector("#c-" + CONFIRMS[0].key) });
+  return problems;
+}
+
+function buildApplicationPayload(form) {
+  const text = (key) => (form.querySelector("#f-" + key).value || "").trim();
+  return {
+    venueName: text("venueName"),
+    cityArea: text("cityArea"),
+    playingFields: Number(form.querySelector("#f-playingFields").value),
+    venueDescription: text("venueDescription"),
+    expectedWindow: text("expectedWindow"),
+    expectedTeamCount: Number(form.querySelector("#f-expectedTeamCount").value),
+    confirmAllAdults: form.querySelector("#c-confirmAllAdults").checked,
+    confirmIndependentScorekeepers: form.querySelector("#c-confirmIndependentScorekeepers").checked,
+    confirmPilotExclusions: form.querySelector("#c-confirmPilotExclusions").checked,
+  };
+}
+
+function renderApplicationForm(authState, intro) {
+  const card = el(`<section class="card accent" aria-labelledby="apply-title">
+    <h2 id="apply-title">Apply to host</h2>
+    <p class="applying-as"></p>
+    <p class="hint-required">All fields are required.</p>
+    <form id="host-form" novalidate>
+      <div id="form-error" class="error-summary" role="alert" tabindex="-1" hidden></div>
+      <div id="fields"></div>
+      <fieldset class="group" id="confirm-group" aria-describedby="err-confirmations">
+        <legend class="group-legend">Please confirm</legend>
+        <div id="confirms"></div>
+        <p class="field-error" id="err-confirmations" hidden></p>
+      </fieldset>
+      <button type="submit" class="btn-primary" id="submit-btn">Submit application</button>
+      <p class="msg" id="form-status" role="status"></p>
+    </form>
+  </section>`);
+  card.querySelector(".applying-as").textContent = intro || ("Applying as " + (authState.displayName || "") + ". Your display name is shown to URBANO reviewers.");
+  const form = card.querySelector("#host-form");
+  const fields = card.querySelector("#fields");
+  for (const spec of FIELDS) fields.appendChild(fieldBlock(spec));
+  const confirms = card.querySelector("#confirms");
+  for (const c of CONFIRMS) {
+    const row = node("div", "checkbox-row");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = "c-" + c.key;
+    box.name = c.key;
+    const label = node("label", null, c.text);
+    label.setAttribute("for", "c-" + c.key);
+    row.appendChild(box);
+    row.appendChild(label);
+    confirms.appendChild(row);
+  }
+
+  const errorBox = card.querySelector("#form-error");
+  const submitBtn = card.querySelector("#submit-btn");
+  const statusEl = card.querySelector("#form-status");
+  let submitting = false;
+
+  function showSummary(message) {
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+    errorBox.focus();
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    errorBox.hidden = true;
+    const problems = validateForm(form);
+    if (problems.length > 0) {
+      showSummary("Please fix the " + (problems.length === 1 ? "problem" : problems.length + " problems") + " below and submit again.");
+      const first = problems[0].input;
+      if (first) first.focus();
+      return;
+    }
+    submitting = true;
+    submitBtn.disabled = true;
+    statusEl.textContent = "Submitting your application…";
+    const res = await authedFetch("/api/gaming/host/applications", { method: "POST", body: JSON.stringify(buildApplicationPayload(form)) });
+    if (res.status === 201) {
+      statusEl.textContent = "";
+      await renderApp(true);
+      return;
+    }
+    submitting = false;
+    submitBtn.disabled = false;
+    statusEl.textContent = "";
+    if (res.status === 409) {
+      // Already applied (for example in another tab): show the truthful current state.
+      await renderApp(true);
+      return;
+    }
+    if (res.status === 400 && res.json && typeof res.json.field === "string") {
+      const key = FIELDS.some((f) => f.key === res.json.field) ? res.json.field : (res.json.field === "confirmations" ? "confirmations" : null);
+      if (key) {
+        const input = setFieldError(form, key, key === "confirmations" ? "Please confirm all three statements to apply." : "Please check this field and try again.");
+        showSummary("Please fix the problem below and submit again.");
+        if (input) input.focus();
+        return;
+      }
+    }
+    showSummary(messageFor(res, "We could not submit your application. Please try again."));
+  });
+  return card;
+}
+
+// ---- Status panels ------------------------------------------------------
+
+function summaryRow(dl, term, value) {
+  dl.appendChild(node("dt", null, term));
+  dl.appendChild(node("dd", null, value));
+}
+
+/** The applicant's own submission, shown back to them. Every value is set as text. */
+function renderApplicationSummary(application) {
+  const dl = node("dl", "summary");
+  summaryRow(dl, "Venue or organization", application.venueName);
+  summaryRow(dl, "City or area", application.cityArea);
+  summaryRow(dl, "Playing fields", String(application.playingFields));
+  summaryRow(dl, "Venue and tournament experience", application.venueDescription);
+  summaryRow(dl, "Expected date or window", application.expectedWindow);
+  summaryRow(dl, "Teams expected", String(application.expectedTeamCount));
+  if (application.submittedAt) summaryRow(dl, "Submitted", formatDate(application.submittedAt));
+  return dl;
+}
+
+function statusCard(heading, pillText, pillClass) {
+  const card = el(`<section class="card accent" aria-labelledby="status-title">
+    <h2 id="status-title" tabindex="-1"></h2>
+    <p><span class="status-pill"></span></p>
+    <div class="status-body"></div>
+  </section>`);
+  card.querySelector("#status-title").textContent = heading;
+  const pill = card.querySelector(".status-pill");
+  pill.textContent = pillText;
+  if (pillClass) pill.classList.add(pillClass);
+  return card;
+}
+
+function addParagraph(parent, text) {
+  parent.appendChild(node("p", null, text));
+}
+
+function renderUnderReview(status) {
+  const card = statusCard("Application under review", "Under review", "gold");
+  const body = card.querySelector(".status-body");
+  addParagraph(body, "Thank you. URBANO is reviewing your application. Approval is at URBANO's discretion, and the result will appear on this page.");
+  addParagraph(body, "You can withdraw your application while it is under review.");
+  body.appendChild(renderApplicationSummary(status.application));
+
+  const actions = node("div", "actions");
+  const withdrawBtn = node("button", "btn-secondary", "Withdraw application");
+  withdrawBtn.type = "button";
+  actions.appendChild(withdrawBtn);
+  body.appendChild(actions);
+  const feedback = node("p", "msg");
+  feedback.setAttribute("role", "status");
+  body.appendChild(feedback);
+
+  withdrawBtn.addEventListener("click", () => {
+    if (body.querySelector(".confirm-panel")) return;
+    const panel = node("div", "confirm-panel");
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "Confirm withdrawal");
+    addParagraph(panel, "Withdraw your application? You can apply again later.");
+    const row = node("div", "actions");
+    const confirmBtn = node("button", "btn-primary", "Yes, withdraw");
+    confirmBtn.type = "button";
+    const keepBtn = node("button", "btn-secondary", "Keep my application");
+    keepBtn.type = "button";
+    row.appendChild(confirmBtn);
+    row.appendChild(keepBtn);
+    panel.appendChild(row);
+    body.insertBefore(panel, feedback);
+    withdrawBtn.disabled = true;
+    confirmBtn.focus();
+
+    let busy = false;
+    keepBtn.addEventListener("click", () => {
+      panel.remove();
+      withdrawBtn.disabled = false;
+      withdrawBtn.focus();
+    });
+    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") keepBtn.click(); });
+    confirmBtn.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      confirmBtn.disabled = true;
+      feedback.className = "msg";
+      feedback.textContent = "Withdrawing…";
+      const res = await authedFetch("/api/gaming/host/applications/" + encodeURIComponent(status.application.publicCode) + "/withdraw", { method: "POST", body: "{}" });
+      if (res.status === 200 || res.status === 409) {
+        await renderApp(true);
+        return;
+      }
+      busy = false;
+      confirmBtn.disabled = false;
+      feedback.className = "msg error";
+      feedback.textContent = messageFor(res, "We could not withdraw your application. Please try again.");
+    });
+  });
+  return card;
+}
+
+function renderApproved(status) {
+  const card = statusCard("Your host application was approved", "Approved", "good");
+  const body = card.querySelector(".status-body");
+  addParagraph(body, "You can now create your one private pilot competition. Your access covers this single pilot. It does not make you an URBANO employee, partner, or certified organizer, and URBANO may revoke it.");
+  addParagraph(body, "Once you create the pilot, it cannot be replaced. Choose a name your teams will recognize.");
+
+  const form = el(`<form id="pilot-form" novalidate>
+    <div class="field">
+      <label for="pilot-name">Name of your pilot competition</label>
+      <p class="hint" id="hint-pilot-name">3–80 characters.</p>
+      <input id="pilot-name" name="name" type="text" required minlength="3" maxlength="80" autocomplete="off" aria-describedby="hint-pilot-name err-pilot-name" />
+      <p class="field-error" id="err-pilot-name" hidden></p>
+    </div>
+    <button type="submit" class="btn-primary" id="pilot-submit">Create my pilot competition</button>
+    <p class="msg" id="pilot-status" role="status"></p>
+  </form>`);
+  body.appendChild(form);
+
+  const input = form.querySelector("#pilot-name");
+  const err = form.querySelector("#err-pilot-name");
+  const submit = form.querySelector("#pilot-submit");
+  const feedback = form.querySelector("#pilot-status");
+  let busy = false;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    const name = (input.value || "").trim();
+    if (name.length < 3 || name.length > 80) {
+      err.textContent = "Enter a name of 3–80 characters.";
+      err.hidden = false;
+      input.setAttribute("aria-invalid", "true");
+      input.focus();
+      return;
+    }
+    err.hidden = true;
+    input.removeAttribute("aria-invalid");
+    busy = true;
+    submit.disabled = true;
+    feedback.className = "msg";
+    feedback.textContent = "Creating your pilot…";
+    const res = await authedFetch("/api/gaming/host/competition", { method: "POST", body: JSON.stringify({ name }) });
+    if (res.status === 201 || res.status === 403 || res.status === 409) {
+      // 201: created. 403/409: already created or access changed — show the truthful current state.
+      await renderApp(true);
+      return;
+    }
+    busy = false;
+    submit.disabled = false;
+    feedback.className = "msg error";
+    feedback.textContent = messageFor(res, "We could not create your pilot. Please try again.");
+  });
+  return card;
+}
+
+function renderPilotCreated(status) {
+  const card = statusCard("Your approved pilot has already been created", "Pilot created", "good");
+  const body = card.querySelector(".status-body");
+  const name = status.application.competitionName;
+  if (name) {
+    const p = node("p");
+    p.appendChild(document.createTextNode("Your pilot: "));
+    p.appendChild(node("strong", null, name));
+    body.appendChild(p);
+  }
+  addParagraph(body, "Use the organizer tools to add teams and create the invitation links you share by hand. Your access covers this one pilot only.");
+  const actions = node("div", "actions");
+  const link = node("a", "btn-link", "Open organizer tools");
+  link.setAttribute("href", "/competitions-admin.html");
+  actions.appendChild(link);
+  body.appendChild(actions);
+  return card;
+}
+
+function renderNotApproved() {
+  const card = statusCard("Your application was not approved", "Not approved", "bad");
+  const body = card.querySelector(".status-body");
+  addParagraph(body, "URBANO reviews applications at its discretion. You are welcome to submit a new application if your plans change.");
+  const actions = node("div", "actions");
+  const again = node("button", "btn-secondary", "Submit a new application");
+  again.type = "button";
+  again.addEventListener("click", () => showFreshForm());
+  actions.appendChild(again);
+  body.appendChild(actions);
+  return card;
+}
+
+function renderWithdrawn() {
+  const card = statusCard("You withdrew your application", "Withdrawn");
+  const body = card.querySelector(".status-body");
+  addParagraph(body, "Nothing further will happen with that application. You can apply again whenever you like.");
+  const actions = node("div", "actions");
+  const again = node("button", "btn-secondary", "Submit a new application");
+  again.type = "button";
+  again.addEventListener("click", () => showFreshForm());
+  actions.appendChild(again);
+  body.appendChild(actions);
+  return card;
+}
+
+function renderRevoked(status) {
+  const card = statusCard("Your hosting access has been revoked", "Access revoked", "bad");
+  const body = card.querySelector(".status-body");
+  addParagraph(body, "You can no longer administer the pilot or create a new one. The competition and its records are kept.");
+  if (status.application.competitionName) {
+    const p = node("p");
+    p.appendChild(document.createTextNode("Your pilot: "));
+    p.appendChild(node("strong", null, status.application.competitionName));
+    body.appendChild(p);
+  }
+  return card;
+}
+
+// ---- Page states ----------------------------------------------------------
+
+/**
+ * Opens the shared sign-in panel from this page's own button. urbanoAuth.js closes
+ * its panel on ANY click that lands outside the panel and outside the header
+ * button, so this click must not reach the document, or the panel would open and
+ * shut in the same gesture. It also opens the panel rather than toggling it, and
+ * moves focus into the panel so a keyboard user can type straight away.
+ */
+function openSignInPanel(event) {
+  event.stopPropagation();
+  const header = document.getElementById("btn-signin");
+  if (!header) return;
+  const panel = header.nextElementSibling;
+  const isOpen = !!panel && panel.style.display === "block";
+  if (!isOpen) header.click();
+  setTimeout(() => {
+    const field = document.querySelector("[data-email], [data-code], [data-display-name]");
+    if (field) field.focus();
+  }, 0);
+}
+
+function renderSignedOut() {
+  const card = el(`<section class="card accent" aria-labelledby="signin-title">
+    <h2 id="signin-title">Sign in to apply</h2>
+    <p>You can read everything about the pilot above. To apply, sign in with URBANO: we email you a one-time code, and you choose a display name.</p>
+    <div class="actions"><button type="button" class="btn-primary" id="signin-to-apply">Sign in with URBANO to apply</button></div>
+  </section>`);
+  card.querySelector("#signin-to-apply").addEventListener("click", openSignInPanel);
+  return card;
+}
+
+function renderProfileForm() {
+  const card = el(`<section class="card accent" aria-labelledby="profile-title">
+    <h2 id="profile-title">Choose your display name</h2>
+    <p>You are signed in, but you have not chosen a display name yet. URBANO reviewers see this name with your application.</p>
+    <form id="profile-form" novalidate>
+      <div class="field">
+        <label for="display-name">Display name</label>
+        <p class="hint" id="hint-display-name">1–40 characters.</p>
+        <input id="display-name" name="displayName" type="text" required maxlength="40" autocomplete="nickname" aria-describedby="hint-display-name err-display-name" />
+        <p class="field-error" id="err-display-name" hidden></p>
+      </div>
+      <button type="submit" class="btn-primary" id="profile-submit">Continue</button>
+    </form>
+  </section>`);
+  const form = card.querySelector("#profile-form");
+  const input = card.querySelector("#display-name");
+  const err = card.querySelector("#err-display-name");
+  const submit = card.querySelector("#profile-submit");
+  let busy = false;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    const name = (input.value || "").trim();
+    if (name.length < 1 || name.length > 40) {
+      err.textContent = "Enter a display name of 1–40 characters.";
+      err.hidden = false;
+      input.setAttribute("aria-invalid", "true");
+      input.focus();
+      return;
+    }
+    err.hidden = true;
+    input.removeAttribute("aria-invalid");
+    busy = true;
+    submit.disabled = true;
+    let result;
+    try { result = await UrbanoAuth.completeProfile(name); } catch (e) { result = { status: "error", message: "We could not save your display name. Please try again." }; }
+    if (result && result.status === "authenticated") {
+      // completeProfile fires no auth event, so this page re-renders itself.
+      await renderApp(true);
+      return;
+    }
+    busy = false;
+    submit.disabled = false;
+    err.textContent = (result && typeof result.message === "string" && result.message) || "We could not save your display name. Please try again.";
+    err.hidden = false;
+    input.focus();
+  });
+  return card;
+}
+
+let freshFormRequested = false;
+function showFreshForm() {
+  freshFormRequested = true;
+  renderApp(true);
+}
+
+// What the page last drew. Auth events (a token refresh, a second event while a session first resolves) and the sign-in poll
+// call renderApp() without `force`; if the state they find is the one already on screen they change nothing, so a half-typed
+// application, display name or pilot name is never wiped by a background event. Only a real change of state, or a deliberate
+// user action (which passes force), re-draws the page.
+let renderedKey = null;
+let renderedAuthStatus = null;
+
+let authPollTimer = null;
+function stopAuthPoll() { if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; } }
+function startAuthPoll() {
+  if (authPollTimer) return;
+  let attempts = 0;
+  authPollTimer = setInterval(async () => {
+    attempts += 1;
+    let state;
+    try { state = await UrbanoAuth.getState(); } catch (e) { return; }
+    // Completing the display-name step fires no auth event, so watch for the status to MOVE from what is drawn.
+    if (state.status !== renderedAuthStatus) { stopAuthPoll(); renderApp(true); }
+    else if (attempts >= 120) stopAuthPoll();
+  }, 500);
+}
+
+// Several auth events can fire in quick succession while a session first
+// resolves; only the newest render may touch the DOM.
+let renderGeneration = 0;
+
+function mount(child, focusHeading) {
+  appEl.textContent = "";
+  appEl.appendChild(child);
+  appEl.setAttribute("aria-busy", "false");
+  if (focusHeading) {
+    const h = child.querySelector("#status-title");
+    if (h) h.focus();
+  }
+}
+
+/** A failure state is never a dead end: it says what happened and offers to try again. */
+function mountError(message) {
+  renderedKey = null;
+  const box = node("div", "empty-state");
+  box.appendChild(node("p", null, message));
+  const retry = node("button", "btn-secondary", "Try again");
+  retry.type = "button";
+  retry.addEventListener("click", () => renderApp(true));
+  box.appendChild(retry);
+  mount(box, false);
+}
+
+async function renderApp(force) {
+  const myGeneration = ++renderGeneration;
+  let authState;
+  try {
+    authState = await UrbanoAuth.getState();
+  } catch (e) {
+    if (myGeneration !== renderGeneration) return;
+    mountError("We could not check your sign-in.");
+    return;
+  }
+  if (myGeneration !== renderGeneration) return;
+
+  if (authState.status === "unauthenticated" || authState.status === "profile_incomplete") {
+    renderedAuthStatus = authState.status;
+    const key = authState.status;
+    startAuthPoll();
+    if (!force && key === renderedKey) { appEl.setAttribute("aria-busy", "false"); return; }
+    renderedKey = key;
+    if (authState.status === "unauthenticated") { programInfo.open = true; mount(renderSignedOut(), false); }
+    else mount(renderProfileForm(), false);
+    return;
+  }
+  stopAuthPoll();
+  renderedAuthStatus = authState.status;
+
+  const res = await authedFetch("/api/gaming/host/status");
+  if (myGeneration !== renderGeneration) return;
+  // Check the status before reading any collection: an unavailable or failed
+  // response must never be mistaken for "you have not applied".
+  if (res.status !== 200 || !res.json) {
+    mountError(messageFor(res, "We could not load your host application."));
+    return;
+  }
+  const status = res.json;
+  const phase = status.phase;
+  const showForm = phase === "NOT_APPLIED" || (freshFormRequested && (phase === "NOT_APPROVED" || phase === "WITHDRAWN"));
+  const key = "authenticated:" + phase + ":" + (showForm ? "form" : "status");
+  if (!force && key === renderedKey) { appEl.setAttribute("aria-busy", "false"); return; }
+  renderedKey = key;
+
+  if (showForm) {
+    programInfo.open = true;
+    mount(renderApplicationForm(authState), false);
+    return;
+  }
+  freshFormRequested = false;
+  programInfo.open = false;
+  if (phase === "UNDER_REVIEW") mount(renderUnderReview(status), true);
+  else if (phase === "APPROVED_READY") mount(renderApproved(status), true);
+  else if (phase === "PILOT_CREATED") mount(renderPilotCreated(status), true);
+  else if (phase === "NOT_APPROVED") mount(renderNotApproved(), true);
+  else if (phase === "WITHDRAWN") mount(renderWithdrawn(), true);
+  else if (phase === "ACCESS_REVOKED") mount(renderRevoked(status), true);
+  else mountError("We could not load your host application.");
+}
+
+UrbanoAuth.onAuthStateChange(() => renderApp(false));
+renderApp(true);
+</script>
+
+</body>
+</html>

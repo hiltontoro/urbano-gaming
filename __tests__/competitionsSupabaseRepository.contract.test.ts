@@ -134,15 +134,88 @@ async function cleanupCompetitions(competitionIds: string[]): Promise<void> {
   await cleanupClient.from("competitions").delete().in("competition_id", competitionIds);
 }
 
+// UG-CR-GATE-090 — teardown. Two defects, one fix.
+//  1. The known "Hook timed out in 10000ms": this hook deletes every synthetic auth user the file created (about 550), one request at a
+//     time, and that takes about as long as vitest's 10 s default hook timeout, so it tips over whenever local Auth is a little slow.
+//     No assertion was ever affected; the file failed at teardown. The fix is a clearly bounded timeout sized for the work. Deletes
+//     stay sequential: no extra concurrency against local Auth.
+//  2. Hidden failures the old hook swallowed (supabase-js returns errors instead of throwing). Deleting the authority grants used one
+//     `.in()` over every member id, which exceeds the gateway's URL limit ("URI too long"), so no grant was ever deleted and every
+//     auth user that held one (the organizers, about 93 of 549) could not be deleted either. Ids are now sent in small bounded chunks.
+//     Separately, the cancellation test writes CANCEL_INCOMPLETE_COMPETITION audit events, which pin their actor (a foreign key
+//     without cascade); this file now deletes its own synthetic audit rows by actor, as its sibling contract files already do.
+// Failures are collected and thrown, never swallowed, and completion is PROVEN: afterwards nothing this file created may remain.
+const CLEANUP_HOOK_TIMEOUT_MS = 180_000;
+const CLEANUP_ID_CHUNK = 50;
+
+function inChunks<T>(items: T[], size = CLEANUP_ID_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 afterAll(async () => {
+  const problems: string[] = [];
   await cleanupCompetitions(createdCompetitionIds);
-  if (createdGamingMemberIds.length > 0) {
-    await cleanupClient.from("authority_grants").delete().in("gaming_member_id", createdGamingMemberIds);
+  for (const ids of inChunks(createdGamingMemberIds)) {
+    const { error } = await cleanupClient.from("authority_grants").delete().in("gaming_member_id", ids);
+    if (error) problems.push(`authority_grants delete failed: ${error.message}`);
+  }
+  for (const ids of inChunks(createdGamingMemberIds)) {
+    const { error } = await cleanupClient.from("admin_audit_events").delete().in("actor_id", ids);
+    if (error) problems.push(`admin_audit_events delete failed: ${error.message}`);
   }
   for (const authUserId of createdAuthUserIds) {
-    await cleanupClient.auth.admin.deleteUser(authUserId);
+    const { error } = await cleanupClient.auth.admin.deleteUser(authUserId);
+    if (error) problems.push(`auth user delete failed (${error.code ?? error.status ?? "no code"}): ${error.message || "no message"}`);
   }
-});
+
+  // Proof of completion: nothing this file created remains.
+  let remainingCompetitions = 0;
+  for (const ids of inChunks(createdCompetitionIds)) {
+    const { data, error } = await cleanupClient.from("competitions").select("competition_id").in("competition_id", ids);
+    if (error) problems.push(`competition verification failed: ${error.message}`);
+    else remainingCompetitions += (data ?? []).length;
+  }
+  if (remainingCompetitions > 0) problems.push(`${remainingCompetitions} competition(s) created by this file remain`);
+  let remainingMembers = 0;
+  for (const ids of inChunks(createdGamingMemberIds)) {
+    const { data, error } = await cleanupClient.from("gaming_members").select("gaming_member_id").in("gaming_member_id", ids);
+    if (error) problems.push(`gaming member verification failed: ${error.message}`);
+    else remainingMembers += (data ?? []).length;
+  }
+  if (remainingMembers > 0) problems.push(`${remainingMembers} gaming member(s) created by this file remain`);
+  let remainingGrants = 0;
+  for (const ids of inChunks(createdGamingMemberIds)) {
+    const { data, error } = await cleanupClient.from("authority_grants").select("gaming_member_id").in("gaming_member_id", ids);
+    if (error) problems.push(`authority grant verification failed: ${error.message}`);
+    else remainingGrants += (data ?? []).length;
+  }
+  if (remainingGrants > 0) problems.push(`${remainingGrants} authority grant(s) for members created by this file remain`);
+  let remainingAuditEvents = 0;
+  for (const ids of inChunks(createdGamingMemberIds)) {
+    const { data, error } = await cleanupClient.from("admin_audit_events").select("admin_audit_event_id").in("actor_id", ids);
+    if (error) problems.push(`audit event verification failed: ${error.message}`);
+    else remainingAuditEvents += (data ?? []).length;
+  }
+  if (remainingAuditEvents > 0) problems.push(`${remainingAuditEvents} audit event(s) by members created by this file remain`);
+  if (createdAuthUserIds.length > 0) {
+    const created = new Set(createdAuthUserIds);
+    let remaining = 0;
+    for (let page = 1; ; page++) {
+      const { data, error } = await cleanupClient.auth.admin.listUsers({ page, perPage: 1000 });
+      if (error) { problems.push(`auth user verification failed: ${error.message}`); break; }
+      remaining += data.users.filter((user) => created.has(user.id)).length;
+      if (data.users.length < 1000) break;
+    }
+    if (remaining > 0) problems.push(`${remaining} auth user(s) created by this file remain`);
+  }
+
+  if (problems.length > 0) {
+    const distinct = Array.from(new Set(problems));
+    throw new Error(`Contract cleanup incomplete (${problems.length} problem(s) for ${createdAuthUserIds.length} auth users): ${distinct.slice(0, 3).join("; ")}`);
+  }
+}, CLEANUP_HOOK_TIMEOUT_MS);
 
 async function setUpCompetitionWith4Teams() {
   const organizer = await createRealGamingMember("Organizer");
@@ -1629,9 +1702,14 @@ describe("Opaque public_code resolution and incomplete-competition cancellation 
   });
 });
 
-async function setUpCancelledPublishedCompetition() {
+async function setUpCancelledPublishedCompetition(options: { appointScorekeeperToSemifinal1?: string } = {}) {
   const ctx = await setUpCompetitionWith4Teams();
   const published = await publishDefault(ctx.competitionId, ctx.organizerId, ctx.teams);
+  // UG-CR-GATE-089: appointment is refused once the competition is cancelled, so a
+  // test that needs an AUTHORIZED scorekeeper must appoint before the void below.
+  if (options.appointScorekeeperToSemifinal1) {
+    await appointScorekeeper(repo, published.semifinal1FixtureId, ctx.organizerId, options.appointScorekeeperToSemifinal1);
+  }
   // Voiding ANY of the three required knockout fixtures cascades the
   // WHOLE competition to CANCELLED_WITHOUT_CHAMPION (the pre-existing
   // void_competition_fixture_atomically behavior) — semifinal1 itself is
@@ -1826,11 +1904,19 @@ describe("UG-CR-GATE-082 corrections (UG-CR-REV-053)", () => {
     });
 
     it("submitFixtureEvidence is denied once the competition is cancelled", async () => {
-      const { published } = await setUpCancelledPublishedCompetition();
+      // UG-CR-GATE-089: this used to call with a member who was NEVER appointed, and reached the cancellation
+      // guard only because the scorekeeper check failed open on a NULL comparison. The scorekeeper is now really
+      // appointed (before the cancellation), so the cancellation guard is exercised for an AUTHORIZED caller.
       const scorekeeper = await createRealGamingMember("Guard Evidence Scorekeeper");
+      const { published } = await setUpCancelledPublishedCompetition({ appointScorekeeperToSemifinal1: scorekeeper.gamingMemberId });
       await expect(
         submitFixtureEvidence(repo, published.semifinal1FixtureId, scorekeeper.gamingMemberId, 1, 0, [], [], [], null)
       ).rejects.toBeInstanceOf(CompetitionCancelledError);
+      // A caller who was never appointed is stopped at the authorization boundary, not by the lifecycle check.
+      const stranger = await createRealGamingMember("Guard Evidence Stranger");
+      await expect(
+        submitFixtureEvidence(repo, published.semifinal1FixtureId, stranger.gamingMemberId, 1, 0, [], [], [], null)
+      ).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
     });
 
     it("raiseDispute is denied once the competition is cancelled", async () => {

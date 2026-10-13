@@ -150,7 +150,7 @@
     <div class="field"><label for="c-activity">Format</label><br /><select id="c-activity"><option value="SOCCER_5V5">SOCCER_5V5</option></select></div>
     <button id="btn-create-competition" style="align-self:flex-end;">Create</button>
   </div>
-  <p class="msg" id="msg-competition">Requires active platform OPERATIONAL authority.</p>
+  <p class="msg" id="msg-competition">Creating a competition here needs internal platform access. If you are an approved host, create your one pilot from <a href="/become-a-host.html" style="text-decoration:underline">Become a Host</a> instead.</p>
 
   <h2>Select Competition</h2>
   <div class="row">
@@ -349,6 +349,9 @@ document.getElementById("btn-create-competition").addEventListener("click", asyn
     setMsg("msg-competition", "Competition created.", "success");
     document.getElementById("c-name").value = "";
     await loadCompetitions();
+  } else if (res.status === 403) {
+    // An approved host who lands here is refused by the server; say so in plain words and point to where their one pilot is created.
+    setMsg("msg-competition", "Creating a competition here needs internal platform access. If you are an approved host, create your one pilot from the Become a Host page.", "error");
   } else setMsg("msg-competition", (res.json && res.json.error) || "Failed to create competition.", "error");
 });
 

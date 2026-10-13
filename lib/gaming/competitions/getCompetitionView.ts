@@ -1,6 +1,7 @@
 import type { CompetitionsRepository } from "./db/competitionsRepository";
 import type { CompetitionView, CompetitionFixtureViewEntry, FixtureState } from "./types";
 import { CompetitionNotFoundError } from "./types";
+import { isActiveOrganizer, toPublicCompetition } from "./organizerAccess";
 
 const EVIDENCE_VISIBLE_STATES: FixtureState[] = [
   "EVIDENCE_SUBMITTED",
@@ -28,7 +29,7 @@ export async function getCompetitionView(
   const competition = await repo.getCompetitionById(competitionId);
   if (!competition) throw new CompetitionNotFoundError();
 
-  const isOrganizer = competition.organizerGamingMemberId === callerGamingMemberId;
+  const isOrganizer = isActiveOrganizer(competition, callerGamingMemberId);
 
   const [allTeams, fixtures, myRegistration, myTeamMembership, myPendingJoinRequest, myPersistentRecords] = await Promise.all([
     repo.getCompetitionTeams(competitionId),
@@ -145,7 +146,7 @@ export async function getCompetitionView(
   );
 
   return {
-    competition,
+    competition: toPublicCompetition(competition),
     teams,
     pendingTeamProposals: pendingTeamProposalsNamed,
     rejectedTeamProposals: rejectedTeamProposalsNamed,

@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Host Applications — URBANO Gaming</title>
+<meta name="robots" content="noindex" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Host Applications (internal review) — UG-CR-GATE-088. For URBANO
+   * reviewers only. This page does NOT decide who may review: knowing this
+   * address grants nothing, and neither does a display name, an email domain
+   * or any flag held in the browser. Every request is authorized by the
+   * database from the signed-in member's real, current authority; for anyone
+   * else the server answers 403 and this page says so.
+   *
+   * Applicant text is shown only through textContent. Applicants appear by
+   * name and application text; no member or application identifier is ever
+   * displayed. An application is addressed in requests only by its opaque code.
+   */
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c;
+    --ink: #f5f1e8; --muted: #a9a496; --line: #2a2a2a; --line-strong: #8f8a7c;
+    --gold: #d4af37; --primary-fill: #f5f1e8; --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed; --exp-purple-glow: rgba(124, 58, 237, 0.45); --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --good: #4ade80; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+  .shell-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; row-gap: 8px; max-width: 1000px; margin: 0 auto; padding: 20px 20px 0; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before { content: ""; position: absolute; inset: -9px; background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%); filter: blur(4px); z-index: 0; }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; letter-spacing: 0.02em; }
+  .brand-badge { background: var(--exp-purple-bg); border: 1px solid var(--exp-purple); color: var(--ink); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
+  .signin-btn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 16px; border-radius: 8px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; min-height: 44px; max-width: 100%; overflow-wrap: anywhere; }
+  .signin-btn:hover { background: var(--surface-2); }
+  /* urbanoAuth.js injects this inline link next to the header button; the page gives it a real touch target. */
+  a[data-urbano-signout][style*="display: inline"] { display: inline-flex !important; align-items: center; min-height: 44px; padding: 0 12px; font-size: 13px !important; }
+  .signin-status { max-width: 1000px; margin: 10px auto 0; padding: 10px 20px 0; font-size: 13px; color: var(--muted); }
+  .back-link { max-width: 1000px; margin: 4px auto 0; padding: 0 20px; font-size: 14px; color: var(--muted); display: flex; align-items: center; min-height: 44px; text-decoration: none; }
+  .back-link:hover { color: var(--ink); }
+  .content { max-width: 1000px; margin: 18px auto 0; padding: 0 20px; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 0 0 6px; }
+  h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 0 6px; }
+  p { margin: 0 0 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; align-items: center; }
+  .tab-btn { font-family: inherit; font-size: 14px; font-weight: 600; padding: 11px 16px; border-radius: 10px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); cursor: pointer; min-height: 46px; }
+  .tab-btn[aria-pressed="true"] { background: var(--primary-fill); color: var(--primary-ink); border-color: var(--primary-fill); }
+  .card { border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); padding: 20px; margin: 0 0 16px; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .status-pill { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,0.04); color: var(--ink); border: 1px solid var(--line-strong); display: inline-block; }
+  .status-pill.good { color: var(--good); border-color: var(--good); }
+  .status-pill.bad { color: var(--bad); border-color: var(--bad); }
+  .status-pill.gold { color: var(--gold); border-color: var(--gold); }
+  dl.facts { margin: 12px 0 0; display: grid; grid-template-columns: 1fr; gap: 0; }
+  dl.facts dt { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 10px; }
+  dl.facts dd { margin: 2px 0 0; white-space: pre-wrap; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .btn-primary { font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 18px; border-radius: 10px; border: none; background: var(--primary-fill); color: var(--primary-ink); cursor: pointer; min-height: 46px; }
+  .btn-danger { font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 18px; border-radius: 10px; border: 1px solid var(--bad); background: transparent; color: var(--bad); cursor: pointer; min-height: 46px; }
+  .btn-secondary { font-family: inherit; font-size: 14px; font-weight: 600; padding: 11px 16px; border-radius: 10px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; min-height: 46px; }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .panel { border: 1px solid var(--line-strong); border-radius: 12px; padding: 14px; margin-top: 14px; background: var(--bg-card); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .field textarea { width: 100%; font-family: inherit; font-size: 16px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); min-height: 100px; resize: vertical; }
+  .field-error { font-size: 14px; color: var(--bad); margin: 6px 0 0; }
+  .msg { font-size: 14px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+  .msg.error { color: var(--bad); }
+  .msg.success { color: var(--good); }
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 16px; }
+  @media (min-width: 760px) {
+    /* Label on the left, value on the right, for every short fact; the long ones span the full width, label above value. */
+    dl.facts { grid-template-columns: minmax(150px, 220px) 1fr; column-gap: 24px; align-items: baseline; }
+    dl.facts dd.wide, dl.facts dt.wide { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; } .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 11px 12px; }
+    .signin-status, .back-link, .content { padding-left: 16px; padding-right: 16px; }
+    h1 { font-size: 22px; } .card { padding: 16px; }
+    .actions > button { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell-header">
+  <div class="brand">
+    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+    <span class="brand-word">URBANO</span>
+    <span class="brand-badge">Gaming</span>
+  </div>
+  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
+</div>
+<p class="signin-status" id="signin-status" role="status" aria-live="polite"></p>
+
+<a class="back-link" href="/">← Back to URBANO Gaming</a>
+
+<main class="content" id="main">
+  <h1 id="page-title" tabindex="-1">Host applications</h1>
+  <p>Review applications from people who want to host a private pilot competition. Approving lets the applicant create one pilot; you can revoke that access later.</p>
+  <p class="msg" id="page-status" role="status" aria-live="polite"></p>
+  <div id="app" aria-busy="true"><div class="empty-state">Loading…</div></div>
+</main>
+
+<script src="/urbanoAuth.js"></script>
+<script>
+UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("signin-status"));
+
+const appEl = document.getElementById("app");
+const pageStatus = document.getElementById("page-status");
+let currentView = "PENDING";
+let cardCounter = 0;
+
+// All applicant and reviewer text reaches the DOM through textContent only.
+function el(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html.trim();
+  return div.firstElementChild;
+}
+
+function node(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined && text !== null) n.textContent = text;
+  return n;
+}
+
+async function authedFetch(path, options) {
+  // A request that never answers must not leave a button disabled forever: it is abandoned after 20 seconds and reported as unreachable.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const token = await UrbanoAuth.getAccessToken();
+    const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
+    if (token) headers.authorization = "Bearer " + token;
+    const res = await fetch(path, Object.assign({ cache: "no-store", signal: controller.signal }, options, { headers }));
+    const json = await res.json().catch(() => null);
+    return { status: res.status, json };
+  } catch (err) {
+    return { status: 0, json: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function messageFor(res, fallback) {
+  if (res.status === 0) return "We could not reach URBANO. Check your connection and try again.";
+  if (res.status === 401) return "Please sign in again to continue.";
+  if (res.status === 403) return "You do not have access to review host applications.";
+  if (res.status === 503) return "Become a Host is not open yet.";
+  if (res.json && typeof res.json.error === "string" && res.status >= 400 && res.status < 500) return res.json.error;
+  return fallback;
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const STATE_LABEL = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected", WITHDRAWN: "Withdrawn" };
+const STATE_CLASS = { PENDING: "gold", APPROVED: "good", REJECTED: "bad", WITHDRAWN: "" };
+const COMPETITION_STATE_LABEL = {
+  DRAFT: "Not yet open", TEAM_REGISTRATION_OPEN: "Open for team registration", READY_TO_PUBLISH: "Finalizing bracket",
+  PUBLISHED: "In progress", COMPLETE: "Complete", CANCELLED_WITHOUT_CHAMPION: "Cancelled",
+};
+
+function fact(dl, term, value, wide) {
+  const dt = node("dt", wide ? "wide" : null, term);
+  const dd = node("dd", wide ? "wide" : null, value);
+  dl.appendChild(dt);
+  dl.appendChild(dd);
+}
+
+function accessSummary(a) {
+  if (a.capabilityState === "AVAILABLE") return "Hosting access is available. The pilot has not been created yet.";
+  if (a.capabilityState === "CONSUMED") {
+    const label = a.competitionState ? (COMPETITION_STATE_LABEL[a.competitionState] || "") : "";
+    return "Pilot created" + (a.competitionName ? ": " + a.competitionName : "") + (label ? " (" + label + ")" : "") + ".";
+  }
+  if (a.capabilityState === "REVOKED") return "Hosting access was revoked" + (a.capabilityRevokedAt ? " on " + formatDateTime(a.capabilityRevokedAt) : "") + ".";
+  return "";
+}
+
+/** One application card. Every value is set as text. */
+function renderApplication(a, reload) {
+  const card = el(`<article class="card" tabindex="-1">
+    <div class="card-head">
+      <div><h2 class="who"></h2><p class="where"></p></div>
+      <span class="status-pill"></span>
+    </div>
+    <dl class="facts"></dl>
+    <div class="actions"></div>
+    <div class="panel-slot"></div>
+    <p class="msg card-status" role="status"></p>
+  </article>`);
+  card.querySelector(".who").textContent = a.applicantDisplayName;
+  // Each card is a named region, and each repeated action says whose application it acts on.
+  const whoId = "who-" + (++cardCounter);
+  card.querySelector(".who").id = whoId;
+  card.setAttribute("aria-labelledby", whoId);
+  const forWhom = " — application from " + a.applicantDisplayName;
+  card.querySelector(".where").textContent = a.venueName + " — " + a.cityArea;
+  const pill = card.querySelector(".status-pill");
+  pill.textContent = STATE_LABEL[a.state] || a.state;
+  if (STATE_CLASS[a.state]) pill.classList.add(STATE_CLASS[a.state]);
+
+  const facts = card.querySelector(".facts");
+  fact(facts, "Playing fields", String(a.playingFields));
+  fact(facts, "Teams expected", String(a.expectedTeamCount));
+  fact(facts, "Expected date or window", a.expectedWindow);
+  fact(facts, "Submitted", formatDateTime(a.submittedAt));
+  fact(facts, "Venue and tournament experience", a.venueDescription, true);
+  if (a.state === "APPROVED" || a.state === "REJECTED") {
+    fact(facts, "Decided", formatDateTime(a.decidedAt) + (a.decidedByDisplayName ? " by " + a.decidedByDisplayName : ""));
+    if (a.decisionReason) fact(facts, "Internal reason", a.decisionReason, true);
+  }
+  if (a.state === "WITHDRAWN" && a.withdrawnAt) fact(facts, "Withdrawn", formatDateTime(a.withdrawnAt));
+  if (a.state === "APPROVED") {
+    fact(facts, "Hosting access", accessSummary(a), true);
+    if (a.capabilityState === "REVOKED" && a.capabilityRevokeReason) fact(facts, "Internal revocation reason", a.capabilityRevokeReason, true);
+  }
+
+  const actions = card.querySelector(".actions");
+  const slot = card.querySelector(".panel-slot");
+  const status = card.querySelector(".card-status");
+
+  function closePanel(returnFocusTo) {
+    slot.textContent = "";
+    for (const b of actions.querySelectorAll("button")) b.disabled = false;
+    if (returnFocusTo) returnFocusTo.focus();
+  }
+
+  /** The shared confirm panel: an optional required reason, a confirm button, and a cancel. */
+  function openPanel(opener, config) {
+    slot.textContent = "";
+    for (const b of actions.querySelectorAll("button")) b.disabled = true;
+    const panel = node("div", "panel");
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", config.label);
+    panel.appendChild(node("p", null, config.prompt));
+    let textarea = null;
+    let errorEl = null;
+    if (config.reasonLabel) {
+      const field = node("div", "field");
+      const label = node("label", null, config.reasonLabel);
+      textarea = document.createElement("textarea");
+      textarea.id = "reason-" + Math.random().toString(36).slice(2);
+      textarea.maxLength = 500;
+      textarea.required = true;
+      label.setAttribute("for", textarea.id);
+      errorEl = node("p", "field-error");
+      errorEl.id = textarea.id + "-err";
+      errorEl.hidden = true;
+      textarea.setAttribute("aria-describedby", errorEl.id);
+      field.appendChild(label);
+      field.appendChild(textarea);
+      field.appendChild(errorEl);
+      panel.appendChild(field);
+    }
+    const row = node("div", "actions");
+    const confirmBtn = node("button", config.danger ? "btn-danger" : "btn-primary", config.confirmText);
+    confirmBtn.type = "button";
+    const cancelBtn = node("button", "btn-secondary", "Cancel");
+    cancelBtn.type = "button";
+    row.appendChild(confirmBtn);
+    row.appendChild(cancelBtn);
+    panel.appendChild(row);
+    slot.appendChild(panel);
+    (textarea || confirmBtn).focus();
+
+    let busy = false;
+    cancelBtn.addEventListener("click", () => { if (!busy) closePanel(opener); });
+    panel.addEventListener("keydown", (e) => { if (e.key === "Escape" && !busy) closePanel(opener); });
+    confirmBtn.addEventListener("click", async () => {
+      if (busy) return;
+      const reason = textarea ? (textarea.value || "").trim() : null;
+      if (textarea && !reason) {
+        errorEl.textContent = "A reason is required.";
+        errorEl.hidden = false;
+        textarea.setAttribute("aria-invalid", "true");
+        textarea.focus();
+        return;
+      }
+      busy = true;
+      confirmBtn.disabled = true;
+      cancelBtn.disabled = true;
+      status.className = "msg card-status";
+      status.textContent = "Saving…";
+      const res = await authedFetch(config.path, { method: "POST", body: JSON.stringify(config.body(reason)) });
+      if (res.status === 200) {
+        await reload(config.doneMessage(res.json && res.json.application));
+        return;
+      }
+      if (res.status === 409 || res.status === 404) {
+        // Someone else decided it, or it was withdrawn: the card on screen is stale, so show the truth rather than live buttons.
+        await reload(messageFor(res, "That application has changed."), "error");
+        return;
+      }
+      busy = false;
+      confirmBtn.disabled = false;
+      cancelBtn.disabled = false;
+      status.className = "msg error card-status";
+      status.textContent = messageFor(res, "We could not save that. Please try again.");
+    });
+  }
+
+  const code = a.publicCode;
+  if (a.state === "PENDING") {
+    const approve = node("button", "btn-primary", "Approve");
+    approve.type = "button";
+    approve.setAttribute("aria-label", "Approve" + forWhom);
+    const reject = node("button", "btn-danger", "Reject");
+    reject.type = "button";
+    reject.setAttribute("aria-label", "Reject" + forWhom);
+    actions.appendChild(approve);
+    actions.appendChild(reject);
+    approve.addEventListener("click", () => openPanel(approve, {
+      label: "Confirm approval",
+      prompt: "Approve this application? The applicant will be able to create one private pilot competition.",
+      confirmText: "Yes, approve",
+      path: "/api/gaming/host/review/" + encodeURIComponent(code) + "/decide",
+      body: () => ({ decision: "APPROVE" }),
+      doneMessage: (r) => (r && r.alreadyDecided ? "That application had already been approved." : "Application approved."),
+    }));
+    reject.addEventListener("click", () => openPanel(reject, {
+      label: "Confirm rejection",
+      prompt: "Reject this application? The applicant sees only that it was not approved; your reason stays internal.",
+      reasonLabel: "Internal reason (required)",
+      confirmText: "Yes, reject",
+      danger: true,
+      path: "/api/gaming/host/review/" + encodeURIComponent(code) + "/decide",
+      body: (reason) => ({ decision: "REJECT", reason }),
+      doneMessage: (r) => (r && r.alreadyDecided ? "That application had already been rejected." : "Application rejected."),
+    }));
+  } else if (a.state === "APPROVED" && a.capabilityState !== "REVOKED") {
+    const revoke = node("button", "btn-danger", "Revoke hosting access");
+    revoke.type = "button";
+    revoke.setAttribute("aria-label", "Revoke hosting access" + forWhom);
+    actions.appendChild(revoke);
+    revoke.addEventListener("click", () => openPanel(revoke, {
+      label: "Confirm revocation",
+      prompt: "Revoke this host's access? They will no longer be able to administer their pilot or create one. Every record is kept.",
+      reasonLabel: "Internal reason (required)",
+      confirmText: "Yes, revoke access",
+      danger: true,
+      path: "/api/gaming/host/review/" + encodeURIComponent(code) + "/revoke",
+      body: (reason) => ({ reason }),
+      doneMessage: (r) => (r && r.alreadyRevoked ? "That access had already been revoked." : "Hosting access revoked."),
+    }));
+  }
+  return card;
+}
+
+let listGeneration = 0;
+async function loadList(message, kind) {
+  const myList = ++listGeneration;
+  appEl.setAttribute("aria-busy", "true");
+  const view = currentView;
+  const res = await authedFetch("/api/gaming/host/review?view=" + encodeURIComponent(view));
+  // Only the newest request may draw: a slow answer for a tab the reviewer has already left must not overwrite the current one.
+  if (myList !== listGeneration) return;
+  // Check the status before reading any collection: a refusal or outage must
+  // never be shown as "no applications".
+  if (res.status !== 200 || !res.json) {
+    appEl.textContent = "";
+    const box = node("div", "empty-state");
+    box.appendChild(node("p", null, messageFor(res, "We could not load host applications.")));
+    if (res.status !== 403) {
+      const retry = node("button", "btn-secondary", "Try again");
+      retry.type = "button";
+      retry.addEventListener("click", () => loadList());
+      box.appendChild(retry);
+    }
+    appEl.appendChild(box);
+    appEl.setAttribute("aria-busy", "false");
+    return;
+  }
+  const applications = Array.isArray(res.json.applications) ? res.json.applications : [];
+  appEl.textContent = "";
+
+  const toolbar = node("div", "toolbar");
+  toolbar.setAttribute("role", "group");
+  toolbar.setAttribute("aria-label", "Application list");
+  for (const [tab, label] of [["PENDING", "Pending"], ["ACTIVE", "Active hosts"], ["HISTORY", "History"]]) {
+    const b = node("button", "tab-btn", label);
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(view === tab));
+    b.addEventListener("click", () => { currentView = tab; pageStatus.textContent = ""; loadList(); });
+    toolbar.appendChild(b);
+  }
+  appEl.appendChild(toolbar);
+
+  if (applications.length === 0) {
+    appEl.appendChild(node("div", "empty-state", view === "PENDING" ? "No applications are waiting for review." : view === "ACTIVE" ? "No hosts have active access." : "No decisions in the history yet."));
+  } else {
+    for (const a of applications) appEl.appendChild(renderApplication(a, loadList));
+  }
+  appEl.setAttribute("aria-busy", "false");
+  if (message) {
+    pageStatus.className = kind === "error" ? "msg error" : "msg success";
+    pageStatus.textContent = message;
+  }
+}
+
+/**
+ * Opens the shared sign-in panel from this page's own button. urbanoAuth.js closes
+ * its panel on ANY click that lands outside the panel and outside the header
+ * button, so this click must not reach the document, or the panel would open and
+ * shut in the same gesture. It also opens the panel rather than toggling it, and
+ * moves focus into the panel so a keyboard user can type straight away.
+ */
+function openSignInPanel(event) {
+  event.stopPropagation();
+  const header = document.getElementById("btn-signin");
+  if (!header) return;
+  const panel = header.nextElementSibling;
+  const isOpen = !!panel && panel.style.display === "block";
+  if (!isOpen) header.click();
+  setTimeout(() => {
+    const field = document.querySelector("[data-email], [data-code], [data-display-name]");
+    if (field) field.focus();
+  }, 0);
+}
+
+function renderSignedOut() {
+  const card = el(`<section class="card" aria-labelledby="signin-title">
+    <h2 id="signin-title">Sign in to review</h2>
+    <p>Sign in with your URBANO account. Access is decided by the system, not by this page.</p>
+    <div class="actions"><button type="button" class="btn-primary" id="signin-to-review">Sign in with URBANO</button></div>
+  </section>`);
+  card.querySelector("#signin-to-review").addEventListener("click", openSignInPanel);
+  return card;
+}
+
+// What the page last drew: auth events and the sign-in poll re-draw only on a real change of sign-in state, so a reason the
+// reviewer is typing is never wiped by a token refresh.
+let renderedAuthStatus = null;
+let authPollTimer = null;
+function stopAuthPoll() { if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; } }
+function startAuthPoll() {
+  if (authPollTimer) return;
+  let attempts = 0;
+  authPollTimer = setInterval(async () => {
+    attempts += 1;
+    let state;
+    try { state = await UrbanoAuth.getState(); } catch (e) { return; }
+    if (state.status !== renderedAuthStatus) { stopAuthPoll(); renderApp(true); }
+    else if (attempts >= 120) stopAuthPoll();
+  }, 500);
+}
+
+let renderGeneration = 0;
+
+async function renderApp(force) {
+  const myGeneration = ++renderGeneration;
+  let authState;
+  try {
+    authState = await UrbanoAuth.getState();
+  } catch (e) {
+    if (myGeneration !== renderGeneration) return;
+    appEl.textContent = "";
+    const box = node("div", "empty-state");
+    box.appendChild(node("p", null, "We could not check your sign-in."));
+    const retry = node("button", "btn-secondary", "Try again");
+    retry.type = "button";
+    retry.addEventListener("click", () => renderApp(true));
+    box.appendChild(retry);
+    appEl.appendChild(box);
+    appEl.setAttribute("aria-busy", "false");
+    renderedAuthStatus = null;
+    return;
+  }
+  if (myGeneration !== renderGeneration) return;
+
+  if (!force && authState.status === renderedAuthStatus) return;
+  renderedAuthStatus = authState.status;
+
+  if (authState.status === "unauthenticated") {
+    appEl.textContent = "";
+    appEl.appendChild(renderSignedOut());
+    appEl.setAttribute("aria-busy", "false");
+    startAuthPoll();
+    return;
+  }
+  if (authState.status === "profile_incomplete") {
+    appEl.textContent = "";
+    appEl.appendChild(node("div", "empty-state", "Finish signing in with URBANO to continue."));
+    appEl.setAttribute("aria-busy", "false");
+    startAuthPoll();
+    return;
+  }
+  stopAuthPoll();
+  await loadList();
+}
+
+UrbanoAuth.onAuthStateChange(() => renderApp(false));
+renderApp(true);
+</script>
+
+</body>
+</html>

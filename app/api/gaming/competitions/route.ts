@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildCompetitionsRepo, requireGamingMember, statusForCompetitionsError, requireCompetitionsSchemaReady } from "@/lib/gaming/competitions/httpAuth";
 import { createCompetition } from "@/lib/gaming/competitions/createCompetition";
+import { isListedFor, toPublicCompetition } from "@/lib/gaming/competitions/organizerAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,11 @@ export const dynamic = "force-dynamic";
  * visible to an ordinary member browsing the list. This filter is the
  * actual privacy boundary; it is enforced here, server-side, on every
  * request — never left to client-side presentation alone.
+ *
+ * UG-CR-GATE-088: a private pilot created through an approved host
+ * capability is never enumerable: it is listed only to its own organizer and
+ * to members who hold a role in it (see isListedFor), and the host-binding
+ * flags are never part of the response.
  */
 export async function GET(request: Request) {
   const unavailable = requireCompetitionsSchemaReady();
@@ -25,9 +31,11 @@ export async function GET(request: Request) {
 
   const repo = buildCompetitionsRepo(credentials);
   const allCompetitions = await repo.listCompetitions();
-  const competitions = allCompetitions.filter(
-    (c) => c.state !== "DRAFT" || c.organizerGamingMemberId === auth.gamingMemberId
-  );
+  // Private (host-bound) pilots owned by somebody else are listed only to members who hold a role in them; the role lookup
+  // is made only when such a pilot exists, so ordinary requests cost nothing extra.
+  const needsInvolvement = allCompetitions.some((c) => c.hostBound === true && c.organizerGamingMemberId !== auth.gamingMemberId);
+  const involved = needsInvolvement ? new Set(await repo.listCompetitionIdsInvolvingMember(auth.gamingMemberId)) : new Set<string>();
+  const competitions = allCompetitions.filter((c) => isListedFor(c, auth.gamingMemberId, involved)).map((c) => toPublicCompetition(c));
   return NextResponse.json({ competitions });
 }
 

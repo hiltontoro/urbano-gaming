@@ -61,6 +61,8 @@ import {
   FixtureNotFoundError,
   EvidenceMissingError,
   CompetitionAccessDeniedError,
+  HostAccessRevokedError,
+  FixtureTeamScopeError,
   OperationalAuthorityRequiredError,
   NotTeamCaptainError,
   ScorekeeperConflictOfInterestError,
@@ -176,6 +178,7 @@ function makeFakeRepository(): CompetitionsRepository {
     forfeitFixture: vi.fn(),
     voidFixture: vi.fn(),
     listCompetitions: vi.fn(),
+    listCompetitionIdsInvolvingMember: vi.fn(),
     getCompetitionById: vi.fn(),
     getCompetitionTeams: vi.fn(),
     getCompetitionTeamById: vi.fn(),
@@ -329,6 +332,8 @@ describe("statusForCompetitionsError — complete domain-error to HTTP-status ma
   ];
   const FORBIDDEN: [string, Error][] = [
     ["CompetitionAccessDeniedError", new CompetitionAccessDeniedError()],
+    ["HostAccessRevokedError", new HostAccessRevokedError()],
+    ["FixtureTeamScopeError", new FixtureTeamScopeError()],
     ["OperationalAuthorityRequiredError", new OperationalAuthorityRequiredError()],
     ["NotTeamCaptainError", new NotTeamCaptainError()],
     ["ScorekeeperConflictOfInterestError", new ScorekeeperConflictOfInterestError()],
@@ -1001,6 +1006,116 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
   });
 
+  describe("UG-CR-GATE-088 (Become a Host) — a host's private pilot, and a revoked host, at the three TypeScript-side organizer sites", () => {
+    const competition = (over: Record<string, unknown> = {}) => ({
+      competitionId: "c-pilot", publicCode: "c-pilot-code", activityKey: "SOCCER_5V5", name: "Pilot", organizerGamingMemberId: "auth-derived-member",
+      state: "TEAM_REGISTRATION_OPEN", cancelledReason: null, createdAt: "x", publishedAt: null, ...over,
+    });
+    const getRequest = () => new Request("http://localhost/probe", { headers: { authorization: "Bearer token" } });
+
+    it("GET /competitions: a host's private pilot is never enumerable — listed to its organizer and to members who hold a role in it, hidden from everyone else, in every state", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/route");
+      (repo.listCompetitions as ReturnType<typeof vi.fn>).mockResolvedValue([
+        competition({ competitionId: "pilot-open", hostBound: true, hostAccessRevoked: false, organizerGamingMemberId: "some-host" }),
+        competition({ competitionId: "pilot-published", hostBound: true, hostAccessRevoked: false, organizerGamingMemberId: "some-host", state: "PUBLISHED" }),
+        competition({ competitionId: "pilot-mine", hostBound: true, hostAccessRevoked: false }),
+        competition({ competitionId: "pilot-mine-revoked", hostBound: true, hostAccessRevoked: true }),
+        competition({ competitionId: "internal-open", organizerGamingMemberId: "some-operator" }),
+      ]);
+      // A stranger: no role anywhere.
+      (repo.listCompetitionIdsInvolvingMember as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      const stranger = (await (await GET(getRequest())).json()) as { competitions: Array<{ competitionId: string }> };
+      expect(stranger.competitions.map((c) => c.competitionId).sort()).toEqual(["internal-open", "pilot-mine", "pilot-mine-revoked"]);
+      // The same caller once they hold a role in one pilot (an appointed scorekeeper, a captain, a registrant): only that pilot appears.
+      (repo.listCompetitionIdsInvolvingMember as ReturnType<typeof vi.fn>).mockResolvedValue(["pilot-published"]);
+      const assigned = (await (await GET(getRequest())).json()) as { competitions: Array<{ competitionId: string }> };
+      expect(assigned.competitions.map((c) => c.competitionId).sort()).toEqual(["internal-open", "pilot-mine", "pilot-mine-revoked", "pilot-published"]);
+      expect(repo.listCompetitionIdsInvolvingMember).toHaveBeenCalledWith("auth-derived-member");
+    });
+
+    it("GET /competitions: the role lookup is made only when somebody else's private pilot exists, and the response never carries the host-binding flags", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/route");
+      (repo.listCompetitions as ReturnType<typeof vi.fn>).mockResolvedValue([
+        competition({ competitionId: "internal-open", organizerGamingMemberId: "some-operator" }),
+        competition({ competitionId: "pilot-mine", hostBound: true, hostAccessRevoked: true }),
+      ]);
+      const body = await (await GET(getRequest())).json();
+      expect(repo.listCompetitionIdsInvolvingMember).not.toHaveBeenCalled();
+      expect(JSON.stringify(body)).not.toMatch(/hostBound|hostAccessRevoked/);
+      expect(body.competitions).toHaveLength(2);
+    });
+
+    const team = { competitionTeamId: "team-1", competitionId: "c-pilot", captainGamingMemberId: "someone-else" };
+
+    it("GET teams/[teamId]/join-requests: the active organizer reads the pending applicants", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/teams/[teamId]/join-requests/route");
+      (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team);
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue(competition({ hostBound: true, hostAccessRevoked: false }));
+      (repo.getPendingJoinRequestsForTeam as ReturnType<typeof vi.fn>).mockResolvedValue([{ competitionJoinRequestId: "jr1", requestingGamingMemberId: "m1" }]);
+      (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({ m1: "Pat Player" });
+      const res = await GET(getRequest(), { params: { teamId: "team-1" } });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as any).joinRequests[0].requestingGamingMemberDisplayName).toBe("Pat Player");
+    });
+
+    it("GET teams/[teamId]/join-requests: a REVOKED host gets 403 and the applicants are never read", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/teams/[teamId]/join-requests/route");
+      (repo.getCompetitionTeamById as ReturnType<typeof vi.fn>).mockResolvedValue(team);
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue(competition({ hostBound: true, hostAccessRevoked: true }));
+      const res = await GET(getRequest(), { params: { teamId: "team-1" } });
+      expect(res.status).toBe(403);
+      expect(repo.getPendingJoinRequestsForTeam).not.toHaveBeenCalled();
+      expect(repo.getDisplayNames).not.toHaveBeenCalled();
+    });
+
+    const fixture = { competitionFixtureId: "fx-1", competitionId: "c-pilot", teamACompetitionTeamId: null, teamBCompetitionTeamId: null, scorekeeperGamingMemberId: "auth-derived-member" };
+    function mockAdminDetail(comp: Record<string, unknown>) {
+      (repo.getFixtureById as ReturnType<typeof vi.fn>).mockResolvedValue(fixture);
+      (repo.getCompetitionById as ReturnType<typeof vi.fn>).mockResolvedValue(comp);
+      for (const name of ["getCheckIns", "getCurrentAttestations", "getCurrentGoalEvents", "getCurrentAssistEvents", "getDisputes", "getCompetitionRegistrations"]) {
+        (repo as any)[name].mockResolvedValue([]);
+      }
+      for (const name of ["getCurrentEvidence", "getCurrentShootout", "getCurrentFinalization"]) (repo as any)[name].mockResolvedValue(null);
+      (repo.getDisplayNames as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    }
+
+    it("GET fixtures/[fixtureId]/admin-detail: the active organizer reads the fixture's private detail", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+      mockAdminDetail(competition({ hostBound: true, hostAccessRevoked: false }));
+      expect((await GET(getRequest(), { params: { fixtureId: "fx-1" } })).status).toBe(200);
+    });
+
+    it("GET fixtures/[fixtureId]/admin-detail: a REVOKED host gets 403 — even when they appointed themselves scorekeeper", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+      mockAdminDetail(competition({ hostBound: true, hostAccessRevoked: true }));
+      const res = await GET(getRequest(), { params: { fixtureId: "fx-1" } });
+      expect(res.status).toBe(403);
+      expect(repo.getCurrentRoster).not.toHaveBeenCalled();
+      expect(repo.getDisputes).not.toHaveBeenCalled();
+    });
+
+    it("GET fixtures/[fixtureId]/admin-detail: an independent scorekeeper is unaffected by the host's revocation", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+      mockAdminDetail(competition({ hostBound: true, hostAccessRevoked: true, organizerGamingMemberId: "the-former-host" }));
+      expect((await GET(getRequest(), { params: { fixtureId: "fx-1" } })).status).toBe(200);
+    });
+
+    it("GET fixtures/[fixtureId]/admin-detail: a stranger holding the competition's public code is still refused", async () => {
+      const { GET } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/admin-detail/route");
+      mockAdminDetail(competition({ hostBound: true, hostAccessRevoked: false, organizerGamingMemberId: "the-host" }));
+      (repo.getFixtureById as ReturnType<typeof vi.fn>).mockResolvedValue({ ...fixture, scorekeeperGamingMemberId: "another-scorekeeper" });
+      expect((await GET(getRequest(), { params: { fixtureId: "fx-1" } })).status).toBe(403);
+    });
+
+    it("a HostAccessRevokedError raised by any organizer RPC reaches the client as a plain 403", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/finalize/route");
+      (repo.finalizeFixture as ReturnType<typeof vi.fn>).mockRejectedValue(new HostAccessRevokedError());
+      const res = await POST(jsonRequest("POST", {}), { params: { fixtureId: "fx-1" } });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("Your hosting access has been revoked. You can no longer administer this competition.");
+    });
+  });
+
   it("maps a domain error thrown by the repository to its correct HTTP status via statusForCompetitionsError's REAL implementation", async () => {
     const { POST } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/finalize/route");
     (repo.finalizeFixture as ReturnType<typeof vi.fn>).mockRejectedValue(new FixtureNotFoundError());
@@ -1022,6 +1137,50 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/at least 4/);
+  });
+
+  describe("UG-CR-GATE-089 — fixture-scope and scorekeeper authorization at the application boundary", () => {
+    it("POST fixtures/[fixtureId]/roster: a team that is not part of the fixture is a bounded 403 that names nothing; the actor is always the session's and no client-supplied scope is forwarded", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/roster/route");
+      (repo.declareRoster as ReturnType<typeof vi.fn>).mockRejectedValue(new FixtureTeamScopeError());
+
+      const res = await POST(
+        jsonRequest("POST", {
+          competitionTeamId: "team-b", gamingMemberIds: ["m1"], isOrganizerAction: false, reason: null,
+          // Everything below is attacker-supplied and must never reach the repository.
+          competitionId: "other-competition", captainGamingMemberId: "attacker-captain", declaringGamingMemberId: "attacker-supplied-id", hostCapability: "approved",
+        }),
+        { params: { fixtureId: "fx-foreign" } }
+      );
+
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("This team is not part of this fixture.");
+      expect(repo.declareRoster).toHaveBeenCalledWith("fx-foreign", "team-b", "auth-derived-member", false, null, ["m1"]);
+    });
+
+    it("the SQL scope-mismatch code and the unknown-fixture path translate to the SAME typed error with the SAME message (translateError)", async () => {
+      const { translateError } = await import("../lib/gaming/competitions/db/supabaseCompetitionsRepository");
+      const fromScope = translateError({ code: "P0001", message: "FIXTURE_TEAM_SCOPE_MISMATCH: this team is not part of this fixture" });
+      expect(fromScope).toBeInstanceOf(FixtureTeamScopeError);
+      expect(fromScope.message).toBe("This team is not part of this fixture.");
+      expect(httpAuth.statusForCompetitionsError(fromScope)).toBe(403);
+    });
+
+    it("POST fixtures/[fixtureId]/evidence: a caller who is not this fixture's appointed scorekeeper is a 403, and the scorekeeper identity is always the session's, never the request body's", async () => {
+      const { POST } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/evidence/route");
+      (repo.submitFixtureEvidence as ReturnType<typeof vi.fn>).mockRejectedValue(new CompetitionAccessDeniedError());
+
+      const res = await POST(
+        jsonRequest("POST", {
+          teamAScore: 1, teamBScore: 0, goalEvents: [], assistEvents: [], participationAttestations: [], penaltyShootoutWinningTeamId: null,
+          scorekeeperGamingMemberId: "attacker-supplied-id", appointedScorekeeperGamingMemberId: "attacker-supplied-id",
+        }),
+        { params: { fixtureId: "fx-1" } }
+      );
+
+      expect(res.status).toBe(403);
+      expect(repo.submitFixtureEvidence).toHaveBeenCalledWith("fx-1", "auth-derived-member", 1, 0, [], [], [], null);
+    });
   });
 
   it("POST fixtures/[fixtureId]/disputes never forwards a client-supplied actor identity — raisedByGamingMemberId always comes from the authenticated session, never the request body (UG-CR-GATE-032)", async () => {
