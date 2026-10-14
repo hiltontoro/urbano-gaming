@@ -17,6 +17,8 @@ import path from "node:path";
 
 const INDEX_HTML = readFileSync(path.join(process.cwd(), "public/index.html"), "utf8");
 const ROUTE_SOURCE = readFileSync(path.join(process.cwd(), "app/api/gaming/host/availability/route.ts"), "utf8");
+// The ONE browser-side reader of the server's answer, shared by the landing card and the application page (UG-CR-GATE-091).
+const READER_SOURCE = readFileSync(path.join(process.cwd(), "public/hostAvailability.js"), "utf8");
 
 const HOST_FLAG = "BECOME_A_HOST_SCHEMA_READY";
 const AVAILABILITY_URL = "/api/gaming/host/availability";
@@ -69,7 +71,8 @@ async function realRouteReply(): Promise<Reply> {
   return { status: res.status, json: await res.json() };
 }
 
-async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compressTimeout?: boolean; html?: string } = {}) {
+/** `readerSource: null` models a page whose /hostAvailability.js failed to load. */
+async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compressTimeout?: boolean; html?: string; readerSource?: string | null } = {}) {
   const calls: FetchCall[] = [];
   const dom = new JSDOM(opts.html ?? INDEX_HTML, {
     url: "http://localhost/",
@@ -102,6 +105,8 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
           };
         })();
       };
+      // jsdom does not load external scripts, so the REAL shipped reader is evaluated into the window, exactly as the script tag would.
+      if (opts.readerSource !== null) window.eval(opts.readerSource ?? READER_SOURCE);
     },
   });
   const win = dom.window as unknown as Window & Record<string, any>;
@@ -399,6 +404,30 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     }
     // The file the browser downloads never names the variable and never touches the server's environment.
     expect(INDEX_HTML).not.toMatch(/BECOME_A_HOST|SCHEMA_READY|process\.env/);
+    expect(READER_SOURCE).not.toMatch(/BECOME_A_HOST|SCHEMA_READY|process\.env/);
+  });
+
+  it("a page whose shared reader failed to load fails closed — it never opens the card on its own", async () => {
+    process.env[HOST_FLAG] = "true";
+    const page = await loadLanding(realRouteReply, { readerSource: null });
+    await page.settle(80);
+    expectClosedCard(page.card());
+    expect(page.calls).toHaveLength(0); // nothing asked the server anything: there is no reader to ask
+  });
+
+  it("the strict reading of the server's answer exists in exactly ONE place (public/hostAvailability.js), which both pages load", () => {
+    const BECOME_HTML = readFileSync(path.join(process.cwd(), "public/become-a-host.html"), "utf8");
+    for (const [name, html] of [["index.html", INDEX_HTML], ["become-a-host.html", BECOME_HTML]] as const) {
+      expect(html, name).toContain('<script src="/hostAvailability.js"></script>');
+      // The reader is loaded before the page's own inline script, so it exists by the time the page asks.
+      expect(html.indexOf('<script src="/hostAvailability.js"></script>'), name).toBeLessThan(html.indexOf("<script>"));
+      expect(html, name).not.toContain(AVAILABILITY_URL); // the URL is the reader's, not the page's
+      expect(html, name).not.toMatch(/body\.available|Object\.keys\(body\)|\.available\s*===/);
+      expect(html, name).toContain("HostAvailability");
+    }
+    expect(READER_SOURCE).toContain(AVAILABILITY_URL);
+    expect(READER_SOURCE).toMatch(/keys\.length === 1 && keys\[0\] === "available" && body\.available === true/);
+    expect(READER_SOURCE).not.toMatch(/BECOME_A_HOST|SCHEMA_READY|process\.env|localStorage|sessionStorage|document\.cookie|NEXT_PUBLIC/);
   });
 
   it("there is no client-side readiness switch: the open card cannot be reached except through the server's answer", () => {
@@ -436,6 +465,13 @@ describe("negative controls — removing any fail-closed protection makes the CT
     expect(html).not.toBe(INDEX_HTML);
     return html;
   }
+  /** The same, for the shared reader (the strict reading of the server's answer lives there, not in the page). */
+  function mutatedReader(from: string, to: string): string {
+    expect(READER_SOURCE.split(from).length - 1, `reader mutation anchor must exist exactly once: ${from.slice(0, 50)}`).toBe(1);
+    const source = READER_SOURCE.replace(from, to);
+    expect(source).not.toBe(READER_SOURCE);
+    return source;
+  }
   const actionable = (page: Awaited<ReturnType<typeof loadLanding>>) => page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`).length > 0;
 
   it("control 1 — first paint rendered open: the CTA is actionable while the request is still pending", async () => {
@@ -444,22 +480,22 @@ describe("negative controls — removing any fail-closed protection makes the CT
   });
 
   it("control 2 — shape check loosened to `truthy`: a malformed { available: \"true\" } opens the CTA", async () => {
-    const html = mutated('return keys.length === 1 && keys[0] === "available" && body.available === true;', "return !!body.available;");
-    const page = await loadLanding(() => ({ status: 200, json: { available: "true" } }), { html });
+    const readerSource = mutatedReader('return keys.length === 1 && keys[0] === "available" && body.available === true;', "return !!body.available;");
+    const page = await loadLanding(() => ({ status: 200, json: { available: "true" } }), { readerSource });
     await page.settle(30);
     expect(actionable(page)).toBe(true);
   });
 
   it("control 3 — status check removed: a 500 response carrying { available: true } opens the CTA", async () => {
-    const html = mutated("if (!res || res.status !== 200) return false;", "if (!res) return false;");
-    const page = await loadLanding(() => ({ status: 500, json: { available: true } }), { html });
+    const readerSource = mutatedReader("if (!res || res.status !== 200) return false;", "if (!res) return false;");
+    const page = await loadLanding(() => ({ status: 500, json: { available: true } }), { readerSource });
     await page.settle(30);
     expect(actionable(page)).toBe(true);
   });
 
   it("control 4 — failure treated as open: a network error opens the CTA", async () => {
-    const html = mutated("} catch (_) {\n      return false;", "} catch (_) {\n      return true;");
-    const page = await loadLanding(() => "reject", { html });
+    const readerSource = mutatedReader("} catch (_) {\n      return false;", "} catch (_) {\n      return true;");
+    const page = await loadLanding(() => "reject", { readerSource });
     await page.settle(30);
     expect(actionable(page)).toBe(true);
   });
@@ -473,9 +509,9 @@ describe("negative controls — removing any fail-closed protection makes the CT
   });
 
   it("control 6 — timeout removed: a request that never answers is never aborted (nothing ends the wait)", async () => {
-    const html = mutated("if (controller) timer = setTimeout(() => controller.abort(), HOST_AVAILABILITY_TIMEOUT_MS);", "");
+    const readerSource = mutatedReader("if (controller) timer = setTimeout(function () { controller.abort(); }, TIMEOUT_MS);", "");
     let aborted = false;
-    const page = await loadLanding(() => "hang", { html, compressTimeout: true });
+    const page = await loadLanding(() => "hang", { readerSource, compressTimeout: true });
     (page.calls[0].init.signal as AbortSignal | undefined)?.addEventListener("abort", () => { aborted = true; });
     await page.settle(150);
     expect(aborted).toBe(false); // the real page aborts here (see the timeout test above)
@@ -484,5 +520,54 @@ describe("negative controls — removing any fail-closed protection makes the CT
   it("the controls changed only their own copies: the shipped page still fails closed", async () => {
     const page = await loadLanding(() => "hang");
     expect(actionable(page)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-091 Correction D — the 320 px landing header. jsdom does not lay anything out, so these pin the RULES that produce the
+// measured result (real-browser numbers at 320 / 375 / 768 / 1280 px are in UG-CR-RPT-091); the rules are what must not silently regress.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+describe("landing header — the 320 px overflow fix is pinned", () => {
+  const css = INDEX_HTML.slice(INDEX_HTML.indexOf("<style>"), INDEX_HTML.indexOf("</style>"));
+  const rule = (selector: string, source = css) => {
+    const m = source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+    return m ? m[1] : "";
+  };
+  const media = (query: string) => {
+    const start = css.indexOf(`@media (${query})`);
+    if (start < 0) return "";
+    let depth = 0;
+    for (let i = css.indexOf("{", start); i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      if (css[i] === "}" && --depth === 0) return css.slice(css.indexOf("{", start) + 1, i);
+    }
+    return "";
+  };
+
+  it("below 375 px the header may wrap, so the sign-in control drops to its own row instead of overflowing the page", () => {
+    const narrow = media("max-width: 374px");
+    expect(narrow).toMatch(/\.shell-header\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(narrow).toMatch(/row-gap:\s*8px/);
+  });
+
+  it("at 375 px and wider the header is NOT wrapping (that layout is unchanged), and no other width-specific wrap exists", () => {
+    expect(rule(".shell-header")).not.toMatch(/flex-wrap/);
+    expect((css.match(/flex-wrap:\s*wrap/g) ?? []).length).toBeGreaterThanOrEqual(1);
+    for (const query of ["max-width: 640px"]) expect(media(query)).not.toMatch(/\.shell-header\s*\{[^}]*flex-wrap/);
+  });
+
+  it("the sign-in control keeps its label on one line (never broken mid-word), keeps its natural width, and is never wider than the header", () => {
+    const btn = rule(".signin-btn");
+    expect(btn).toMatch(/white-space:\s*nowrap/);
+    expect(btn).toMatch(/flex-shrink:\s*0/);
+    expect(btn).toMatch(/max-width:\s*100%/);
+    expect(btn).toMatch(/text-overflow:\s*ellipsis/);
+    expect(btn).not.toMatch(/overflow-wrap:\s*anywhere|word-break:\s*break-(all|word)|hyphens:\s*auto/);
+  });
+
+  it("on phones the sign-in control has a 44 px touch target, and the 768 / 1280 px layouts are left alone", () => {
+    expect(media("max-width: 640px")).toMatch(/\.signin-btn\s*\{[^}]*min-height:\s*44px/);
+    expect(rule(".signin-btn")).not.toMatch(/min-height/); // not applied at tablet/desktop widths
   });
 });

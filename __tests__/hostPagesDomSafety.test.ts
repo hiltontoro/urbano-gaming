@@ -19,6 +19,10 @@ import path from "node:path";
 
 const BECOME_HTML = readFileSync(path.join(process.cwd(), "public/become-a-host.html"), "utf8");
 const REVIEW_HTML = readFileSync(path.join(process.cwd(), "public/host-applications-admin.html"), "utf8");
+// The shared server-authoritative readiness reader (UG-CR-GATE-091). jsdom does not load external scripts, so the REAL shipped file is
+// evaluated into each page's window; the application page cannot start its journey without it.
+const HOST_AVAILABILITY_SOURCE = readFileSync(path.join(process.cwd(), "public/hostAvailability.js"), "utf8");
+const AVAILABILITY_URL = "/api/gaming/host/availability";
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const TOKEN_VALUE = "stub-access-token-value-12345";
@@ -96,6 +100,10 @@ async function loadPage(html: string, opts: { auth: AuthState; respond?: Respond
         }),
       };
       w.fetch = async (url: string, init: any = {}) => {
+        // The page-level tests below are about an OPEN program, so readiness is answered "open" here and kept out of `calls`
+        // (those assert exactly which APPLICATION requests the page makes). Readiness itself — closed, failing, malformed,
+        // delayed — is tested in hostDirectPageReadiness.test.ts.
+        if (String(url) === AVAILABILITY_URL) return { status: 200, json: async () => ({ available: true }) };
         const call: FetchCall = {
           url: String(url),
           method: init.method ?? "GET",
@@ -106,6 +114,7 @@ async function loadPage(html: string, opts: { auth: AuthState; respond?: Respond
         const out = await respond(call);
         return { status: out.status, json: async () => { if (out.json === undefined) throw new Error("no body"); return out.json; } };
       };
+      window.eval(HOST_AVAILABILITY_SOURCE); // the real shared reader, exactly as /hostAvailability.js would define it
     },
   });
   const win = dom.window as unknown as Window & Record<string, any>;
@@ -146,9 +155,13 @@ async function loadPage(html: string, opts: { auth: AuthState; respond?: Respond
   return api;
 }
 
-function assertNoLiveInjection(doc: Document) {
-  // The page authors exactly two <script> elements (the sign-in module and its own); nothing may add a third.
-  expect(doc.querySelectorAll("script"), "an injected <script>").toHaveLength(2);
+/** The scripts each shipped page authors, by source (null = inline). Nothing may add another. */
+const APPLICATION_PAGE_SCRIPTS = ["/urbanoAuth.js", "/hostAvailability.js", null]; // sign-in module, shared readiness reader, the page's own script
+const REVIEW_PAGE_SCRIPTS = ["/urbanoAuth.js", null];
+
+function assertNoLiveInjection(doc: Document, authoredScripts: Array<string | null> = APPLICATION_PAGE_SCRIPTS) {
+  expect(doc.querySelectorAll("script"), "an injected <script>").toHaveLength(authoredScripts.length);
+  expect(Array.from(doc.querySelectorAll("script")).map((x) => x.getAttribute("src"))).toEqual(authoredScripts);
   const main = doc.getElementById("main")!;
   const all = [main, ...Array.from(main.querySelectorAll("*"))];
   for (const el of all) {
@@ -867,7 +880,7 @@ describe("host-applications-admin.html — the internal review page", () => {
       const page = await loadPage(REVIEW_HTML, { auth: authenticated(), respond: () => ({ status: 200, json: { applications: rows } }) });
       await page.settle();
       expect(page.doc.querySelectorAll("article")).toHaveLength(4);
-      assertNoLiveInjection(page.doc);
+      assertNoLiveInjection(page.doc, REVIEW_PAGE_SCRIPTS);
       expect(page.win.__xss).toBeUndefined();
       expect(page.doc.querySelector("article .who")!.textContent).toBe(value);
       for (const dd of Array.from(page.doc.querySelectorAll("dd"))) expect(dd.children).toHaveLength(0);

@@ -24,6 +24,7 @@ import { finalizeFixture } from "../lib/gaming/competitions/finalizeFixture";
 import { forfeitFixture } from "../lib/gaming/competitions/forfeitFixture";
 import { voidFixture } from "../lib/gaming/competitions/voidFixture";
 import type { GoalEventInput, ParticipationAttestationInput } from "../lib/gaming/competitions/types";
+import { CompetitionAccessDeniedError } from "../lib/gaming/competitions/types";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 /**
@@ -36,9 +37,10 @@ import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
  * before, and — through rolled-back negative controls that put the original defect back — that the tests would notice if it
  * returned.
  *
- * finalize, forfeit and void answer an idempotent REPLAY before they reach the organizer check. A NULL caller must not be handed an
- * existing result either, so those three carry one explicit NULL test ahead of the replay; the replay behavior for every NON-NULL
- * caller is deliberately unchanged and is pinned here as unchanged.
+ * finalize, forfeit and void used to answer an idempotent REPLAY before they reached the organizer check. GATE-090 refused a NULL caller
+ * ahead of the replay with one explicit NULL test; GATE-091 superseded that by moving the whole authorization (exact organizer, IS DISTINCT
+ * FROM, host revocation guard) ahead of the replay, so NULL and every other unauthorized caller are refused there. The full private-replay
+ * proof lives in privateReplayAuthorizationSupabase.contract.test.ts; this file keeps the NULL-caller and valid-actor behavior per function.
  *
  * Synthetic identities are unique per run and every assertion is scoped to rows this file created; a database reset restores a
  * clean state.
@@ -93,6 +95,13 @@ async function connectRaw(): Promise<Client> {
   const client = new Client({ connectionString: supabaseDbUrl, statement_timeout: 20000 });
   await client.connect();
   return client;
+}
+
+async function expectRejection<T extends Error>(promise: Promise<unknown>, ErrorClass: new (...args: any[]) => T): Promise<T> {
+  const outcome = await promise.then(() => null, (e: unknown) => e);
+  expect(outcome, `expected a ${ErrorClass.name}, but the call succeeded`).not.toBeNull();
+  expect(outcome).toBeInstanceOf(ErrorClass);
+  return outcome as T;
 }
 
 // Best effort only: some rows these flows create (finalizations, audit events) pin their members, so a failed delete here is
@@ -219,8 +228,9 @@ async function mutate(db: Client, signature: string, edit: (def: string) => stri
 }
 
 const restoreBareComparison = (def: string) => def.replace("p_organizer_gaming_member_id is distinct from v_organizer_id", "p_organizer_gaming_member_id <> v_organizer_id");
-const removeNullGuard = (def: string) => def.replace(/\n  -- UG-CR-GATE-090: a NULL caller is refused here[\s\S]*?if p_organizer_gaming_member_id is null then[\s\S]*?end if;\n/, "\n");
-const original = (def: string) => removeNullGuard(restoreBareComparison(def)); // the function exactly as it was before GATE-090
+// GATE-091 folded the GATE-090 explicit NULL test into the exact-caller check (authorization now precedes the replay), so the function as it
+// was before GATE-090 differs from today's only by the bare comparison.
+const original = restoreBareComparison;
 
 // =============================================================================================================================
 // Inventory
@@ -274,22 +284,20 @@ describe("inventory: the five organizer functions, every active signature, befor
     }
   }, 30000);
 
-  it("finalize, forfeit and void: the explicit NULL test sits after the fixture is locked and read, BEFORE the idempotent replay and the organizer check — and decides nothing for a non-NULL caller", async () => {
+  it("finalize, forfeit and void: the exact-caller check (IS DISTINCT FROM, so NULL can never pass) sits after the fixture is locked and read and BEFORE the idempotent replay; no separate NULL test remains", async () => {
     const db = await connectRaw();
     try {
       for (const signature of [SIGS.finalize, SIGS.forfeit, SIGS.void]) {
         const def = await functionDefinition(db, signature);
         const lock = def.indexOf("pg_advisory_xact_lock(hashtext('competition_scope:'");
         const load = def.indexOf("for update");
-        const guard = def.indexOf("if p_organizer_gaming_member_id is null then");
-        const replay = def.indexOf("competition_fixture_finalizations");
         const check = def.indexOf("p_organizer_gaming_member_id is distinct from v_organizer_id");
-        for (const [name, i] of Object.entries({ lock, load, guard, replay, check })) expect(i, `${signature} ${name}`).toBeGreaterThan(-1);
+        const replay = def.indexOf("competition_fixture_finalizations");
+        for (const [name, i] of Object.entries({ lock, load, check, replay })) expect(i, `${signature} ${name}`).toBeGreaterThan(-1);
         expect(lock).toBeLessThan(load);
-        expect(load).toBeLessThan(guard);
-        expect(guard).toBeLessThan(replay);
-        expect(replay).toBeLessThan(check);
-        expect((def.match(/if p_organizer_gaming_member_id is null then/g) ?? []).length).toBe(1);
+        expect(load).toBeLessThan(check);
+        expect(check).toBeLessThan(replay); // GATE-091: authorization first. (The full ordering is pinned in privateReplayAuthorizationSupabase.contract.test.ts.)
+        expect(def, signature).not.toContain("if p_organizer_gaming_member_id is null then");
       }
       // appoint and decide never answer a replay before the check, so the comparison alone is the boundary there.
       for (const signature of [SIGS.appoint, SIGS.decide]) {
@@ -429,7 +437,7 @@ describe("finalize_competition_fixture_atomically", () => {
     expect(before.state).toBe("EVIDENCE_SUBMITTED");
   }, 60000);
 
-  it("[negative control] the function as it was before GATE-090: a NULL organizer gets past the authorization check", async () => {
+  it("[negative control] the function with the original `<>` comparison: a NULL organizer gets past the authorization check", async () => {
     const db = await connectRaw();
     try {
       await expect(rawCall(db)).rejects.toThrow(DENIED);
@@ -463,28 +471,11 @@ describe("finalize_competition_fixture_atomically", () => {
     expect(await finalizationRows(f.fixtureId)).toBe(before);
   }, 60000);
 
-  it("[negative control] with only the explicit NULL test removed (the comparison stays null-safe), a NULL caller IS handed the existing result: the test is needed", async () => {
-    const db = await connectRaw();
-    try {
-      await expect(rawCall(db)).rejects.toThrow(DENIED);
-      await db.query("begin");
-      await mutate(db, SIGS.finalize, removeNullGuard);
-      const out = await rawCall(db);
-      expect(out.rows[0].already_finalized).toBe(true); // the replay answers before any authorization
-      await db.query("rollback");
-      await expect(rawCall(db)).rejects.toThrow(DENIED);
-    } finally {
-      await db.query("rollback").catch(() => {});
-      await db.end();
-    }
-  }, 60000);
-
-  it("[unchanged] replay behavior for NON-NULL callers is exactly as before: the organizer's retry returns the existing result, and so (pre-existing, RPT-088 §7) does a stranger's", async () => {
+  it("[GATE-091] the organizer's retry is still idempotent, and a stranger's replay is no longer answered (the full private-replay proof is in privateReplayAuthorizationSupabase.contract.test.ts)", async () => {
     const replay = await finalizeFixture(compRepo, f.fixtureId, b.organizerId);
     expect(replay.alreadyFinalized).toBe(true);
     const stranger = (await createMember("Finalize Replay Stranger")).gamingMemberId;
-    const asStranger = await finalizeFixture(compRepo, f.fixtureId, stranger);
-    expect(asStranger).toMatchObject({ alreadyFinalized: true, competitionFixtureFinalizationId: replay.competitionFixtureFinalizationId });
+    await expectRejection(finalizeFixture(compRepo, f.fixtureId, stranger), CompetitionAccessDeniedError);
     expect(await finalizationRows(f.fixtureId)).toBe(1);
   }, 60000);
 });
@@ -510,7 +501,7 @@ describe("forfeit_competition_fixture_atomically", () => {
     expect(await fixtureRow(b.sf1)).toEqual(before);
   }, 60000);
 
-  it("[negative control] the function as it was before GATE-090: a NULL organizer gets past the authorization check and FORFEITS the fixture", async () => {
+  it("[negative control] the function with the original `<>` comparison: a NULL organizer gets past the authorization check and FORFEITS the fixture", async () => {
     const db = await connectRaw();
     try {
       await expect(rawCall(db)).rejects.toThrow(DENIED);
@@ -549,27 +540,11 @@ describe("forfeit_competition_fixture_atomically", () => {
     expect(await finalizationRows(b.sf1)).toBe(1);
   }, 60000);
 
-  it("[negative control] with only the explicit NULL test removed, a NULL caller IS handed the existing result: the test is needed", async () => {
-    const db = await connectRaw();
-    try {
-      await expect(rawCall(db)).rejects.toThrow(DENIED);
-      await db.query("begin");
-      await mutate(db, SIGS.forfeit, removeNullGuard);
-      const out = await rawCall(db);
-      expect(out.rows[0].already_finalized).toBe(true);
-      await db.query("rollback");
-    } finally {
-      await db.query("rollback").catch(() => {});
-      await db.end();
-    }
-  }, 60000);
-
-  it("[unchanged] replay behavior for NON-NULL callers is exactly as before", async () => {
+  it("[GATE-091] the organizer's retry is still idempotent, and a stranger's replay is no longer answered", async () => {
     const replay = await forfeitFixture(compRepo, b.sf1, b.organizerId, b.teams[0].competitionTeamId, "Team did not arrive.");
     expect(replay.alreadyFinalized).toBe(true);
     const stranger = (await createMember("Forfeit Replay Stranger")).gamingMemberId;
-    const asStranger = await forfeitFixture(compRepo, b.sf1, stranger, b.teams[0].competitionTeamId, "Not allowed, but answered as before.");
-    expect(asStranger).toMatchObject({ alreadyFinalized: true, competitionFixtureFinalizationId: replay.competitionFixtureFinalizationId });
+    await expectRejection(forfeitFixture(compRepo, b.sf1, stranger, b.teams[0].competitionTeamId, "Team did not arrive."), CompetitionAccessDeniedError);
     expect(await finalizationRows(b.sf1)).toBe(1);
   }, 60000);
 });
@@ -596,7 +571,7 @@ describe("void_competition_fixture_atomically", () => {
     expect(stateBefore).not.toBe("CANCELLED_WITHOUT_CHAMPION");
   }, 60000);
 
-  it("[negative control] the function as it was before GATE-090: a NULL organizer gets past the authorization check and CANCELS the competition", async () => {
+  it("[negative control] the function with the original `<>` comparison: a NULL organizer gets past the authorization check and CANCELS the competition", async () => {
     const db = await connectRaw();
     try {
       await expect(rawCall(db)).rejects.toThrow(DENIED);
@@ -633,27 +608,11 @@ describe("void_competition_fixture_atomically", () => {
     expect(await finalizationRows(b.sf1)).toBe(1);
   }, 60000);
 
-  it("[negative control] with only the explicit NULL test removed, a NULL caller IS handed the existing result: the test is needed", async () => {
-    const db = await connectRaw();
-    try {
-      await expect(rawCall(db)).rejects.toThrow(DENIED);
-      await db.query("begin");
-      await mutate(db, SIGS.void, removeNullGuard);
-      const out = await rawCall(db);
-      expect(out.rows[0].already_finalized).toBe(true);
-      await db.query("rollback");
-    } finally {
-      await db.query("rollback").catch(() => {});
-      await db.end();
-    }
-  }, 60000);
-
-  it("[unchanged] replay behavior for NON-NULL callers is exactly as before", async () => {
+  it("[GATE-091] the organizer's retry is still idempotent, and a stranger's replay is no longer answered", async () => {
     const replay = await voidFixture(compRepo, b.sf1, b.organizerId, "Pitch unavailable.");
     expect(replay.alreadyFinalized).toBe(true);
     const stranger = (await createMember("Void Replay Stranger")).gamingMemberId;
-    const asStranger = await voidFixture(compRepo, b.sf1, stranger, "Not allowed, but answered as before.");
-    expect(asStranger).toMatchObject({ alreadyFinalized: true, competitionFixtureFinalizationId: replay.competitionFixtureFinalizationId });
+    await expectRejection(voidFixture(compRepo, b.sf1, stranger, "Pitch unavailable."), CompetitionAccessDeniedError);
     expect(await finalizationRows(b.sf1)).toBe(1);
   }, 60000);
 });
@@ -663,14 +622,15 @@ describe("void_competition_fixture_atomically", () => {
 // =============================================================================================================================
 
 describe("the negative controls left no trace", () => {
-  it("every function still has its null-safe comparison, the three replay-first functions still have the explicit NULL test, and the grants are intact", async () => {
+  it("every function still has its null-safe comparison, the three replay functions still authorize before the replay, and the grants are intact", async () => {
     const db = await connectRaw();
     try {
       for (const signature of Object.values(SIGS)) {
         expect(await functionDefinition(db, signature), signature).toContain("p_organizer_gaming_member_id is distinct from v_organizer_id");
       }
       for (const signature of [SIGS.finalize, SIGS.forfeit, SIGS.void]) {
-        expect(await functionDefinition(db, signature), signature).toContain("if p_organizer_gaming_member_id is null then");
+        const def = await functionDefinition(db, signature);
+        expect(def.indexOf("p_organizer_gaming_member_id is distinct from v_organizer_id"), signature).toBeLessThan(def.indexOf("return query select v_existing_finalization_id"));
       }
       for (const name of FIVE) {
         const { rows } = await db.query(

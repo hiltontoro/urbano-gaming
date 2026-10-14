@@ -79,6 +79,10 @@
     font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
     border-radius: 8px; border: 1px solid var(--ink); background: transparent;
     color: var(--ink); cursor: pointer;
+    /* UG-CR-GATE-091: it keeps its natural width (so the label is never squeezed or ellipsized at ordinary sizes), is never wider than
+       the header, and is never broken mid-word. Only an extreme display name is truncated with an ellipsis, instead of pushing the
+       page sideways. */
+    white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
   .signin-btn:hover { background: var(--surface-2); }
   .signin-status {
@@ -225,7 +229,7 @@
   @media (max-width: 640px) {
     .shell-header { padding: 16px 16px 0; }
     .brand-word { font-size: 15px; }
-    .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
+    .signin-btn { font-size: 12px; padding: 9px 12px; min-height: 44px; }
     .primary-nav { padding: 0 16px 2px; }
     .hero { padding: 28px 16px 4px; }
     .section { padding: 0 16px; }
@@ -234,6 +238,14 @@
     .featured-card h2 { font-size: 20px; }
     .match-slide { padding: 18px 16px; }
     .match-teams { font-size: 18px; }
+  }
+
+  /* UG-CR-GATE-091 (320 px header). The wordmark, the Gaming badge and "Sign in with URBANO" need about 344 px side by side. At 375 px
+     and wider that fits (this layout is unchanged); below 375 px it does not, and the unwrapped header pushed the whole page about
+     39 px sideways at 320 px. Below 375 px the header may therefore wrap, so the sign-in control drops onto its own row instead of
+     overflowing. The control keeps its label on one line (never broken mid-word) and its 44 px touch target. */
+  @media (max-width: 374px) {
+    .shell-header { flex-wrap: wrap; row-gap: 8px; }
   }
 </style>
 </head>
@@ -300,6 +312,7 @@
 <footer>URBANO Gaming — part of URBANO</footer>
 
 <script src="/urbanoAuth.js"></script>
+<script src="/hostAvailability.js"></script>
 <script>
   UrbanoAuth.attachSignInButton(
     document.getElementById("btn-signin"),
@@ -352,8 +365,9 @@
 
   // UG-CR-GATE-090: the Become a Host entry fails closed. It is NOT actionable (no link, no "Apply") until the server has said, in
   // this page load, that applications are open. Every other outcome — the answer is still pending, the request fails or times out,
-  // the response is not exactly the expected shape, or the server says closed — leaves the card as the informational "not open yet"
-  // card below. The browser never sees or decides readiness itself: it only relays the server's bounded yes/no.
+  // the response is not exactly the expected shape, the shared reader (/hostAvailability.js) did not load, or the server says
+  // closed — leaves the card as the informational "not open yet" card below. The browser never sees or decides readiness itself:
+  // it only relays the server's bounded yes/no, read by the one reader the application page shares.
   const HOST_ENTRY_CLOSED = {
     title: "Become a Host",
     sub: "Host applications are not open yet.",
@@ -367,8 +381,6 @@
     href: "/become-a-host.html",
     action: "Apply →",
   };
-  const HOST_AVAILABILITY_URL = "/api/gaming/host/availability";
-  const HOST_AVAILABILITY_TIMEOUT_MS = 4000;
 
   function experiencesCatalog(hostOpen) {
     return [
@@ -417,31 +429,11 @@
     }).join("");
   }
 
-  // True only for HTTP 200 whose JSON body is exactly { "available": true }. Anything else — a network error, a timeout, a non-200
-  // status, a body that is not JSON, not an object, carries more or fewer keys, or holds any other value (including the string
-  // "true" or the number 1) — is "closed". Never throws.
-  async function resolveHostAvailability() {
-    let timer = null;
-    try {
-      const controller = typeof AbortController === "function" ? new AbortController() : null;
-      if (controller) timer = setTimeout(() => controller.abort(), HOST_AVAILABILITY_TIMEOUT_MS);
-      const res = await fetch(HOST_AVAILABILITY_URL, {
-        method: "GET",
-        cache: "no-store",
-        credentials: "omit",
-        headers: { Accept: "application/json" },
-        signal: controller ? controller.signal : undefined,
-      });
-      if (!res || res.status !== 200) return false;
-      const body = await res.json();
-      if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
-      const keys = Object.keys(body);
-      return keys.length === 1 && keys[0] === "available" && body.available === true;
-    } catch (_) {
-      return false;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+  // True only when the shared reader says the server answered exactly { "available": true }. If the reader itself is missing
+  // (its script failed to load) the answer is "not open".
+  function resolveHostAvailability() {
+    const reader = window.HostAvailability;
+    return reader && typeof reader.resolve === "function" ? reader.resolve() : Promise.resolve(false);
   }
 
   renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");

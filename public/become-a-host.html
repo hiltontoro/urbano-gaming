@@ -139,19 +139,25 @@
       </ul>
       <p>The pilot does <strong>not</strong> include entry fees, prizes, sponsorships, minors, public statistics, automated invitations, or open registration.</p>
       <p>Approval lets you create and run this one pilot. It does not make you an URBANO employee, partner, or certified organizer, and it is not a permanent affiliation.</p>
-      <p>Anyone can read this page. To apply you need to sign in with URBANO and have a display name.</p>
+      <p id="apply-requirements" hidden>Anyone can read this page. To apply you need to sign in with URBANO and have a display name.</p>
     </div>
   </details>
 
   <div id="app" aria-busy="true">
-    <div class="empty-state">Loading…</div>
+    <div class="empty-state" id="checking-state">Checking whether host applications are open…</div>
   </div>
 </main>
 
 <script src="/urbanoAuth.js"></script>
+<script src="/hostAvailability.js"></script>
 <script>
-UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("signin-status"));
-
+// UG-CR-GATE-091: this page is CLOSED until the server says, in this page load, that host applications are open. Nothing that
+// invites an application — the header sign-in control and its one-time-code panel, the "Sign in to apply" button, the display-name
+// step, the application form — exists, is wired up, or is fetched until then. A pending answer, a failed or timed-out request, a
+// malformed response, a missing reader script and a "closed" answer all leave the page in the same truthful closed state. The
+// answer comes from /hostAvailability.js, the same reader the landing page uses; this page holds no readiness logic of its own.
+const signInButton = document.getElementById("btn-signin");
+const signInStatus = document.getElementById("signin-status");
 const appEl = document.getElementById("app");
 const programInfo = document.getElementById("program-info");
 
@@ -793,8 +799,40 @@ async function renderApp(force) {
   else mountError("We could not load your host application.");
 }
 
-UrbanoAuth.onAuthStateChange(() => renderApp(false));
-renderApp(true);
+/** The closed state: the program is still explained above, but nothing here leads into an application. */
+function showClosed() {
+  signInButton.hidden = true; // never attached, so it can neither open the sign-in panel nor sign anyone in from this page
+  document.getElementById("apply-requirements").hidden = true;
+  programInfo.open = true;
+  const card = el(`<section class="card accent" aria-labelledby="closed-title">
+    <h2 id="closed-title">Host applications are not open yet</h2>
+    <p><span class="status-pill gold">Not open yet</span></p>
+    <p>URBANO is not accepting host applications right now. You can read how the pilot program will work above. This page will open for applications when the program does.</p>
+  </section>`);
+  appEl.textContent = "";
+  appEl.appendChild(card);
+  appEl.setAttribute("aria-busy", "false");
+}
+
+/** The open journey: only ever started after the server's own "open" answer. */
+function startJourney() {
+  document.getElementById("apply-requirements").hidden = false;
+  UrbanoAuth.attachSignInButton(signInButton, signInStatus);
+  UrbanoAuth.onAuthStateChange(() => renderApp(false));
+  renderApp(true);
+}
+
+(async function start() {
+  const reader = window.HostAvailability;
+  let open = false;
+  try {
+    open = !!reader && typeof reader.resolve === "function" ? (await reader.resolve()) === true : false;
+  } catch (e) {
+    open = false;
+  }
+  if (open === true) startJourney();
+  else showClosed();
+})();
 </script>
 
 </body>
