@@ -43,8 +43,10 @@ import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
  * tests would notice if it returned.
  *
  * Neither function has an idempotent replay: a decided request raises JOIN_REQUEST_NOT_PENDING, an already-reviewed one raises
- * JOIN_REQUEST_ALREADY_REVIEWED, so no earlier return can answer a NULL caller. Synthetic identities are unique per run; a database reset
- * restores a clean state.
+ * JOIN_REQUEST_ALREADY_REVIEWED, so no earlier return can answer a NULL caller. UG-CR-GATE-092 (the last describe block) additionally proves
+ * decide_join_request_atomically authorizes BEFORE it says anything about the request's lifecycle: an unauthorized caller holding a request id
+ * gets the same bounded denial whether the request is pending, decided, attached to a cancelled competition, or does not exist. Synthetic
+ * identities are unique per run; a database reset restores a clean state.
  */
 
 const env = loadEnv("development", process.cwd(), "");
@@ -391,16 +393,19 @@ describe("decide_join_request_atomically", () => {
     expect((await decideJoinRequest(compRepo, b.requestId, X.organizerId, "REJECT", true)).status).toBe("REJECTED");
   }, 180000);
 
-  it("REPLAY (applicable here as a second decision): a decided request is refused with JOIN_REQUEST_NOT_PENDING for every caller — the organizer, the captain, a stranger and NULL — and nothing changes", async () => {
+  it("REPLAY (a second decision): the AUTHORIZED captain and organizer are refused with JOIN_REQUEST_NOT_PENDING, and every UNAUTHORIZED caller — NULL, a foreign organizer, a stranger — gets the bounded denial instead, so a decided request is never confirmed to them", async () => {
     const r = await newRequest(X, X.teamA);
     await decideJoinRequest(compRepo, r.requestId, X.teamA.captainId, "APPROVE", false);
     const before = await snapshot(X, r);
+    // Authorized: the lifecycle refusal, exactly as before.
     await expectRejection(decideJoinRequest(compRepo, r.requestId, X.teamA.captainId, "APPROVE", false), JoinRequestNotPendingError);
     await expectRejection(decideJoinRequest(compRepo, r.requestId, X.organizerId, "REJECT", true), JoinRequestNotPendingError);
-    expect(msg(await decideRpc(r.requestId, null, "REJECT", false))).toMatch(NOT_PENDING); // a NULL caller is refused, never answered with a result
-    expect(msg(await decideRpc(r.requestId, null, "REJECT", true))).toMatch(NOT_PENDING);
-    // Pre-existing and deliberately unchanged (the lifecycle check precedes authorization): any caller who already knows the request id is told it is no longer pending.
-    expect(msg(await decideRpc(r.requestId, Y.organizerId, "REJECT", true))).toMatch(NOT_PENDING);
+    // Unauthorized (UG-CR-GATE-092): the denial, never "not pending" — GATE-091 had left this lifecycle response in front of the authorization.
+    expect(msg(await decideRpc(r.requestId, null, "REJECT", false))).toMatch(NOT_CAPTAIN);
+    expect(msg(await decideRpc(r.requestId, null, "REJECT", true))).toMatch(DENIED);
+    expect(msg(await decideRpc(r.requestId, Y.organizerId, "REJECT", true))).toMatch(DENIED);
+    expect(msg(await decideRpc(r.requestId, Y.teamA.captainId, "REJECT", false))).toMatch(NOT_CAPTAIN);
+    for (const text of [msg(await decideRpc(r.requestId, null, "REJECT", false)), msg(await decideRpc(r.requestId, Y.organizerId, "REJECT", true))]) expect(text).not.toMatch(NOT_PENDING);
     expect(await snapshot(X, r)).toEqual(before);
   }, 180000);
 
@@ -466,7 +471,7 @@ describe("decide_join_request_atomically", () => {
       await waitUntilBlockedOnLock(observer, pid[0].pid);
       await holder.query("select * from decide_join_request_atomically($1, $2, 'APPROVE', false)", [r.requestId, X.teamA.captainId]); // re-entrant on the held lock
       await holder.query("commit");
-      expect(await waiting).toMatch(NOT_PENDING);
+      expect(await waiting).toMatch(NOT_CAPTAIN); // the bounded denial, not "not pending": authorization comes before the lifecycle
       expect(await membershipRows(X.competitionId, r.memberId)).toBe(1);
       expect((await requestRow(r.requestId)).decided_by_gaming_member_id).toBe(X.teamA.captainId);
     } finally {
@@ -572,6 +577,234 @@ describe("organizer_review_join_request_atomically", () => {
       await Promise.all(callers.map((c) => c.end()));
     }
   }, 240000);
+});
+
+// =============================================================================================================================
+// UG-CR-GATE-092 — decide_join_request_atomically authorizes BEFORE any lifecycle or not-found response
+// =============================================================================================================================
+
+const CAPTAIN_DENIAL = "NOT_TEAM_CAPTAIN: only this team's own captain may decide this request";
+const OVERRIDE_DENIAL = "COMPETITION_ACCESS_DENIED: only the organizer may override a join-request decision";
+const LIFECYCLE_OR_NOT_FOUND = /JOIN_REQUEST_NOT_PENDING|COMPETITION_CANCELLED|JOIN_REQUEST_NOT_FOUND|already been decided|cancelled|no such/i;
+
+// The old ordering, rebuilt from today's function text: the lifecycle checks BEFORE the organizer/captain check (and "not found" for a missing request).
+const NOT_PENDING_BLOCK = "  if v_current_status <> 'REQUESTED' then\n    raise exception 'JOIN_REQUEST_NOT_PENDING: this join request has already been decided' using errcode = 'P0001';\n  end if;\n\n";
+const CANCELLED_BLOCK = "  if v_competition_state = 'CANCELLED_WITHOUT_CHAMPION' then\n    raise exception 'COMPETITION_CANCELLED: this competition has been cancelled and no longer accepts this action'\n      using errcode = 'P0001';\n  end if;\n\n";
+const ORG_SELECT_BLOCK = "  select competitions.organizer_gaming_member_id, competitions.state\n    into v_organizer_id, v_competition_state\n    from competitions where competitions.competition_id = v_competition_id;\n\n";
+const BRANCH_DENIAL_BLOCK =
+  "    if p_is_organizer_override then\n      raise exception 'COMPETITION_ACCESS_DENIED: only the organizer may override a join-request decision' using errcode = 'P0001';\n    end if;\n" +
+  "    raise exception 'NOT_TEAM_CAPTAIN: only this team''s own captain may decide this request' using errcode = 'P0001';\n";
+const lifecycleBeforeAuthorization = (def: string) => def.replace(NOT_PENDING_BLOCK, "").replace(CANCELLED_BLOCK, "").replace(ORG_SELECT_BLOCK, NOT_PENDING_BLOCK + ORG_SELECT_BLOCK + CANCELLED_BLOCK);
+const notFoundForMissing = (def: string) => def.split(BRANCH_DENIAL_BLOCK).join("    raise exception 'JOIN_REQUEST_NOT_FOUND: no such join request exists' using errcode = 'P0001';\n");
+
+describe("decide_join_request_atomically — authorization comes BEFORE any lifecycle or not-found response (UG-CR-GATE-092)", () => {
+  interface Case { label: string; comp: Comp; requestId: string; memberId: string | null }
+  let cases: Case[];
+  let outsider: string;
+  /** Callers who are NOT authorized for any of the cases below (none is the exact organizer or exact captain of any case's competition/team). */
+  const unauthorizedFor = (c: Case): Array<[string, string | null]> => [
+    ["an authenticated stranger", outsider],
+    ["the organizer of another competition", Y.organizerId],
+    ["a captain of another competition", Y.teamA.captainId],
+    ["another team's captain in the same competition", X.teamB.captainId],
+    ["an approved host outside their pilot", hostPilot.hostId],
+    ["the requester themselves", c.memberId ?? outsider],
+    ["a NULL caller", null],
+  ];
+
+  beforeAll(async () => {
+    outsider = (await createMember("Disclosure Outsider")).gamingMemberId;
+    const pending = await newRequest(X, X.teamA);
+    const approved = await newRequest(X, X.teamA);
+    await decideJoinRequest(compRepo, approved.requestId, X.teamA.captainId, "APPROVE", false);
+    const rejected = await newRequest(X, X.teamA);
+    await decideJoinRequest(compRepo, rejected.requestId, X.teamA.captainId, "REJECT", false);
+    const z1 = await buildCompetition("discZ1");
+    const cancelledPending = await newRequest(z1, z1.teamA);
+    await cancelCompetition(compRepo, z1.competitionId, z1.organizerId, "Cancelled for the disclosure suite (pending).");
+    const z2 = await buildCompetition("discZ2");
+    const cancelledDecided = await newRequest(z2, z2.teamA);
+    await decideJoinRequest(compRepo, cancelledDecided.requestId, z2.teamA.captainId, "APPROVE", false);
+    await cancelCompetition(compRepo, z2.competitionId, z2.organizerId, "Cancelled for the disclosure suite (decided).");
+    cases = [
+      { label: "pending", comp: X, ...pending },
+      { label: "decided (approved)", comp: X, ...approved },
+      { label: "decided (rejected)", comp: X, ...rejected },
+      { label: "pending, in a cancelled competition", comp: z1, ...cancelledPending },
+      { label: "decided, in a cancelled competition", comp: z2, ...cancelledDecided },
+      { label: "does not exist", comp: X, requestId: randomUUID(), memberId: null },
+    ];
+  }, 400000);
+
+  it("an unauthorized caller gets the SAME bounded denial whether the request is pending, decided, attached to a cancelled competition, or missing — in both branches, for every kind of unauthorized caller", async () => {
+    for (const override of [false, true]) {
+      const expected = override ? OVERRIDE_DENIAL : CAPTAIN_DENIAL;
+      const seen = new Map<string, string[]>();
+      for (const c of cases) {
+        for (const [who, actor] of unauthorizedFor(c)) {
+          const out = await decideRpc(c.requestId, actor, "APPROVE", override);
+          expect(out.data, `${who} on a request that is ${c.label} (override=${override}) was handed data`).toBeNull();
+          const text = msg(out);
+          expect(text, `${who} on a request that is ${c.label} (override=${override})`).not.toMatch(LIFECYCLE_OR_NOT_FOUND);
+          seen.set(text, [...(seen.get(text) ?? []), `${who} / ${c.label}`]);
+        }
+      }
+      expect(Array.from(seen.keys()), `override=${override}: every state and caller must see one message`).toEqual([expected]);
+    }
+  }, 300000);
+
+  it("the typed service path agrees: a stranger gets the 403-class denial for every state (an organizer claim and a captain claim alike), never a 404 or a lifecycle error", async () => {
+    for (const c of cases) {
+      await expectRejection(decideJoinRequest(compRepo, c.requestId, outsider, "APPROVE", true), CompetitionAccessDeniedError);
+      await expectRejection(decideJoinRequest(compRepo, c.requestId, outsider, "APPROVE", false), NotTeamCaptainError);
+    }
+  }, 180000);
+
+  it("a denial leaves ZERO residual writes: every existing request's row, membership and audit footprint is unchanged after all those attempts", async () => {
+    const real = cases.filter((c) => c.memberId !== null);
+    const before = await Promise.all(real.map((c) => snapshot(c.comp, { requestId: c.requestId, memberId: c.memberId! })));
+    for (const c of cases) for (const [, actor] of unauthorizedFor(c)) for (const override of [false, true]) await decideRpc(c.requestId, actor, "REJECT", override);
+    const after = await Promise.all(real.map((c) => snapshot(c.comp, { requestId: c.requestId, memberId: c.memberId! })));
+    expect(after).toEqual(before);
+    expect(before.map((b) => b.row.status)).toEqual(["REQUESTED", "APPROVED", "REJECTED", "REQUESTED", "APPROVED"]);
+  }, 300000);
+
+  it("AUTHORIZED behavior is unchanged: the exact captain and organizer still get the lifecycle responses, in their original order", async () => {
+    const [pending, approved, , cancelledPending, cancelledDecided] = cases;
+    // Captain.
+    await expectRejection(decideJoinRequest(compRepo, approved.requestId, X.teamA.captainId, "APPROVE", false), JoinRequestNotPendingError);
+    await expectRejection(decideJoinRequest(compRepo, cancelledPending.requestId, cancelledPending.comp.teamA.captainId, "APPROVE", false), CompetitionCancelledError);
+    await expectRejection(decideJoinRequest(compRepo, cancelledDecided.requestId, cancelledDecided.comp.teamA.captainId, "APPROVE", false), JoinRequestNotPendingError); // "not pending" still precedes "cancelled"
+    // Organizer override.
+    await expectRejection(decideJoinRequest(compRepo, approved.requestId, X.organizerId, "REJECT", true), JoinRequestNotPendingError);
+    await expectRejection(decideJoinRequest(compRepo, cancelledPending.requestId, cancelledPending.comp.organizerId, "APPROVE", true), CompetitionCancelledError);
+    await expectRejection(decideJoinRequest(compRepo, cancelledDecided.requestId, cancelledDecided.comp.organizerId, "APPROVE", true), JoinRequestNotPendingError);
+    // And the normal decision still works for both, with the unchanged return shape.
+    const byCaptain = await decideRpc(pending.requestId, X.teamA.captainId, "APPROVE", false);
+    expect(byCaptain.error).toBeNull();
+    expect(Object.keys((byCaptain.data as Array<Record<string, unknown>>)[0]).sort()).toEqual(["competition_join_request_id", "competition_team_membership_id", "decided_at", "status"]);
+    const fresh = await newRequest(X, X.teamB);
+    expect((await decideJoinRequest(compRepo, fresh.requestId, X.organizerId, "REJECT", true)).status).toBe("REJECTED");
+  }, 240000);
+
+  it("a request that does not exist has no organizer or captain: even the organizer and a captain get the bounded denial for it (an intended difference: no 'not found' for anyone)", async () => {
+    const nowhere = randomUUID();
+    expect(msg(await decideRpc(nowhere, X.organizerId, "APPROVE", true))).toBe(OVERRIDE_DENIAL);
+    expect(msg(await decideRpc(nowhere, X.teamA.captainId, "APPROVE", false))).toBe(CAPTAIN_DENIAL);
+    expect(msg(await decideRpc(nowhere, null, "APPROVE", true))).toBe(OVERRIDE_DENIAL);
+    // A NULL or absent override flag takes the captain branch, as it always did.
+    const nullFlag = await serviceClient.rpc("decide_join_request_atomically", { p_competition_join_request_id: nowhere, p_deciding_gaming_member_id: outsider, p_decision: "APPROVE", p_is_organizer_override: null });
+    expect(msg(nullFlag)).toBe(CAPTAIN_DENIAL);
+    // Input validation depends on nothing stored, so it still answers first and identically for everyone.
+    expect(msg(await serviceClient.rpc("decide_join_request_atomically", { p_competition_join_request_id: nowhere, p_deciding_gaming_member_id: outsider, p_decision: "MAYBE", p_is_organizer_override: false }))).toMatch(/INVALID_DECISION/);
+  }, 120000);
+
+  it("a REVOKED HOST's override is refused with HOST_ACCESS_REVOKED in every request state (guard before lifecycle), while a stranger on the same requests learns nothing about the host", async () => {
+    const h = await buildHostPilot("jdisc");
+    const pendingReq = await newRequest(h.comp, h.comp.teamB);
+    const decidedReq = await newRequest(h.comp, h.comp.teamB);
+    await decideJoinRequest(compRepo, decidedReq.requestId, h.comp.teamB.captainId, "APPROVE", false);
+    await cancelCompetition(compRepo, h.comp.competitionId, h.hostId, "Cancelled before revocation, for the disclosure suite.");
+    await withGovernance(() => revokeHostCapability(hostRepo, reviewer.gamingMemberId, h.code, "Disclosure suite: revoke."));
+    for (const r of [pendingReq, decidedReq]) {
+      await expectRejection(decideJoinRequest(compRepo, r.requestId, h.hostId, "APPROVE", true), HostAccessRevokedError);
+      expect(msg(await decideRpc(r.requestId, outsider, "APPROVE", true))).toBe(OVERRIDE_DENIAL); // a stranger is not told the host was revoked
+      expect(msg(await decideRpc(r.requestId, null, "APPROVE", true))).toBe(OVERRIDE_DENIAL);
+    }
+    expect((await requestRow(pendingReq.requestId)).status).toBe("REQUESTED");
+  }, 400000);
+
+  it("CONCURRENCY (deterministic): a stranger waiting on the scope lock while the captain's decision commits is DENIED when it runs — it is never told the request has just been decided", async () => {
+    const r = await newRequest(X, X.teamA);
+    const holder = await connectRaw();
+    const waiter = await connectRaw();
+    const observer = await connectRaw();
+    try {
+      await holder.query("begin");
+      await holder.query("select pg_advisory_xact_lock(hashtext('competition_scope:' || $1::text))", [X.competitionId]);
+      const { rows: pid } = await waiter.query("select pg_backend_pid() as pid");
+      const waiting = waiter.query("select * from decide_join_request_atomically($1, $2, 'APPROVE', false)", [r.requestId, outsider]).then(() => "answered", (e: Error) => e.message);
+      await waitUntilBlockedOnLock(observer, pid[0].pid);
+      await holder.query("select * from decide_join_request_atomically($1, $2, 'APPROVE', false)", [r.requestId, X.teamA.captainId]); // re-entrant on the held lock
+      await holder.query("commit");
+      expect(await waiting).toBe(CAPTAIN_DENIAL);
+      expect((await requestRow(r.requestId)).status).toBe("APPROVED");
+    } finally {
+      await holder.query("rollback").catch(() => {});
+      await Promise.all([holder.end(), waiter.end(), observer.end()]);
+    }
+  }, 120000);
+
+  it("ORDER is pinned: validation → lookup → scope lock → row lock → organizer/captain derived → exact-caller check → host guard → NOT_PENDING → CANCELLED → first write; and 'not found' is gone", async () => {
+    const db = await connectRaw();
+    try {
+      const def = await functionDefinition(db, DECIDE_SIG);
+      const at = (needle: string | RegExp) => (typeof needle === "string" ? def.indexOf(needle) : def.search(needle));
+      const order = {
+        validation: at("INVALID_DECISION"),
+        lock: at("pg_advisory_xact_lock(hashtext('competition_scope:'"),
+        rowLock: at("for update"),
+        organizerLookup: at("select competitions.organizer_gaming_member_id"),
+        captainLookup: at("select competition_teams.captain_gaming_member_id"),
+        organizerCheck: at("p_deciding_gaming_member_id is distinct from v_organizer_id"),
+        hostGuard: at("assert_competition_not_host_revoked(v_competition_id)"),
+        captainCheck: at("p_deciding_gaming_member_id is distinct from v_captain_id"),
+        notPending: at("JOIN_REQUEST_NOT_PENDING"),
+        cancelled: at("COMPETITION_CANCELLED"),
+        firstWrite: at(/\n\s*update competition_join_requests/),
+      };
+      for (const [name, i] of Object.entries(order)) expect(i, name).toBeGreaterThan(-1);
+      const values = Object.values(order);
+      expect(values, JSON.stringify(order)).toEqual([...values].sort((a, b) => a - b));
+      expect(def, "a request that does not exist is now a denial, never 'not found'").not.toContain("JOIN_REQUEST_NOT_FOUND");
+      expect((def.match(/COMPETITION_ACCESS_DENIED: only the organizer may override a join-request decision/g) ?? []).length).toBe(3); // the check plus the two missing-request paths
+      expect((def.match(/NOT_TEAM_CAPTAIN: only this team''s own captain may decide this request/g) ?? []).length).toBe(3);
+    } finally {
+      await db.end();
+    }
+  }, 30000);
+
+  it("[negative control] with the lifecycle checks put back IN FRONT of the authorization, the previous disclosure returns: a stranger is told a request is decided, and that its competition is cancelled", async () => {
+    const decided = cases[1];
+    const cancelled = cases[3];
+    const db = await connectRaw();
+    try {
+      const call = (id: string) => db.query("select * from decide_join_request_atomically($1, $2, 'APPROVE', true)", [id, outsider]);
+      for (const c of [decided, cancelled]) await expect(call(c.requestId)).rejects.toThrow(DENIED); // the real function refuses both with the bounded denial
+      await db.query("begin");
+      await mutate(db, DECIDE_SIG, lifecycleBeforeAuthorization);
+      await db.query("savepoint probe");
+      await expect(call(decided.requestId)).rejects.toThrow(NOT_PENDING); // disclosed: "already decided"
+      await db.query("rollback to savepoint probe");
+      await expect(call(cancelled.requestId)).rejects.toThrow(/COMPETITION_CANCELLED/); // disclosed: "its competition has been cancelled"
+      await db.query("rollback to savepoint probe");
+      await db.query("rollback");
+      for (const c of [decided, cancelled]) await expect(call(c.requestId)).rejects.toThrow(DENIED); // restored
+    } finally {
+      await db.query("rollback").catch(() => {});
+      await db.end();
+    }
+  }, 120000);
+
+  it("[negative control] with 'not found' put back for a missing request, a stranger can tell an id that exists from one that does not", async () => {
+    const db = await connectRaw();
+    try {
+      const missing = randomUUID();
+      const call = (id: string, override: boolean) => db.query("select * from decide_join_request_atomically($1, $2, 'APPROVE', $3)", [id, outsider, override]);
+      await expect(call(missing, true)).rejects.toThrow(DENIED);
+      await db.query("begin");
+      await mutate(db, DECIDE_SIG, notFoundForMissing);
+      await db.query("savepoint probe");
+      await expect(call(missing, true)).rejects.toThrow(/JOIN_REQUEST_NOT_FOUND/); // disclosed: "this id does not exist"
+      await db.query("rollback to savepoint probe");
+      await expect(call(cases[0].requestId, true)).rejects.toThrow(DENIED); // an existing id still says "denied": the two now differ
+      await db.query("rollback");
+      await expect(call(missing, true)).rejects.toThrow(DENIED);
+    } finally {
+      await db.query("rollback").catch(() => {});
+      await db.end();
+    }
+  }, 120000);
 });
 
 // =============================================================================================================================

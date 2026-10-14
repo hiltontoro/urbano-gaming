@@ -1183,6 +1183,75 @@ describe("Competitions API routes — client-supplied field rejection and malfor
     });
   });
 
+  describe("UG-CR-GATE-092 — the join-request decide route derives the caller ONLY from the authenticated session", () => {
+    const ROUTE = "../app/api/gaming/competitions/join-requests/[joinRequestId]/decide/route";
+    const decided = { competitionJoinRequestId: "jr-1", status: "APPROVED", decidedAt: "2026-01-01T00:00:00Z", competitionTeamMembershipId: null };
+
+    it("never forwards a client-supplied actor, competition or team: the deciding member is always the one requireGamingMember resolved", async () => {
+      const { POST } = await import(ROUTE);
+      (repo.decideJoinRequest as ReturnType<typeof vi.fn>).mockResolvedValue(decided);
+      const res = await POST(
+        jsonRequest("POST", {
+          decision: "APPROVE", isOrganizerOverride: false,
+          decidingGamingMemberId: "attacker-supplied-id", gamingMemberId: "attacker-supplied-id", memberId: "attacker-supplied-id", actor: "attacker-supplied-id",
+          captainGamingMemberId: "attacker-supplied-id", organizerGamingMemberId: "attacker-supplied-id", competitionId: "another-competition", competitionTeamId: "another-team",
+        }),
+        { params: { joinRequestId: "jr-1" } }
+      );
+      expect(res.status).toBe(200);
+      expect(repo.decideJoinRequest).toHaveBeenCalledTimes(1);
+      expect(repo.decideJoinRequest).toHaveBeenCalledWith("jr-1", "auth-derived-member", "APPROVE", false);
+    });
+
+    it("forwards the organizer-override CLAIM only as the strict boolean true — a string, number or object is not a claim (and the database re-verifies it either way)", async () => {
+      const { POST } = await import(ROUTE);
+      (repo.decideJoinRequest as ReturnType<typeof vi.fn>).mockResolvedValue(decided);
+      for (const claim of ["true", 1, {}, [], null, undefined, "yes"]) {
+        vi.mocked(repo.decideJoinRequest).mockClear();
+        await POST(jsonRequest("POST", { decision: "REJECT", isOrganizerOverride: claim }), { params: { joinRequestId: "jr-1" } });
+        expect(repo.decideJoinRequest).toHaveBeenCalledWith("jr-1", "auth-derived-member", "REJECT", false);
+      }
+      vi.mocked(repo.decideJoinRequest).mockClear();
+      await POST(jsonRequest("POST", { decision: "REJECT", isOrganizerOverride: true }), { params: { joinRequestId: "jr-1" } });
+      expect(repo.decideJoinRequest).toHaveBeenCalledWith("jr-1", "auth-derived-member", "REJECT", true);
+    });
+
+    it("an unauthorized caller gets a 403 carrying exactly the repository's bounded denial — the route adds nothing about the request, in either branch", async () => {
+      const { POST } = await import(ROUTE);
+      const cases: Array<[Error, string]> = [
+        [new NotTeamCaptainError("NOT_TEAM_CAPTAIN: only this team's own captain may decide this request"), "NOT_TEAM_CAPTAIN: only this team's own captain may decide this request"],
+        [new CompetitionAccessDeniedError("COMPETITION_ACCESS_DENIED: only the organizer may override a join-request decision"), "COMPETITION_ACCESS_DENIED: only the organizer may override a join-request decision"],
+      ];
+      for (const [error, message] of cases) {
+        (repo.decideJoinRequest as ReturnType<typeof vi.fn>).mockRejectedValue(error);
+        for (const override of [false, true]) {
+          const res = await POST(jsonRequest("POST", { decision: "APPROVE", isOrganizerOverride: override }), { params: { joinRequestId: "any-id-including-one-that-does-not-exist" } });
+          expect(res.status).toBe(403);
+          expect(await res.json()).toEqual({ error: message });
+        }
+      }
+    });
+
+    it("a malformed decision or body never reaches the repository (400), so input validation stays state-independent", async () => {
+      const { POST } = await import(ROUTE);
+      for (const body of [{}, { decision: "MAYBE" }, { decision: "approve" }, { decision: null }]) {
+        const res = await POST(jsonRequest("POST", body), { params: { joinRequestId: "jr-1" } });
+        expect(res.status).toBe(400);
+      }
+      const badJson = await POST(new Request("http://localhost/probe", { method: "POST", headers: { authorization: "Bearer token" }, body: "{not json" }), { params: { joinRequestId: "jr-1" } });
+      expect(badJson.status).toBe(400);
+      expect(repo.decideJoinRequest).not.toHaveBeenCalled();
+    });
+
+    it("the route source reads exactly `decision` and `isOrganizerOverride` from the body, and no identity from the body, query or headers", async () => {
+      const { readFileSync } = await import("node:fs");
+      const source = readFileSync("app/api/gaming/competitions/join-requests/[joinRequestId]/decide/route.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      expect(source).toMatch(/const \{ decision, isOrganizerOverride \} = body;/);
+      expect(source).toMatch(/decideJoinRequest\(repo, params\.joinRequestId, auth\.gamingMemberId, decision, isOrganizerOverride === true\)/);
+      expect(source).not.toMatch(/body\.(gamingMemberId|memberId|decidingGamingMemberId|actor|userId|authUserId|email)|searchParams\.get\(|headers\.get\(/);
+    });
+  });
+
   it("POST fixtures/[fixtureId]/disputes never forwards a client-supplied actor identity — raisedByGamingMemberId always comes from the authenticated session, never the request body (UG-CR-GATE-032)", async () => {
     const { POST } = await import("../app/api/gaming/competitions/fixtures/[fixtureId]/disputes/route");
     (repo.raiseDispute as ReturnType<typeof vi.fn>).mockResolvedValue({ competitionDisputeId: "d1", raisedAt: "2026-01-01T00:00:00Z" });
