@@ -276,7 +276,10 @@ describe("inventory: both functions, every active signature, before and after", 
     }
   }, 30000);
 
-  it("NO function in the whole public schema compares a caller to a stored authority with a bare <> or != any more (every such comparison is IS DISTINCT FROM)", async () => {
+  // Scope, stated exactly: every function in schema `public`, but ONLY the PARAMETER-FIRST order `p_..gaming_member_id <> v_..` (or `!=`).
+  // The order `v_.. <> p_..gaming_member_id` is not matched here; the both-order scan, with its coverage stated and self-tested, is in
+  // nullSafeOrganizerAuthorizationSupabase.contract.test.ts (GATE-094). An earlier title claimed more than this query covers.
+  it("no function in schema `public` has the PARAMETER-FIRST bare form `p_..gaming_member_id <> v_..` (or `!=`); the join-request functions use IS DISTINCT FROM — the both-order scan is in the GATE-094 section of the null-safe organizer file", async () => {
     const db = await connectRaw();
     try {
       const { rows } = await db.query(`select p.proname, pg_get_functiondef(p.oid) as def from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f'`);
