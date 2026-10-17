@@ -252,3 +252,91 @@ Not staged, not committed, not pushed, not deployed, per instruction — left fo
 **Final regression, re-run after production proving:** 641/641 behavioral, 144/144 contract, `tsc --noEmit` clean, `npm run build` clean.
 
 **Duel release boundary, confirmed live:** Duel remains genuinely non-playable in production — no href, no onclick, no competitor picker, no participant controls, no mechanic renderer exist anywhere in the deployed page. The backend correction from the prior Slice remains live and untouched; only the discovery card's own honesty changed.
+
+## Application Shell Convergence Slice 001 — Home and Discovery (Product Integration, 2026-10-16)
+
+**Status: local implementation only.** Not committed, not staged, not pushed, not deployed, no migration, no provider access. It awaits lane-specific Code Review and Founder acceptance. This section is evidence for the event it records; it does not authorize a Slice 002 or a release.
+
+**Governance.** URBANO Gaming — Product Integration is a bounded cross-portfolio implementation workstream governed by Canon & Sequencing. Product & Experience Design owns the frozen visual reference (baseline `bb5d1bd8`); this Slice implements it for one page and does not redefine it. Implementation was done in an isolated detached worktree created from exactly `a816e4003417e9f453bad854f64d7d7d141f4f10` (= `origin/main` = `origin/integrate/join-session` at the time), with no branch and no commit.
+
+### What changed
+
+Only `public/index.html` changed behavior. The Home is now a discovery page with this bounded structure:
+
+- Navigation: **Home, Play, Experiences, Competitions, Host** (stable anchors `#play`, `#experiences`, `#host`; Competitions is a direct link to `/competitions.html`). No Profile.
+- **Play** — Mini Games: URBANO Rutas and URBANO Towers (`Playtest`). Hosted group games: Trivia and Quiz (`Playtest`, existing destinations) and Duel, informational only ("Available inside hosted Sessions — no standalone play."; not a link, not focusable).
+- **Experiences** — Soccer Predictions (Dedicated Experience, date-independent copy), **Poker** (Dedicated Experience, `Playtest`, player-side route `/poker-table.html`), Community Voting and Level 33 (non-actionable, `Future`).
+- **Competitions** — one entry, exact visible label `Competitions`, link exactly `/competitions.html` (bare, same-origin; no query, fragment, competition-derived name/count/status/invitation/team/participant data; never `competitions-admin.html`).
+- **Host** — four distinct entries: Session Host (`/host.html`), **Poker Host** (`/host.html?experience=poker`), **Competitions** (member-facing, bare `/competitions.html`; organizer authority is named only as a separate approval through Become a Host — see the copy correction below), and Become a Host (server-controlled, see below). Venue Operations is not offered.
+- The stale hard-coded Soccer fixture (teams, venue, date/time, "Live now") is removed and not replaced with another dated or live-looking item. The horizontally scrolling carousel and the Featured block are gone with it.
+
+Not exposed or implied anywhere: Pulse, Race, Rebote, Daily, automated matchmaking, other Competition sports, persistent Gaming XP or rewards, Profile.
+
+### Become a Host (Host availability seam preserved)
+
+The seam is unchanged in substance: first paint is the closed informational card; the card becomes a link to `/become-a-host.html` only when the shared reader `public/hostAvailability.js` (unchanged) resolves `true`, i.e. HTTP 200 and a body of exactly `{"available":true}`. Pending, failed, timed-out, malformed, non-200, reader-missing and `{"available":false}` outcomes all leave it closed and non-actionable. `/become-a-host.html` appears exactly once in the markup, only inside the script; a `<noscript>` fallback renders the closed card with no link. Exactly one availability request per load, GET, credentials omitted.
+
+### Frozen assets (copied byte-for-byte; source = `URBANO Gaming Design Baseline.zip`, SHA-256 `e093b7ea9378f7c3823960c259e6027956a8e3ecd4156a3001a6bda13f06c3d9`)
+
+| Baseline entry | Repository path | SHA-256 (source = destination) | Bytes |
+| --- | --- | --- | --- |
+| `Logos/Pixel Mark Proposals/URBANO Gaming Unframed Lockup Digital Glow Proposed.svg` | `public/assets/brand/urbano-gaming-lockup-digital-glow.svg` | `fd3d54590a7486e68b4a45cc6e2856079b4a80dee4a6f533e795cf3aeb9c61c6` | 6133 |
+| `Logos/Pixel Mark Proposals/URBANO Gaming Unframed Lockup Structural Proposed.svg` | `public/assets/brand/urbano-gaming-lockup-structural.svg` | `b15b7d4e70d992b4c4e4030680e2957eb3c77e2f4f3c64376453fa85e50da2cb` | 5474 |
+| `Logos/Pixel Mark Proposals/URBANO Gaming Pixel Symbol Optical Small No Glow Proposed.svg` | `public/assets/brand/urbano-gaming-symbol-optical-small.svg` | `708a69e652701ef6396a6fc860d106a8eda9065ff17df048376924cc0e0eafa0` | 1699 |
+| `Product/Brandbook/Fonts/Montserrat Variable.ttf` | `public/assets/fonts/Montserrat-Variable.ttf` | `0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7` | 744936 |
+| `Product/Brandbook/Fonts/OFL.txt` | `public/assets/fonts/OFL.txt` | `8b7141c03fa4f8d44e6345d5d4931709290f0f67875e452e95ac1fd3a027802e` | 4400 |
+| `Product/Brandbook/Fonts/Font provenance.json` | `public/assets/fonts/PROVENANCE.json` | `2d9cb6610e6e86753d5edb81453e19f1225fbf65d3652eee71e1c928c36c19c1` | 476 |
+
+The lockups are used only through `<img>`/`<picture>` (never inlined) because the frozen SVG files carry an internal "proposed" title that must not become an accessible name. No editorial artwork PNG was copied. `public/urbano-mark.svg` is untouched and still used by the sibling pages.
+
+Brand behavior: the digital-glow lockup is the default presentation (≥ 821 px); the structural lockup is selected by `prefers-reduced-motion: reduce`; at constrained widths (≤ 820 px) the optical-small symbol plus visible `URBANO`/`GAMING` text replaces the lockup. Montserrat is served locally with a system fallback stack; no Google Fonts or other external provider, and the Home requires no external network dependency to render.
+
+### Decisions to flag for review
+
+1. **Poker destination.** The Dedicated Experience entry routes to `/poker-table.html` (the player-side surface), so it cannot be confused with Poker Host (`/host.html?experience=poker`). Review may prefer a different existing player-side route.
+2. **New wording** introduced by this Slice and not taken from a frozen artifact: the `Future` pill (Community Voting, Level 33), the `Not open yet` pill and "Host applications are not open yet." (closed Become a Host), the hero copy, and the group/section lead lines.
+3. **Leaderboards and Rewards** are no longer linked from the Home (navigation is bounded to five items). Their pages are unchanged and still reachable directly.
+4. **Brandbook 0.5 is not final.** The frozen lockups are labelled "Proposed" in their own metadata; this Slice implements them as the frozen reference without declaring them final.
+5. **Decorative arrow (copy correction).** The Host section's Competitions action label is exactly `Explore Competitions`; the arrow that every other card spells as a literal `→` is, on that card only, generated by CSS (`.exp-action-arrow::after`, empty alternative text), so the label's own text is the accepted wording while the card still looks like its three siblings. If a literal `→` in the text is preferred, it is a one-line change.
+
+### Competition copy correction (UG Code Review — Competitions: `ACCEPT_WITH_COPY_CORRECTION`, 2026-10-17)
+
+The Host section's third card — the Competition card, formerly titled `Competition Organizer` (Become a Host is fourth) — now reads exactly:
+
+- Title: `Competitions`
+- Explanatory copy: `Explore competitions as a member. Organizing a competition requires separate approval through Become a Host.`
+- Action label: `Explore Competitions`
+- Destination: `/competitions.html` (bare, same-origin; the card is the only anchor)
+
+The card no longer implies that the current member holds organizer authority, and it does not claim Become a Host is open (it names Become a Host in words only and never links to it). The other two Competitions links — the navigation item and the Competitions section card — are unchanged. The four Host concepts stay apart: Session Host, Poker Host, the member-facing Competitions entry (organizer authority being the separate approval it points at), and the server-controlled Become a Host application. No Competition behavior, Become a Host behavior or Poker route changed.
+
+Test changes (no existing assertion weakened): titles, entry fixtures and counts in `homeDiscovery.test.ts` and `hostAvailability.test.ts` now expect `Competitions`; one existing assertion had to be adapted because the accepted copy deliberately names Become a Host — `hostAvailability.test.ts` formerly forbade the word `become` anywhere in that entry's text, and now tolerates it only inside the exact accepted sentence (any other `become` in the card still fails) while also requiring the exact copy and action label, no nested anchor, and no `organizer`, `admin`, `console`, `apply` or `invitation` text. A new block in `homeDiscovery.test.ts` pins the exact title, copy, action and destination, and carries 16 in-suite negative controls plus a runtime control, each a copy of the shipped page with one defect: the title `Competition Organizer`; organizer-authority copy (two variants); the previous copy and action label; a copy claiming Become a Host is open; a copy carrying Competition context; a direct admin destination; a direct organizer-console destination; a query string (`?c=&t=`); a fragment; falling through to the application page; an application link added inside the card; an admin link elsewhere in the Host section; the navigation link gaining a query; the section card gaining a fragment; and a closed Become a Host entry that carries the application href.
+
+Mutation check on the real page (both Home and Host suites run against each mutated copy of `public/index.html`, restored byte-identical afterwards): all 13 mutations were rejected — the title `Competition Organizer`; two organizer-authority copies; a direct admin destination; `?c=&t=`; a fragment; fall-through to the application page; Competition context in the copy; a closed entry carrying the application href; first paint opening Become a Host; the old action label; the navigation link gaining a query; the section card gaining a fragment.
+
+### Tests
+
+- New `__tests__/homeDiscovery.test.ts` (76 tests after the copy correction; registered in the explicit `npm test` list): document structure and landmarks, heading hierarchy, skip link, exact navigation and anchors, closed same-origin link inventory, the full Competitions contract, Poker vs Poker Host separation, status truthfulness (Duel informational; Rutas/Towers `Playtest`; Voting/Level 33 non-actionable), absence of Pulse/Race/Rebote/Daily/matchmaking/XP/Profile/other sports, stale fixture removed, no external host or font provider, local asset paths and frozen-hash verification, brand lockup selection, focus-visible and reduced-motion provisions, 44 px targets, palette and contrast (computed), and responsive document structure (including the pill-wrap fix found in the browser pass) and the Host section's Competitions card contract with its negative controls (above).
+- `__tests__/hostAvailability.test.ts` extended (38 → 41 tests): locator re-anchored to `#host-entries .exp-card`, open/closed assertions re-pointed at the four-entry Host list, and the old "rest of the landing page unchanged" test replaced by four tests (four distinct entries; plain entries identical across readiness states; the Host section's Competitions entry is a bare link with the exact accepted copy and the only application link is Become a Host's; no Venue Operations and four distinct explanations). All negative controls (mutated page and reader), fail-closed cases and the 320 px header CSS pins are retained and pass; only control 1's mutation anchor and the locators and script regexes were re-pointed at the new Host markup, while controls 2–6, the other negative controls and the CSS pin tests are untouched.
+- The Home tests were mutation-checked twice. First pass: six deliberate defects (Competitions link gaining a query, Duel becoming a link, an external font import, Pulse appearing, Rutas labelled Available, focus ring removed) each failed the suite. Second pass (copy correction): the 13 mutations listed above.
+
+### Verification (local, clean environment — no `.env.local`, no provider variables)
+
+- `npm test`: 42 files, 1706 tests passed (baseline before this Slice: 41 files, 1627 tests; the 1683 recorded before the copy correction became 1706 with its 23 new Home tests). `npx tsc --noEmit`: clean. `npm run build`: clean.
+- Real-browser validation against a production build served locally: no horizontal overflow at 320, 360, 390, 768 and 1280 px, and at a 195 CSS px viewport (a viewport simulation, **not** browser zoom — see Zoom below); keyboard-only traversal covers 19 focus stops in DOM order starting with the skip link, every stop showing a 3 px `:focus-visible` outline; the three anchors and the skip link work; Become a Host closed (no application link) and, using only a local `BECOME_A_HOST_SCHEMA_READY=true` test control, explicitly open; all page requests same-origin; frozen assets served byte-identical.
+- A defect found by that pass and fixed in this Slice: the `Not open yet` pill (127 px) overflowed its card by 17 px and the page by 1 px at 195 CSS px. `.exp-card-top` now wraps and `.pill` is capped at its container width; pinned by a test.
+- Reduced motion: confirmed by headless Chrome with `--force-prefers-reduced-motion` (only the structural lockup is requested; the default requests only the digital-glow lockup); the animation/transition/scroll-behavior suppression is verified by static CSS assertions rather than a computed-style probe.
+
+**Zoom.** The in-app browser cannot change zoom: eight zoom-in key presses left `innerWidth` at 1024 and DPR at 2, and the only control it offers is viewport emulation. A locally installed Chrome 155 can. It was driven headless over the DevTools protocol in throwaway profiles carrying Chrome's own page-zoom preference, with every non-localhost name lookup blocked. Desktop Chrome will not go below a 500 px window, even through its own window API, so a 390 px browser window could not be produced. Genuine results, against the corrected page: a 100% control gave `innerWidth` 500 at DPR 1; **genuine 200% zoom gave 250 CSS px at DPR 2**; genuine 256% zoom gave **195 CSS px** at DPR 2.56. At both zoom levels, with Become a Host closed and with it explicitly open (local test control): no horizontal overflow, all 19 exercised focus stops `:focus-visible` (the closed state has exactly 19 stops; the open state has 20, of which the first 19 were exercised; the ring is 3 px at 200%, and Chrome snaps it to 2.73 px at 256% to whole device pixels), the exact accepted Competitions copy, no application link while closed and one only on the server's `true`, no external resource, one availability request. **The literal item — actual 200% browser zoom in a 390 px browser window — remains an unresolved manual-validation item.** The 195 CSS px viewport simulation, and the genuine 256% zoom that yields the same 195 CSS px layout width, are stress evidence, not a substitute for it.
+
+### Files changed (Application Shell Convergence Slice 001)
+
+`public/index.html`, `__tests__/hostAvailability.test.ts`, `package.json` (one entry appended to the `test` script), `APPLICATION_SHELL_IMPLEMENTATION_RECORD.md` (this section), `__tests__/homeDiscovery.test.ts`, and the six asset files above. Nothing else.
+
+### Remaining gaps
+
+- Competitions: the destination page, its invitation handling and its API are unchanged and unreviewed here; the Home links to the bare page only.
+- Production behavior, deployment and the real sign-in flow were not exercised (provider-free by design; the shared sign-in script reports a configuration error in that environment and the Home still renders).
+- Become a Host remains closed in Production; activation is a separate Founder gate.
+- Actual 200% browser zoom at a 390 px browser window: unresolved, manual validation required (see Zoom).
+- Real-device and screen-reader testing were not performed.

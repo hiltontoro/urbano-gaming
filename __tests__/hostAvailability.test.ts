@@ -111,10 +111,12 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
   });
   const win = dom.window as unknown as Window & Record<string, any>;
   const doc = win.document;
-  const card = () => Array.from(doc.querySelectorAll("#experiences-carousel .exp-card")).find((c) => (c.querySelector("h3")?.textContent ?? "") === "Become a Host") as HTMLElement | undefined;
+  const card = () => Array.from(doc.querySelectorAll("#host-entries .exp-card")).find((c) => (c.querySelector("h3")?.textContent ?? "") === "Become a Host") as HTMLElement | undefined;
+  /** The four Host entries in document order: [title, tag, href]. Used to prove the three plain links never depend on readiness. */
+  const hostEntries = () => Array.from(doc.querySelectorAll("#host-entries .exp-card")).map((c) => [c.querySelector("h3")?.textContent ?? "", c.tagName, c.getAttribute("href")] as const);
   const settle = async (ms = 60) => { await new Promise((r) => setTimeout(r, ms)); };
   return {
-    win, doc, calls, card, settle,
+    win, doc, calls, card, hostEntries, settle,
     markup: () => { const c = doc.body.cloneNode(true) as HTMLElement; c.querySelectorAll("script").forEach((s) => s.remove()); return c.innerHTML; },
     /** Rendered text only: the page's own script source is not content. */
     text: () => { const c = doc.body.cloneNode(true) as HTMLElement; c.querySelectorAll("script").forEach((x) => x.remove()); return (c.textContent ?? "").replace(/\s+/g, " "); },
@@ -301,14 +303,14 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     await page.settle();
     const card = page.card();
     expectOpenCard(card);
-    // Usable: a real anchor, focusable, with the application page as its destination, in the same carousel as before.
+    // Usable: a real anchor, focusable, with the application page as its destination, inside the Host section.
     expect((card as HTMLAnchorElement).href).toBe(`http://localhost${BECOME_A_HOST_PAGE}`);
     expect(card!.getAttribute("tabindex")).not.toBe("-1");
-    expect(card!.closest("#experiences-carousel")).toBeTruthy();
+    expect(card!.closest("#host-entries")).toBeTruthy();
     expect(page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`).length).toBe(1);
-    // The sibling cards are untouched.
-    const titles = Array.from(page.doc.querySelectorAll("#experiences-carousel h3")).map((h) => h.textContent);
-    expect(titles).toEqual(["Become a Host", "Community Voting", "Level 33"]);
+    // The sibling Host entries are untouched.
+    const titles = Array.from(page.doc.querySelectorAll("#host-entries h3")).map((h) => h.textContent);
+    expect(titles).toEqual(["Session Host", "Poker Host", "Competitions", "Become a Host"]);
   });
 
   it("[8] the readiness answer is acted on only once: after it resolves open the card is open, and an unrelated later event cannot make a closed card open", async () => {
@@ -438,18 +440,73 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     // Nothing hardcodes "open", reads storage or the URL to decide, or infers readiness from anything else.
     const script = INDEX_HTML.slice(INDEX_HTML.indexOf("const HOST_ENTRY_CLOSED"), INDEX_HTML.indexOf("</script>", INDEX_HTML.indexOf("const HOST_ENTRY_CLOSED")));
     expect(script).not.toMatch(/localStorage|sessionStorage|location\.(search|hash|href)|URLSearchParams|document\.cookie|NEXT_PUBLIC|hostOpen\s*=\s*true|=\s*true;\s*\/\/\s*open/);
-    expect(script).toMatch(/experiencesCatalog\(false\)/); // first paint is always the closed card
-    expect(script).toMatch(/if \(open === true\) renderCatalog\(experiencesCatalog\(true\)/);
+    expect(script).toMatch(/renderHostEntry\(false\)/); // first paint is always the closed card
+    expect(script).toMatch(/if \(open === true\) renderHostEntry\(true\)/);
   });
 
-  it("the rest of the landing page is unchanged: the skill-game cards and the other experience cards render exactly as before", async () => {
+  const HOST_ENTRIES_PLAIN = [
+    ["Session Host", "A", "/host.html"],
+    ["Poker Host", "A", "/host.html?experience=poker"],
+    ["Competitions", "A", "/competitions.html"],
+  ] as const;
+
+  // Accepted by UG Code Review — Competitions (ACCEPT_WITH_COPY_CORRECTION). The Host-area entry is a member-facing Competitions link;
+  // organizer authority is a separate approval that this card only points at, in words.
+  const HOST_COMPETITIONS_COPY = "Explore competitions as a member. Organizing a competition requires separate approval through Become a Host.";
+
+  it("the Host section has four distinct entries, and while closed only Become a Host is informational", async () => {
     const page = await loadLanding(() => "reject");
     await page.settle(30);
-    const games = Array.from(page.doc.querySelectorAll("#games-carousel h3")).map((h) => h.textContent);
-    expect(games).toEqual(["Trivia", "Quiz", "Poker", "Duel"]);
-    const experiences = Array.from(page.doc.querySelectorAll("#experiences-carousel h3")).map((h) => h.textContent);
-    expect(experiences).toEqual(["Become a Host", "Community Voting", "Level 33"]);
-    expect(page.doc.querySelectorAll("#experiences-carousel .exp-card.is-locked").length).toBe(3); // all three informational while closed
+    expect(page.hostEntries()).toEqual([...HOST_ENTRIES_PLAIN, ["Become a Host", "DIV", null]]);
+    expect(page.doc.querySelectorAll("#host-entries .exp-card.is-locked").length).toBe(1);
+    expect(page.doc.querySelectorAll("#host-entries .exp-card.is-actionable").length).toBe(3);
+  });
+
+  it("the three plain Host entries are identical in every readiness state — closed, open, failed, never answering and reader missing — only Become a Host changes", async () => {
+    const states: Array<[string, Reply, { readerSource?: string | null } | undefined, boolean]> = [
+      ["closed", { status: 200, json: { available: false } }, undefined, false],
+      ["open", { status: 200, json: { available: true } }, undefined, true],
+      ["failed", "reject", undefined, false],
+      ["malformed", { status: 200, json: { available: "true" } }, undefined, false],
+      ["reader missing", { status: 200, json: { available: true } }, { readerSource: null }, false],
+    ];
+    for (const [label, reply, opts, expectOpen] of states) {
+      const page = await loadLanding(() => reply, opts);
+      await page.settle(40);
+      const entries = page.hostEntries();
+      expect(entries.slice(0, 3), label).toEqual([...HOST_ENTRIES_PLAIN]);
+      expect(entries[3], label).toEqual(expectOpen ? ["Become a Host", "A", BECOME_A_HOST_PAGE] : ["Become a Host", "DIV", null]);
+      page.win.close();
+    }
+  });
+
+  it("the Host section's Competitions entry points only at the bare Competitions page — never an organizer console, a specific competition or the application", async () => {
+    for (const flag of [undefined, "true"]) {
+      if (flag === undefined) delete process.env[HOST_FLAG];
+      else process.env[HOST_FLAG] = flag;
+      const page = await loadLanding(realRouteReply);
+      await page.settle();
+      const organizer = Array.from(page.doc.querySelectorAll("#host-entries .exp-card")).find((c) => c.querySelector("h3")?.textContent === "Competitions")!;
+      expect(organizer.getAttribute("href")).toBe("/competitions.html");
+      expect(organizer.querySelector(".exp-sub")?.textContent).toBe(HOST_COMPETITIONS_COPY);
+      expect(organizer.querySelector(".exp-action")?.textContent).toBe("Explore Competitions");
+      expect(organizer.textContent).not.toMatch(/admin|console|apply|invitation|organizer/i);
+      // The one place this card may name Become a Host is the accepted sentence, in words: nowhere else, and never as a link or an action.
+      expect((organizer.textContent ?? "").replace(HOST_COMPETITIONS_COPY, "")).not.toMatch(/become/i);
+      expect(organizer.querySelectorAll("a").length).toBe(0); // the card itself is the only anchor
+      // The application link, when it exists, is the only link to the application page in the whole document.
+      const applicationLinks = page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`);
+      expect(applicationLinks.length).toBe(flag === "true" ? 1 : 0);
+      page.win.close();
+    }
+  });
+
+  it("Venue Operations is not offered, and no Host entry implies a universal Host role", async () => {
+    const page = await loadLanding(realRouteReply);
+    await page.settle();
+    expect(page.text()).not.toMatch(/venue operations/i);
+    const bodies = Array.from(page.doc.querySelectorAll("#host-entries .exp-card")).map((c) => c.querySelector("p")?.textContent ?? "");
+    expect(new Set(bodies).size).toBe(4); // four distinct explanations, not one shared blurb
   });
 });
 
@@ -475,7 +532,7 @@ describe("negative controls — removing any fail-closed protection makes the CT
   const actionable = (page: Awaited<ReturnType<typeof loadLanding>>) => page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`).length > 0;
 
   it("control 1 — first paint rendered open: the CTA is actionable while the request is still pending", async () => {
-    const page = await loadLanding(() => "hang", { html: mutated('renderCatalog(experiencesCatalog(false), "experiences-carousel");', 'renderCatalog(experiencesCatalog(true), "experiences-carousel");') });
+    const page = await loadLanding(() => "hang", { html: mutated("renderHostEntry(false);", "renderHostEntry(true);") });
     expect(actionable(page)).toBe(true); // the flash the real page prevents
   });
 

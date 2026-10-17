@@ -1,313 +1,428 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="description" content="URBANO Gaming — quick games, hosted group games, community competitions and larger experiences." />
 <title>URBANO Gaming</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
-   * URBANO Gaming Application Shell — member-facing landing page.
-   * Reuses the constitutional identity tokens and Experience Layer
-   * purple accent already established in host.html/participant.html
-   * (charcoal/gold/ivory + Montserrat, purple = the Gaming
-   * application layer, gold reserved for Recognition) rather than
-   * introducing a new visual language. See
-   * APPLICATION_SHELL_IMPLEMENTATION_RECORD.md.
+   * URBANO Gaming Application Shell — Home and Discovery (Convergence
+   * Slice 001). Presentation only: plain static HTML, no router, no
+   * framework, no external font or script. The palette is the six
+   * Gaming Brandbook colors plus alpha; Montserrat is served locally
+   * from /assets/fonts. See APPLICATION_SHELL_IMPLEMENTATION_RECORD.md.
    */
+  @font-face {
+    font-family: "Montserrat";
+    src: url("/assets/fonts/Montserrat-Variable.ttf") format("truetype");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
   :root {
     --charcoal: #0a0a0a;
-    --bg-page: #0a0a0a;
-    --bg-card: #161616;
-    --surface-2: #1c1c1c;
-    --ink: #f5f1e8;
-    --muted: #9b9689;
-    --line: #2a2a2a;
+    --surface: #1a1a1a;
+    --ivory: #f5f1e8;
+    --purple: #7c3aed;
+    --purple-2: #b57cff;
     --gold: #d4af37;
-    --gold-bg: rgba(212, 175, 55, 0.12);
-    --accent: #d4af37;
-    --primary-fill: #f5f1e8;
-    --primary-ink: #0a0a0a;
-    --exp-purple: #7c3aed;
-    --exp-purple-glow: rgba(124, 58, 237, 0.45);
-    --exp-purple-bg: rgba(124, 58, 237, 0.12);
-    --upcoming: #333333;
+    --ink: #f5f1e8;
+    --muted: rgba(245, 241, 232, 0.76);
+    --line: rgba(245, 241, 232, 0.2);
+    --line-strong: rgba(245, 241, 232, 0.45);
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg-page);
+    font-size: 16px;
+    line-height: 1.5;
+    background: var(--charcoal);
     color: var(--ink);
     margin: 0;
     padding: 0 0 60px;
   }
   a { color: inherit; text-decoration: none; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  h1, h2, h3, h4, p { margin: 0; }
 
-  /* Header — same brand markup as host.html/participant.html, so the
-     mark, wordmark, and Gaming badge read identically everywhere. */
+  /* Keyboard: one visible, high-contrast focus ring on every control. */
+  a:focus-visible, button:focus-visible {
+    outline: 3px solid var(--purple-2);
+    outline-offset: 3px;
+  }
+  .skip-link {
+    position: absolute; left: 12px; top: -120px; z-index: 2000;
+    background: var(--ivory); color: var(--charcoal); font-weight: 700; font-size: 14px;
+    padding: 12px 16px; border-radius: 8px;
+  }
+  .skip-link:focus { top: 12px; }
+
+  /* Header — the brand lockup and the existing sign-in seam. */
   .shell-header {
     display: flex; align-items: center; justify-content: space-between;
     max-width: 1080px; margin: 0 auto; padding: 20px 20px 0;
   }
-  .brand { display: inline-flex; align-items: center; gap: 10px; }
-  /* Founder visual review: the mark previously used
-     filter: drop-shadow(...) directly on the <img>. drop-shadow blurs
-     the *alpha silhouette* of the image — since urbano-mark.svg is a
-     fully opaque square (not just the U shape), that traced a crisp
-     purple-glowing rectangle around the mark, reading as an unwanted
-     box/border. Fixed by moving the glow to a separate, blurred
-     radial-gradient pseudo-element positioned behind the mark, which
-     produces a soft atmospheric halo instead of outlining the image's
-     own rectangular edge. The mark asset itself is untouched. */
-  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
-  .brand-mark-wrap::before {
-    content: ""; position: absolute; inset: -9px;
-    background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
-    filter: blur(4px); z-index: 0;
-  }
-  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
-  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
-  .brand-badge {
-    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
-    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
-    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
-  }
+  .brand { display: flex; align-items: center; min-width: 0; }
+  .brand-lockup { display: block; line-height: 0; }
+  .brand-lockup-img { display: block; width: 320px; max-width: 100%; height: auto; }
+  .brand-compact { display: none; align-items: center; gap: 10px; min-width: 0; }
+  .brand-symbol { display: block; width: 48px; height: auto; flex: none; }
+  .brand-compact-name { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+  .brand-compact-top { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; }
+  .brand-compact-name strong { font-size: 19px; font-weight: 800; color: var(--purple-2); margin-top: 4px; }
 
+  .account { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
   .signin-btn {
     font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
     border-radius: 8px; border: 1px solid var(--ink); background: transparent;
     color: var(--ink); cursor: pointer;
-    /* UG-CR-GATE-091: it keeps its natural width (so the label is never squeezed or ellipsized at ordinary sizes), is never wider than
-       the header, and is never broken mid-word. Only an extreme display name is truncated with an ellipsis, instead of pushing the
-       page sideways. */
+    /* UG-CR-GATE-091: natural width, never wider than the header, never broken mid-word; an extreme display name is truncated. */
     white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
-  .signin-btn:hover { background: var(--surface-2); }
+  .signin-btn:hover { background: var(--surface); }
+  .account a[data-urbano-signout] { padding: 12px 6px; color: var(--muted); }
   .signin-status {
     display: none; max-width: 1080px; margin: 10px auto 0; padding: 10px 20px 0;
-    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+    font-size: 14px; color: var(--muted); line-height: 1.5;
   }
 
-  /* Primary navigation — the smallest structure that gives URBANO
-     Gaming a durable app shape: Home/Play/Experiences are anchors on
-     this one page; Leaderboards/Rewards are their own small static
-     pages. No router, no framework — plain links, matching every
-     other page in this shell. Horizontally scrollable so it never
-     wraps awkwardly on narrow phones. */
+  /* Primary navigation — bounded to five destinations. */
   .primary-nav {
-    display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
-    max-width: 1080px; margin: 16px auto 0; padding: 0 20px 2px;
+    display: flex; flex-wrap: wrap; gap: 8px;
+    max-width: 1080px; margin: 16px auto 0; padding: 0 20px;
   }
-  .primary-nav::-webkit-scrollbar { display: none; }
   .nav-link {
-    flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted);
-    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+    display: inline-flex; align-items: center; min-height: 44px;
+    font-size: 14px; font-weight: 600; color: var(--muted);
+    padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line-strong);
     white-space: nowrap;
   }
-  .nav-link.is-active { color: var(--ink); border-color: var(--ink); }
+  .nav-link:hover { color: var(--ink); border-color: var(--ink); }
+  .nav-link[aria-current="page"] { color: var(--ink); border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--purple); }
+
+  main { display: block; }
+  main:focus { outline: none; }
 
   /* Hero */
-  .hero { max-width: 1080px; margin: 0 auto; padding: 36px 20px 8px; text-align: center; }
-  .hero h1 {
-    font-size: clamp(28px, 5vw, 40px); font-weight: 800; letter-spacing: -0.01em;
-    margin: 0 0 12px;
+  .hero { max-width: 1080px; margin: 28px auto 0; padding: 0 20px; }
+  .hero-inner {
+    border: 1px solid var(--line); border-radius: 22px; padding: 34px 28px;
+    background: radial-gradient(120% 140% at 100% 0%, rgba(124, 58, 237, 0.18), transparent 60%), var(--surface);
   }
-  .hero p {
-    color: var(--muted); font-size: 15px; max-width: 560px; margin: 0 auto; line-height: 1.6;
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--purple-2); }
+  .hero h1 { font-size: 32px; line-height: 1.2; letter-spacing: -0.03em; font-weight: 700; margin-top: 6px; }
+  .hero-sub { color: var(--muted); max-width: 60ch; margin-top: 12px; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
+    font-size: 15px; font-weight: 700; padding: 10px 20px; border-radius: 10px; border: 1px solid transparent;
   }
+  .btn-primary { background: var(--ivory); color: var(--charcoal); border-color: var(--ivory); }
+  .btn-secondary { background: var(--surface); color: var(--ivory); border-color: var(--line-strong); }
+  .btn-secondary:hover { border-color: var(--purple-2); }
 
+  /* Sections */
   .section { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
-  .section-label {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700;
-    color: var(--muted); margin: 40px 0 12px;
+  .section-title { font-size: 24px; line-height: 1.25; font-weight: 700; letter-spacing: -0.018em; margin-top: 44px; }
+  .section-lead { color: var(--muted); margin-top: 6px; max-width: 70ch; }
+  .group-title { font-size: 18px; line-height: 1.3; font-weight: 700; margin-top: 24px; }
+  .group-note { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .card-grid {
+    display: grid; gap: 14px; margin-top: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
   }
-  .section-note { font-size: 12.5px; color: var(--muted); margin: 10px 0 0; }
+  .card-grid > li { display: flex; min-width: 0; }
 
-  /* Featured card */
-  .featured-card {
-    position: relative; overflow: hidden;
-    border-radius: 16px; border: 1px solid var(--exp-purple);
-    background:
-      radial-gradient(120% 140% at 100% 0%, var(--exp-purple-bg), transparent 60%),
-      var(--bg-card);
-    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.14), 0 0 30px var(--exp-purple-glow);
-    padding: 28px 24px;
-  }
-  .featured-eyebrow {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--exp-purple); margin-bottom: 4px;
-  }
-  .featured-card h2 { font-size: 24px; margin: 6px 0 0; font-weight: 800; }
-
-  /* Match module — structured as a single-item horizontal track so a
-     second/third upcoming fixture can be appended later without
-     redesigning this section. Only one verified fixture exists today;
-     no slide controls are built since there's nothing yet to navigate
-     between. Original URBANO treatment (typography + gradients +
-     a subtle repeating diagonal texture evoking stadium light) —
-     deliberately no crests, no broadcast graphics, no third-party
-     marks; team names appear as plain text only. */
-  .match-track {
-    display: flex; gap: 14px; overflow-x: auto; -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory; margin: 16px 0 6px; padding-bottom: 2px;
-  }
-  .match-track::-webkit-scrollbar { display: none; }
-  .match-slide {
-    flex: 0 0 100%; scroll-snap-align: start;
-    border-radius: 14px; border: 1px solid rgba(124, 58, 237, 0.35);
-    background:
-      linear-gradient(135deg, rgba(124,58,237,0.18) 0%, transparent 55%),
-      repeating-linear-gradient(135deg, rgba(255,255,255,0.025) 0 2px, transparent 2px 16px),
-      var(--surface-2);
-    padding: 22px 20px;
-  }
-  .match-teams {
-    display: flex; align-items: center; justify-content: center; gap: 14px;
-    font-size: 21px; font-weight: 800; margin: 0 0 14px; flex-wrap: wrap; text-align: center;
-  }
-  .match-vs {
-    font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-  .match-meta {
-    display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center;
-    font-size: 12.5px; color: var(--muted);
-  }
-  .featured-note { color: var(--muted); font-size: 13.5px; margin: 16px 0 20px; }
-  .featured-cta {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--primary-fill); color: var(--primary-ink);
-    font-weight: 700; font-size: 14px; padding: 11px 20px; border-radius: 999px;
-  }
-
-  /* Explore carousels (Skill Games, Experiences) */
-  .carousel {
-    display: flex; gap: 14px; overflow-x: auto; padding: 4px 20px 14px;
-    margin: 0 -20px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
-  }
-  .carousel::-webkit-scrollbar { height: 6px; }
-  .carousel::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
-
+  /* Cards */
   .exp-card {
-    flex: 0 0 auto; width: 230px; scroll-snap-align: start;
-    border: 1px solid var(--line); border-radius: 14px; background: var(--bg-card);
-    padding: 18px 16px; display: flex; flex-direction: column; gap: 10px;
-    min-height: 168px;
+    flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 168px;
+    padding: 18px 16px; border-radius: 16px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink);
   }
-  .exp-card.is-actionable { cursor: pointer; }
-  .exp-card.is-actionable:active { background: var(--surface-2); }
-  .exp-card.is-locked { opacity: 0.55; cursor: default; }
+  .exp-card.tone-route { background: linear-gradient(145deg, rgba(79, 134, 255, 0.22), rgba(79, 134, 255, 0.06) 58%, transparent), var(--surface); }
+  .exp-card.tone-tower { background: linear-gradient(145deg, rgba(193, 139, 73, 0.24), rgba(193, 139, 73, 0.06) 58%, transparent), var(--surface); }
+  .exp-card.is-actionable { border-color: var(--line-strong); cursor: pointer; }
+  .exp-card.is-actionable:hover { border-color: var(--purple-2); }
+  .exp-card.is-locked { border-style: dashed; border-color: var(--line-strong); }
+  .exp-card-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .exp-icon { width: 28px; height: 28px; flex: none; color: var(--purple-2); }
+  .kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--purple-2); }
+  .exp-title { font-size: 18px; line-height: 1.3; font-weight: 700; overflow-wrap: break-word; }
+  .exp-sub { font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .exp-note { font-size: 14px; line-height: 1.5; color: var(--ink); font-weight: 600; }
+  .exp-action { font-size: 14px; font-weight: 700; color: var(--ink); margin-top: auto; }
+  /* The shared decorative arrow, generated by CSS so the action label's own text stays exactly its accepted wording. The second declaration marks it decorative (empty alternative text) where supported. */
+  .exp-action-arrow::after { content: " →"; content: " →" / ""; }
 
-  .status-pill {
-    align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+  .pill {
+    flex: none; max-width: 100%; overflow-wrap: anywhere; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor;
   }
-  .status-featured { background: var(--exp-purple-bg); color: var(--exp-purple); border: 1px solid var(--exp-purple); }
-  .status-playtest { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
-  .status-building { background: rgba(245,241,232,0.05); color: var(--ink); border: 1px dashed var(--ink); }
-  .status-soon { background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--line); }
-
-  /* Icon + status pill share the card's top row so the semantic emoji
-     (Founder direction: lightweight v1 icon layer, not a Brand asset)
-     reads immediately without competing with the title below it. */
-  .exp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .exp-icon { font-size: 20px; line-height: 1; }
-
-  .exp-card h3 { font-size: 16px; margin: 0; font-weight: 700; }
-  .exp-card .exp-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; flex: 1; }
-  .exp-card .exp-action { font-size: 12px; font-weight: 700; color: var(--ink); margin-top: auto; }
-  .exp-card.is-locked .exp-action { color: var(--muted); font-weight: 600; }
+  .pill-playtest { color: var(--ivory); }
+  .pill-future { color: var(--purple-2); border-style: dashed; }
 
   footer {
     max-width: 1080px; margin: 48px auto 0; padding: 20px; text-align: center;
-    color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 14px; border-top: 1px solid var(--line);
+  }
+
+  @media (max-width: 820px) {
+    .brand-lockup { display: none; }
+    .brand-compact { display: inline-flex; }
   }
 
   @media (max-width: 640px) {
     .shell-header { padding: 16px 16px 0; }
-    .brand-word { font-size: 15px; }
     .signin-btn { font-size: 12px; padding: 9px 12px; min-height: 44px; }
-    .primary-nav { padding: 0 16px 2px; }
-    .hero { padding: 28px 16px 4px; }
+    .signin-status { padding-left: 16px; padding-right: 16px; }
+    .primary-nav { padding: 0 16px; }
+    .hero { padding: 0 16px; }
+    .hero-inner { padding: 26px 20px; }
     .section { padding: 0 16px; }
-    .carousel { padding: 4px 16px 14px; margin: 0 -16px; }
-    .featured-card { padding: 22px 18px; }
-    .featured-card h2 { font-size: 20px; }
-    .match-slide { padding: 18px 16px; }
-    .match-teams { font-size: 18px; }
+    footer { padding: 20px 16px; }
   }
 
-  /* UG-CR-GATE-091 (320 px header). The wordmark, the Gaming badge and "Sign in with URBANO" need about 344 px side by side. At 375 px
-     and wider that fits (this layout is unchanged); below 375 px it does not, and the unwrapped header pushed the whole page about
-     39 px sideways at 320 px. Below 375 px the header may therefore wrap, so the sign-in control drops onto its own row instead of
-     overflowing. The control keeps its label on one line (never broken mid-word) and its 44 px touch target. */
+  @media (max-width: 560px) {
+    .hero h1 { font-size: 28px; line-height: 1.2; }
+    .hero-actions .btn { flex: 1 1 100%; }
+  }
+
+  /* UG-CR-GATE-091 (320 px header). Below 375 px the brand and the sign-in control cannot share a row; the header may wrap so the control drops onto its own row instead of overflowing. */
   @media (max-width: 374px) {
     .shell-header { flex-wrap: wrap; row-gap: 8px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+    .exp-card, .btn, .nav-link, .signin-btn { transition: border-color 0.12s ease, background-color 0.12s ease; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 </style>
 </head>
 <body>
 
-<div class="shell-header">
-  <div class="brand">
-    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
-    <span class="brand-word">URBANO</span>
-    <span class="brand-badge">Gaming</span>
-  </div>
-  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
-</div>
-<p class="signin-status" id="signin-status"></p>
+<a class="skip-link" href="#main">Skip to main content</a>
 
-<nav class="primary-nav">
-  <a class="nav-link is-active" href="/">Home</a>
-  <a class="nav-link" href="/#play">Play</a>
-  <a class="nav-link" href="/#experiences">Experiences</a>
-  <a class="nav-link" href="/leaderboards.html">Leaderboards</a>
-  <a class="nav-link" href="/rewards.html">Rewards</a>
+<header class="shell-header">
+  <div class="brand">
+    <picture class="brand-lockup">
+      <source media="(prefers-reduced-motion: reduce)" srcset="/assets/brand/urbano-gaming-lockup-structural.svg" />
+      <img class="brand-lockup-img" src="/assets/brand/urbano-gaming-lockup-digital-glow.svg" alt="URBANO Gaming" width="320" height="149" />
+    </picture>
+    <span class="brand-compact">
+      <img class="brand-symbol" src="/assets/brand/urbano-gaming-symbol-optical-small.svg" alt="" width="48" height="51" />
+      <span class="brand-compact-name"><span class="brand-compact-top">URBANO</span><strong>GAMING</strong></span>
+    </span>
+  </div>
+  <div class="account">
+    <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
+  </div>
+</header>
+<p class="signin-status" id="signin-status" role="status"></p>
+
+<nav class="primary-nav" aria-label="Primary">
+  <a class="nav-link" href="/" aria-current="page">Home</a>
+  <a class="nav-link" href="#play">Play</a>
+  <a class="nav-link" href="#experiences">Experiences</a>
+  <a class="nav-link" href="/competitions.html">Competitions</a>
+  <a class="nav-link" href="#host">Host</a>
 </nav>
 
-<div class="hero">
-  <h1>Play, predict, and compete with your community.</h1>
-  <p>Trivia, predictions, competitive minigames, and live experiences — built for playing together.</p>
-</div>
+<main id="main" tabindex="-1">
 
-<div class="section">
-  <div class="section-label">Featured</div>
-  <div class="featured-card">
-    <div class="featured-eyebrow">⚽ Featured Match</div>
-    <h2>Soccer Predictions</h2>
-    <div class="match-track">
-      <div class="match-slide">
-        <div class="match-teams">
-          <span>Espanyol</span>
-          <span class="match-vs">vs</span>
-          <span>Real Madrid</span>
-        </div>
-        <div class="match-meta">
-          <span>LaLiga · Sat, Aug 22</span>
-          <span>RCDE Stadium</span>
-          <span>1:30 PM · Tegucigalpa</span>
-        </div>
-      </div>
+<section class="hero" aria-labelledby="home-title">
+  <div class="hero-inner">
+    <p class="eyebrow">Your play space</p>
+    <h1 id="home-title">What do you want to play?</h1>
+    <p class="hero-sub">Quick games, hosted group games, community competitions and larger experiences — each one labeled for what it is today.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/participant.html">Join with code</a>
+      <a class="btn btn-secondary" href="#host">Explore hosting</a>
     </div>
-    <p class="featured-note">Live now — sign in with URBANO to make your prediction.</p>
-    <a class="featured-cta" href="/soccer-predictions.html">Enter Soccer Predictions →</a>
   </div>
-</div>
+</section>
 
-<div class="section" id="play">
-  <div class="section-label">Skill Games</div>
-  <div class="carousel" id="games-carousel"></div>
-  <p class="section-note">More competitive games are on the way.</p>
-</div>
+<section class="section" id="play" aria-labelledby="play-title">
+  <h2 class="section-title" id="play-title">Play</h2>
 
-<div class="section" id="experiences">
-  <div class="section-label">Experiences</div>
-  <div class="carousel" id="experiences-carousel"></div>
-</div>
+  <h3 class="group-title">Mini Games</h3>
+  <p class="group-note">Quick solo games, each with its own rules.</p>
+  <ul class="card-grid">
+    <li>
+      <a class="exp-card is-actionable tone-route" href="/rutas.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 4h10a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8h10M3 2h4v4H3Zm14 16h4v4h-4Z"/></svg>
+          <span class="pill pill-playtest">Playtest</span>
+        </span>
+        <h4 class="exp-title">URBANO Rutas</h4>
+        <p class="exp-sub">Slide each piece to its matching exit. Choose a scenario to begin.</p>
+        <span class="exp-action">Open →</span>
+      </a>
+    </li>
+    <li>
+      <a class="exp-card is-actionable tone-tower" href="/towers.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3h18v18H3ZM3 9h18M9 9v12"/></svg>
+          <span class="pill pill-playtest">Playtest</span>
+        </span>
+        <h4 class="exp-title">URBANO Towers</h4>
+        <p class="exp-sub">Move the whole stack to the target tower. A larger piece never rests on a smaller one.</p>
+        <span class="exp-action">Open →</span>
+      </a>
+    </li>
+  </ul>
+
+  <h3 class="group-title">Hosted group games</h3>
+  <p class="group-note">A host opens a room and everyone joins with a room code.</p>
+  <ul class="card-grid">
+    <li>
+      <a class="exp-card is-actionable" href="/trivia-playtest.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-2.5-11.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8M12 17h.01"/></svg>
+          <span class="pill pill-playtest">Playtest</span>
+        </span>
+        <h4 class="exp-title">Trivia</h4>
+        <p class="exp-sub">Host or join a live session — try the current Trivia playtest.</p>
+        <span class="exp-action">Open →</span>
+      </a>
+    </li>
+    <li>
+      <a class="exp-card is-actionable" href="/quiz-playtest.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 4H4v18h16V4h-4M8 2h8v5H8Zm0 12 3 3 5-5"/></svg>
+          <span class="pill pill-playtest">Playtest</span>
+        </span>
+        <h4 class="exp-title">Quiz</h4>
+        <p class="exp-sub">Self-paced — everyone answers on their own time, results reveal together.</p>
+        <span class="exp-action">Open →</span>
+      </a>
+    </li>
+    <li>
+      <div class="exp-card is-locked">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 3 14 14m-1-14L3 17M3 3l1 5 4-4ZM21 3l-1 5-4-4M14 17l4-4M6 13l4 4m7 0 4 4M7 17l-4 4"/></svg>
+        </span>
+        <h4 class="exp-title">Duel</h4>
+        <p class="exp-sub">Head-to-head challenges between two players.</p>
+        <p class="exp-note">Available inside hosted Sessions — no standalone play.</p>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<section class="section" id="experiences" aria-labelledby="experiences-title">
+  <h2 class="section-title" id="experiences-title">Experiences</h2>
+  <p class="section-lead">Larger experiences, each with its own lifecycle.</p>
+  <ul class="card-grid">
+    <li>
+      <a class="exp-card is-actionable" href="/soccer-predictions.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 8.2l3.4 2.5-1.3 4H9.9l-1.3-4Z"/></svg>
+        </span>
+        <span class="kicker">Dedicated Experience</span>
+        <h3 class="exp-title">Soccer Predictions</h3>
+        <p class="exp-sub">See the Soccer matches open for predictions and make yours. Sign in with URBANO to submit.</p>
+        <span class="exp-action">Open Soccer Predictions →</span>
+      </a>
+    </li>
+    <li>
+      <a class="exp-card is-actionable" href="/poker-table.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm5 5c-1.6 1.7-3 2.7-3 4.2a1.6 1.6 0 0 0 3 .8 1.6 1.6 0 0 0 3-.8C15 11.7 13.6 10.7 12 9Zm0 5v3"/></svg>
+          <span class="pill pill-playtest">Playtest</span>
+        </span>
+        <span class="kicker">Dedicated Experience</span>
+        <h3 class="exp-title">Poker</h3>
+        <p class="exp-sub">A table game with its own hands and lifecycle. Join a table with the host's room code — free chips only.</p>
+        <span class="exp-action">Join a table →</span>
+      </a>
+    </li>
+    <li>
+      <div class="exp-card is-locked">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m8 8 4 4 8-8M4 12l-2 9h20l-2-9M8 16h8"/></svg>
+          <span class="pill pill-future">Future</span>
+        </span>
+        <h3 class="exp-title">Community Voting</h3>
+        <p class="exp-sub">A future way to vote on community events. Nothing to join yet.</p>
+      </div>
+    </li>
+    <li>
+      <div class="exp-card is-locked">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3h18v18H3ZM7 7h.1m10 0h.1M12 12h.1M7 17h.1m10 0h.1"/></svg>
+          <span class="pill pill-future">Future</span>
+        </span>
+        <span class="kicker">Orchestrator Experience</span>
+        <h3 class="exp-title">Level 33</h3>
+        <p class="exp-sub">A turn-based party-board concept. Not playable or hostable.</p>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<section class="section" id="competitions" aria-labelledby="competitions-title">
+  <h2 class="section-title" id="competitions-title">Compete</h2>
+  <p class="section-lead">Community competitions organized on URBANO Gaming.</p>
+  <ul class="card-grid">
+    <li>
+      <a class="exp-card is-actionable" href="/competitions.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 3h10v7a5 5 0 0 1-10 0ZM7 5H3v3a4 4 0 0 0 4 4m10-7h4v3a4 4 0 0 1-4 4m-5 3v6m-4 0h8"/></svg>
+        </span>
+        <h3 class="exp-title">Competitions</h3>
+        <p class="exp-sub">Sign in with URBANO to see the competitions you take part in.</p>
+        <span class="exp-action">Open Competitions →</span>
+      </a>
+    </li>
+  </ul>
+</section>
+
+<section class="section" id="host" aria-labelledby="host-title">
+  <h2 class="section-title" id="host-title">Host</h2>
+  <p class="section-lead">Choose a hosting path. Access to one activity does not grant permission to operate another.</p>
+  <ul class="card-grid" id="host-entries">
+    <li>
+      <a class="exp-card is-actionable" href="/host.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3h18v13H3ZM8 21h8m-4-5v5m-4-12 4-4 4 4m-4-4v8"/></svg>
+        </span>
+        <h3 class="exp-title">Session Host</h3>
+        <p class="exp-sub">Facilitate a group Session such as Trivia, Quiz or Duel. Controls stay scoped to that Session.</p>
+        <span class="exp-action">Host a Session →</span>
+      </a>
+    </li>
+    <li>
+      <a class="exp-card is-actionable" href="/host.html?experience=poker">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm5 5c-1.6 1.7-3 2.7-3 4.2a1.6 1.6 0 0 0 3 .8 1.6 1.6 0 0 0 3-.8C15 11.7 13.6 10.7 12 9Zm0 5v3"/></svg>
+        </span>
+        <h3 class="exp-title">Poker Host</h3>
+        <p class="exp-sub">Open a table for your group. Poker has its own table and hand lifecycle, separate from a Session.</p>
+        <span class="exp-action">Host Poker →</span>
+      </a>
+    </li>
+    <li>
+      <a class="exp-card is-actionable" href="/competitions.html">
+        <span class="exp-card-top">
+          <svg class="exp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 22V3c5-4 9 4 14 0v10c-5 4-9-4-14 0"/></svg>
+        </span>
+        <h3 class="exp-title">Competitions</h3>
+        <p class="exp-sub">Explore competitions as a member. Organizing a competition requires separate approval through Become a Host.</p>
+        <span class="exp-action exp-action-arrow">Explore Competitions</span>
+      </a>
+    </li>
+    <li id="host-become"><noscript><div class="exp-card is-locked"><span class="exp-card-top"><span class="pill pill-future">Not open yet</span></span><h3 class="exp-title">Become a Host</h3><p class="exp-sub">Host applications are not open yet.</p></div></noscript></li>
+  </ul>
+</section>
+
+</main>
 
 <footer>URBANO Gaming — part of URBANO</footer>
 
@@ -319,114 +434,71 @@
     document.getElementById("signin-status")
   );
 
-  // Two separate, member-facing catalogs — Skill Games (short-form
-  // competitive play) vs. Experiences (broader social/participatory
-  // moments, including the future orchestrated Level 33). Neither is a
-  // rendering of the internal Interaction Engine Taxonomy — see
-  // APPLICATION_SHELL_IMPLEMENTATION_RECORD.md. Soccer Predictions is
-  // deliberately not duplicated into the Experiences carousel below —
-  // it's already the Featured module above, and repeating a full card
-  // for it here would be redundant, not additive.
-  const SKILL_GAMES_CATALOG = [
-    {
-      icon: "🧠",
-      title: "Trivia",
-      sub: "Host or join a live session — try the current Trivia playtest.",
-      status: "playtest",
-      href: "/trivia-playtest.html",
-    },
-    {
-      icon: "📝",
-      title: "Quiz",
-      sub: "Self-paced — everyone answers on their own time, results reveal together.",
-      status: "playtest",
-      href: "/quiz-playtest.html",
-    },
-    {
-      icon: "🃏",
-      title: "Poker",
-      sub: "Host a private No-Limit Hold'em table for your group.",
-      status: "playtest",
-      // Host Unified Entry Slice 003 §18: converges on the canonical
-      // picker shell with Poker preselected, replacing the standalone
-      // /poker-host.html entry point — that page still works
-      // indefinitely as a compatibility surface (§17/§19), it is just
-      // no longer where this card sends a Host.
-      href: "/host.html?experience=poker",
-      action: "Host →",
-    },
-    {
-      icon: "⚔️",
-      title: "Duel",
-      sub: "Head-to-head challenges between members — gameplay screen is in development.",
-      status: "building",
-    },
-  ];
-
-  // UG-CR-GATE-090: the Become a Host entry fails closed. It is NOT actionable (no link, no "Apply") until the server has said, in
-  // this page load, that applications are open. Every other outcome — the answer is still pending, the request fails or times out,
-  // the response is not exactly the expected shape, the shared reader (/hostAvailability.js) did not load, or the server says
-  // closed — leaves the card as the informational "not open yet" card below. The browser never sees or decides readiness itself:
-  // it only relays the server's bounded yes/no, read by the one reader the application page shares.
+  // UG-CR-GATE-090: the Become a Host entry fails closed. It is NOT actionable (no link, no call to apply) until the server has said,
+  // in this page load, that applications are open. Every other outcome — the answer is still pending, the request fails or times out,
+  // the response is not exactly the expected shape, the shared reader (/hostAvailability.js) did not load, or the server says closed —
+  // leaves the entry as the informational "not open yet" card below. The browser never sees or decides readiness itself: it only
+  // relays the server's bounded yes/no, read by the one reader the application page shares. The other three Host entries are plain
+  // links to their own destinations and do not depend on that answer.
   const HOST_ENTRY_CLOSED = {
     title: "Become a Host",
     sub: "Host applications are not open yet.",
-    status: "soon",
+    pill: "Not open yet",
   };
   const HOST_ENTRY_OPEN = {
     // The public entry to the Become a Host application. Anyone may read the page; applying requires an URBANO sign-in.
     title: "Become a Host",
     sub: "Apply to run a private, invite-only tournament at your venue, for adults you know.",
-    status: "playtest",
     href: "/become-a-host.html",
     action: "Apply →",
   };
+  const USER_PLUS_ICON = "M8 3a4 4 0 1 0 0 8 4 4 0 1 0 0-8M2 22v-3a6 6 0 0 1 12 0v3m5-16v8m-4-4h8";
 
-  function experiencesCatalog(hostOpen) {
-    return [
-      hostOpen === true ? HOST_ENTRY_OPEN : HOST_ENTRY_CLOSED,
-      {
-        title: "Community Voting",
-        sub: "Vote for your favorites in live moments.",
-        status: "soon",
-      },
-      {
-        title: "Level 33",
-        sub: "A new way to play together, coming to URBANO Gaming.",
-        status: "soon",
-      },
-    ];
+  function textNode(tag, className, text) {
+    const node = document.createElement(tag);
+    node.className = className;
+    node.textContent = text;
+    return node;
   }
 
-  // Status vocabulary, deliberately kept to the smallest necessary
-  // extension: "building" was added alongside the existing Featured/
-  // Playtest/Coming Soon set specifically for Duel — its backend is
-  // real and deployed (unlike Community Voting/Level 33), but no
-  // gameplay UI exists yet to open, so it cannot honestly be Playtest
-  // either. No other new status was introduced.
-  const STATUS_LABEL = { featured: "Featured", playtest: "Playtest", building: "In Development", soon: "Coming Soon" };
-  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", building: "status-building", soon: "status-soon" };
-  const NON_ACTIONABLE_STATUSES = new Set(["building", "soon"]);
-  const NON_ACTIONABLE_LABEL = { building: "In development", soon: "Coming soon" };
+  function buildCard(item) {
+    const actionable = typeof item.href === "string";
+    const card = document.createElement(actionable ? "a" : "div");
+    card.className = "exp-card " + (actionable ? "is-actionable" : "is-locked");
+    if (actionable) card.setAttribute("href", item.href);
 
-  function renderCatalog(items, targetId) {
-    const el = document.getElementById(targetId);
-    el.innerHTML = items.map((item) => {
-      const locked = NON_ACTIONABLE_STATUSES.has(item.status);
-      const tag = locked ? "div" : "a";
-      const hrefAttr = locked ? "" : ` href="${item.href}"`;
-      const iconMarkup = item.icon ? `<span class="exp-icon">${item.icon}</span>` : "<span></span>";
-      const actionText = locked ? NON_ACTIONABLE_LABEL[item.status] : (item.action || "Open →");
-      return `<${tag} class="exp-card ${locked ? "is-locked" : "is-actionable"}"${hrefAttr}>
-        <div class="exp-card-top">
-          ${iconMarkup}
-          <span class="status-pill ${STATUS_CLASS[item.status]}">${STATUS_LABEL[item.status]}</span>
-        </div>
-        <h3>${item.title}</h3>
-        <p class="exp-sub">${item.sub}</p>
-        <span class="exp-action">${actionText}</span>
-      </${tag}>`;
-    }).join("");
+    const top = document.createElement("span");
+    top.className = "exp-card-top";
+    const svgNs = "http://www.w3.org/2000/svg";
+    const icon = document.createElementNS(svgNs, "svg");
+    icon.setAttribute("class", "exp-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("fill", "none");
+    icon.setAttribute("stroke", "currentColor");
+    icon.setAttribute("stroke-width", "1.8");
+    icon.setAttribute("stroke-linecap", "round");
+    icon.setAttribute("stroke-linejoin", "round");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS(svgNs, "path");
+    path.setAttribute("d", USER_PLUS_ICON);
+    icon.appendChild(path);
+    top.appendChild(icon);
+    if (item.pill) top.appendChild(textNode("span", "pill pill-future", item.pill));
+    card.appendChild(top);
+
+    card.appendChild(textNode("h3", "exp-title", item.title));
+    card.appendChild(textNode("p", "exp-sub", item.sub));
+    if (actionable) card.appendChild(textNode("span", "exp-action", item.action));
+    return card;
+  }
+
+  function hostEntry(hostOpen) {
+    return hostOpen === true ? HOST_ENTRY_OPEN : HOST_ENTRY_CLOSED;
+  }
+
+  function renderHostEntry(hostOpen) {
+    document.getElementById("host-become").replaceChildren(buildCard(hostEntry(hostOpen)));
   }
 
   // True only when the shared reader says the server answered exactly { "available": true }. If the reader itself is missing
@@ -436,11 +508,10 @@
     return reader && typeof reader.resolve === "function" ? reader.resolve() : Promise.resolve(false);
   }
 
-  renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
-  // First paint is always the closed card, so an actionable Become a Host card can never flash before readiness is known.
-  renderCatalog(experiencesCatalog(false), "experiences-carousel");
+  // First paint is always the closed card, so an actionable Become a Host entry can never flash before readiness is known.
+  renderHostEntry(false);
   resolveHostAvailability().then((open) => {
-    if (open === true) renderCatalog(experiencesCatalog(true), "experiences-carousel");
+    if (open === true) renderHostEntry(true);
   });
 </script>
 
