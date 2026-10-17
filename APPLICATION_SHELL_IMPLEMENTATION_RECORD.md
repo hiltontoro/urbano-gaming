@@ -255,9 +255,11 @@ Not staged, not committed, not pushed, not deployed, per instruction — left fo
 
 ## Application Shell Convergence Slice 001 — Home and Discovery (Product Integration, 2026-10-16)
 
-**Status: local implementation only.** Not committed, not staged, not pushed, not deployed, no migration, no provider access. It awaits lane-specific Code Review and Founder acceptance. This section is evidence for the event it records; it does not authorize a Slice 002 or a release.
+**Status (current source-control state): committed locally on a feature branch; not pushed.** The implementation is committed locally as `22902772d3d58d53433dc2d125111bb33f94c703` on branch `feature/application-shell-home-discovery-slice-001`, whose parent is `a816e4003417e9f453bad854f64d7d7d141f4f10`. Nothing has been pushed, merged, deployed or released, there is no migration, and no provider was accessed; push remains unauthorized. The one validation item still open — actual 200% browser zoom in a 390 px browser window — is deferred to Preview/release validation (see Zoom). A later documentation-only commit updates this status record; it is not the implementation commit, and the implementation commit above is unchanged. This section is evidence for the events it records; it does not authorize a Slice 002, a push or a release.
 
-**Governance.** URBANO Gaming — Product Integration is a bounded cross-portfolio implementation workstream governed by Canon & Sequencing. Product & Experience Design owns the frozen visual reference (baseline `bb5d1bd8`); this Slice implements it for one page and does not redefine it. Implementation was done in an isolated detached worktree created from exactly `a816e4003417e9f453bad854f64d7d7d141f4f10` (= `origin/main` = `origin/integrate/join-session` at the time), with no branch and no commit.
+**Source-control history of this Slice.** (1) *Original local-validation event (historical).* The implementation was written and validated locally in an isolated detached worktree, with nothing committed, staged, pushed, deployed, migrated or provider-accessed, and it then awaited lane-specific Code Review and Founder acceptance; the account of that event below, including its validation figures, is preserved as recorded. (2) Founder and Code Review then accepted the corrected local implementation and authorized source-control preparation: one named local branch and one local commit. (3) The implementation was committed locally as the commit named in the Status above.
+
+**Governance.** URBANO Gaming — Product Integration is a bounded cross-portfolio implementation workstream governed by Canon & Sequencing. Product & Experience Design owns the frozen visual reference (baseline `bb5d1bd8`); this Slice implements it for one page and does not redefine it. Implementation and local validation were originally done in an isolated detached worktree created from exactly `a816e4003417e9f453bad854f64d7d7d141f4f10` (= `origin/main` = `origin/integrate/join-session` at the time), with no branch and no commit at that time; the Slice has since been committed locally on a feature branch, as recorded in the Status above.
 
 ### What changed
 
@@ -338,5 +340,5 @@ Mutation check on the real page (both Home and Host suites run against each muta
 - Competitions: the destination page, its invitation handling and its API are unchanged and unreviewed here; the Home links to the bare page only.
 - Production behavior, deployment and the real sign-in flow were not exercised (provider-free by design; the shared sign-in script reports a configuration error in that environment and the Home still renders).
 - Become a Host remains closed in Production; activation is a separate Founder gate.
-- Actual 200% browser zoom at a 390 px browser window: unresolved, manual validation required (see Zoom).
+- Actual 200% browser zoom at a 390 px browser window: unresolved; deferred to Preview/release validation, where it requires manual validation (see Zoom).
 - Real-device and screen-reader testing were not performed.
