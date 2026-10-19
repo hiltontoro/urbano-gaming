@@ -155,3 +155,19 @@ export interface CompetitionsRepository {
   getCurrentFinalization(competitionFixtureId: string): Promise<CompetitionFixtureFinalizationRecord | null>;
   getMemberParticipationRecords(competitionId: string, gamingMemberId: string): Promise<CompetitionMemberParticipationRecord[]>;
 }
+
+/**
+ * UG-CR-GATE-100 — the only two reads the organizer-access signal and the organizer-scoped administrative
+ * source are built on. They are kept apart from {@link CompetitionsRepository} on purpose: administration
+ * is not member discovery, and this interface neither widens nor changes any discovery read.
+ *
+ * It deliberately offers no way to list a member's scorekeeper appointments across competitions, and no read of
+ * host applications or capabilities: neither a scorekeeper appointment nor an unused pilot capability is
+ * organizer authority, so neither is consulted by the organizer-access signal or the default administrative source.
+ */
+export interface CompetitionAdministrationReads {
+  /** Every competition, newest first (the same read the general list starts from; never returned to a browser as is). */
+  listCompetitions(): Promise<CompetitionRecord[]>;
+  /** Does this member hold the active internal OPERATIONAL authority that create_competition_atomically itself requires? */
+  hasOperationalAuthority(gamingMemberId: string): Promise<boolean>;
+}

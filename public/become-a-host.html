@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Become a Host — URBANO Gaming</title>
+<title>Apply to Host Competitions — URBANO Gaming</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -122,14 +122,14 @@
 <a class="back-link" href="/">← Back to URBANO Gaming</a>
 
 <main class="content" id="main">
-  <h1 id="page-title">Become a Host</h1>
+  <h1 id="page-title">Apply to Host Competitions</h1>
   <p>Run a private, invite-only tournament at your venue for adults you know, with URBANO Gaming keeping the bracket, the rosters and the results.</p>
 
   <details class="program" id="program-info" open>
     <summary>About the pilot program</summary>
     <div class="program-body">
-      <p><strong>Hosting is by application, not automatic.</strong> URBANO reviews every application. Approval is at URBANO's discretion and may be revoked.</p>
-      <p>The first program supports <strong>one private, invite-only pilot competition</strong> per approved host.</p>
+      <p><strong>Becoming a Competition Organizer is by application, not automatic.</strong> URBANO reviews every application. Approval is at URBANO's discretion and may be revoked.</p>
+      <p>The first program supports <strong>one private, invite-only pilot competition</strong> per approved Competition Organizer.</p>
       <ul class="program-list">
         <li>Known adults only: everyone who plays, scores, or helps is an adult you know.</li>
         <li>Four teams with at least four players each.</li>
@@ -138,13 +138,13 @@
         <li>You share the invitation links yourself, by hand. Nothing is sent automatically.</li>
       </ul>
       <p>The pilot does <strong>not</strong> include entry fees, prizes, sponsorships, minors, public statistics, automated invitations, or open registration.</p>
-      <p>Approval lets you create and run this one pilot. It does not make you an URBANO employee, partner, or certified organizer, and it is not a permanent affiliation.</p>
+      <p>Approval lets you create and run this one pilot as a Competition Organizer. It does not make you an URBANO employee or partner, it gives you no other role in URBANO Gaming (for example hosting a game session or a poker table), and it is not a permanent affiliation.</p>
       <p id="apply-requirements" hidden>Anyone can read this page. To apply you need to sign in with URBANO and have a display name.</p>
     </div>
   </details>
 
   <div id="app" aria-busy="true">
-    <div class="empty-state" id="checking-state">Checking whether host applications are open…</div>
+    <div class="empty-state" id="checking-state">Checking whether applications to host competitions are open…</div>
   </div>
 </main>
 
@@ -200,7 +200,7 @@ async function authedFetch(path, options) {
 function messageFor(res, fallback) {
   if (res.status === 0) return "We could not reach URBANO. Check your connection and try again.";
   if (res.status === 401) return "Please sign in again to continue.";
-  if (res.status === 503) return "Become a Host is not open yet.";
+  if (res.status === 503) return "Applications to host competitions are not open yet.";
   if (res.json && typeof res.json.error === "string" && res.status >= 400 && res.status < 500) return res.json.error;
   return fallback;
 }
@@ -311,7 +311,7 @@ function buildApplicationPayload(form) {
 
 function renderApplicationForm(authState, intro) {
   const card = el(`<section class="card accent" aria-labelledby="apply-title">
-    <h2 id="apply-title">Apply to host</h2>
+    <h2 id="apply-title">Apply to Host Competitions</h2>
     <p class="applying-as"></p>
     <p class="hint-required">All fields are required.</p>
     <form id="host-form" novalidate>
@@ -496,9 +496,9 @@ function renderUnderReview(status) {
 }
 
 function renderApproved(status) {
-  const card = statusCard("Your host application was approved", "Approved", "good");
+  const card = statusCard("Your Competition Organizer application was approved", "Approved", "good");
   const body = card.querySelector(".status-body");
-  addParagraph(body, "You can now create your one private pilot competition. Your access covers this single pilot. It does not make you an URBANO employee, partner, or certified organizer, and URBANO may revoke it.");
+  addParagraph(body, "You can now create your one private pilot competition as a Competition Organizer. Your access covers this single pilot. It does not make you an URBANO employee or partner, it gives you no other role in URBANO Gaming, and URBANO may revoke it.");
   addParagraph(body, "Once you create the pilot, it cannot be replaced. Choose a name your teams will recognize.");
 
   const form = el(`<form id="pilot-form" novalidate>
@@ -559,9 +559,15 @@ function renderPilotCreated(status) {
     p.appendChild(node("strong", null, name));
     body.appendChild(p);
   }
-  addParagraph(body, "Use the organizer tools to add teams and create the invitation links you share by hand. Your access covers this one pilot only.");
+  const state = status.application.competitionState;
+  if (state === "COMPLETE" || state === "CANCELLED_WITHOUT_CHAMPION") {
+    // A finished pilot is not administered any more, so no Organizer Access is offered for it.
+    addParagraph(body, "This pilot has ended, so there is nothing left to administer. Your access covered this one pilot only.");
+    return card;
+  }
+  addParagraph(body, "Use Organizer Access to add teams and create the invitation links you share by hand. Your access covers this one pilot only.");
   const actions = node("div", "actions");
-  const link = node("a", "btn-link", "Open organizer tools");
+  const link = node("a", "btn-link", "Organizer Access");
   link.setAttribute("href", "/competitions-admin.html");
   actions.appendChild(link);
   body.appendChild(actions);
@@ -595,7 +601,7 @@ function renderWithdrawn() {
 }
 
 function renderRevoked(status) {
-  const card = statusCard("Your hosting access has been revoked", "Access revoked", "bad");
+  const card = statusCard("Your Competition Organizer access has been revoked", "Access revoked", "bad");
   const body = card.querySelector(".status-body");
   addParagraph(body, "You can no longer administer the pilot or create a new one. The competition and its records are kept.");
   if (status.application.competitionName) {
@@ -773,7 +779,7 @@ async function renderApp(force) {
   // Check the status before reading any collection: an unavailable or failed
   // response must never be mistaken for "you have not applied".
   if (res.status !== 200 || !res.json) {
-    mountError(messageFor(res, "We could not load your host application."));
+    mountError(messageFor(res, "We could not load your application."));
     return;
   }
   const status = res.json;
@@ -796,7 +802,7 @@ async function renderApp(force) {
   else if (phase === "NOT_APPROVED") mount(renderNotApproved(), true);
   else if (phase === "WITHDRAWN") mount(renderWithdrawn(), true);
   else if (phase === "ACCESS_REVOKED") mount(renderRevoked(status), true);
-  else mountError("We could not load your host application.");
+  else mountError("We could not load your application.");
 }
 
 /** The closed state: the program is still explained above, but nothing here leads into an application. */
@@ -805,9 +811,9 @@ function showClosed() {
   document.getElementById("apply-requirements").hidden = true;
   programInfo.open = true;
   const card = el(`<section class="card accent" aria-labelledby="closed-title">
-    <h2 id="closed-title">Host applications are not open yet</h2>
+    <h2 id="closed-title">Applications to host competitions are not open yet</h2>
     <p><span class="status-pill gold">Not open yet</span></p>
-    <p>URBANO is not accepting host applications right now. You can read how the pilot program will work above. This page will open for applications when the program does.</p>
+    <p>URBANO is not accepting applications to host competitions right now. You can read how the pilot program will work above. This page will open for applications when the program does.</p>
   </section>`);
   appEl.textContent = "";
   appEl.appendChild(card);

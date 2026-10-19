@@ -444,6 +444,11 @@ export interface CompetitionView {
   myPendingJoinRequest: CompetitionJoinRequestRecord | null;
   myPersistentRecords: CompetitionMemberParticipationRecord[];
   isOrganizer: boolean;
+  /**
+   * UG-CR-GATE-100 — the ids of the fixtures of THIS competition the viewer is currently appointed to score (empty when none). The member
+   * competition page offers its scorekeeper action only when this is non-empty; the scorekeeper-administration route re-confirms it.
+   */
+  myScorekeeperFixtureIds: string[];
 }
 
 export interface CompetitionFixtureViewEntry {

@@ -362,6 +362,26 @@ async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
   if (competition.cancelledReason) headerCard.querySelector(".cancelled-reason").textContent = competition.cancelledReason;
   wrap.appendChild(headerCard);
 
+  // --- Scorekeeper action (UG-CR-GATE-100) — contextual to THIS one competition. It is offered only when the server, having just loaded
+  // this addressed competition for this signed-in member, says they are currently appointed to score at least one of its fixtures
+  // (view.myScorekeeperFixtureIds). Anything else — missing, empty, malformed, a non-string entry — offers nothing. The action carries
+  // only this competition's opaque public_code; the scoring page resolves it and the server re-confirms the appointment itself before
+  // returning a single fixture. There is no global scorekeeper entry anywhere. ---
+  const scorekeeperFixtureIds = view.myScorekeeperFixtureIds;
+  if (Array.isArray(scorekeeperFixtureIds) && scorekeeperFixtureIds.length > 0 && scorekeeperFixtureIds.every((id) => typeof id === "string" && id.length > 0)
+      && CompetitionsIntent.isValidCompetitionCode(competition.publicCode)) {
+    const skCard = el(`<div class="card" id="scorekeeper-card">
+      <h2>Scorekeeping</h2>
+      <p class="msg scorekeeper-summary"></p>
+      <a class="btn-secondary" id="scorekeeper-action" style="display:inline-block;margin-top:10px;">Score your fixtures</a>
+    </div>`);
+    skCard.querySelector(".scorekeeper-summary").textContent = scorekeeperFixtureIds.length === 1
+      ? "You are the appointed scorekeeper for 1 fixture in this competition."
+      : "You are the appointed scorekeeper for " + scorekeeperFixtureIds.length + " fixtures in this competition.";
+    skCard.querySelector("#scorekeeper-action").setAttribute("href", "/competitions-admin.html?c=" + encodeURIComponent(competition.publicCode));
+    wrap.appendChild(skCard);
+  }
+
   const acceptingRegistration = competition.state === "TEAM_REGISTRATION_OPEN" || competition.state === "READY_TO_PUBLISH" || competition.state === "PUBLISHED";
   const teamRegistrationOpen = competition.state === "TEAM_REGISTRATION_OPEN";
 

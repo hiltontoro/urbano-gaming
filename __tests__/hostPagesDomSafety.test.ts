@@ -235,7 +235,9 @@ describe("become-a-host.html — the program information (test 1: anyone can rea
       expect(info).toContain(excluded);
     }
     expect(info).toMatch(/discretion and may be revoked/i);
-    expect(info).toMatch(/not make you an URBANO employee, partner, or certified organizer/i);
+    expect(info).toMatch(/not make you an URBANO employee or partner/i);
+    expect(info).toMatch(/no other role in URBANO Gaming/i);
+    expect(info).not.toMatch(/certified organizer/i);
     expect(info).toMatch(/not a permanent affiliation/i);
     expect(info).toMatch(/sign in with URBANO and have a display name/i);
     dom.window.close();
@@ -449,9 +451,9 @@ describe("become-a-host.html — the application form (tests 2, 3)", () => {
 
   it("an outage or refusal is never shown as an empty form: 503, 401, 500 and a dropped connection each get a truthful message", async () => {
     for (const [res, expected] of [
-      [{ status: 503, json: { error: "Become a Host is not open yet." } }, /Become a Host is not open yet/],
+      [{ status: 503, json: { error: "Become a Host is not open yet." } }, /Applications to host competitions are not open yet/],
       [{ status: 401, json: { error: "A valid Authorization header for an authenticated Gaming Member is required." } }, /Please sign in again/],
-      [{ status: 500, json: { error: "Failed" } }, /could not load your host application/],
+      [{ status: 500, json: { error: "Failed" } }, /could not load your application/],
     ] as const) {
       const page = await loadPage(BECOME_HTML, { auth: authenticated(), respond: () => res });
       await page.settle();
@@ -471,7 +473,7 @@ describe("become-a-host.html — the application form (tests 2, 3)", () => {
 describe("become-a-host.html — every phase is shown distinctly and truthfully", () => {
   const PHASES: Array<{ phase: string; application: Record<string, unknown>; heading: RegExp; pill: string; extra?: (page: Awaited<ReturnType<typeof loadPage>>) => void }> = [
     { phase: "UNDER_REVIEW", application: { ...APPLICATION }, heading: /Application under review/, pill: "Under review" },
-    { phase: "APPROVED_READY", application: { ...APPLICATION, state: "APPROVED", capabilityState: "AVAILABLE", decidedAt: "2026-10-08T09:00:00Z" }, heading: /Your host application was approved/, pill: "Approved" },
+    { phase: "APPROVED_READY", application: { ...APPLICATION, state: "APPROVED", capabilityState: "AVAILABLE", decidedAt: "2026-10-08T09:00:00Z" }, heading: /Your Competition Organizer application was approved/, pill: "Approved" },
     {
       phase: "PILOT_CREATED",
       application: { ...APPLICATION, state: "APPROVED", capabilityState: "CONSUMED", competitionName: "Riverside Pilot Cup", competitionState: "DRAFT" },
@@ -482,7 +484,7 @@ describe("become-a-host.html — every phase is shown distinctly and truthfully"
     {
       phase: "ACCESS_REVOKED",
       application: { ...APPLICATION, state: "APPROVED", capabilityState: "REVOKED", competitionName: "Riverside Pilot Cup" },
-      heading: /Your hosting access has been revoked/, pill: "Access revoked",
+      heading: /Your Competition Organizer access has been revoked/, pill: "Access revoked",
     },
   ];
 
@@ -507,10 +509,25 @@ describe("become-a-host.html — every phase is shown distinctly and truthfully"
     const page = await loadPage(BECOME_HTML, { auth: authenticated(), respond: () => statusResponse("APPROVED_READY", PHASES[1].application) });
     await page.settle();
     const text = page.doc.getElementById("app")!.textContent!.replace(/\s+/g, " ");
-    expect(text).toMatch(/does not make you an URBANO employee, partner, or certified organizer/);
+    expect(text).toMatch(/does not make you an URBANO employee or partner/);
+    expect(text).toMatch(/gives you no other role in URBANO Gaming/);
+    expect(text).not.toMatch(/certified organizer/);
     expect(text).toMatch(/URBANO may revoke it/);
     expect(text).toMatch(/cannot be replaced/);
     page.close();
+  });
+
+  it("PILOT_CREATED: Organizer Access is offered while the pilot is still being run — and not once it has ended (UG-CR-GATE-100)", async () => {
+    for (const [state, offered] of [["DRAFT", true], ["TEAM_REGISTRATION_OPEN", true], ["READY_TO_PUBLISH", true], ["PUBLISHED", true], ["COMPLETE", false], ["CANCELLED_WITHOUT_CHAMPION", false]] as Array<[string, boolean]>) {
+      const application = { ...PHASES[2].application, competitionState: state };
+      const page = await loadPage(BECOME_HTML, { auth: authenticated(), respond: () => statusResponse("PILOT_CREATED", application) });
+      await page.settle();
+      const links = [...page.doc.querySelectorAll("#app a")].filter((a) => a.getAttribute("href") === "/competitions-admin.html");
+      expect(links.map((a) => a.textContent), state).toEqual(offered ? ["Organizer Access"] : []);
+      expect(page.doc.getElementById("app")!.textContent, state).toContain(offered ? "Use Organizer Access" : "This pilot has ended, so there is nothing left to administer.");
+      expect(page.doc.getElementById("app")!.textContent, state).toContain("Riverside Pilot Cup");     // the pilot's name is still shown either way
+      page.close();
+    }
   });
 
   it("a rejected applicant never sees an internal reason, even if the server sent one by mistake", async () => {
@@ -1181,7 +1198,7 @@ describe("become-a-host.html — background events never wipe what the applicant
     expect(page.text()).toMatch(/Application under review/);
     phase = "APPROVED_READY";
     page.fireAuthEvent();
-    await page.settle(() => /Your host application was approved/.test(page.text()));
+    await page.settle(() => /Your Competition Organizer application was approved/.test(page.text()));
     page.close();
   });
 
@@ -1189,7 +1206,7 @@ describe("become-a-host.html — background events never wipe what the applicant
     let healthy = false;
     const page = await loadPage(BECOME_HTML, { auth: authenticated(), respond: () => (healthy ? statusResponse("NOT_APPLIED", null) : { status: 500, json: { error: "x" } }) });
     await page.settle();
-    expect(page.text()).toMatch(/could not load your host application/i);
+    expect(page.text()).toMatch(/could not load your application/i);
     healthy = true;
     page.button("Try again").click();
     await page.settle(() => !!page.doc.getElementById("host-form"));

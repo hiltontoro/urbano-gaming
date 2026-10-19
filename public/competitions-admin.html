@@ -70,6 +70,8 @@
   .msg { font-size: 14px; color: var(--muted); margin: 6px 0; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
+  /* UG-CR-GATE-100: links this page itself offers must be legible on the dark page (default link blue is not). */
+  #admin-gate a { color: var(--ink); text-decoration: underline; }
   .fixture-block { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
   .fixture-header { display: flex; justify-content: space-between; align-items: center; }
   .pill { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
@@ -135,7 +137,7 @@
 <a class="back-link" href="/">← Back to URBANO Gaming</a>
 
 <section style="padding-top:16px;">
-<h1>Competitions — Organizer &amp; Scorekeeper Admin</h1>
+<h1 id="page-title">Competitions — Organizer Admin</h1>
 <div class="row">
   <button id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
   <span class="msg" id="auth-status">Not signed in.</span>
@@ -144,20 +146,32 @@
 
 <section id="admin-sections" style="display:none;">
 
+  <!-- UG-CR-GATE-100: no creation control exists for a caller until the server says THIS caller may start it (operations.createCompetition in
+       the administrative source — the active internal OPERATIONAL authority). The page never decides that from anything the browser holds. -->
+  <div id="create-section" hidden>
   <h2>Create Competition</h2>
   <div class="row">
     <div class="field"><label for="c-name">Competition name</label><br /><input id="c-name" placeholder="Competition name" style="min-width:min(240px,100%)" /></div>
     <div class="field"><label for="c-activity">Format</label><br /><select id="c-activity"><option value="SOCCER_5V5">SOCCER_5V5</option></select></div>
     <button id="btn-create-competition" style="align-self:flex-end;">Create</button>
   </div>
-  <p class="msg" id="msg-competition">Creating a competition here needs internal platform access. If you are an approved host, create your one pilot from <a href="/become-a-host.html" style="text-decoration:underline">Become a Host</a> instead.</p>
+  <p class="msg" id="msg-competition"></p>
+  </div>
 
+  <!-- UG-CR-GATE-100: the default experience reads ONLY GET /api/gaming/competitions/administration (the competitions the caller actively
+       organizes). Until that source answers with at least one competition, nothing below is shown: no selector, no competition name, no
+       control. The scorekeeper experience is a different, contextual one (see loadScorekeeperContext): it starts from ONE addressed
+       competition and never from this source. -->
+  <div id="admin-gate" class="msg" role="status" aria-live="polite"></div>
+
+  <div id="select-section" hidden>
   <h2>Select Competition</h2>
   <div class="row">
     <select id="comp-select" style="min-width:min(320px,100%)"></select>
     <button id="btn-load-competition">Load</button>
   </div>
   <p class="msg" id="msg-load"></p>
+  </div>
 
   <div id="competition-detail" style="display:none;">
     <h3 id="comp-title"></h3>
@@ -168,6 +182,9 @@
       <p class="msg" id="cancelled-reason-text" style="margin-top:4px;"></p>
     </div>
 
+    <p class="msg" id="scorekeeper-note" hidden>You are the appointed scorekeeper for the fixtures below. You can submit evidence for them; organizer controls are not available to you.</p>
+
+    <div id="organizer-only">
     <div id="lifecycle-rail" class="lifecycle-rail"></div>
     <p class="msg blocker-note" id="lifecycle-blocker" style="display:none;"></p>
 
@@ -212,6 +229,7 @@
       <button id="btn-publish">Publish Competition</button>
     </div>
     <p class="msg" id="msg-publish"></p>
+    </div>
 
     <h3>Fixtures</h3>
     <div id="fixtures-list"></div>
@@ -226,6 +244,9 @@ UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.ge
 
 let cachedCompetitions = [];
 let currentView = null;
+// The administrative entry the loaded competition was opened under: ORGANIZER (from the organizer-only source) or SCOREKEEPER (the contextual experience).
+let currentAccess = null;
+function isOrganizerView() { return !!currentAccess && currentAccess.access === "ORGANIZER"; }
 
 function el(html) {
   const div = document.createElement("div");
@@ -294,6 +315,25 @@ function humanizeCompetitionState(state) {
   return labels[state] || String(state).replace(/_/g, " ");
 }
 
+// The one shape an opaque competition public_code has (the same pattern public/competitionsIntent.js validates): 22 characters of [A-Za-z0-9_-].
+const PUBLIC_CODE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+/** The addressed competition's public_code from the URL, or null for anything missing or malformed (there is no partial-trust outcome). */
+function scorekeeperCodeFromUrl() {
+  try {
+    const raw = new URLSearchParams(window.location.search).get("c");
+    return typeof raw === "string" && PUBLIC_CODE_PATTERN.test(raw) ? raw : null;
+  } catch (err) { return null; }
+}
+
+// An authorization read that neither answers nor fails within this time is treated as FAILED: nothing is opened on silence.
+let READ_TIMEOUT_MS = 15000;
+function readAuthorization(path) {
+  return Promise.race([
+    authedFetch(path),
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error("timeout")), READ_TIMEOUT_MS)),
+  ]);
+}
+
 async function refreshAuthState() {
   const state = await UrbanoAuth.getState();
   const statusEl = document.getElementById("auth-status");
@@ -301,15 +341,51 @@ async function refreshAuthState() {
   if (state.status === "authenticated") {
     statusEl.textContent = "Signed in as " + state.displayName + ".";
     sections.style.display = "block";
-    await loadCompetitions();
+    // A scorekeeper arrives from ONE competition's own page with that competition's opaque code. Anything else is the default experience,
+    // which lists only the competitions the caller actively organizes.
+    const code = scorekeeperCodeFromUrl();
+    if (code) await loadScorekeeperContext(code);
+    else await loadCompetitions();
   } else {
     statusEl.textContent = "Not signed in.";
     sections.style.display = "none";
   }
 }
 
+/** A creation control appears only when the server answered exactly `true` for it. Anything else — missing, malformed, a stale legacy flag — is "no". */
+function applyOperations(operations) {
+  const ops = operations && typeof operations === "object" ? operations : {};
+  document.getElementById("create-section").hidden = ops.createCompetition !== true;
+}
+
+/** Shows nothing but one truthful sentence (and, for the "nothing to administer" case, the two other entries). Never a name, id or count. */
+function closeAdministration(message, offerOtherEntries, operations) {
+  cachedCompetitions = [];
+  currentView = null;
+  currentAccess = null;
+  document.getElementById("select-section").hidden = true;
+  document.getElementById("competition-detail").style.display = "none";
+  document.getElementById("comp-select").innerHTML = "";
+  applyOperations(operations);
+  const gate = document.getElementById("admin-gate");
+  gate.textContent = message;
+  gate.hidden = !message;
+  if (message && offerOtherEntries) {
+    gate.appendChild(document.createTextNode(" "));
+    const explore = document.createElement("a");
+    explore.href = "/competitions.html"; explore.textContent = "Explore Competitions"; explore.style.textDecoration = "underline";
+    gate.appendChild(explore);
+    gate.appendChild(document.createTextNode(" or "));
+    const apply = document.createElement("a");
+    apply.href = "/become-a-host.html"; apply.textContent = "Apply to Host Competitions"; apply.style.textDecoration = "underline";
+    gate.appendChild(apply);
+    gate.appendChild(document.createTextNode("."));
+  }
+}
+
 async function loadCompetitions() {
-  const res = await authedFetch("/api/gaming/competitions");
+  // The ONLY source for the default experience (UG-CR-GATE-100). It is decided on the server from the caller's own relationship to each
+  // competition; this page never reads the general member-discovery list and never filters one in the browser.
   const select = document.getElementById("comp-select");
   // This rebuild also runs from background events unrelated to anything
   // the organizer just did (e.g. a Supabase session token refresh firing
@@ -319,16 +395,36 @@ async function loadCompetitions() {
   // open a competition the organizer never chose, with no indication
   // their selection had changed underneath them.
   const previouslySelected = select.value;
-  select.innerHTML = "";
-  // A 503 (or any other non-200 — UG-CR-GATE-036) must never render as a
-  // silent, unexplained empty dropdown — the organizer would have no way
-  // to tell "nothing exists yet" apart from "the service is down."
-  if (res.status !== 200) {
-    cachedCompetitions = [];
-    setMsg("msg-load", (res.json && res.json.error) || "Failed to load competitions.", "error");
+  let res;
+  try {
+    res = await readAuthorization("/api/gaming/competitions/administration");
+  } catch (err) {
+    // A failed, dropped or silent read is not "still authorized": whatever an earlier answer opened is closed again.
+    closeAdministration("Failed to load your competitions.", false, null);
     return;
   }
-  cachedCompetitions = (res.json && res.json.competitions) || [];
+  // A 503 (or any other non-200 — UG-CR-GATE-036) must never render as a
+  // silent, unexplained empty dropdown — and must never leave an earlier
+  // competition on screen. It fails closed with one truthful sentence.
+  if (res.status !== 200 || !res.json || !Array.isArray(res.json.competitions)) {
+    closeAdministration((res.json && typeof res.json.error === "string" && res.json.error) || "Failed to load your competitions.", false, null);
+    return;
+  }
+  const entries = res.json.competitions.filter((c) => c && typeof c.competitionId === "string" && typeof c.name === "string" && c.access === "ORGANIZER");
+  if (entries.length === 0) {
+    // No competition is being run by this caller. If the server says they may still START one (the active internal OPERATIONAL authority),
+    // show exactly that and nothing more; otherwise show the one truthful sentence and the two other entries.
+    const ops = res.json.operations;
+    const mayStart = !!ops && typeof ops === "object" && ops.createCompetition === true;
+    closeAdministration(mayStart ? "" : "You do not currently organize any competition, so there is nothing to administer here.", !mayStart, ops);
+    return;
+  }
+  applyOperations(res.json.operations);
+  cachedCompetitions = entries;
+  select.innerHTML = "";
+  document.getElementById("admin-gate").hidden = true;
+  document.getElementById("admin-gate").textContent = "";
+  document.getElementById("select-section").hidden = false;
   for (const c of cachedCompetitions) {
     const opt = document.createElement("option");
     opt.value = c.competitionId;
@@ -338,6 +434,55 @@ async function loadCompetitions() {
   if (previouslySelected && cachedCompetitions.some((c) => c.competitionId === previouslySelected)) {
     select.value = previouslySelected;
   }
+}
+
+/**
+ * The scorekeeper experience (UG-CR-GATE-100), reached only from ONE competition's own page with that competition's opaque code. The code is
+ * resolved to the real id (the same unauthenticated resolve every competition link uses), that exact id is handed to the bounded
+ * scorekeeper-administration route, and the SERVER re-confirms the appointment. What comes back is that one competition and only the fixtures
+ * currently assigned to this caller; nothing is listed, no selector exists, and no organizer or creation control is ever built.
+ */
+async function loadScorekeeperContext(code) {
+  closeAdministration("", false, null);
+  const NOT_APPOINTED = "You are not currently appointed to score any fixture in this competition.";
+  let competitionId = null;
+  try {
+    const resolved = await Promise.race([
+      fetch("/api/gaming/competitions/resolve?c=" + encodeURIComponent(code), { cache: "no-store" }),
+      new Promise((_resolve, reject) => setTimeout(() => reject(new Error("timeout")), READ_TIMEOUT_MS)),
+    ]);
+    const body = resolved.status === 200 ? await resolved.json().catch(() => null) : null;
+    competitionId = body && typeof body.competitionId === "string" && body.competitionId ? body.competitionId : null;
+  } catch (err) { competitionId = null; }
+  if (!competitionId) { closeAdministration(NOT_APPOINTED, false, null); return; }
+
+  let res;
+  try {
+    res = await readAuthorization(`/api/gaming/competitions/${encodeURIComponent(competitionId)}/scorekeeper-administration`);
+  } catch (err) { closeAdministration("Failed to load your scorekeeper assignment.", false, null); return; }
+  const data = res.status === 200 ? res.json : null;
+  const valid = data && data.competition && typeof data.competition.name === "string" && Array.isArray(data.fixtures) && data.fixtures.length > 0
+    && Array.isArray(data.teams) && data.fixtures.every((f) => f && typeof f.competitionFixtureId === "string" && typeof f.state === "string");
+  if (!valid) {
+    closeAdministration(res.status === 401 || res.status === 503 ? ((res.json && typeof res.json.error === "string" && res.json.error) || NOT_APPOINTED) : NOT_APPOINTED, false, null);
+    return;
+  }
+
+  currentAccess = { competitionId, access: "SCOREKEEPER" };
+  currentView = null;                                   // there is no organizer view in this experience, so every organizer handler stays inert
+  document.getElementById("page-title").textContent = "Competitions — Scorekeeping";
+  document.getElementById("admin-gate").hidden = true;
+  document.getElementById("organizer-only").hidden = true;
+  document.getElementById("cancelled-banner").style.display = "none";
+  document.getElementById("scorekeeper-note").hidden = false;
+  document.getElementById("comp-title").textContent = data.competition.name;
+  const pill = document.getElementById("comp-state-pill");
+  pill.textContent = humanizeCompetitionState(data.competition.state);
+  pill.className = "pill";
+  const list = document.getElementById("fixtures-list");
+  list.innerHTML = "";
+  for (const f of data.fixtures) list.appendChild(renderFixtureBlock(f, data.teams, "SCOREKEEPER"));
+  document.getElementById("competition-detail").style.display = "block";
 }
 
 document.getElementById("btn-create-competition").addEventListener("click", async () => {
@@ -351,7 +496,7 @@ document.getElementById("btn-create-competition").addEventListener("click", asyn
     await loadCompetitions();
   } else if (res.status === 403) {
     // An approved host who lands here is refused by the server; say so in plain words and point to where their one pilot is created.
-    setMsg("msg-competition", "Creating a competition here needs internal platform access. If you are an approved host, create your one pilot from the Become a Host page.", "error");
+    setMsg("msg-competition", "Creating a competition here needs internal platform access. If you are an approved Competition Organizer, create your one pilot from Apply to Host Competitions.", "error");
   } else setMsg("msg-competition", (res.json && res.json.error) || "Failed to create competition.", "error");
 });
 
@@ -375,8 +520,12 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
 });
 
 async function loadCompetitionDetail(competitionId) {
+  // Only a competition the scoped source returned can be opened here, so a tampered selector value is simply ignored.
+  const entry = cachedCompetitions.find((c) => c.competitionId === competitionId);
+  if (!entry) { setMsg("msg-load", "Select a competition.", "error"); return; }
   const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);
   if (res.status !== 200) { setMsg("msg-load", (res.json && res.json.error) || "Failed to load.", "error"); return; }
+  currentAccess = entry;
   currentView = res.json.view;
   document.getElementById("competition-detail").style.display = "block";
   renderCompetitionDetail();
@@ -543,7 +692,7 @@ document.getElementById("cancel-reason").addEventListener("input", (e) => {
 });
 document.getElementById("btn-cancel-confirm").addEventListener("click", async () => {
   const confirmBtn = document.getElementById("btn-cancel-confirm");
-  if (confirmBtn.disabled) return;
+  if (confirmBtn.disabled || !isOrganizerView()) return;
   const reason = document.getElementById("cancel-reason").value.trim();
   if (!reason) { setMsg("cancel-status", "A reason is required to cancel.", "error"); return; }
   confirmBtn.disabled = true;
@@ -575,7 +724,11 @@ function makeCell(label, text) {
 }
 
 function renderCompetitionDetail() {
+  // Organizer administration only: a view opened under anything but ORGANIZER access renders nothing (fail closed).
+  if (!isOrganizerView() || !currentView) return;
   const { competition, teams, pendingTeamProposals, rejectedTeamProposals, fixtures } = currentView;
+  document.getElementById("organizer-only").hidden = false;
+  document.getElementById("scorekeeper-note").hidden = true;
   document.getElementById("comp-title").textContent = competition.name;
   const pill = document.getElementById("comp-state-pill");
   pill.textContent = humanizeCompetitionState(competition.state);
@@ -666,22 +819,25 @@ function renderCompetitionDetail() {
   const fixturesList = document.getElementById("fixtures-list");
   fixturesList.innerHTML = "";
   for (const f of fixtures) {
-    fixturesList.appendChild(renderFixtureBlock(f, teams));
+    fixturesList.appendChild(renderFixtureBlock(f, teams, "ORGANIZER"));
   }
 }
 
 document.getElementById("btn-open-registration").addEventListener("click", async () => {
+  if (!isOrganizerView()) return;
   const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/open-team-registration`, { method: "POST" });
   if (res.status === 200) { setMsg("msg-registration", "Team registration opened.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
   else setMsg("msg-registration", (res.json && res.json.error) || "Failed to open team registration.", "error");
 });
 document.getElementById("btn-close-registration").addEventListener("click", async () => {
+  if (!isOrganizerView()) return;
   const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/close-team-registration`, { method: "POST" });
   if (res.status === 200) { setMsg("msg-registration", "Team registration closed — ready to publish.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
   else setMsg("msg-registration", (res.json && res.json.error) || "Failed to close team registration.", "error");
 });
 
 document.getElementById("btn-publish").addEventListener("click", async () => {
+  if (!isOrganizerView()) return;
   const body = {
     semifinal1TeamAId: document.getElementById("p-sf1a").value,
     semifinal1TeamBId: document.getElementById("p-sf1b").value,
@@ -787,7 +943,7 @@ function readAttestationRows(container) {
   })).filter((r) => r.gamingMemberId);
 }
 
-function renderFixtureBlock(entryOrFixture, teams) {
+function renderFixtureBlock(entryOrFixture, teams, mode) {
   const f = entryOrFixture.fixture || entryOrFixture;
   const block = el(`<div class="fixture-block">
     <div class="fixture-header">
@@ -812,35 +968,38 @@ function renderFixtureBlock(entryOrFixture, teams) {
       return;
     }
     detailContainer.innerHTML = "";
-    detailContainer.appendChild(renderFixtureDetail(f, res.json, teams));
+    detailContainer.appendChild(renderFixtureDetail(f, res.json, teams, mode));
   });
 
   return block;
 }
 
-function renderFixtureDetail(f, detail, teams) {
+function renderFixtureDetail(f, detail, teams, mode) {
   const wrap = el(`<div></div>`);
+  const organizerMode = mode === "ORGANIZER";
 
-  const scorekeeperP = el(`<p class="msg"></p>`);
-  scorekeeperP.textContent = "Scorekeeper: " + (f.scorekeeperGamingMemberId ? (detail.displayNames[f.scorekeeperGamingMemberId] || "Unknown") : "not appointed");
-  wrap.appendChild(scorekeeperP);
+  if (organizerMode) {
+    const scorekeeperP = el(`<p class="msg"></p>`);
+    scorekeeperP.textContent = "Scorekeeper: " + (f.scorekeeperGamingMemberId ? (detail.displayNames[f.scorekeeperGamingMemberId] || "Unknown") : "not appointed");
+    wrap.appendChild(scorekeeperP);
 
-  // Appoint scorekeeper — a competition-scoped, human-readable <select>
-  // (UG-CR-GATE-082 per UG-CR-REV-053 #4), never a raw-UUID text input.
-  // Server-side eligibility (not either competing captain, not on
-  // either roster) is unchanged and still the real enforcement.
-  const skForm = el(`<fieldset><legend>Appoint Scorekeeper</legend>
-    <div class="row"><select class="sk-input" style="min-width:min(220px,100%)"></select><button class="btn-appoint">Appoint</button></div>
-    <p class="msg sk-msg"></p></fieldset>`);
-  populateMemberOptions(skForm.querySelector(".sk-input"), detail.eligibleMembers, f.scorekeeperGamingMemberId);
-  skForm.querySelector(".btn-appoint").addEventListener("click", async () => {
-    const scorekeeperGamingMemberId = skForm.querySelector(".sk-input").value.trim();
-    if (!scorekeeperGamingMemberId) return;
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/scorekeeper`, { method: "POST", body: JSON.stringify({ scorekeeperGamingMemberId }) });
-    if (res.status === 200) { setFormMsg(skForm, ".sk-msg", "Appointed.", "success"); }
-    else { setFormMsg(skForm, ".sk-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  wrap.appendChild(skForm);
+    // Appoint scorekeeper — a competition-scoped, human-readable <select>
+    // (UG-CR-GATE-082 per UG-CR-REV-053 #4), never a raw-UUID text input.
+    // Server-side eligibility (not either competing captain, not on
+    // either roster) is unchanged and still the real enforcement.
+    const skForm = el(`<fieldset><legend>Appoint Scorekeeper</legend>
+      <div class="row"><select class="sk-input" style="min-width:min(220px,100%)"></select><button class="btn-appoint">Appoint</button></div>
+      <p class="msg sk-msg"></p></fieldset>`);
+    populateMemberOptions(skForm.querySelector(".sk-input"), detail.eligibleMembers, f.scorekeeperGamingMemberId);
+    skForm.querySelector(".btn-appoint").addEventListener("click", async () => {
+      const scorekeeperGamingMemberId = skForm.querySelector(".sk-input").value.trim();
+      if (!scorekeeperGamingMemberId) return;
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/scorekeeper`, { method: "POST", body: JSON.stringify({ scorekeeperGamingMemberId }) });
+      if (res.status === 200) { setFormMsg(skForm, ".sk-msg", "Appointed.", "success"); }
+      else { setFormMsg(skForm, ".sk-msg", (res.json && res.json.error) || "Failed.", "error"); }
+    });
+    wrap.appendChild(skForm);
+  }
 
   // Rosters + check-ins. Every team/display name below is assigned via
   // .textContent after construction, never interpolated into the HTML
@@ -900,100 +1059,104 @@ function renderFixtureDetail(f, detail, teams) {
     wrap.appendChild(evidenceP);
   }
 
-  // Correct fixture (Organizer) — same shape, plus reason.
-  const correctForm = el(`<fieldset><legend>Correct Fixture (Organizer)</legend>
-    <div class="row"><input class="cor-reason" placeholder="Reason (required)" style="min-width:min(320px,100%)" /></div>
-    <div class="row"><input class="cor-score-a" type="number" min="0" placeholder="Team A score" style="max-width:120px" />
-    <input class="cor-score-b" type="number" min="0" placeholder="Team B score" style="max-width:120px" />
-    <select class="cor-shootout-winner"><option value="">No shootout</option><option value="A">Team A wins shootout</option><option value="B">Team B wins shootout</option></select></div>
-    <p class="msg">Goal events:</p><div class="cor-goals"></div><button type="button" class="secondary cor-add-goal">Add Goal Event</button>
-    <p class="msg">Assist events:</p><div class="cor-assists"></div><button type="button" class="secondary cor-add-assist">Add Assist Event</button>
-    <div class="row" style="margin-top:10px"><button class="btn-correct">Submit Correction</button></div>
-    <p class="msg cor-msg"></p></fieldset>`);
-  const corGoalsEditor = eventRowsEditor(correctForm.querySelector(".cor-goals"), detail.eligibleMembers, "goal");
-  const corAssistsEditor = eventRowsEditor(correctForm.querySelector(".cor-assists"), detail.eligibleMembers, "assist");
-  correctForm.querySelector(".cor-add-goal").addEventListener("click", () => corGoalsEditor.addRow(null));
-  correctForm.querySelector(".cor-add-assist").addEventListener("click", () => corAssistsEditor.addRow(null));
-  correctForm.querySelector(".btn-correct").addEventListener("click", async () => {
-    const reason = correctForm.querySelector(".cor-reason").value.trim();
-    if (!reason) { setFormMsg(correctForm, ".cor-msg", "Reason is required.", "error"); return; }
-    const teamAScore = parseInt(correctForm.querySelector(".cor-score-a").value, 10);
-    const teamBScore = parseInt(correctForm.querySelector(".cor-score-b").value, 10);
-    const goalRows = readGoalRows(correctForm.querySelector(".cor-goals"));
-    const goalEvents = goalRows.map((r) => ({ scorerGamingMemberId: r.scorerGamingMemberId, competitionTeamId: r.competitionTeamIdSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId }));
-    const assistEvents = readAssistRows(correctForm.querySelector(".cor-assists"));
-    const shootoutSide = correctForm.querySelector(".cor-shootout-winner").value;
-    const penaltyShootoutWinningTeamId = shootoutSide ? (shootoutSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId) : null;
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/correct`, {
-      method: "POST", body: JSON.stringify({ reason, teamAScore, teamBScore, goalEvents, assistEvents, penaltyShootoutWinningTeamId }),
+  if (organizerMode) {
+    // Correct fixture (Organizer) — same shape, plus reason.
+    const correctForm = el(`<fieldset><legend>Correct Fixture (Organizer)</legend>
+      <div class="row"><input class="cor-reason" placeholder="Reason (required)" style="min-width:min(320px,100%)" /></div>
+      <div class="row"><input class="cor-score-a" type="number" min="0" placeholder="Team A score" style="max-width:120px" />
+      <input class="cor-score-b" type="number" min="0" placeholder="Team B score" style="max-width:120px" />
+      <select class="cor-shootout-winner"><option value="">No shootout</option><option value="A">Team A wins shootout</option><option value="B">Team B wins shootout</option></select></div>
+      <p class="msg">Goal events:</p><div class="cor-goals"></div><button type="button" class="secondary cor-add-goal">Add Goal Event</button>
+      <p class="msg">Assist events:</p><div class="cor-assists"></div><button type="button" class="secondary cor-add-assist">Add Assist Event</button>
+      <div class="row" style="margin-top:10px"><button class="btn-correct">Submit Correction</button></div>
+      <p class="msg cor-msg"></p></fieldset>`);
+    const corGoalsEditor = eventRowsEditor(correctForm.querySelector(".cor-goals"), detail.eligibleMembers, "goal");
+    const corAssistsEditor = eventRowsEditor(correctForm.querySelector(".cor-assists"), detail.eligibleMembers, "assist");
+    correctForm.querySelector(".cor-add-goal").addEventListener("click", () => corGoalsEditor.addRow(null));
+    correctForm.querySelector(".cor-add-assist").addEventListener("click", () => corAssistsEditor.addRow(null));
+    correctForm.querySelector(".btn-correct").addEventListener("click", async () => {
+      const reason = correctForm.querySelector(".cor-reason").value.trim();
+      if (!reason) { setFormMsg(correctForm, ".cor-msg", "Reason is required.", "error"); return; }
+      const teamAScore = parseInt(correctForm.querySelector(".cor-score-a").value, 10);
+      const teamBScore = parseInt(correctForm.querySelector(".cor-score-b").value, 10);
+      const goalRows = readGoalRows(correctForm.querySelector(".cor-goals"));
+      const goalEvents = goalRows.map((r) => ({ scorerGamingMemberId: r.scorerGamingMemberId, competitionTeamId: r.competitionTeamIdSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId }));
+      const assistEvents = readAssistRows(correctForm.querySelector(".cor-assists"));
+      const shootoutSide = correctForm.querySelector(".cor-shootout-winner").value;
+      const penaltyShootoutWinningTeamId = shootoutSide ? (shootoutSide === "A" ? f.teamACompetitionTeamId : f.teamBCompetitionTeamId) : null;
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/correct`, {
+        method: "POST", body: JSON.stringify({ reason, teamAScore, teamBScore, goalEvents, assistEvents, penaltyShootoutWinningTeamId }),
+      });
+      if (res.status === 200) {
+        setFormMsg(correctForm, ".cor-msg", `Corrected. Cascade: ${res.json.result.cascadeOutcome}.`, "success");
+      } else { setFormMsg(correctForm, ".cor-msg", (res.json && res.json.error) || "Failed.", "error"); }
     });
-    if (res.status === 200) {
-      setFormMsg(correctForm, ".cor-msg", `Corrected. Cascade: ${res.json.result.cascadeOutcome}.`, "success");
-    } else { setFormMsg(correctForm, ".cor-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  wrap.appendChild(correctForm);
-
-  // Disputes
-  wrap.appendChild(el(`<h3>Disputes</h3>`));
-  const disputesList = el(`<div></div>`);
-  for (const d of detail.disputes) {
-    const disputeP = el(`<p class="msg"></p>`);
-    disputeP.textContent = `[${d.targetFactType}] ${d.reason} — ${d.resolutionAction || "open"}`;
-    disputesList.appendChild(disputeP);
+    wrap.appendChild(correctForm);
   }
-  if (detail.disputes.length === 0) disputesList.appendChild(el(`<p class="msg">No disputes raised.</p>`));
-  wrap.appendChild(disputesList);
-  const disputeForm = el(`<div class="row">
-    <select class="dis-type"><option value="SCORE">SCORE</option><option value="GOAL_EVENT">GOAL_EVENT</option><option value="ASSIST_EVENT">ASSIST_EVENT</option><option value="PARTICIPATION_ATTESTATION">PARTICIPATION_ATTESTATION</option></select>
-    <input class="dis-target" placeholder="target fact ID" />
-    <input class="dis-reason" placeholder="Reason" style="min-width:min(220px,100%)" />
-    <button class="btn-dispute">Raise Dispute</button></div><p class="msg dis-msg"></p>`);
-  disputeForm.querySelector(".btn-dispute").addEventListener("click", async () => {
-    const targetFactType = disputeForm.querySelector(".dis-type").value;
-    const targetFactId = disputeForm.querySelector(".dis-target").value.trim();
-    const reason = disputeForm.querySelector(".dis-reason").value.trim();
-    if (!targetFactId || !reason) { setFormMsg(disputeForm, ".dis-msg", "Target fact ID and reason are required.", "error"); return; }
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/disputes`, { method: "POST", body: JSON.stringify({ targetFactType, targetFactId, reason }) });
-    if (res.status === 201) { setFormMsg(disputeForm, ".dis-msg", "Dispute raised.", "success"); }
-    else { setFormMsg(disputeForm, ".dis-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  wrap.appendChild(disputeForm);
 
-  // Finalize / Forfeit / Void
-  const closeForm = el(`<fieldset><legend>Close Fixture (Organizer)</legend>
-    <div class="row"><button class="btn-finalize">Finalize</button></div>
-    <div class="row"><select class="forfeit-team"></select>
-    <input class="forfeit-reason" placeholder="Forfeit reason" style="min-width:min(220px,100%)" /><button class="secondary btn-forfeit">Forfeit</button></div>
-    <div class="row"><input class="void-reason" placeholder="Void reason" style="min-width:min(220px,100%)" /><button class="danger btn-void">Void</button></div>
-    <p class="msg close-msg"></p></fieldset>`);
-  const forfeitTeamSelect = closeForm.querySelector(".forfeit-team");
-  for (const sideTeamId of [f.teamACompetitionTeamId, f.teamBCompetitionTeamId]) {
-    const opt = document.createElement("option");
-    opt.value = sideTeamId;
-    opt.textContent = `${teamNameOf(teams, sideTeamId)} forfeits`;
-    forfeitTeamSelect.appendChild(opt);
+  if (organizerMode) {
+    // Disputes
+    wrap.appendChild(el(`<h3>Disputes</h3>`));
+    const disputesList = el(`<div></div>`);
+    for (const d of detail.disputes) {
+      const disputeP = el(`<p class="msg"></p>`);
+      disputeP.textContent = `[${d.targetFactType}] ${d.reason} — ${d.resolutionAction || "open"}`;
+      disputesList.appendChild(disputeP);
+    }
+    if (detail.disputes.length === 0) disputesList.appendChild(el(`<p class="msg">No disputes raised.</p>`));
+    wrap.appendChild(disputesList);
+    const disputeForm = el(`<div class="row">
+      <select class="dis-type"><option value="SCORE">SCORE</option><option value="GOAL_EVENT">GOAL_EVENT</option><option value="ASSIST_EVENT">ASSIST_EVENT</option><option value="PARTICIPATION_ATTESTATION">PARTICIPATION_ATTESTATION</option></select>
+      <input class="dis-target" placeholder="target fact ID" />
+      <input class="dis-reason" placeholder="Reason" style="min-width:min(220px,100%)" />
+      <button class="btn-dispute">Raise Dispute</button></div><p class="msg dis-msg"></p>`);
+    disputeForm.querySelector(".btn-dispute").addEventListener("click", async () => {
+      const targetFactType = disputeForm.querySelector(".dis-type").value;
+      const targetFactId = disputeForm.querySelector(".dis-target").value.trim();
+      const reason = disputeForm.querySelector(".dis-reason").value.trim();
+      if (!targetFactId || !reason) { setFormMsg(disputeForm, ".dis-msg", "Target fact ID and reason are required.", "error"); return; }
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/disputes`, { method: "POST", body: JSON.stringify({ targetFactType, targetFactId, reason }) });
+      if (res.status === 201) { setFormMsg(disputeForm, ".dis-msg", "Dispute raised.", "success"); }
+      else { setFormMsg(disputeForm, ".dis-msg", (res.json && res.json.error) || "Failed.", "error"); }
+    });
+    wrap.appendChild(disputeForm);
+
+    // Finalize / Forfeit / Void
+    const closeForm = el(`<fieldset><legend>Close Fixture (Organizer)</legend>
+      <div class="row"><button class="btn-finalize">Finalize</button></div>
+      <div class="row"><select class="forfeit-team"></select>
+      <input class="forfeit-reason" placeholder="Forfeit reason" style="min-width:min(220px,100%)" /><button class="secondary btn-forfeit">Forfeit</button></div>
+      <div class="row"><input class="void-reason" placeholder="Void reason" style="min-width:min(220px,100%)" /><button class="danger btn-void">Void</button></div>
+      <p class="msg close-msg"></p></fieldset>`);
+    const forfeitTeamSelect = closeForm.querySelector(".forfeit-team");
+    for (const sideTeamId of [f.teamACompetitionTeamId, f.teamBCompetitionTeamId]) {
+      const opt = document.createElement("option");
+      opt.value = sideTeamId;
+      opt.textContent = `${teamNameOf(teams, sideTeamId)} forfeits`;
+      forfeitTeamSelect.appendChild(opt);
+    }
+    closeForm.querySelector(".btn-finalize").addEventListener("click", async () => {
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/finalize`, { method: "POST" });
+      if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", `Finalized. Winner: ${teamNameOf(teams, res.json.result.winningCompetitionTeamId)}.`, "success"); }
+      else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+    });
+    closeForm.querySelector(".btn-forfeit").addEventListener("click", async () => {
+      const forfeitingCompetitionTeamId = closeForm.querySelector(".forfeit-team").value;
+      const reason = closeForm.querySelector(".forfeit-reason").value.trim();
+      if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/forfeit`, { method: "POST", body: JSON.stringify({ forfeitingCompetitionTeamId, reason }) });
+      if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Forfeited.", "success"); }
+      else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+    });
+    closeForm.querySelector(".btn-void").addEventListener("click", async () => {
+      const reason = closeForm.querySelector(".void-reason").value.trim();
+      if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
+      const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+      if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Voided — competition cancelled without a champion.", "success"); }
+      else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
+    });
+    wrap.appendChild(closeForm);
   }
-  closeForm.querySelector(".btn-finalize").addEventListener("click", async () => {
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/finalize`, { method: "POST" });
-    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", `Finalized. Winner: ${teamNameOf(teams, res.json.result.winningCompetitionTeamId)}.`, "success"); }
-    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  closeForm.querySelector(".btn-forfeit").addEventListener("click", async () => {
-    const forfeitingCompetitionTeamId = closeForm.querySelector(".forfeit-team").value;
-    const reason = closeForm.querySelector(".forfeit-reason").value.trim();
-    if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/forfeit`, { method: "POST", body: JSON.stringify({ forfeitingCompetitionTeamId, reason }) });
-    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Forfeited.", "success"); }
-    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  closeForm.querySelector(".btn-void").addEventListener("click", async () => {
-    const reason = closeForm.querySelector(".void-reason").value.trim();
-    if (!reason) { setFormMsg(closeForm, ".close-msg", "Reason is required.", "error"); return; }
-    const res = await authedFetch(`/api/gaming/competitions/fixtures/${f.competitionFixtureId}/void`, { method: "POST", body: JSON.stringify({ reason }) });
-    if (res.status === 200 || res.status === 201) { setFormMsg(closeForm, ".close-msg", "Voided — competition cancelled without a champion.", "success"); }
-    else { setFormMsg(closeForm, ".close-msg", (res.json && res.json.error) || "Failed.", "error"); }
-  });
-  wrap.appendChild(closeForm);
 
   return wrap;
 }

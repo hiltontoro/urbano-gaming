@@ -255,7 +255,9 @@ describe("UG-CR-GATE-083 corrections (UG-CR-REV-054 finding 2) — DOM-safety ho
       );
       const inline = /<script>([\s\S]*?)<\/script>/.exec(adminHtml);
       if (!inline) throw new Error("the page's inline script was not found");
-      w.eval(inline[1] + "\nwindow.__render = (v) => { currentView = v; renderCompetitionDetail(); };");
+      // UG-CR-GATE-100: loadCompetitionDetail records the administrative entry the competition was opened under, and a view without one is
+      // rendered as a non-organizer view (fail closed). These tests exercise the ORGANIZER rendering, so they record that entry exactly as it does.
+      w.eval(inline[1] + "\nwindow.__render = (v) => { currentView = v; currentAccess = { competitionId: v.competition.competitionId, access: \"ORGANIZER\" }; renderCompetitionDetail(); };");
       return w;
     }
 

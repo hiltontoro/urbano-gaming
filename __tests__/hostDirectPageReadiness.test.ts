@@ -21,7 +21,7 @@ const HOST_FLAG = "BECOME_A_HOST_SCHEMA_READY";
 const AVAILABILITY_URL = "/api/gaming/host/availability";
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const TOKEN_VALUE = "stub-access-token-value-12345";
-const CLOSED_HEADING = "Host applications are not open yet";
+const CLOSED_HEADING = "Applications to host competitions are not open yet";
 
 type AuthState =
   | { status: "unauthenticated" }
@@ -319,7 +319,7 @@ describe("before readiness resolves nothing actionable is ever shown", () => {
   it("while the request is PENDING the page shows a neutral checking state: no button, no form, no panel, no session read", async () => {
     const page = await loadPage({ availability: () => "hang" });
     await page.settle(60);
-    expect(page.doc.getElementById("checking-state")?.textContent).toBe("Checking whether host applications are open…");
+    expect(page.doc.getElementById("checking-state")?.textContent).toBe("Checking whether applications to host competitions are open…");
     expect(page.doc.getElementById("app")!.getAttribute("aria-busy")).toBe("true");
     expect(page.doc.getElementById("closed-title")).toBeNull(); // not claiming "closed" before it knows
     expect(page.headerButton().style.visibility).toBe("hidden");

@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
@@ -93,7 +93,7 @@ export function translateError(error: { code?: string; message?: string }): Erro
   return new Error(msg || "Unknown Competitions repository error.");
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository {
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
@@ -406,6 +406,18 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository {
       record.hostAccessRevoked = bindings.get(data.competition_id) === true;
     }
     return record;
+  }
+
+  async hasOperationalAuthority(gamingMemberId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("authority_grants")
+      .select("authority_grant_id")
+      .eq("gaming_member_id", gamingMemberId)
+      .eq("authority_class", "OPERATIONAL")
+      .is("revoked_at", null)
+      .limit(1);
+    if (error) throw error;
+    return (data ?? []).length > 0;
   }
 
   async listCompetitions(): Promise<CompetitionRecord[]> {

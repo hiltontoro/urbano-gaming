@@ -2,6 +2,7 @@ import type { CompetitionsRepository } from "./db/competitionsRepository";
 import type { CompetitionView, CompetitionFixtureViewEntry, FixtureState } from "./types";
 import { CompetitionNotFoundError } from "./types";
 import { isActiveOrganizer, toPublicCompetition } from "./organizerAccess";
+import { appointedFixtureIds } from "./administration";
 
 const EVIDENCE_VISIBLE_STATES: FixtureState[] = [
   "EVIDENCE_SUBMITTED",
@@ -158,5 +159,8 @@ export async function getCompetitionView(
     myPendingJoinRequest,
     myPersistentRecords,
     isOrganizer,
+    // UG-CR-GATE-100: the fixtures of THIS addressed competition the caller is currently appointed to score — the only way the member
+    // competition page learns it may offer the scorekeeper action. Decided here, per competition; never a list across competitions.
+    myScorekeeperFixtureIds: appointedFixtureIds(competition, fixtures, callerGamingMemberId),
   };
 }
