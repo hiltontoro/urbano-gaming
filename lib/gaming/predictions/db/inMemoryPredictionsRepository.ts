@@ -9,13 +9,22 @@ import type {
   PrizeTierRecord,
   PredictionRecord,
   MatchResultRecord,
+  SavedMatchResult,
   OfficialGoalEventRecord,
   OfficialGoalEventInput,
   EvaluationRecord,
   GamingProgressionEventRecord,
   PrizeQualificationRecord,
+  PrizeQualificationDetailRecord,
   LeaderboardEntry,
 } from "../types";
+import { attachQualificationDetails } from "../qualificationDetails";
+import {
+  assertPrizeQualificationShape,
+  decideCorrectionPrize,
+  lineageOrdinalOf,
+  type DeliveredEntitlement,
+} from "../deliveryPolicy";
 import { InMemoryMetagameRepository } from "../../metagame/db/inMemoryMetagameRepository";
 import { InMemoryAuditStore } from "../../audit/db/inMemoryAuditStore";
 import { InMemoryAuthorityRepository } from "../../authority/db/inMemoryAuthorityRepository";
@@ -41,8 +50,25 @@ import {
   SupersededResultNotFinalizedError,
   PrizeQualificationNotFoundError,
   QualificationSupersededError,
-  DraftResultAlreadyExistsError,
+  ResultAlreadyBeingCorrectedError,
+  MatchResultBaseRequiredError,
+  MatchResultBaseStaleError,
+  MatchResultDigestRequiredError,
+  MatchResultDigestMismatchError,
+  InvalidMatchResultEventsError,
+  MatchResultIsCorrectionError,
+  PrizeQualificationHeldError,
+  PrizeAlreadyFulfilledError,
+  PrizeQualificationNotHeldError,
 } from "../types";
+import {
+  assertMatchResultIntegrity,
+  compareGoalEventsChronologically,
+  computeMatchResultContentDigest,
+  saveBaseToken,
+  validateGoalEventInputs,
+  validateResultScores,
+} from "../resultIntegrity";
 
 const PROGRESSION_RULE_KEYS = [
   "PREDICTION_PARTICIPATED",
@@ -74,6 +100,18 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   private evaluations = new Map<string, EvaluationRecord>();
   private progressionEvents = new Map<string, GamingProgressionEventRecord>();
   private qualifications = new Map<string, PrizeQualificationRecord>();
+  private memberDisplayNames = new Map<string, string>();
+  /**
+   * Mirrors the per-match transaction lock the Postgres functions take:
+   * every mutation of result and entitlement state runs one at a time,
+   * and re-reads state only after it holds its turn.
+   */
+  private lockChain: Promise<unknown> = Promise.resolve();
+  private serialize<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.lockChain.then(work, work);
+    this.lockChain = run.catch(() => undefined);
+    return run;
+  }
   private progressionRulePoints = new Map<string, number>(
     PROGRESSION_RULE_KEYS.map((k) => [k, 0])
   );
@@ -110,6 +148,22 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   }
   get auditStoreForTests(): InMemoryAuditStore {
     return this.auditStore;
+  }
+
+  /** Test-only seam: this repository owns no Gaming Member store, so display names are seeded. */
+  setMemberDisplayName(gamingMemberId: string, displayName: string): void {
+    this.memberDisplayNames.set(gamingMemberId, displayName);
+  }
+
+  /**
+   * Test-only seam: edit a prize definition after the fact. The database
+   * allows the same edit (prize_tiers is plain data), so a correction
+   * must not mistake an edited prize for an unchanged one.
+   */
+  setPrizeLabelForTests(prizeTierId: string, prizeLabel: string): void {
+    const tier = this.prizeTiers.get(prizeTierId);
+    if (!tier) throw new Error(`No prize tier ${prizeTierId}`);
+    this.prizeTiers.set(prizeTierId, { ...tier, prizeLabel });
   }
 
   /** Test-only seam: configure a progression rule's point value. */
@@ -521,31 +575,56 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     awayScore: number;
     officialGoalEvents: OfficialGoalEventInput[];
     enteredByGamingMemberId: string;
-    supersedesMatchResultId?: string | null;
-  }): Promise<MatchResultRecord> {
-    const existingDraft = await this.getDraftMatchResult(input.matchId);
+    saveBase: string;
+  }): Promise<SavedMatchResult> {
+    return this.serialize(async () => {
+      if (typeof input.saveBase !== "string" || input.saveBase.trim().length === 0) {
+        throw new MatchResultBaseRequiredError();
+      }
+      validateResultScores(input.homeScore, input.awayScore);
+      if (!Array.isArray(input.officialGoalEvents)) {
+        throw new InvalidMatchResultEventsError("Official goal events must be a list.");
+      }
 
-    let record: MatchResultRecord;
-    if (existingDraft) {
-      record = { ...existingDraft, homeScore: input.homeScore, awayScore: input.awayScore };
-    } else {
-      record = {
-        matchResultId: randomUUID(),
-        matchId: input.matchId,
-        homeScore: input.homeScore,
-        awayScore: input.awayScore,
-        finalizedAt: null,
-        supersedesMatchResultId: input.supersedesMatchResultId ?? null,
-        enteredByGamingMemberId: input.enteredByGamingMemberId,
-        finalizedByGamingMemberId: null,
-        createdAt: new Date().toISOString(),
-      };
-    }
-    this.matchResults.set(record.matchResultId, record);
+      const match = this.matches.get(input.matchId);
+      if (!match) throw new MatchNotFoundError();
 
-    this.goalEvents.set(
-      record.matchResultId,
-      input.officialGoalEvents.map((event, index) => ({
+      // Initial draft vs correction is decided here, from the
+      // supersession chain, under the same turn finalize/correct take.
+      const currentFinalized = this.currentFinalizedFor(input.matchId);
+      const draft =
+        [...this.matchResults.values()].find(
+          (r) => r.matchId === input.matchId && r.finalizedAt === null
+        ) ?? null;
+      const supersedes = currentFinalized?.matchResultId ?? null;
+      if (draft && draft.supersedesMatchResultId !== supersedes) {
+        throw new ResultAlreadyBeingCorrectedError();
+      }
+
+      const expectedBase = saveBaseToken({
+        draftDigest: draft ? this.digestFor(draft.matchResultId) : null,
+        finalizedDigest: currentFinalized ? this.digestFor(currentFinalized.matchResultId) : null,
+      });
+      if (input.saveBase !== expectedBase) throw new MatchResultBaseStaleError();
+
+      validateGoalEventInputs(input.officialGoalEvents);
+
+      // Build the candidate, validate it, and only then commit: a
+      // rejected save leaves the prior draft exactly as it was.
+      const record: MatchResultRecord = draft
+        ? { ...draft, homeScore: input.homeScore, awayScore: input.awayScore }
+        : {
+            matchResultId: randomUUID(),
+            matchId: input.matchId,
+            homeScore: input.homeScore,
+            awayScore: input.awayScore,
+            finalizedAt: null,
+            supersedesMatchResultId: supersedes,
+            enteredByGamingMemberId: input.enteredByGamingMemberId,
+            finalizedByGamingMemberId: null,
+            createdAt: new Date().toISOString(),
+          };
+      const events: OfficialGoalEventRecord[] = input.officialGoalEvents.map((event, index) => ({
         officialGoalEventId: randomUUID(),
         matchResultId: record.matchResultId,
         scorerPlayerId: event.scorerPlayerId,
@@ -553,10 +632,57 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
         minuteStoppage: event.minuteStoppage ?? null,
         isOwnGoal: event.isOwnGoal ?? false,
         ordinal: index + 1,
-      }))
-    );
+      }));
 
-    return record;
+      assertMatchResultIntegrity({
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeScore: record.homeScore,
+        awayScore: record.awayScore,
+        events,
+        teamOfPlayer: (playerId) => this.players.get(playerId)?.teamId ?? null,
+      });
+
+      this.matchResults.set(record.matchResultId, record);
+      this.goalEvents.set(record.matchResultId, events);
+
+      return {
+        ...record,
+        contentDigest: this.digestFor(record.matchResultId),
+        isCorrection: supersedes !== null,
+      };
+    });
+  }
+
+  /** The finalized result no other finalized result supersedes. */
+  private currentFinalizedFor(matchId: string): MatchResultRecord | null {
+    const finalized = [...this.matchResults.values()].filter(
+      (r) => r.matchId === matchId && r.finalizedAt !== null
+    );
+    return (
+      finalized.find(
+        (candidate) => !finalized.some((other) => other.supersedesMatchResultId === candidate.matchResultId)
+      ) ?? null
+    );
+  }
+
+  private digestFor(matchResultId: string): string {
+    const result = this.matchResults.get(matchResultId)!;
+    const match = this.matches.get(result.matchId)!;
+    return computeMatchResultContentDigest({
+      matchResultId,
+      matchId: result.matchId,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeScore: result.homeScore,
+      awayScore: result.awayScore,
+      supersedesMatchResultId: result.supersedesMatchResultId,
+      events: this.goalEvents.get(matchResultId) ?? [],
+    });
+  }
+
+  async getMatchResultContentDigest(matchResultId: string): Promise<string | null> {
+    return this.matchResults.has(matchResultId) ? this.digestFor(matchResultId) : null;
   }
 
   async getMatchResultById(matchResultId: string): Promise<MatchResultRecord | null> {
@@ -572,10 +698,7 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   }
 
   async getCurrentFinalizedMatchResult(matchId: string): Promise<MatchResultRecord | null> {
-    const finalized = [...this.matchResults.values()]
-      .filter((r) => r.matchId === matchId && r.finalizedAt !== null)
-      .sort((a, b) => (a.finalizedAt! < b.finalizedAt! ? 1 : -1));
-    return finalized[0] ?? null;
+    return this.currentFinalizedFor(matchId);
   }
 
   async listGoalEventsForResult(matchResultId: string): Promise<OfficialGoalEventRecord[]> {
@@ -617,12 +740,11 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     matchResultId: string
   ): { goalCount: number; firstTeam: "HOME" | "AWAY" | "NO_GOAL" } {
     const match = this.matches.get(matchId)!;
-    const events = this.regulationTimeEligibleGoalEvents(matchResultId).sort((a, b) => {
-      const aMinute = a.minuteRegulation + (a.minuteStoppage ?? 0);
-      const bMinute = b.minuteRegulation + (b.minuteStoppage ?? 0);
-      if (aMinute !== bMinute) return aMinute - bMinute;
-      return a.ordinal - b.ordinal;
-    });
+    // (minute, stoppage, entry order): summing minute + stoppage would tie
+    // first-half stoppage 45+10 with ordinary minute 55.
+    const events = this.regulationTimeEligibleGoalEvents(matchResultId).sort(
+      compareGoalEventsChronologically
+    );
 
     if (events.length === 0) {
       return { goalCount: 0, firstTeam: "NO_GOAL" };
@@ -750,278 +872,441 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   async finalizeMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string | null
+    reason: string | null,
+    expectedDigest: string
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }> {
-    const result = this.matchResults.get(matchResultId);
-    if (!result) throw new MatchResultNotFoundError();
+    return this.serialize(async () => {
+      if (!this.matchResults.get(matchResultId)) throw new MatchResultNotFoundError();
 
-    // Authority checked before any mutation and before the idempotent-
-    // return branch — an unauthorized caller learns nothing about the
-    // Result's state, mirroring the RPC's own ordering.
-    const hasAuthority = await this.authority.hasActiveAuthority(
-      finalizedByGamingMemberId,
-      "CONSEQUENTIAL_FINALIZER"
-    );
-    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
-
-    if (result.finalizedAt) {
-      return { matchResultId, finalizedAt: result.finalizedAt, alreadyFinalized: true };
-    }
-
-    // Checked before any mutation — unlike the SQL implementation
-    // (where any later exception rolls back the whole transaction
-    // including an earlier write), this in-memory Map has no
-    // transactional rollback, so the cancelled-Match guard must run
-    // before match_results is touched at all, not merely before this
-    // function returns.
-    const matchForGuard = this.matches.get(result.matchId)!;
-    if (matchForGuard.cancelledAt) throw new MatchCancelledError();
-
-    const finalizedAt = new Date().toISOString();
-    this.matchResults.set(matchResultId, {
-      ...result,
-      finalizedAt,
-      finalizedByGamingMemberId,
-    });
-
-    this.auditStore.record({
-      actionType: "FINALIZE_RESULT",
-      actorKind: "GAMING_MEMBER",
-      actorId: finalizedByGamingMemberId,
-      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
-      targetType: "match_results",
-      targetId: matchResultId,
-      previousReference: null,
-      resultingReference: { table: "match_results", id: matchResultId },
-      outcome: "SUCCESS",
-      reason,
-    });
-
-    const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
-
-    for (const prediction of [...this.predictions.values()].filter(
-      (p) => p.matchId === result.matchId
-    )) {
-      const evaluated = this.evaluatePrediction(prediction, result, facts, matchResultId);
-
-      const evaluation: EvaluationRecord = {
-        evaluationId: randomUUID(),
-        predictionId: prediction.predictionId,
-        matchResultId,
-        ...evaluated,
-        evaluatedAt: new Date().toISOString(),
-      };
-      this.evaluations.set(evaluation.evaluationId, evaluation);
-
-      const match = this.matches.get(result.matchId)!;
-      const { experienceSummaryId } = await this.metagame.recordExperienceSummary({
-        gamingMemberId: prediction.gamingMemberId,
-        experienceKey: "SOCCER_PREDICTIONS",
-        categoryKey: "SOCCER_PREDICTIONS",
-        activityClassification: match.activityClassification!,
-        authorityTier: "ADMIN_FINALIZED",
-        occurredAt: prediction.createdAt,
-        finalizedAt,
-        meaningfulParticipation: true,
-        performanceBandKey: `CORRECT_${evaluated.correctDimensionCount}_OF_4`,
-        sourceReference: evaluation.evaluationId,
-        rulesetVersion: "predictions-v2",
-        supersedesExperienceSummaryId: null,
-        idempotencyKey: evaluation.evaluationId,
-        evidence: {
-          correctDimensionCount: evaluated.correctDimensionCount,
-          scorelineCorrect: evaluated.scorelineCorrect,
-          goalscorerCorrect: evaluated.goalscorerCorrect,
-          goalMinuteCorrect: evaluated.goalMinuteCorrect,
-          firstTeamCorrect: evaluated.firstTeamToScoreCorrect,
-        },
-        correctDimensionCount: evaluated.correctDimensionCount,
-        correctDimensionKeys: evaluated.correctDimensionKeys,
-        xpEligible: match.xpEligible ?? false,
-      });
-      await this.metagame.processExperienceSummaryConsequences(experienceSummaryId);
-
-      const tier = [...this.prizeTiers.values()].find(
-        (t) =>
-          t.venueActivationId === prediction.venueActivationId &&
-          t.correctDimensionCount === evaluated.correctDimensionCount
+      // Authority is checked before the digest, the replay branch and
+      // any mutation — an unauthorized caller learns nothing about the
+      // result's state. Possession of a digest is not authorization.
+      const hasAuthority = await this.authority.hasActiveAuthority(
+        finalizedByGamingMemberId,
+        "CONSEQUENTIAL_FINALIZER"
       );
-      if (tier) {
-        const qualification: PrizeQualificationRecord = {
-          prizeQualificationId: randomUUID(),
-          evaluationId: evaluation.evaluationId,
-          gamingMemberId: prediction.gamingMemberId,
-          venueActivationId: prediction.venueActivationId,
-          prizeTierId: tier.prizeTierId,
-          redeemedAt: null,
-          redeemedByGamingMemberId: null,
-          supersededAt: null,
-          createdAt: new Date().toISOString(),
-        };
-        this.qualifications.set(qualification.prizeQualificationId, qualification);
-      }
-    }
+      if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
 
-    return { matchResultId, finalizedAt, alreadyFinalized: false };
+      if (typeof expectedDigest !== "string" || expectedDigest.trim().length === 0) {
+        throw new MatchResultDigestRequiredError();
+      }
+
+      const result = this.matchResults.get(matchResultId)!;
+      if (result.supersedesMatchResultId) throw new MatchResultIsCorrectionError();
+
+      if (result.finalizedAt) {
+        if (expectedDigest !== this.digestFor(matchResultId)) throw new MatchResultDigestMismatchError();
+        return { matchResultId, finalizedAt: result.finalizedAt, alreadyFinalized: true };
+      }
+
+      // Checked before any mutation — unlike the SQL implementation
+      // (where any later exception rolls back the whole transaction
+      // including an earlier write), this in-memory Map has no
+      // transactional rollback, so every guard must run before
+      // match_results is touched at all.
+      const match = this.matches.get(result.matchId)!;
+      if (match.cancelledAt) throw new MatchCancelledError();
+
+      if (expectedDigest !== this.digestFor(matchResultId)) throw new MatchResultDigestMismatchError();
+
+      assertMatchResultIntegrity({
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeScore: result.homeScore,
+        awayScore: result.awayScore,
+        events: this.goalEvents.get(matchResultId) ?? [],
+        teamOfPlayer: (playerId) => this.players.get(playerId)?.teamId ?? null,
+      });
+
+      const finalizedAt = new Date().toISOString();
+      this.matchResults.set(matchResultId, {
+        ...result,
+        finalizedAt,
+        finalizedByGamingMemberId,
+      });
+
+      this.auditStore.record({
+        actionType: "FINALIZE_RESULT",
+        actorKind: "GAMING_MEMBER",
+        actorId: finalizedByGamingMemberId,
+        authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+        targetType: "match_results",
+        targetId: matchResultId,
+        previousReference: null,
+        resultingReference: { table: "match_results", id: matchResultId },
+        outcome: "SUCCESS",
+        reason,
+      });
+
+      const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
+
+      for (const prediction of [...this.predictions.values()].filter(
+        (p) => p.matchId === result.matchId
+      )) {
+        const evaluated = this.evaluatePrediction(prediction, result, facts, matchResultId);
+
+        const evaluation: EvaluationRecord = {
+          evaluationId: randomUUID(),
+          predictionId: prediction.predictionId,
+          matchResultId,
+          ...evaluated,
+          evaluatedAt: new Date().toISOString(),
+        };
+        this.evaluations.set(evaluation.evaluationId, evaluation);
+
+        const { experienceSummaryId } = await this.metagame.recordExperienceSummary({
+          gamingMemberId: prediction.gamingMemberId,
+          experienceKey: "SOCCER_PREDICTIONS",
+          categoryKey: "SOCCER_PREDICTIONS",
+          activityClassification: match.activityClassification!,
+          authorityTier: "ADMIN_FINALIZED",
+          occurredAt: prediction.createdAt,
+          finalizedAt,
+          meaningfulParticipation: true,
+          performanceBandKey: `CORRECT_${evaluated.correctDimensionCount}_OF_4`,
+          sourceReference: evaluation.evaluationId,
+          rulesetVersion: "predictions-v2",
+          supersedesExperienceSummaryId: null,
+          idempotencyKey: evaluation.evaluationId,
+          evidence: {
+            correctDimensionCount: evaluated.correctDimensionCount,
+            scorelineCorrect: evaluated.scorelineCorrect,
+            goalscorerCorrect: evaluated.goalscorerCorrect,
+            goalMinuteCorrect: evaluated.goalMinuteCorrect,
+            firstTeamCorrect: evaluated.firstTeamToScoreCorrect,
+          },
+          correctDimensionCount: evaluated.correctDimensionCount,
+          correctDimensionKeys: evaluated.correctDimensionKeys,
+          xpEligible: match.xpEligible ?? false,
+        });
+        await this.metagame.processExperienceSummaryConsequences(experienceSummaryId);
+
+        const tier = [...this.prizeTiers.values()].find(
+          (t) =>
+            t.venueActivationId === prediction.venueActivationId &&
+            t.correctDimensionCount === evaluated.correctDimensionCount
+        );
+        if (tier) {
+          this.storeNewQualification(
+            this.newQualification({
+              evaluationId: evaluation.evaluationId,
+              gamingMemberId: prediction.gamingMemberId,
+              venueActivationId: prediction.venueActivationId,
+              prizeTierId: tier.prizeTierId,
+              lineageOrdinal: this.lineageOf(matchResultId),
+            })
+          );
+        }
+      }
+
+      return { matchResultId, finalizedAt, alreadyFinalized: false };
+    });
+  }
+
+  private newQualification(
+    fields: Pick<
+      PrizeQualificationRecord,
+      "evaluationId" | "gamingMemberId" | "venueActivationId" | "prizeTierId"
+    > &
+      Partial<PrizeQualificationRecord>
+  ): PrizeQualificationRecord {
+    const record: PrizeQualificationRecord = {
+      prizeQualificationId: randomUUID(),
+      redeemedAt: null,
+      redeemedByGamingMemberId: null,
+      redeemedPrizeLabel: null,
+      redeemedPrizeLabelBasis: null,
+      legacyObservedPrizeLabel: null,
+      lineageOrdinal: null,
+      supersededAt: null,
+      replacesPrizeQualificationId: null,
+      fulfilledByPrizeQualificationId: null,
+      holdPriorPrizeQualificationId: null,
+      heldAt: null,
+      holdBasis: null,
+      holdReason: null,
+      releasedAt: null,
+      releasedByGamingMemberId: null,
+      releaseReason: null,
+      createdAt: new Date().toISOString(),
+      ...fields,
+    };
+    return record;
+  }
+
+  /** Position of a result in the explicit supersession chain (the database's match_result_lineage_ordinal). */
+  private lineageOf(matchResultId: string): number | null {
+    return lineageOrdinalOf(matchResultId, (id) => {
+      const result = this.matchResults.get(id);
+      return result ? result.supersedesMatchResultId : undefined;
+    });
+  }
+
+  /**
+   * The only way an entitlement row is created. Applies the row-shape
+   * rules and the (member, activation, lineage position) uniqueness the
+   * database enforces, so this repository cannot hold a row Postgres would
+   * refuse.
+   */
+  private storeNewQualification(qualification: PrizeQualificationRecord): PrizeQualificationRecord {
+    assertPrizeQualificationShape(qualification);
+    if (qualification.lineageOrdinal !== null) {
+      const clash = [...this.qualifications.values()].some(
+        (q) =>
+          q.gamingMemberId === qualification.gamingMemberId &&
+          q.venueActivationId === qualification.venueActivationId &&
+          q.lineageOrdinal === qualification.lineageOrdinal
+      );
+      if (clash) throw new Error("prize_qualifications_lineage_position_key violated");
+    }
+    this.qualifications.set(qualification.prizeQualificationId, qualification);
+    return qualification;
+  }
+
+  /**
+   * TEST SEAM — never called by application code. Restates an existing
+   * entitlement the way the data migration leaves a pre-existing one: a
+   * delivery recorded before delivery-time label snapshots (basis
+   * OBSERVED_AT_MIGRATION or UNKNOWN), and/or no lineage position. Lets
+   * tests give this repository the same legacy rows the Postgres tests
+   * build (there under session_replication_role = replica), so both can be
+   * proven to follow the same rules. The row-shape rules still apply.
+   */
+  restateQualificationForTest(
+    prizeQualificationId: string,
+    patch: Partial<PrizeQualificationRecord>
+  ): PrizeQualificationRecord {
+    const existing = this.qualifications.get(prizeQualificationId);
+    if (!existing) throw new PrizeQualificationNotFoundError();
+    const restated: PrizeQualificationRecord = { ...existing, ...patch };
+    assertPrizeQualificationShape(restated);
+    this.qualifications.set(prizeQualificationId, restated);
+    return restated;
   }
 
   async correctMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string
+    reason: string,
+    expectedDigest: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;
     supersedesMatchResultId: string;
     alreadyFinalized: boolean;
   }> {
-    if (!reason || reason.trim().length === 0) throw new ReasonRequiredError();
+    return this.serialize(async () => {
+      if (!reason || reason.trim().length === 0) throw new ReasonRequiredError();
 
-    const result = this.matchResults.get(matchResultId);
-    if (!result) throw new MatchResultNotFoundError();
-    if (!result.supersedesMatchResultId) throw new NotACorrectionError();
+      const found = this.matchResults.get(matchResultId);
+      if (!found) throw new MatchResultNotFoundError();
+      if (!found.supersedesMatchResultId) throw new NotACorrectionError();
 
-    const hasAuthority = await this.authority.hasActiveAuthority(
-      finalizedByGamingMemberId,
-      "CONSEQUENTIAL_FINALIZER"
-    );
-    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
-
-    if (result.finalizedAt) {
-      return {
-        matchResultId,
-        finalizedAt: result.finalizedAt,
-        supersedesMatchResultId: result.supersedesMatchResultId,
-        alreadyFinalized: true,
-      };
-    }
-
-    const supersedes = this.matchResults.get(result.supersedesMatchResultId);
-    if (!supersedes || !supersedes.finalizedAt) {
-      throw new SupersededResultNotFinalizedError();
-    }
-
-    // Checked before any mutation — same reasoning as
-    // finalizeMatchResult: a cancelled Match may not produce a
-    // settlement via correction either.
-    const matchForGuard = this.matches.get(result.matchId)!;
-    if (matchForGuard.cancelledAt) throw new MatchCancelledError();
-
-    const finalizedAt = new Date().toISOString();
-    const supersedesMatchResultId = result.supersedesMatchResultId;
-    this.matchResults.set(matchResultId, {
-      ...result,
-      finalizedAt,
-      finalizedByGamingMemberId,
-    });
-
-    this.auditStore.record({
-      actionType: "CORRECT_RESULT",
-      actorKind: "GAMING_MEMBER",
-      actorId: finalizedByGamingMemberId,
-      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
-      targetType: "match_results",
-      targetId: matchResultId,
-      previousReference: { table: "match_results", id: supersedesMatchResultId },
-      resultingReference: { table: "match_results", id: matchResultId },
-      outcome: "SUCCESS",
-      reason,
-    });
-
-    const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
-
-    for (const prediction of [...this.predictions.values()].filter(
-      (p) => p.matchId === result.matchId
-    )) {
-      const oldEvaluation = [...this.evaluations.values()].find(
-        (e) =>
-          e.predictionId === prediction.predictionId &&
-          e.matchResultId === result.supersedesMatchResultId
+      const hasAuthority = await this.authority.hasActiveAuthority(
+        finalizedByGamingMemberId,
+        "CONSEQUENTIAL_FINALIZER"
       );
+      if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
 
-      const evaluated = this.evaluatePrediction(prediction, result, facts, matchResultId);
-
-      const newEvaluation: EvaluationRecord = {
-        evaluationId: randomUUID(),
-        predictionId: prediction.predictionId,
-        matchResultId,
-        ...evaluated,
-        evaluatedAt: new Date().toISOString(),
-      };
-      this.evaluations.set(newEvaluation.evaluationId, newEvaluation);
-
-      const match = this.matches.get(result.matchId)!;
-      const oldExperienceSummary = oldEvaluation
-        ? await this.metagame.getExperienceSummaryByIdempotencyKey("SOCCER_PREDICTIONS", oldEvaluation.evaluationId)
-        : null;
-
-      const { experienceSummaryId: newExperienceSummaryId } = await this.metagame.recordExperienceSummary({
-        gamingMemberId: prediction.gamingMemberId,
-        experienceKey: "SOCCER_PREDICTIONS",
-        categoryKey: "SOCCER_PREDICTIONS",
-        activityClassification: match.activityClassification!,
-        authorityTier: "ADMIN_FINALIZED",
-        occurredAt: prediction.createdAt,
-        finalizedAt,
-        meaningfulParticipation: true,
-        performanceBandKey: `CORRECT_${evaluated.correctDimensionCount}_OF_4`,
-        sourceReference: newEvaluation.evaluationId,
-        rulesetVersion: "predictions-v2",
-        supersedesExperienceSummaryId: oldExperienceSummary?.experienceSummaryId ?? null,
-        idempotencyKey: newEvaluation.evaluationId,
-        evidence: {
-          correctDimensionCount: evaluated.correctDimensionCount,
-          scorelineCorrect: evaluated.scorelineCorrect,
-          goalscorerCorrect: evaluated.goalscorerCorrect,
-          goalMinuteCorrect: evaluated.goalMinuteCorrect,
-          firstTeamCorrect: evaluated.firstTeamToScoreCorrect,
-          correction: true,
-        },
-        correctDimensionCount: evaluated.correctDimensionCount,
-        correctDimensionKeys: evaluated.correctDimensionKeys,
-        xpEligible: match.xpEligible ?? false,
-      });
-      await this.metagame.processExperienceSummaryConsequences(newExperienceSummaryId);
-
-      if (oldEvaluation) {
-        const oldQualification = [...this.qualifications.values()].find(
-          (q) => q.evaluationId === oldEvaluation.evaluationId && !q.supersededAt
-        );
-        if (oldQualification) {
-          this.qualifications.set(oldQualification.prizeQualificationId, {
-            ...oldQualification,
-            supersededAt: new Date().toISOString(),
-          });
-        }
+      if (typeof expectedDigest !== "string" || expectedDigest.trim().length === 0) {
+        throw new MatchResultDigestRequiredError();
       }
 
-      const newTier = [...this.prizeTiers.values()].find(
-        (t) =>
-          t.venueActivationId === prediction.venueActivationId &&
-          t.correctDimensionCount === evaluated.correctDimensionCount
-      );
-      if (newTier) {
-        const qualification: PrizeQualificationRecord = {
-          prizeQualificationId: randomUUID(),
+      const result = this.matchResults.get(matchResultId)!;
+      const supersedesMatchResultId = result.supersedesMatchResultId!;
+
+      if (result.finalizedAt) {
+        if (expectedDigest !== this.digestFor(matchResultId)) throw new MatchResultDigestMismatchError();
+        return {
+          matchResultId,
+          finalizedAt: result.finalizedAt,
+          supersedesMatchResultId,
+          alreadyFinalized: true,
+        };
+      }
+
+      // Every guard runs before the first mutation (see finalizeMatchResult).
+      const match = this.matches.get(result.matchId)!;
+      if (match.cancelledAt) throw new MatchCancelledError();
+
+      const supersedes = this.matchResults.get(supersedesMatchResultId);
+      if (!supersedes || !supersedes.finalizedAt) {
+        throw new SupersededResultNotFinalizedError();
+      }
+
+      if (expectedDigest !== this.digestFor(matchResultId)) throw new MatchResultDigestMismatchError();
+
+      assertMatchResultIntegrity({
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeScore: result.homeScore,
+        awayScore: result.awayScore,
+        events: this.goalEvents.get(matchResultId) ?? [],
+        teamOfPlayer: (playerId) => this.players.get(playerId)?.teamId ?? null,
+      });
+
+      const finalizedAt = new Date().toISOString();
+      this.matchResults.set(matchResultId, {
+        ...result,
+        finalizedAt,
+        finalizedByGamingMemberId,
+      });
+      // This correction's place in the explicit supersession chain.
+      const correctionLineage = this.lineageOf(matchResultId);
+
+      this.auditStore.record({
+        actionType: "CORRECT_RESULT",
+        actorKind: "GAMING_MEMBER",
+        actorId: finalizedByGamingMemberId,
+        authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+        targetType: "match_results",
+        targetId: matchResultId,
+        previousReference: { table: "match_results", id: supersedesMatchResultId },
+        resultingReference: { table: "match_results", id: matchResultId },
+        outcome: "SUCCESS",
+        reason,
+      });
+
+      const facts = this.deriveOfficialFacts(result.matchId, matchResultId);
+
+      for (const prediction of [...this.predictions.values()].filter(
+        (p) => p.matchId === result.matchId
+      )) {
+        const oldEvaluation = [...this.evaluations.values()].find(
+          (e) =>
+            e.predictionId === prediction.predictionId &&
+            e.matchResultId === supersedesMatchResultId
+        );
+
+        const evaluated = this.evaluatePrediction(prediction, result, facts, matchResultId);
+
+        const newEvaluation: EvaluationRecord = {
+          evaluationId: randomUUID(),
+          predictionId: prediction.predictionId,
+          matchResultId,
+          ...evaluated,
+          evaluatedAt: new Date().toISOString(),
+        };
+        this.evaluations.set(newEvaluation.evaluationId, newEvaluation);
+
+        const oldExperienceSummary = oldEvaluation
+          ? await this.metagame.getExperienceSummaryByIdempotencyKey("SOCCER_PREDICTIONS", oldEvaluation.evaluationId)
+          : null;
+
+        const { experienceSummaryId: newExperienceSummaryId } = await this.metagame.recordExperienceSummary({
+          gamingMemberId: prediction.gamingMemberId,
+          experienceKey: "SOCCER_PREDICTIONS",
+          categoryKey: "SOCCER_PREDICTIONS",
+          activityClassification: match.activityClassification!,
+          authorityTier: "ADMIN_FINALIZED",
+          occurredAt: prediction.createdAt,
+          finalizedAt,
+          meaningfulParticipation: true,
+          performanceBandKey: `CORRECT_${evaluated.correctDimensionCount}_OF_4`,
+          sourceReference: newEvaluation.evaluationId,
+          rulesetVersion: "predictions-v2",
+          supersedesExperienceSummaryId: oldExperienceSummary?.experienceSummaryId ?? null,
+          idempotencyKey: newEvaluation.evaluationId,
+          evidence: {
+            correctDimensionCount: evaluated.correctDimensionCount,
+            scorelineCorrect: evaluated.scorelineCorrect,
+            goalscorerCorrect: evaluated.goalscorerCorrect,
+            goalMinuteCorrect: evaluated.goalMinuteCorrect,
+            firstTeamCorrect: evaluated.firstTeamToScoreCorrect,
+            correction: true,
+          },
+          correctDimensionCount: evaluated.correctDimensionCount,
+          correctDimensionKeys: evaluated.correctDimensionKeys,
+          xpEligible: match.xpEligible ?? false,
+        });
+        await this.metagame.processExperienceSummaryConsequences(newExperienceSummaryId);
+
+        // Prize policy: the old entitlement is always superseded (history
+        // kept); what replaces it depends on what was PHYSICALLY DELIVERED
+        // for this member and activation, never on the old row alone.
+        const oldQualification = oldEvaluation
+          ? [...this.qualifications.values()].find((q) => q.evaluationId === oldEvaluation.evaluationId)
+          : undefined;
+        if (oldQualification && !oldQualification.supersededAt) {
+          this.qualifications.set(oldQualification.prizeQualificationId, {
+            ...oldQualification,
+            supersededAt: finalizedAt,
+          });
+        }
+
+        const newTier = [...this.prizeTiers.values()].find(
+          (t) =>
+            t.venueActivationId === prediction.venueActivationId &&
+            t.correctDimensionCount === evaluated.correctDimensionCount
+        );
+        if (!newTier) continue; // no longer qualifies: history kept, no clawback
+
+        const delivered: DeliveredEntitlement[] = [...this.qualifications.values()]
+          .filter(
+            (q) =>
+              q.gamingMemberId === prediction.gamingMemberId &&
+              q.venueActivationId === prediction.venueActivationId &&
+              q.redeemedAt !== null
+          )
+          .map((q) => ({
+            prizeQualificationId: q.prizeQualificationId,
+            prizeTierId: q.prizeTierId,
+            lineageOrdinal: q.lineageOrdinal,
+            basis: q.redeemedPrizeLabelBasis!,
+            redeemedPrizeLabel: q.redeemedPrizeLabel,
+            legacyObservedPrizeLabel: q.legacyObservedPrizeLabel,
+            tierDimensionCount: this.prizeTiers.get(q.prizeTierId)?.correctDimensionCount ?? null,
+          }));
+
+        // The rules live in deliveryPolicy.ts, shared with the SQL contract
+        // tests: ordering is lineage position, never a timestamp.
+        const decision = decideCorrectionPrize({
+          delivered,
+          correctionLineage,
+          newTierId: newTier.prizeTierId,
+          newTierLabel: newTier.prizeLabel,
+          newDimensionCount: evaluated.correctDimensionCount,
+        });
+
+        const base = {
           evaluationId: newEvaluation.evaluationId,
           gamingMemberId: prediction.gamingMemberId,
           venueActivationId: prediction.venueActivationId,
           prizeTierId: newTier.prizeTierId,
-          redeemedAt: null,
-          redeemedByGamingMemberId: null,
-          supersededAt: null,
-          createdAt: new Date().toISOString(),
+          replacesPrizeQualificationId: oldQualification?.prizeQualificationId ?? null,
+          lineageOrdinal: correctionLineage,
         };
-        this.qualifications.set(qualification.prizeQualificationId, qualification);
-      }
-    }
 
-    return {
-      matchResultId,
-      finalizedAt,
-      supersedesMatchResultId: result.supersedesMatchResultId,
-      alreadyFinalized: false,
-    };
+        if (decision.kind === "REPLACE_UNREDEEMED") {
+          this.storeNewQualification(this.newQualification(base));
+        } else if (decision.kind === "FULFILLED") {
+          // The delivery actor and time are NOT copied.
+          this.storeNewQualification(
+            this.newQualification({
+              ...base,
+              fulfilledByPrizeQualificationId: decision.fulfilledByPrizeQualificationId,
+            })
+          );
+        } else {
+          this.storeNewQualification(
+            this.newQualification({
+              ...base,
+              holdPriorPrizeQualificationId: decision.holdPriorPrizeQualificationId,
+              heldAt: finalizedAt,
+              holdBasis: decision.basis,
+              holdReason: decision.reason,
+            })
+          );
+        }
+      }
+
+      return {
+        matchResultId,
+        finalizedAt,
+        supersedesMatchResultId,
+        alreadyFinalized: false,
+      };
+    });
   }
 
   async getEvaluation(
@@ -1038,10 +1323,20 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   async getCurrentEvaluationForPrediction(
     predictionId: string
   ): Promise<EvaluationRecord | null> {
-    const matches = [...this.evaluations.values()]
-      .filter((e) => e.predictionId === predictionId)
-      .sort((a, b) => (a.evaluatedAt < b.evaluatedAt ? 1 : -1));
-    return matches[0] ?? null;
+    // The current evaluation is the one for the result at the highest
+    // position of the supersession chain — never the latest timestamp.
+    let current: EvaluationRecord | null = null;
+    let currentLineage = -1;
+    for (const evaluation of this.evaluations.values()) {
+      if (evaluation.predictionId !== predictionId) continue;
+      const lineage = this.lineageOf(evaluation.matchResultId);
+      if (lineage === null) throw new Error("evaluation order cannot be established: unreadable result chain");
+      if (lineage > currentLineage) {
+        current = evaluation;
+        currentLineage = lineage;
+      }
+    }
+    return current;
   }
 
   async listProgressionEventsForMember(
@@ -1088,42 +1383,111 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     );
   }
 
+  async listQualificationDetailsForActivation(
+    venueActivationId: string
+  ): Promise<PrizeQualificationDetailRecord[]> {
+    const qualifications = await this.listQualificationsForActivation(venueActivationId);
+    const prizeLabels = new Map(
+      [...this.prizeTiers.values()].map((tier) => [tier.prizeTierId, tier.prizeLabel])
+    );
+    return attachQualificationDetails(qualifications, this.memberDisplayNames, prizeLabels);
+  }
+
   async redeemPrizeQualification(
     prizeQualificationId: string,
     redeemedByGamingMemberId: string,
     reason: string | null
   ): Promise<{ prizeQualificationId: string; redeemedAt: string; alreadyRedeemed: boolean }> {
-    const existing = this.qualifications.get(prizeQualificationId);
-    if (!existing) throw new PrizeQualificationNotFoundError();
+    return this.serialize(async () => {
+      if (!this.qualifications.get(prizeQualificationId)) throw new PrizeQualificationNotFoundError();
 
-    const hasAuthority = await this.authority.hasActiveAuthority(redeemedByGamingMemberId, "CONSEQUENTIAL_FINALIZER");
-    if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
+      const hasAuthority = await this.authority.hasActiveAuthority(redeemedByGamingMemberId, "CONSEQUENTIAL_FINALIZER");
+      if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
 
-    if (existing.redeemedAt) {
-      return { prizeQualificationId, redeemedAt: existing.redeemedAt, alreadyRedeemed: true };
-    }
-    if (existing.supersededAt) throw new QualificationSupersededError();
+      // Every decision is made against the row as it stands when this
+      // call has its turn.
+      const existing = this.qualifications.get(prizeQualificationId)!;
+      if (existing.redeemedAt) {
+        return { prizeQualificationId, redeemedAt: existing.redeemedAt, alreadyRedeemed: true };
+      }
+      if (existing.supersededAt) throw new QualificationSupersededError();
+      if (existing.fulfilledByPrizeQualificationId) throw new PrizeAlreadyFulfilledError();
+      if (existing.heldAt && !existing.releasedAt) throw new PrizeQualificationHeldError();
 
-    const redeemedAt = new Date().toISOString();
-    this.qualifications.set(prizeQualificationId, {
-      ...existing,
-      redeemedAt,
-      redeemedByGamingMemberId,
+      const redeemedAt = new Date().toISOString();
+      const redeemed: PrizeQualificationRecord = {
+        ...existing,
+        redeemedAt,
+        redeemedByGamingMemberId,
+        redeemedPrizeLabel: this.prizeTiers.get(existing.prizeTierId)?.prizeLabel ?? null,
+        redeemedPrizeLabelBasis: "SNAPSHOT_AT_REDEMPTION",
+        legacyObservedPrizeLabel: null,
+      };
+      assertPrizeQualificationShape(redeemed);
+      this.qualifications.set(prizeQualificationId, redeemed);
+
+      this.auditStore.record({
+        actionType: "CONFIRM_PRIZE_REDEMPTION",
+        actorKind: "GAMING_MEMBER",
+        actorId: redeemedByGamingMemberId,
+        authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+        targetType: "prize_qualifications",
+        targetId: prizeQualificationId,
+        previousReference: null,
+        resultingReference: { table: "prize_qualifications", id: prizeQualificationId },
+        outcome: "SUCCESS",
+        reason,
+      });
+
+      return { prizeQualificationId, redeemedAt, alreadyRedeemed: false };
     });
+  }
 
-    this.auditStore.record({
-      actionType: "CONFIRM_PRIZE_REDEMPTION",
-      actorKind: "GAMING_MEMBER",
-      actorId: redeemedByGamingMemberId,
-      authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
-      targetType: "prize_qualifications",
-      targetId: prizeQualificationId,
-      previousReference: null,
-      resultingReference: { table: "prize_qualifications", id: prizeQualificationId },
-      outcome: "SUCCESS",
-      reason,
+  async releasePrizeQualificationHold(
+    prizeQualificationId: string,
+    releasedByGamingMemberId: string,
+    reason: string
+  ): Promise<{ prizeQualificationId: string; releasedAt: string; alreadyReleased: boolean }> {
+    return this.serialize(async () => {
+      if (!reason || reason.trim().length === 0) throw new ReasonRequiredError();
+      if (!this.qualifications.get(prizeQualificationId)) throw new PrizeQualificationNotFoundError();
+
+      const hasAuthority = await this.authority.hasActiveAuthority(releasedByGamingMemberId, "CONSEQUENTIAL_FINALIZER");
+      if (!hasAuthority) throw new InsufficientPlatformAuthorityError("CONSEQUENTIAL_FINALIZER");
+
+      const existing = this.qualifications.get(prizeQualificationId)!;
+      if (!existing.heldAt) throw new PrizeQualificationNotHeldError();
+      if (existing.releasedAt) {
+        return { prizeQualificationId, releasedAt: existing.releasedAt, alreadyReleased: true };
+      }
+      if (existing.supersededAt) throw new QualificationSupersededError();
+
+      const releasedAt = new Date().toISOString();
+      const released: PrizeQualificationRecord = {
+        ...existing,
+        releasedAt,
+        releasedByGamingMemberId,
+        releaseReason: reason,
+      };
+      assertPrizeQualificationShape(released);
+      this.qualifications.set(prizeQualificationId, released);
+
+      this.auditStore.record({
+        actionType: "RELEASE_PRIZE_HOLD",
+        actorKind: "GAMING_MEMBER",
+        actorId: releasedByGamingMemberId,
+        authorityClassUsed: "CONSEQUENTIAL_FINALIZER",
+        targetType: "prize_qualifications",
+        targetId: prizeQualificationId,
+        previousReference: existing.holdPriorPrizeQualificationId
+          ? { table: "prize_qualifications", id: existing.holdPriorPrizeQualificationId }
+          : null,
+        resultingReference: { table: "prize_qualifications", id: prizeQualificationId },
+        outcome: "SUCCESS",
+        reason,
+      });
+
+      return { prizeQualificationId, releasedAt, alreadyReleased: false };
     });
-
-    return { prizeQualificationId, redeemedAt, alreadyRedeemed: false };
   }
 }

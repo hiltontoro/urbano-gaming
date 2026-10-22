@@ -163,6 +163,17 @@ export interface OfficialGoalEventRecord {
   ordinal: number;
 }
 
+/**
+ * A saved draft plus the digest of exactly the content that was saved
+ * and whether the save started (or edited) a correction of an already
+ * finalized result. The digest is what finalize/correct must be given:
+ * it proves WHICH content was reviewed, never WHO may finalize it.
+ */
+export type SavedMatchResult = MatchResultRecord & {
+  contentDigest: string;
+  isCorrection: boolean;
+};
+
 /** One official goal, as supplied to draft result entry. */
 export interface OfficialGoalEventInput {
   scorerPlayerId: string;
@@ -195,6 +206,47 @@ export interface GamingProgressionEventRecord {
   createdAt: string;
 }
 
+/**
+ * How the label stored with a delivery came to be known.
+ *   - SNAPSHOT_AT_REDEMPTION — captured at the moment the prize was handed
+ *     over. The only basis that can show a later entitlement is the same
+ *     prize.
+ *   - OBSERVED_AT_MIGRATION — a delivery recorded before delivery-time
+ *     snapshots existed; the prize definition seen when the data was
+ *     migrated is kept as legacyObservedPrizeLabel. It is a clue about what
+ *     was probably handed over, never proof.
+ *   - UNKNOWN — a legacy delivery with no readable prize definition.
+ */
+export type DeliveryEvidenceBasis = "SNAPSHOT_AT_REDEMPTION" | "OBSERVED_AT_MIGRATION" | "UNKNOWN";
+
+/** Why an entitlement is held until a Consequential Finalizer releases it. */
+export type PrizeHoldBasis =
+  | "DELIVERED_PRIZE_CHANGED"
+  | "DELIVERY_EQUIVALENCE_UNKNOWN"
+  | "DELIVERY_ORDER_UNKNOWN"
+  | "LEGACY_PENDING_TWIN";
+
+/**
+ * An entitlement to a prize, one per evaluation. Redemption evidence
+ * (redeemedAt / redeemedByGamingMemberId / redeemedPrizeLabel and its
+ * basis) is immutable once written. A correction never creates a second
+ * physical delivery on its own:
+ *   - fulfilledByPrizeQualificationId — the ORIGINAL redeemed row whose
+ *     delivery already satisfies this entitlement. Only a delivery
+ *     recorded AT redemption can satisfy one. A fulfilled row has no
+ *     redemption event of its own and can never be redeemed.
+ *   - heldAt / holdBasis / holdReason / holdPriorPrizeQualificationId — a
+ *     replacement that cannot be delivered until a Consequential Finalizer
+ *     releases it with a reason (releasedAt / releasedByGamingMemberId /
+ *     releaseReason). The basis says why: the delivered prize changed, the
+ *     delivery predates label snapshots so equivalence is unknown, or the
+ *     order of deliveries could not be established.
+ *
+ * lineageOrdinal is the position of the entitlement's result in the
+ * explicit supersession chain of results (0 for a first result). It — not
+ * a timestamp, not an identifier — orders deliveries; null only for a
+ * legacy row whose position cannot be established.
+ */
 export interface PrizeQualificationRecord {
   prizeQualificationId: string;
   evaluationId: string;
@@ -203,8 +255,34 @@ export interface PrizeQualificationRecord {
   prizeTierId: string;
   redeemedAt: string | null;
   redeemedByGamingMemberId: string | null;
+  /** The prize label as it stood at the moment of delivery (basis SNAPSHOT_AT_REDEMPTION only). */
+  redeemedPrizeLabel: string | null;
+  redeemedPrizeLabelBasis: DeliveryEvidenceBasis | null;
+  /** Legacy deliveries only: the prize definition observed when the data was migrated. Not proof. */
+  legacyObservedPrizeLabel: string | null;
+  lineageOrdinal: number | null;
   supersededAt: string | null;
+  replacesPrizeQualificationId: string | null;
+  fulfilledByPrizeQualificationId: string | null;
+  holdPriorPrizeQualificationId: string | null;
+  heldAt: string | null;
+  holdBasis: PrizeHoldBasis | null;
+  holdReason: string | null;
+  releasedAt: string | null;
+  releasedByGamingMemberId: string | null;
+  releaseReason: string | null;
   createdAt: string;
+}
+
+/**
+ * A Prize Qualification plus the two human-readable facts an admin
+ * needs to hand over a prize: who won and what they won. null only when
+ * the referenced row is genuinely missing; superseded qualifications
+ * keep their label, so a correction never blanks redemption history.
+ */
+export interface PrizeQualificationDetailRecord extends PrizeQualificationRecord {
+  memberDisplayName: string | null;
+  prizeLabel: string | null;
 }
 
 export interface LeaderboardEntry {
@@ -409,5 +487,109 @@ export class ResultAlreadyBeingCorrectedError extends Error {
   constructor() {
     super("The current finalized result already has a correction in progress.");
     this.name = "ResultAlreadyBeingCorrectedError";
+  }
+}
+
+export class MatchResultDigestRequiredError extends Error {
+  constructor() {
+    super("The digest of the reviewed result content is required.");
+    this.name = "MatchResultDigestRequiredError";
+  }
+}
+
+export class MatchResultDigestMismatchError extends Error {
+  constructor() {
+    super("The result changed since it was reviewed. Load it and review it again.");
+    this.name = "MatchResultDigestMismatchError";
+  }
+}
+
+export class MatchResultBaseRequiredError extends Error {
+  constructor() {
+    super("The save base from your last load of this result is required to save.");
+    this.name = "MatchResultBaseRequiredError";
+  }
+}
+
+export class MatchResultBaseStaleError extends Error {
+  constructor() {
+    super("The result changed since you loaded it (it was saved, finalized or corrected). Reload before saving.");
+    this.name = "MatchResultBaseStaleError";
+  }
+}
+
+export class InvalidMatchResultScoreError extends Error {
+  constructor() {
+    super("Scores must be non-negative whole numbers.");
+    this.name = "InvalidMatchResultScoreError";
+  }
+}
+
+export class InvalidMatchResultEventsError extends Error {
+  constructor(detail?: string) {
+    super(detail || "Official goal events are malformed.");
+    this.name = "InvalidMatchResultEventsError";
+  }
+}
+
+export class MatchResultEventMinuteInvalidError extends Error {
+  constructor(detail?: string) {
+    super(
+      detail ||
+        "A goal event minute must be a whole minute from 1 to 120, and a stoppage offset is only valid at minute 45, 90, 105 or 120."
+    );
+    this.name = "MatchResultEventMinuteInvalidError";
+  }
+}
+
+export class MatchResultScorerNotInMatchError extends Error {
+  constructor(detail?: string) {
+    super(detail || "Every goal scorer must be a player on one of this match's two teams.");
+    this.name = "MatchResultScorerNotInMatchError";
+  }
+}
+
+export class MatchResultEventsContradictScoreError extends Error {
+  constructor(detail?: string) {
+    super(
+      detail ||
+        "The regulation-time goal events do not add up to the score. Own goals count for the opposing team; goals after minute 90 are not part of the score."
+    );
+    this.name = "MatchResultEventsContradictScoreError";
+  }
+}
+
+export class MatchResultIsCorrectionError extends Error {
+  constructor() {
+    super("This result corrects a prior finalized result and must be finalized as a correction.");
+    this.name = "MatchResultIsCorrectionError";
+  }
+}
+
+export class MatchResultFinalizedImmutableError extends Error {
+  constructor() {
+    super("A finalized result and its goal evidence cannot be changed.");
+    this.name = "MatchResultFinalizedImmutableError";
+  }
+}
+
+export class PrizeQualificationHeldError extends Error {
+  constructor() {
+    super("This prize is on hold until a Consequential Finalizer releases it.");
+    this.name = "PrizeQualificationHeldError";
+  }
+}
+
+export class PrizeAlreadyFulfilledError extends Error {
+  constructor() {
+    super("An earlier delivery already satisfies this prize; it cannot be delivered again.");
+    this.name = "PrizeAlreadyFulfilledError";
+  }
+}
+
+export class PrizeQualificationNotHeldError extends Error {
+  constructor() {
+    super("This prize is not on hold.");
+    this.name = "PrizeQualificationNotHeldError";
   }
 }

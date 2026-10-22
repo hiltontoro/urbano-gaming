@@ -7,24 +7,69 @@
 <style>
   /*
    * Smallest founder/admin surface to run the Soccer Predictions
-   * proving case: Match/Venue/Activation/Result/Prize CRUD. Desktop is
-   * the intended control surface (not redesigned for mobile) — this is
-   * a plain, functional internal tool, not a generic CMS.
+   * proving case: Match/Venue/Activation/Result/Prize CRUD. A plain,
+   * functional internal tool, not a generic CMS. Restaurant staff use it
+   * on a phone to redeem prizes, so tables scroll inside their own
+   * container and touch targets stay large at phone width.
    */
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0a0a; color: #f5f1e8; margin: 0; padding: 24px; }
   h1 { font-size: 20px; }
   h2 { font-size: 15px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; margin-top: 34px; }
   section { max-width: 900px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-  input, select { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #2a2a2a; background: #161616; color: #f5f1e8; }
+  input, select { font-size: 13px; padding: 8px 10px; border-radius: 6px; border: 1px solid #2a2a2a; background: #161616; color: #f5f1e8; max-width: 100%; }
   button { font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: none; background: #f5f1e8; color: #0a0a0a; cursor: pointer; }
   button.secondary { background: transparent; border: 1px solid #f5f1e8; color: #f5f1e8; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button[hidden] { display: none !important; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c1c1c; }
-  .msg { font-size: 12.5px; color: #9b9689; margin: 6px 0; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c1c1c; vertical-align: top; overflow-wrap: break-word; }
+  th { white-space: nowrap; }
+  .msg { font-size: 12.5px; color: #9b9689; margin: 6px 0; overflow-wrap: anywhere; }
   .msg.error { color: #f87171; }
   .msg.success { color: #4ade80; }
+  .msg.warning { color: #fbbf24; }
+  .msg.multiline { white-space: pre-line; }
   textarea { width: 100%; min-height: 90px; font-family: monospace; font-size: 12px; background: #161616; color: #f5f1e8; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; border: 1px solid #2a2a2a; white-space: nowrap; }
+  .pill.pending { color: #fbbf24; border-color: #fbbf24; }
+  .pill.redeemed { color: #4ade80; border-color: #4ade80; }
+  .pill.superseded { color: #9b9689; border-color: #9b9689; }
+  /* "Status unknown" (a redeem attempt whose outcome was lost) and "Redeemed - reconcile" are never colour alone: the pill text says it. */
+  .pill.unknown { color: #f87171; border-color: #f87171; }
+  .pill.reconcile { color: #fbbf24; border-color: #fbbf24; }
+  /* A correction never delivers a prize twice: "On hold" waits for a Founder decision, "Already delivered" is satisfied by an earlier handover. */
+  .pill.held { color: #f87171; border-color: #f87171; }
+  .pill.fulfilled { color: #9b9689; border-color: #9b9689; }
+  tr[hidden] { display: none !important; }
+  /* Redeem outcomes stay on screen while staff scroll a long list of winners. */
+  #msg-prizes { position: sticky; top: 0; z-index: 2; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; font-size: 14px; font-weight: 600; }
+  #msg-prizes:empty { display: none; }
+  .class-cell { min-width: 190px; }
+  .class-cell .row { margin: 6px 0 0; }
+  .member-id { font-size: 11.5px; font-weight: 400; color: #9b9689; }
+  .hold-note { font-size: 12px; color: #fbbf24; margin-top: 4px; overflow-wrap: anywhere; }
+  .roster-paste { margin: 14px 0 4px; }
+  .roster-paste label { display: block; font-size: 12.5px; color: #9b9689; margin-bottom: 6px; }
+  @media (max-width: 640px) {
+    body { padding: 14px; }
+    input, select, textarea { font-size: 16px; }
+    input, select, button { min-height: 44px; }
+    .row > input, .row > select { flex: 1 1 140px; min-width: 0; }
+    /* Wide tables scroll inside their own container; the Matches and Prizes tables stack into one card per row. */
+    table:not(.stack) { min-width: 480px; }
+    table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+    table.stack thead { display: none; }
+    table.stack tr { border: 1px solid #2a2a2a; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+    table.stack td { border: 0; padding: 3px 0; }
+    table.stack td[data-label]::before { content: attr(data-label) ": "; color: #9b9689; }
+    table.stack td.cell-primary { font-weight: 700; font-size: 14px; }
+    #table-qualifications td.cell-action button { width: 100%; margin-top: 6px; }
+    #table-matches td.cell-action button { margin-top: 6px; }
+    .class-cell { min-width: 0; }
+  }
 </style>
 </head>
 <body>
@@ -49,7 +94,15 @@
     <button id="btn-create-player">Add Player</button>
   </div>
   <p class="msg" id="msg-player"></p>
-  <table id="table-roster"><thead><tr><th>Team</th><th>Player</th><th>Active</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="roster-paste">
+    <label for="p-bulk">Add many players to the team selected above: one name per line. Shirt numbers such as "10." or "10 -" are removed. Up to 60 names per paste; names already on the roster are skipped.</label>
+    <textarea id="p-bulk" placeholder="Lionel Messi&#10;10. Kylian Mbappé&#10;7 - Cristiano Ronaldo"></textarea>
+    <div class="row">
+      <button id="btn-create-players">Add Players</button>
+    </div>
+    <p class="msg multiline" id="msg-bulk" role="status"></p>
+  </div>
+  <div class="table-wrap"><table id="table-roster"><thead><tr><th>Team</th><th>Player</th><th>Active</th><th></th></tr></thead><tbody></tbody></table></div>
 
   <h2>Matches</h2>
   <div class="row">
@@ -60,7 +113,8 @@
     <button id="btn-create-match">Create Match</button>
   </div>
   <p class="msg" id="msg-match"></p>
-  <table id="table-matches"><thead><tr><th>Teams</th><th>Kickoff</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+  <p class="msg" id="classification-help">Predictions open for a match only when it is classified (Official for a real match, Trial / test run for a rehearsal) AND it has an enabled venue activation (see Venue Activations below). This page sets only Official or Trial / test run; the classification locks as soon as a prediction or a result exists for the match.</p>
+  <div class="table-wrap"><table id="table-matches" class="stack"><thead><tr><th>Teams</th><th>Kickoff</th><th>Status</th><th>Classification</th><th></th></tr></thead><tbody></tbody></table></div>
 
   <h2>Venues</h2>
   <div class="row">
@@ -71,7 +125,7 @@
     <button id="btn-create-venue">Create Venue</button>
   </div>
   <p class="msg" id="msg-venue"></p>
-  <table id="table-venues"><thead><tr><th>Name</th><th>Lat/Lng</th><th>Radius</th></tr></thead><tbody></tbody></table>
+  <div class="table-wrap"><table id="table-venues"><thead><tr><th>Name</th><th>Lat/Lng</th><th>Radius</th></tr></thead><tbody></tbody></table></div>
 
   <h2>Venue Activations</h2>
   <div class="row">
@@ -80,7 +134,7 @@
     <button id="btn-create-activation">Activate</button>
   </div>
   <p class="msg" id="msg-activation"></p>
-  <table id="table-activations"><thead><tr><th>Match</th><th>Venue</th><th>Enabled</th><th>Prize tiers</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="table-wrap"><table id="table-activations"><thead><tr><th>Match</th><th>Venue</th><th>Enabled</th><th>Prize tiers</th><th></th></tr></thead><tbody></tbody></table></div>
   <div class="row">
     <select id="pt-activation"></select>
     <select id="pt-count"><option value="1">1/4</option><option value="2">2/4</option><option value="3">3/4</option><option value="4">4/4</option></select>
@@ -94,18 +148,24 @@
     <select id="r-match"></select>
     <button id="btn-load-result">Load</button>
   </div>
+  <p class="msg" id="result-state" role="status"></p>
   <div class="row">
     <input id="r-home" placeholder="Home score" type="number" min="0" />
     <input id="r-away" placeholder="Away score" type="number" min="0" />
   </div>
-  <p class="msg">Goal events — select the scoring Player (own goals still select the Player who touched it last; the credited Team is derived automatically).</p>
+  <p class="msg">The score is the score after 90 minutes plus stoppage time. Goal events — select the scoring Player (own goals still select the Player who touched it last; the credited Team is derived automatically). Goals after minute 90 (extra time, penalties) are kept as evidence but do not count toward the score or toward any prediction.</p>
   <div id="r-events-list"></div>
   <div class="row">
     <button id="btn-add-goal-event" type="button" class="secondary">Add Goal Event</button>
   </div>
+  <p class="msg" id="r-tally" role="status"></p>
+  <div class="row">
+    <input id="r-reason" type="text" maxlength="300" placeholder="Reason (needed for corrections)" aria-label="Reason for correcting a finalized result" />
+  </div>
   <div class="row">
     <button id="btn-save-draft">Save Draft</button>
     <button id="btn-finalize" class="secondary">Finalize</button>
+    <button id="btn-check-finalize" class="secondary" type="button" hidden>Check result status</button>
   </div>
   <p class="msg" id="msg-result"></p>
 
@@ -114,7 +174,16 @@
     <select id="q-activation"></select>
     <button id="btn-load-qualifications">Load Qualifications</button>
   </div>
-  <table id="table-qualifications"><thead><tr><th>Gaming Member</th><th>Tier</th><th>Redeemed</th><th>Superseded</th><th></th></tr></thead><tbody></tbody></table>
+  <p class="msg" id="prizes-heading"></p>
+  <p class="msg" id="prizes-summary"></p>
+  <div class="row">
+    <input id="q-filter" type="search" placeholder="Find a winner by name or member ID" aria-label="Find a winner by name or member ID" autocomplete="off" />
+  </div>
+  <div class="row">
+    <input id="q-release-reason" type="text" maxlength="300" placeholder="Reason for releasing a prize on hold" aria-label="Reason for releasing a prize on hold" />
+  </div>
+  <p class="msg" id="msg-prizes" role="status"></p>
+  <div class="table-wrap"><table id="table-qualifications" class="stack"><thead><tr><th>Player</th><th>Prize</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
 
 </section>
 
@@ -125,8 +194,45 @@ UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.ge
 let cachedMatches = [];
 let cachedVenues = [];
 let cachedActivations = [];
+let activationInfo = {}; // venueActivationId -> { matchId, venueName }
 let cachedTeams = [];
 let cachedRosters = {}; // teamId -> PlayerRecord[]
+
+// Everything on this screen belongs to the identity that was signed in when it was loaded. authEpoch changes whenever that identity
+// changes or signs out, and every answer that arrives for an older epoch is dropped, so a slow response can never restore the
+// previous admin's data under the next one.
+let authEpoch = 0;
+let currentIdentity = null;
+let refreshSeq = 0;
+let activationsState = "unloaded"; // "unloaded" | "ok" | "failed"
+
+// Builds an element without ever parsing markup: every string goes in as
+// text or as an attribute value. Display names, player names, prize labels
+// and server messages are member- or admin-controlled and must never reach
+// an HTML parser.
+function h(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const key of Object.keys(attrs)) {
+      const value = attrs[key];
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "text") node.textContent = String(value);
+      else if (key === "class") node.className = String(value);
+      else if (key === "dataset") Object.assign(node.dataset, value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+  }
+  for (const child of children) {
+    if (child === null || child === undefined || child === false) continue;
+    node.appendChild(typeof child === "object" ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function shortId(id) {
+  const text = typeof id === "string" ? id.trim() : "";
+  return text ? text.slice(0, 8) : "unknown";
+}
 
 function teamNameById(teamId) {
   const team = cachedTeams.find((t) => t.teamId === teamId);
@@ -139,213 +245,749 @@ function allPlayersForMatch(match) {
   return { home, away };
 }
 
-async function authedFetch(path, options) {
-  const token = await UrbanoAuth.getAccessToken();
+function playerNameById(playerId) {
+  for (const teamId of Object.keys(cachedRosters)) {
+    const found = (cachedRosters[teamId] || []).find((p) => p.playerId === playerId);
+    if (found) return found.name;
+  }
+  return "player " + shortId(playerId);
+}
+
+// A request that is given a timeout is aborted when it stalls, so it ends through the caller's ordinary failure path instead of
+// holding its row's button disabled until the page is reloaded (which would also drop the redemption marks kept on this screen).
+const REDEMPTION_REQUEST_TIMEOUT_MS = 20000;
+const RESULT_REQUEST_TIMEOUT_MS = 20000;
+// The sign-in client is asked for a token before every request. If it never answers, the action ends here instead of leaving its
+// button disabled for good; nothing has been sent at that point.
+const TOKEN_TIMEOUT_MS = 10000;
+
+function accessTokenWithTimeout() {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(Object.assign(new Error("The sign-in client did not answer in time."), { tokenTimeout: true }));
+    }, TOKEN_TIMEOUT_MS);
+    Promise.resolve()
+      .then(() => UrbanoAuth.getAccessToken())
+      .then(
+        (token) => { clearTimeout(timer); resolve(token); },
+        (err) => { clearTimeout(timer); reject(err); }
+      );
+  });
+}
+
+// Throws an error tagged `requestNotSent` when the sign-in client fails or does not answer: that happens before any request exists.
+async function authedFetch(path, options, timeoutMs) {
+  let token;
+  try {
+    token = await accessTokenWithTimeout();
+  } catch (err) {
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { requestNotSent: true });
+  }
   const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
   if (token) headers.authorization = "Bearer " + token;
-  const res = await fetch(path, Object.assign({}, options, { headers }));
-  const json = await res.json().catch(() => null);
-  return { status: res.status, json };
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(path, Object.assign({}, options, { headers }, controller ? { signal: controller.signal } : {}));
+    const json = await res.json().catch(() => null);
+    return { status: res.status, json };
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
+// Why a request ended without an answer, and whether it can have reached the server.
+function describeRequestFailure(err) {
+  if (err && err.requestNotSent) {
+    return {
+      sent: false,
+      text: err.tokenTimeout
+        ? "The sign-in did not answer in time, so nothing was sent."
+        : "The request could not be signed (the sign-in failed), so nothing was sent.",
+    };
+  }
+  if (err && err.name === "AbortError") return { sent: true, text: "The server did not answer in time." };
+  return { sent: true, text: "The connection failed." };
+}
+
+function setNodeMsg(elm, text, kind) {
+  elm.textContent = text;
+  const extra = elm.classList.contains("multiline") ? " multiline" : "";
+  elm.className = "msg" + extra + (kind ? " " + kind : "");
 }
 
 function setMsg(id, text, kind) {
-  const elm = document.getElementById(id);
-  elm.textContent = text;
-  elm.className = "msg" + (kind ? " " + kind : "");
+  setNodeMsg(document.getElementById(id), text, kind);
+}
+
+function serverMessage(res) {
+  return res && res.json && typeof res.json.error === "string" ? res.json.error.trim() : "";
+}
+
+function describeFailure(res, fallback, authority) {
+  const message = serverMessage(res);
+  if (res.status === 401) {
+    return "Not signed in, or the session expired. Sign in with an account that has " + authority + " authority, then try again.";
+  }
+  if (res.status === 403) {
+    if (message && message.toLowerCase().includes(authority + " authority")) return message;
+    return (message ? message + " " : "") + "This action needs " + authority + " authority.";
+  }
+  return message || fallback + " (HTTP " + res.status + ")";
+}
+
+// One action at a time per control: a second press while the first is still running does nothing.
+const guardedControls = new Set();
+async function guarded(key, button, action) {
+  if (guardedControls.has(key)) return;
+  guardedControls.add(key);
+  if (button) button.disabled = true;
+  const epoch = authEpoch;
+  try {
+    await action();
+  } finally {
+    guardedControls.delete(key);
+    if (button && epoch === authEpoch) button.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Identity: what is on screen belongs to the signed-in admin and to nobody else.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+function clearAdminData() {
+  authEpoch += 1;
+  qualEpoch += 1;
+  resultEpoch += 1;
+  resultSeq += 1;
+  teamsSeq += 1; matchesSeq += 1; venuesSeq += 1; activationsSeq += 1;
+  cachedMatches = []; cachedVenues = []; cachedActivations = []; activationInfo = {}; cachedTeams = []; cachedRosters = {};
+  activationsState = "unloaded";
+  for (const selector of ["#table-roster", "#table-matches", "#table-venues", "#table-activations", "#table-qualifications"]) {
+    document.querySelector(selector + " tbody").innerHTML = "";
+  }
+  for (const id of ["p-team", "m-home", "m-away", "a-match", "a-venue", "pt-activation", "q-activation", "r-match", "r-events-list"]) {
+    document.getElementById(id).innerHTML = "";
+  }
+  for (const field of document.querySelectorAll("#admin-sections input, #admin-sections textarea")) field.value = "";
+  for (const note of document.querySelectorAll('#admin-sections [id^="msg-"], #prizes-heading, #prizes-summary, #result-state, #r-tally')) {
+    setNodeMsg(note, "", "");
+  }
+  unknownOutcomes.clear(); redeemedNotes.clear(); redeemInFlight.clear(); checkInFlight.clear(); releaseInFlight.clear();
+  qualList = []; qualListActivationId = ""; prizesSummaryText = "";
+  resetResultState();
+  guardedControls.clear();
+  document.getElementById("btn-check-finalize").hidden = true;
+  for (const id of ["btn-save-draft", "btn-finalize"]) document.getElementById(id).disabled = false;
 }
 
 async function refreshAuthState() {
-  const state = await UrbanoAuth.getState();
+  const seq = ++refreshSeq;
   const statusEl = document.getElementById("auth-status");
   const sections = document.getElementById("admin-sections");
-  if (state.status === "authenticated") {
-    statusEl.textContent = "Signed in as " + state.displayName + ".";
-    sections.style.display = "block";
-    await loadAll();
-  } else {
+  let state;
+  try {
+    state = await UrbanoAuth.getState();
+  } catch (err) {
+    if (seq !== refreshSeq) return;
+    currentIdentity = null;
+    clearAdminData();
+    sections.style.display = "none";
+    statusEl.textContent = "Could not read the sign-in state. Reload the page.";
+    return;
+  }
+  if (seq !== refreshSeq) return; // a newer sign-in event has already been handled
+  if (!state || state.status !== "authenticated") {
+    currentIdentity = null;
+    clearAdminData();
     statusEl.textContent = "Not signed in.";
     sections.style.display = "none";
+    return;
   }
+  const identity = String(state.gamingMemberId || state.email || state.displayName || "");
+  if (identity !== currentIdentity) {
+    clearAdminData();
+    currentIdentity = identity;
+  }
+  statusEl.textContent = "Signed in as " + state.displayName + ".";
+  sections.style.display = "block";
+  await loadAll();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Loading the lists. Each loader fetches first and swaps the screen only when the whole answer is good, so a failed or stale read
+// never blanks, duplicates or half-fills what is already there.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+let teamsSeq = 0;
+let matchesSeq = 0;
+let venuesSeq = 0;
+let activationsSeq = 0;
+
+// A reload that works takes back the load error an earlier attempt left; it leaves any other message (such as "Team created.") alone.
+function clearLoadError(id) {
+  const note = document.getElementById(id);
+  if (note.classList.contains("error")) setNodeMsg(note, "", "");
+}
+
+function loadFailureNote(hasStaleData) {
+  return hasStaleData ? " The lists below are the last ones loaded and may be out of date." : "";
 }
 
 async function loadTeams() {
-  const res = await authedFetch("/api/gaming/predictions/admin/teams");
-  cachedTeams = (res.json && res.json.teams) || [];
+  const seq = ++teamsSeq;
+  const epoch = authEpoch;
+  const stale = () => epoch !== authEpoch || seq !== teamsSeq;
+  const fail = (text) => {
+    if (!stale()) setMsg("msg-team", text + loadFailureNote(cachedTeams.length > 0), "error");
+    return false;
+  };
 
-  cachedRosters = {};
-  for (const t of cachedTeams) {
-    const playersRes = await authedFetch(`/api/gaming/predictions/admin/teams/${t.teamId}/players`);
-    cachedRosters[t.teamId] = (playersRes.json && playersRes.json.players) || [];
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/teams");
+  } catch (err) {
+    return fail("Could not load teams. " + describeRequestFailure(err).text);
   }
+  if (stale()) return false;
+  if (res.status !== 200 || !res.json || !Array.isArray(res.json.teams)) return fail(describeFailure(res, "Could not load teams.", "admin"));
+  const teams = res.json.teams;
 
+  const rosters = {};
+  for (const t of teams) {
+    let playersRes;
+    try {
+      playersRes = await authedFetch(`/api/gaming/predictions/admin/teams/${t.teamId}/players`);
+    } catch (err) {
+      return fail(`Could not load the roster of ${t.name}. ` + describeRequestFailure(err).text);
+    }
+    if (stale()) return false;
+    if (playersRes.status !== 200 || !playersRes.json || !Array.isArray(playersRes.json.players)) {
+      return fail(`Could not load the roster of ${t.name}. ` + describeFailure(playersRes, "The server refused.", "admin"));
+    }
+    rosters[t.teamId] = playersRes.json.players;
+  }
+  if (stale()) return false;
+  cachedTeams = teams;
+  cachedRosters = rosters;
+  renderTeams();
+  clearLoadError("msg-team");
+  return true;
+}
+
+function renderTeams() {
+  // A roster refresh must not silently flip the team the admin selected:
+  // the next paste would otherwise land on the first team in the list.
   const teamSelects = [document.getElementById("p-team"), document.getElementById("m-home"), document.getElementById("m-away")];
+  const previous = teamSelects.map((s) => s.value);
   teamSelects.forEach((s) => (s.innerHTML = ""));
   for (const t of cachedTeams) {
     for (const s of teamSelects) {
-      const opt = document.createElement("option");
-      opt.value = t.teamId;
-      opt.textContent = t.name;
-      s.appendChild(opt);
+      s.appendChild(h("option", { value: t.teamId, text: t.name }));
     }
   }
+  teamSelects.forEach((s, i) => {
+    if (previous[i] && cachedTeams.some((t) => t.teamId === previous[i])) s.value = previous[i];
+  });
 
   const tbody = document.querySelector("#table-roster tbody");
   tbody.innerHTML = "";
   for (const t of cachedTeams) {
     for (const p of cachedRosters[t.teamId] || []) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${t.name}</td><td>${p.name}</td><td>${p.active ? "Yes" : "No"}</td><td><button data-toggle-player="${p.playerId}" data-active="${p.active}">${p.active ? "Deactivate" : "Activate"}</button></td>`;
-      tbody.appendChild(tr);
+      const toggle = h("button", {
+        type: "button",
+        text: p.active ? "Deactivate" : "Activate",
+        dataset: { togglePlayer: p.playerId, active: String(p.active) },
+      });
+      toggle.addEventListener("click", () => guarded("player-toggle:" + p.playerId, toggle, async () => {
+        const active = toggle.dataset.active === "true";
+        let res;
+        try {
+          res = await authedFetch(`/api/gaming/predictions/admin/players/${toggle.dataset.togglePlayer}`, {
+            method: "PATCH",
+            body: JSON.stringify({ active: !active }),
+          });
+        } catch (err) {
+          setMsg("msg-player", `Could not ${active ? "deactivate" : "activate"} ${p.name}. ${describeRequestFailure(err).text} Check the roster before trying again.`, "error");
+          return;
+        }
+        if (res.status !== 200) {
+          setMsg("msg-player", describeFailure(res, `Could not ${active ? "deactivate" : "activate"} ${p.name}.`, "operational"), "error");
+          return;
+        }
+        setMsg("msg-player", "", "");
+        await loadTeams();
+      }));
+      tbody.appendChild(h("tr", null, h("td", { text: t.name }), h("td", { text: p.name }), h("td", { text: p.active ? "Yes" : "No" }), h("td", null, toggle)));
     }
   }
-  tbody.querySelectorAll("[data-toggle-player]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const active = btn.dataset.active === "true";
-      await authedFetch(`/api/gaming/predictions/admin/players/${btn.dataset.togglePlayer}`, {
+}
+
+const CLASSIFICATION_LABELS = {
+  OFFICIAL: "Official",
+  TRAINING: "Trial / test run",
+  CASUAL: "Casual (set outside this page)",
+  RANKED: "Ranked (set outside this page)",
+};
+
+function classificationLabel(value) {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(CLASSIFICATION_LABELS, value)
+    ? CLASSIFICATION_LABELS[value]
+    : "Not set - predictions are closed";
+}
+
+const CLASSIFICATION_SHORT = { OFFICIAL: "Official", TRAINING: "Trial", CASUAL: "Casual", RANKED: "Ranked" };
+
+// Names the match by teams, kickoff and classification: a trial and an official
+// match of the same fixture must never look alike in a dropdown.
+function matchLabel(m) {
+  const status = m.cancelledAt
+    ? "Cancelled"
+    : Object.prototype.hasOwnProperty.call(CLASSIFICATION_SHORT, m.activityClassification)
+      ? CLASSIFICATION_SHORT[m.activityClassification]
+      : "Not set";
+  const kickoff = new Date(m.kickoffAt).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return `${teamNameById(m.homeTeamId)} vs ${teamNameById(m.awayTeamId)} - ${kickoff} - ${status}`;
+}
+
+function relabelSelects() {
+  for (const opt of document.querySelectorAll("#a-match option, #r-match option")) {
+    const m = cachedMatches.find((x) => x.matchId === opt.value);
+    if (m) opt.textContent = matchLabel(m);
+  }
+  for (const opt of document.querySelectorAll("#pt-activation option, #q-activation option")) {
+    const info = activationInfo[opt.value];
+    const m = info && cachedMatches.find((x) => x.matchId === info.matchId);
+    if (m) opt.textContent = `${matchLabel(m)} @ ${info.venueName}`;
+  }
+  for (const cell of document.querySelectorAll("#table-activations td[data-match-id]")) {
+    const m = cachedMatches.find((x) => x.matchId === cell.dataset.matchId);
+    if (m) cell.textContent = matchLabel(m);
+  }
+}
+
+function buildClassificationCell(m) {
+  const current = h("strong", { class: "class-current", text: classificationLabel(m.activityClassification) });
+  const select = h(
+    "select",
+    { "aria-label": "Match classification", dataset: { classificationFor: m.matchId } },
+    h("option", { value: "OFFICIAL", text: "Official" }),
+    h("option", { value: "TRAINING", text: "Trial / test run" })
+  );
+  select.value = m.activityClassification === "TRAINING" ? "TRAINING" : "OFFICIAL";
+  const save = h("button", { type: "button", class: "secondary", text: "Set", dataset: { classificationSave: m.matchId } });
+  const msg = h("div", { class: "msg", role: "status", dataset: { classificationMsg: m.matchId } });
+
+  save.addEventListener("click", async () => {
+    const requested = select.value;
+    save.disabled = true;
+    select.disabled = true;
+    setNodeMsg(msg, "Saving…", "");
+    try {
+      const res = await authedFetch(`/api/gaming/predictions/admin/matches/${m.matchId}/activity-classification`, {
         method: "PATCH",
-        body: JSON.stringify({ active: !active }),
+        body: JSON.stringify({ activityClassification: requested }),
       });
-      await loadTeams();
-    });
+      if (res.status === 200) {
+        const saved = res.json && res.json.result && res.json.result.activityClassification;
+        m.activityClassification = typeof saved === "string" ? saved : requested;
+        current.textContent = classificationLabel(m.activityClassification);
+        relabelSelects();
+        setNodeMsg(msg, "Saved. Predictions open once this match also has an enabled venue activation.", "success");
+      } else {
+        setNodeMsg(msg, describeFailure(res, "Could not set the classification.", "finalizer"), "error");
+      }
+    } catch (err) {
+      setNodeMsg(msg, "Network error - the classification was not changed.", "error");
+    } finally {
+      save.disabled = false;
+      select.disabled = false;
+    }
   });
+
+  return h("td", { class: "class-cell" }, h("div", null, "Now: ", current), h("div", { class: "row" }, select, save), msg);
 }
 
 async function loadMatches() {
-  const res = await authedFetch("/api/gaming/predictions/admin/matches");
-  cachedMatches = (res.json && res.json.matches) || [];
+  const seq = ++matchesSeq;
+  const epoch = authEpoch;
+  const stale = () => epoch !== authEpoch || seq !== matchesSeq;
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/matches");
+  } catch (err) {
+    if (!stale()) setMsg("msg-match", "Could not load matches. " + describeRequestFailure(err).text + loadFailureNote(cachedMatches.length > 0), "error");
+    return false;
+  }
+  if (stale()) return false;
+  if (res.status !== 200 || !res.json || !Array.isArray(res.json.matches)) {
+    setMsg("msg-match", describeFailure(res, "Could not load matches.", "admin") + loadFailureNote(cachedMatches.length > 0), "error");
+    return false;
+  }
+  cachedMatches = res.json.matches;
+
   const tbody = document.querySelector("#table-matches tbody");
   tbody.innerHTML = "";
   const matchSelects = [document.getElementById("a-match"), document.getElementById("r-match")];
+  const previous = matchSelects.map((s) => s.value);
   matchSelects.forEach((s) => (s.innerHTML = ""));
   for (const m of cachedMatches) {
     const label = `${teamNameById(m.homeTeamId)} vs ${teamNameById(m.awayTeamId)}`;
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${label}</td><td>${new Date(m.kickoffAt).toLocaleString()}</td><td>${m.cancelledAt ? "Cancelled" : "Active"}</td><td>${m.cancelledAt ? "" : `<button data-cancel="${m.matchId}">Cancel</button>`}</td>`;
-    tbody.appendChild(tr);
+    const cancelButton = m.cancelledAt ? null : h("button", { type: "button", text: "Cancel", dataset: { cancel: m.matchId } });
+    const cancelMsg = cancelButton ? h("div", { class: "msg", role: "status" }) : null;
+    if (cancelButton) {
+      cancelButton.addEventListener("click", () => guarded("cancel-match:" + m.matchId, cancelButton, async () => {
+        if (!window.confirm(`Cancel this match?\n\n${matchLabel(m)}\n\nPlayers will stop seeing it and it cannot be un-cancelled.`)) return;
+        setNodeMsg(cancelMsg, "", "");
+        try {
+          const cancelRes = await authedFetch(`/api/gaming/predictions/admin/matches/${cancelButton.dataset.cancel}`, { method: "DELETE" });
+          if (cancelRes.status === 200) {
+            await loadMatches();
+            relabelSelects();
+          } else {
+            setNodeMsg(cancelMsg, describeFailure(cancelRes, "Could not cancel the match.", "operational"), "error");
+          }
+        } catch (err) {
+          setNodeMsg(cancelMsg, "Network error - check whether the match was cancelled before trying again.", "error");
+        }
+      }));
+    }
+    tbody.appendChild(h("tr", null,
+      h("td", { class: "cell-primary", text: label }),
+      h("td", { "data-label": "Kickoff", text: new Date(m.kickoffAt).toLocaleString() }),
+      h("td", { "data-label": "Status", text: m.cancelledAt ? "Cancelled" : "Active" }),
+      m.cancelledAt ? h("td", { "data-label": "Classification", text: "-" }) : buildClassificationCell(m),
+      h("td", { class: "cell-action" }, cancelButton, cancelMsg)
+    ));
     for (const s of matchSelects) {
-      const opt = document.createElement("option");
-      opt.value = m.matchId;
-      opt.textContent = label;
-      s.appendChild(opt);
+      s.appendChild(h("option", { value: m.matchId, text: matchLabel(m) }));
     }
   }
-  tbody.querySelectorAll("[data-cancel]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      await authedFetch(`/api/gaming/predictions/admin/matches/${btn.dataset.cancel}`, { method: "DELETE" });
-      await loadMatches();
-    });
+  // A reload keeps the operator's choice: the Result form is bound to its match, so the picker must not jump to the first one.
+  matchSelects.forEach((s, i) => {
+    if (previous[i] && cachedMatches.some((m) => m.matchId === previous[i])) s.value = previous[i];
   });
+  reconcileResultSelection();
+  clearLoadError("msg-match");
+  return true;
 }
 
 async function loadVenues() {
-  const res = await authedFetch("/api/gaming/predictions/admin/venues");
-  cachedVenues = (res.json && res.json.venues) || [];
+  const seq = ++venuesSeq;
+  const epoch = authEpoch;
+  const stale = () => epoch !== authEpoch || seq !== venuesSeq;
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/venues");
+  } catch (err) {
+    if (!stale()) setMsg("msg-venue", "Could not load venues. " + describeRequestFailure(err).text + loadFailureNote(cachedVenues.length > 0), "error");
+    return false;
+  }
+  if (stale()) return false;
+  if (res.status !== 200 || !res.json || !Array.isArray(res.json.venues)) {
+    setMsg("msg-venue", describeFailure(res, "Could not load venues.", "admin") + loadFailureNote(cachedVenues.length > 0), "error");
+    return false;
+  }
+  cachedVenues = res.json.venues;
   const tbody = document.querySelector("#table-venues tbody");
   tbody.innerHTML = "";
   const venueSelect = document.getElementById("a-venue");
+  const previous = venueSelect.value;
   venueSelect.innerHTML = "";
   for (const v of cachedVenues) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${v.name}</td><td>${v.latitude}, ${v.longitude}</td><td>${v.radiusMeters}m</td>`;
-    tbody.appendChild(tr);
-    const opt = document.createElement("option");
-    opt.value = v.venueId;
-    opt.textContent = v.name;
-    venueSelect.appendChild(opt);
+    tbody.appendChild(h("tr", null, h("td", { text: v.name }), h("td", { text: `${v.latitude}, ${v.longitude}` }), h("td", { text: `${v.radiusMeters}m` })));
+    venueSelect.appendChild(h("option", { value: v.venueId, text: v.name }));
   }
+  if (previous && cachedVenues.some((v) => v.venueId === previous)) venueSelect.value = previous;
+  clearLoadError("msg-venue");
+  return true;
 }
 
 async function loadActivations() {
+  const seq = ++activationsSeq;
+  const epoch = authEpoch;
+  const stale = () => epoch !== authEpoch || seq !== activationsSeq;
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/activations");
+  } catch (err) {
+    if (stale()) return false;
+    activationsState = "failed";
+    setMsg("msg-activation", "Network error - could not load activations." + loadFailureNote(cachedActivations.length > 0), "error");
+    return false;
+  }
+  if (stale()) return false;
+  if (res.status !== 200 || !res.json || !Array.isArray(res.json.activations)) {
+    activationsState = "failed";
+    setMsg("msg-activation", describeFailure(res, "Could not load activations.", "admin") + loadFailureNote(cachedActivations.length > 0), "error");
+    return false;
+  }
+
   const tbody = document.querySelector("#table-activations tbody");
-  tbody.innerHTML = "";
   const ptSelect = document.getElementById("pt-activation");
   const qSelect = document.getElementById("q-activation");
+  const previous = [ptSelect.value, qSelect.value];
+  tbody.innerHTML = "";
   ptSelect.innerHTML = "";
   qSelect.innerHTML = "";
   cachedActivations = [];
-  for (const m of cachedMatches) {
-    const res = await fetch("/api/gaming/predictions/matches");
-    const data = await res.json();
-    const match = (data.matches || []).find((x) => x.matchId === m.matchId);
-    if (!match) continue;
-    const label = `${teamNameById(m.homeTeamId)} vs ${teamNameById(m.awayTeamId)}`;
-    for (const activation of match.venueActivations) {
-      cachedActivations.push(activation);
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${label}</td><td>${activation.venue ? activation.venue.name : "?"}</td><td>${activation.enabled ? "Yes" : "No"}</td><td>${activation.prizeTiers.map((t) => t.correctDimensionCount + "/4: " + t.prizeLabel).join(", ") || "none"}</td><td><button data-toggle="${activation.venueActivationId}" data-enabled="${activation.enabled}">${activation.enabled ? "Disable" : "Enable"}</button></td>`;
-      tbody.appendChild(tr);
-      [ptSelect, qSelect].forEach((s) => {
-        const opt = document.createElement("option");
-        opt.value = activation.venueActivationId;
-        opt.textContent = `${label} @ ${activation.venue ? activation.venue.name : "?"}`;
-        s.appendChild(opt);
-      });
-    }
-  }
-  tbody.querySelectorAll("[data-toggle]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const enabled = btn.dataset.enabled === "true";
-      await authedFetch(`/api/gaming/predictions/admin/activations/${btn.dataset.toggle}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: !enabled }),
-      });
-      await loadActivations();
+  activationInfo = {};
+  for (const activation of res.json.activations) {
+    cachedActivations.push(activation);
+    const match = cachedMatches.find((x) => x.matchId === activation.matchId);
+    const label = match ? matchLabel(match) : "Unknown match";
+    const venueName = activation.venue ? activation.venue.name : "?";
+    activationInfo[activation.venueActivationId] = { matchId: activation.matchId, venueName };
+    const tiers = (activation.prizeTiers || []).map((t) => t.correctDimensionCount + "/4: " + t.prizeLabel).join(", ") || "none";
+    const toggle = h("button", {
+      type: "button",
+      text: activation.enabled ? "Disable" : "Enable",
+      dataset: { toggle: activation.venueActivationId, enabled: String(activation.enabled) },
     });
-  });
+    toggle.addEventListener("click", () => guarded("activation-toggle:" + activation.venueActivationId, toggle, async () => {
+      const enabled = toggle.dataset.enabled === "true";
+      let toggled;
+      try {
+        toggled = await authedFetch(`/api/gaming/predictions/admin/activations/${toggle.dataset.toggle}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !enabled }),
+        });
+      } catch (err) {
+        setMsg("msg-activation", `Could not ${enabled ? "disable" : "enable"} this activation. ${describeRequestFailure(err).text} Check its state before trying again.`, "error");
+        return;
+      }
+      if (toggled.status !== 200) {
+        setMsg("msg-activation", describeFailure(toggled, `Could not ${enabled ? "disable" : "enable"} this activation.`, "operational"), "error");
+        return;
+      }
+      setMsg("msg-activation", "", "");
+      await loadActivations();
+    }));
+    tbody.appendChild(h("tr", null, h("td", { text: label, dataset: { matchId: activation.matchId } }), h("td", { text: venueName }), h("td", { text: activation.enabled ? "Yes" : "No" }), h("td", { text: tiers }), h("td", null, toggle)));
+    [ptSelect, qSelect].forEach((s) => {
+      s.appendChild(h("option", { value: activation.venueActivationId, text: `${label} @ ${venueName}` }));
+    });
+  }
+  if (cachedActivations.some((a) => a.venueActivationId === previous[0])) ptSelect.value = previous[0];
+  if (cachedActivations.some((a) => a.venueActivationId === previous[1])) qSelect.value = previous[1];
+  activationsState = "ok";
+  clearLoadError("msg-activation");
+  return true;
 }
 
 async function loadAll() {
-  await loadTeams();
-  await loadMatches();
-  await loadVenues();
-  await loadActivations();
+  const epoch = authEpoch;
+  const results = [];
+  results.push(await loadTeams());
+  if (epoch !== authEpoch) return false;
+  results.push(await loadMatches());
+  if (epoch !== authEpoch) return false;
+  results.push(await loadVenues());
+  if (epoch !== authEpoch) return false;
+  results.push(await loadActivations());
+  return results.every(Boolean);
 }
 
-document.getElementById("btn-create-team").addEventListener("click", async () => {
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Create and edit forms: one request at a time per control, and every failure is shown.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+function createFailureText(err, what) {
+  const failure = describeRequestFailure(err);
+  return failure.sent
+    ? `${failure.text} Check whether the ${what} was created before trying again.`
+    : failure.text;
+}
+
+document.getElementById("btn-create-team").addEventListener("click", (event) => guarded("create-team", event.currentTarget, async () => {
   const name = document.getElementById("t-name").value.trim();
   if (!name) { setMsg("msg-team", "Team name is required.", "error"); return; }
-  const res = await authedFetch("/api/gaming/predictions/admin/teams", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+  setMsg("msg-team", "", "");
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/teams", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  } catch (err) {
+    setMsg("msg-team", createFailureText(err, "team"), "error");
+    return;
+  }
   if (res.status === 201) {
     setMsg("msg-team", "Team created.", "success");
     document.getElementById("t-name").value = "";
     await loadTeams();
   } else setMsg("msg-team", (res.json && res.json.error) || "Failed to create team.", "error");
-});
+}));
 
-document.getElementById("btn-create-player").addEventListener("click", async () => {
+document.getElementById("btn-create-player").addEventListener("click", (event) => guarded("create-player", event.currentTarget, async () => {
   const teamId = document.getElementById("p-team").value;
   const name = document.getElementById("p-name").value.trim();
   if (!teamId || !name) { setMsg("msg-player", "Select a team and enter a player name.", "error"); return; }
-  const res = await authedFetch(`/api/gaming/predictions/admin/teams/${teamId}/players`, {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+  setMsg("msg-player", "", "");
+  let res;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/teams/${teamId}/players`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  } catch (err) {
+    setMsg("msg-player", createFailureText(err, "player"), "error");
+    return;
+  }
   if (res.status === 201) {
     setMsg("msg-player", "Player added.", "success");
     document.getElementById("p-name").value = "";
     await loadTeams();
   } else setMsg("msg-player", (res.json && res.json.error) || "Failed to add player.", "error");
+}));
+
+const ROSTER_PASTE_LIMIT = 60;
+// A leading shirt number: "10.", "10)", "10 -", "10:", "(10)", "#10", or "10 " before the name.
+const SHIRT_NUMBER_PREFIX = /^[#(]?\d{1,3}\s*(?:[.)\-–—:]+\s*|\s+|$)/;
+
+function cleanRosterLine(line) {
+  const trimmed = String(line).trim();
+  if (!trimmed) return "";
+  return trimmed.replace(SHIRT_NUMBER_PREFIX, "").replace(/\s+/g, " ").trim();
+}
+
+function foldName(name) {
+  return String(name).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// Pure: pasted text -> distinct names (case-insensitive, first spelling wins),
+// capped at ROSTER_PASTE_LIMIT. `repeated` counts lines dropped as duplicates
+// within the paste; `overflow` counts distinct names beyond the cap.
+function parseRosterPaste(text) {
+  const seen = new Set();
+  const names = [];
+  let repeated = 0;
+  let overflow = 0;
+  for (const line of String(text || "").split(/\r\n|\r|\n/)) {
+    const name = cleanRosterLine(line);
+    if (!name) continue;
+    const key = foldName(name);
+    if (seen.has(key)) { repeated += 1; continue; }
+    seen.add(key);
+    if (names.length < ROSTER_PASTE_LIMIT) names.push(name);
+    else overflow += 1;
+  }
+  return { names, repeated, overflow };
+}
+
+document.getElementById("btn-create-players").addEventListener("click", async () => {
+  const button = document.getElementById("btn-create-players");
+  const textarea = document.getElementById("p-bulk");
+  const msg = document.getElementById("msg-bulk");
+  if (guardedControls.has("roster-paste")) return;
+  const teamId = document.getElementById("p-team").value;
+  if (!teamId) { setNodeMsg(msg, "Select a team first.", "error"); return; }
+
+  const parsed = parseRosterPaste(textarea.value);
+  if (parsed.names.length === 0) { setNodeMsg(msg, "Paste at least one player name (one per line).", "error"); return; }
+
+  const onRoster = new Map((cachedRosters[teamId] || []).map((p) => [foldName(p.name), p]));
+  const toAdd = [];
+  const inactive = [];
+  for (const name of parsed.names) {
+    const existing = onRoster.get(foldName(name));
+    if (!existing) toAdd.push(name);
+    else if (!existing.active) inactive.push(existing.name);
+  }
+  const skipped = parsed.names.length - toAdd.length - inactive.length;
+
+  if (toAdd.length > 0 && !window.confirm(`Add ${toAdd.length} player${toAdd.length === 1 ? "" : "s"} to ${teamNameById(teamId)}?`)) {
+    setNodeMsg(msg, "Cancelled - no players were added.", "");
+    return;
+  }
+
+  // The button stays disabled until the roster has been reloaded: a retry while the roster is still refreshing would add
+  // the names that just went in a second time, and a duplicated player cannot be removed.
+  guardedControls.add("roster-paste");
+  const epoch = authEpoch;
+  button.disabled = true;
+  textarea.disabled = true;
+  let added = 0;
+  const failed = [];
+  let stoppedBecause = "";
+  let notAdded = 0;
+  try {
+    for (let i = 0; i < toAdd.length; i++) {
+      const name = toAdd[i];
+      setNodeMsg(msg, `Adding ${i + 1} of ${toAdd.length}…`, "");
+      let res;
+      try {
+        res = await authedFetch(`/api/gaming/predictions/admin/teams/${teamId}/players`, {
+          method: "POST",
+          body: JSON.stringify({ name }),
+        });
+      } catch (err) {
+        failed.push(name + " (network error)");
+        continue;
+      }
+      if (epoch !== authEpoch) return;
+      if (res.status === 201) {
+        added += 1;
+        // Remember the player locally the moment the server confirms it, so a retry skips this name even if the reload below fails.
+        const created = res.json && res.json.player;
+        if (created && typeof created.playerId === "string") {
+          cachedRosters[teamId] = (cachedRosters[teamId] || []).concat([created]);
+        } else {
+          cachedRosters[teamId] = (cachedRosters[teamId] || []).concat([{ playerId: "added-" + name, teamId, name, active: true }]);
+        }
+        continue;
+      }
+      if (res.status === 401 || res.status === 403) {
+        stoppedBecause = describeFailure(res, "Not permitted.", "operational");
+        notAdded = toAdd.length - i;
+        break;
+      }
+      failed.push(name + " (" + (serverMessage(res) || "HTTP " + res.status) + ")");
+    }
+
+    const lines = [];
+    if (stoppedBecause) lines.push("Stopped: " + stoppedBecause);
+    lines.push(`${teamNameById(teamId)}: Added ${added}, Skipped ${skipped} (already on roster), Failed ${failed.length}.`);
+    if (parsed.repeated) lines.push(`${parsed.repeated} repeated name(s) in the paste were ignored.`);
+    if (inactive.length) lines.push("Not added, on the roster but deactivated (press Activate in the roster table): " + inactive.join(", ") + ".");
+    if (failed.length) lines.push("Failed: " + failed.join("; "));
+    if (notAdded) lines.push(`${notAdded} name(s) were not added.`);
+    if (parsed.overflow) lines.push(`${parsed.overflow} more name(s) beyond the ${ROSTER_PASTE_LIMIT}-name limit were not processed. Paste them as a second batch.`);
+    const clean = !stoppedBecause && failed.length === 0 && parsed.overflow === 0;
+    if (!clean) lines.push("Press Add Players again to retry: names already on the roster are skipped.");
+    setNodeMsg(msg, lines.join("\n"), !clean ? "error" : inactive.length ? "warning" : "success");
+    if (clean) textarea.value = "";
+    await loadTeams();
+  } finally {
+    guardedControls.delete("roster-paste");
+    if (epoch === authEpoch) {
+      button.disabled = false;
+      textarea.disabled = false;
+    }
+  }
 });
 
-document.getElementById("btn-create-match").addEventListener("click", async () => {
+document.getElementById("btn-create-match").addEventListener("click", (event) => guarded("create-match", event.currentTarget, async () => {
   const homeTeamId = document.getElementById("m-home").value;
   const awayTeamId = document.getElementById("m-away").value;
   const competition = document.getElementById("m-competition").value.trim();
   const kickoff = document.getElementById("m-kickoff").value;
   if (!homeTeamId || !awayTeamId || !competition || !kickoff) { setMsg("msg-match", "All fields are required.", "error"); return; }
   if (homeTeamId === awayTeamId) { setMsg("msg-match", "Home and away teams must be different.", "error"); return; }
-  const res = await authedFetch("/api/gaming/predictions/admin/matches", {
-    method: "POST",
-    body: JSON.stringify({ homeTeamId, awayTeamId, competition, kickoffAt: new Date(kickoff).toISOString() }),
-  });
-  if (res.status === 201) { setMsg("msg-match", "Match created.", "success"); await loadAll(); }
-  else setMsg("msg-match", (res.json && res.json.error) || "Failed to create match.", "error");
-});
+  try {
+    const res = await authedFetch("/api/gaming/predictions/admin/matches", {
+      method: "POST",
+      body: JSON.stringify({ homeTeamId, awayTeamId, competition, kickoffAt: new Date(kickoff).toISOString() }),
+    });
+    if (res.status === 201) { setMsg("msg-match", "Match created.", "success"); await loadAll(); }
+    else setMsg("msg-match", (res.json && res.json.error) || "Failed to create match.", "error");
+  } catch (err) {
+    setMsg("msg-match", "Network error - check whether the match was created before trying again.", "error");
+  }
+}));
 
-document.getElementById("btn-create-venue").addEventListener("click", async () => {
+document.getElementById("btn-create-venue").addEventListener("click", (event) => guarded("create-venue", event.currentTarget, async () => {
   const name = document.getElementById("v-name").value.trim();
   const latitude = parseFloat(document.getElementById("v-lat").value);
   const longitude = parseFloat(document.getElementById("v-lng").value);
@@ -353,41 +995,102 @@ document.getElementById("btn-create-venue").addEventListener("click", async () =
   if (!name || !Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(radiusMeters)) {
     setMsg("msg-venue", "All fields are required.", "error"); return;
   }
-  const res = await authedFetch("/api/gaming/predictions/admin/venues", {
-    method: "POST",
-    body: JSON.stringify({ name, latitude, longitude, radiusMeters }),
-  });
+  setMsg("msg-venue", "", "");
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/venues", {
+      method: "POST",
+      body: JSON.stringify({ name, latitude, longitude, radiusMeters }),
+    });
+  } catch (err) {
+    setMsg("msg-venue", createFailureText(err, "venue"), "error");
+    return;
+  }
   if (res.status === 201) { setMsg("msg-venue", "Venue created.", "success"); await loadAll(); }
   else setMsg("msg-venue", (res.json && res.json.error) || "Failed to create venue.", "error");
-});
+}));
 
-document.getElementById("btn-create-activation").addEventListener("click", async () => {
+document.getElementById("btn-create-activation").addEventListener("click", (event) => guarded("create-activation", event.currentTarget, async () => {
   const matchId = document.getElementById("a-match").value;
   const venueId = document.getElementById("a-venue").value;
   if (!matchId || !venueId) { setMsg("msg-activation", "Select a match and venue.", "error"); return; }
-  const res = await authedFetch("/api/gaming/predictions/admin/activations", {
-    method: "POST",
-    body: JSON.stringify({ matchId, venueId }),
-  });
+  setMsg("msg-activation", "", "");
+  let res;
+  try {
+    res = await authedFetch("/api/gaming/predictions/admin/activations", {
+      method: "POST",
+      body: JSON.stringify({ matchId, venueId }),
+    });
+  } catch (err) {
+    setMsg("msg-activation", createFailureText(err, "activation"), "error");
+    return;
+  }
   if (res.status === 201) { setMsg("msg-activation", "Activation created.", "success"); await loadActivations(); }
   else setMsg("msg-activation", (res.json && res.json.error) || "Failed to create activation.", "error");
-});
+}));
 
-document.getElementById("btn-create-tier").addEventListener("click", async () => {
+document.getElementById("btn-create-tier").addEventListener("click", (event) => guarded("create-tier", event.currentTarget, async () => {
   const venueActivationId = document.getElementById("pt-activation").value;
   const correctDimensionCount = parseInt(document.getElementById("pt-count").value, 10);
   const prizeLabel = document.getElementById("pt-label").value.trim();
   if (!venueActivationId || !prizeLabel) { setMsg("msg-tier", "Select an activation and enter a label.", "error"); return; }
-  const res = await authedFetch(`/api/gaming/predictions/admin/activations/${venueActivationId}/prize-tiers`, {
-    method: "POST",
-    body: JSON.stringify({ correctDimensionCount, prizeLabel }),
-  });
+  setMsg("msg-tier", "", "");
+  let res;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/activations/${venueActivationId}/prize-tiers`, {
+      method: "POST",
+      body: JSON.stringify({ correctDimensionCount, prizeLabel }),
+    });
+  } catch (err) {
+    setMsg("msg-tier", createFailureText(err, "prize tier"), "error");
+    return;
+  }
   if (res.status === 201) { setMsg("msg-tier", "Prize tier added.", "success"); await loadActivations(); }
   else setMsg("msg-tier", (res.json && res.json.error) || "Failed to add prize tier.", "error");
-});
+}));
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Result: enter, review and finalize ONE match's result.
+//
+// The form is bound to the match whose result was last read: nothing is saved or finalized for any other match, and nothing is
+// saved or finalized before this page has read the authoritative state of that match. A save carries the "save base" that read
+// returned, so a save over a result that has changed since (saved, finalized or corrected by someone else) is refused by the
+// server. Finalize names the exact result and the digest of the content that was reviewed; a result that changed since is refused,
+// so content nobody reviewed can never be settled. A finalize whose answer is lost is an UNKNOWN outcome, recovered by reading
+// (never by sending it again or by starting a correction).
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const resultState = {
+  matchId: null,   // the match the form belongs to, once its state has been read
+  loaded: false,   // the last read of that match succeeded and nothing since has made it uncertain
+  saveBase: null,  // the token the server gave for the state that read showed
+  draft: null,     // the draft as the server has it (goalEvents and contentDigest included)
+  finalized: null, // the current finalized result as the server has it
+};
+const finalizeUnknowns = new Map(); // matchId -> { matchResultId, contentDigest, isCorrection, scoreline, episode }
+let resultBusy = false;             // a save or a finalize is in flight
+let resultSeq = 0;                  // numbers each read; an older read arriving after a newer one is dropped
+let resultEpoch = 0;                // bumped when the selected match changes, which invalidates every request in flight
+let lastResultMatchId = "";
+let finalizeEpisode = 0;
+
+function resetResultState() {
+  resultState.matchId = null;
+  resultState.loaded = false;
+  resultState.saveBase = null;
+  resultState.draft = null;
+  resultState.finalized = null;
+  finalizeUnknowns.clear();
+  resultBusy = false;
+  lastResultMatchId = "";
+}
+
+function selectedResultMatchId() {
+  return document.getElementById("r-match").value;
+}
 
 function currentResultMatchPlayers() {
-  const matchId = document.getElementById("r-match").value;
+  const matchId = selectedResultMatchId();
   const match = cachedMatches.find((m) => m.matchId === matchId);
   if (!match) return [];
   const home = (cachedRosters[match.homeTeamId] || []).map((p) => ({ ...p, teamName: teamNameById(match.homeTeamId) }));
@@ -397,24 +1100,37 @@ function currentResultMatchPlayers() {
 
 function addGoalEventRow(existing) {
   const players = currentResultMatchPlayers();
-  const row = document.createElement("div");
-  row.className = "row goal-event-row";
-  const playerOptions = players.map((p) => `<option value="${p.playerId}" ${existing && existing.scorerPlayerId === p.playerId ? "selected" : ""}>${p.teamName}: ${p.name}</option>`).join("");
-  row.innerHTML = `
-    <select class="ge-player">${playerOptions}</select>
-    <input class="ge-minute" type="number" min="1" max="120" placeholder="Minute" value="${existing ? existing.minuteRegulation : ""}" style="max-width:90px" />
-    <label style="font-size:12.5px;"><input class="ge-stoppage" type="number" min="1" placeholder="+stoppage" value="${existing && existing.minuteStoppage ? existing.minuteStoppage : ""}" style="max-width:70px" /></label>
-    <label style="font-size:12.5px;"><input class="ge-own-goal" type="checkbox" ${existing && existing.isOwnGoal ? "checked" : ""} /> Own goal</label>
-    <button type="button" class="secondary ge-remove">Remove</button>
-  `;
-  row.querySelector(".ge-remove").addEventListener("click", () => row.remove());
+  const row = h("div", { class: "row goal-event-row" });
+
+  const playerSelect = h("select", { class: "ge-player" });
+  for (const p of players) {
+    const opt = h("option", { value: p.playerId, text: `${p.teamName}: ${p.name}` });
+    if (existing && existing.scorerPlayerId === p.playerId) opt.selected = true;
+    playerSelect.appendChild(opt);
+  }
+
+  const minute = h("input", { class: "ge-minute", type: "number", min: "1", max: "120", placeholder: "Minute", style: "max-width:90px" });
+  minute.value = existing && existing.minuteRegulation !== null && existing.minuteRegulation !== undefined ? existing.minuteRegulation : "";
+
+  const stoppage = h("input", { class: "ge-stoppage", type: "number", min: "1", placeholder: "+stoppage", style: "max-width:70px" });
+  stoppage.value = existing && existing.minuteStoppage ? existing.minuteStoppage : "";
+
+  const ownGoal = h("input", { class: "ge-own-goal", type: "checkbox" });
+  ownGoal.checked = !!(existing && existing.isOwnGoal);
+
+  const remove = h("button", { type: "button", class: "secondary ge-remove", text: "Remove" });
+  remove.addEventListener("click", () => { row.remove(); updateTally(); });
+
+  row.appendChild(playerSelect);
+  row.appendChild(minute);
+  row.appendChild(h("label", { style: "font-size:12.5px;" }, stoppage));
+  row.appendChild(h("label", { style: "font-size:12.5px;" }, ownGoal, " Own goal"));
+  row.appendChild(remove);
   document.getElementById("r-events-list").appendChild(row);
+  updateTally();
 }
 
 document.getElementById("btn-add-goal-event").addEventListener("click", () => addGoalEventRow(null));
-document.getElementById("r-match").addEventListener("change", () => {
-  document.getElementById("r-events-list").innerHTML = "";
-});
 
 function readGoalEventRows() {
   return [...document.querySelectorAll("#r-events-list .goal-event-row")].map((row) => ({
@@ -425,65 +1141,1158 @@ function readGoalEventRows() {
   }));
 }
 
-document.getElementById("btn-load-result").addEventListener("click", async () => {
-  const matchId = document.getElementById("r-match").value;
-  if (!matchId) return;
-  const res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result`);
-  const draft = res.json && res.json.draft;
-  document.getElementById("r-events-list").innerHTML = "";
-  if (draft) {
-    document.getElementById("r-home").value = draft.homeScore;
-    document.getElementById("r-away").value = draft.awayScore;
-    for (const e of draft.goalEvents) addGoalEventRow(e);
-    setMsg("msg-result", draft.supersedesMatchResultId ? "Loaded correction draft." : "Loaded draft.", "success");
-  } else {
-    document.getElementById("r-home").value = "";
-    document.getElementById("r-away").value = "";
-    setMsg("msg-result", (res.json && res.json.currentFinalized) ? "No draft — click Save Draft to start a correction." : "No draft yet.", "");
+// The goals that count toward the score are those up to minute 90 (stoppage included); an own goal counts for the other team.
+function countedGoals(rows, match) {
+  const homePlayers = new Set((cachedRosters[match.homeTeamId] || []).map((p) => p.playerId));
+  const awayPlayers = new Set((cachedRosters[match.awayTeamId] || []).map((p) => p.playerId));
+  let home = 0;
+  let away = 0;
+  let extraTime = 0;
+  let unplaced = 0;
+  for (const row of rows) {
+    if (!Number.isInteger(row.minuteRegulation)) { unplaced += 1; continue; }
+    if (row.minuteRegulation > 90) { extraTime += 1; continue; }
+    const onHome = homePlayers.has(row.scorerPlayerId);
+    const onAway = awayPlayers.has(row.scorerPlayerId);
+    if (!onHome && !onAway) { unplaced += 1; continue; }
+    if (onHome !== row.isOwnGoal) home += 1;
+    else away += 1;
   }
+  return { home, away, extraTime, unplaced };
+}
+
+function updateTally() {
+  const note = document.getElementById("r-tally");
+  const match = cachedMatches.find((m) => m.matchId === selectedResultMatchId());
+  const rows = readGoalEventRows();
+  if (!match || rows.length === 0) { setNodeMsg(note, "", ""); return; }
+  const counted = countedGoals(rows, match);
+  let text = `Goals that count toward the score (up to minute 90; an own goal counts for the other team): ${teamNameById(match.homeTeamId)} ${counted.home} - ${counted.away} ${teamNameById(match.awayTeamId)}.`;
+  if (counted.extraTime) text += ` ${counted.extraTime} goal${counted.extraTime === 1 ? "" : "s"} after minute 90 ${counted.extraTime === 1 ? "is" : "are"} kept as evidence but not counted.`;
+  if (counted.unplaced) text += ` ${counted.unplaced} goal${counted.unplaced === 1 ? " has" : "s have"} no minute or no scorer on this match's rosters yet.`;
+  const homeRaw = document.getElementById("r-home").value.trim();
+  const awayRaw = document.getElementById("r-away").value.trim();
+  let kind = "";
+  if (homeRaw !== "" && awayRaw !== "" && (parseInt(homeRaw, 10) !== counted.home || parseInt(awayRaw, 10) !== counted.away) && !counted.unplaced) {
+    text += ` The score typed above is ${homeRaw}-${awayRaw}: it must equal these counted goals.`;
+    kind = "warning";
+  }
+  setNodeMsg(note, text, kind);
+}
+
+document.getElementById("r-events-list").addEventListener("input", updateTally);
+document.getElementById("r-events-list").addEventListener("change", updateTally);
+document.getElementById("r-home").addEventListener("input", updateTally);
+document.getElementById("r-away").addEventListener("input", updateTally);
+
+function formHasContent() {
+  return document.getElementById("r-home").value.trim() !== ""
+    || document.getElementById("r-away").value.trim() !== ""
+    || document.querySelectorAll("#r-events-list .goal-event-row").length > 0;
+}
+
+function clearResultForm() {
+  document.getElementById("r-home").value = "";
+  document.getElementById("r-away").value = "";
+  document.getElementById("r-events-list").innerHTML = "";
+  document.getElementById("r-reason").value = "";
+  setNodeMsg(document.getElementById("r-tally"), "", "");
+}
+
+function showDraftInForm(draft) {
+  document.getElementById("r-home").value = draft.homeScore;
+  document.getElementById("r-away").value = draft.awayScore;
+  document.getElementById("r-events-list").innerHTML = "";
+  for (const e of draft.goalEvents) addGoalEventRow(e);
+  updateTally();
+}
+
+// Strict comparison of what is on screen with the draft the server holds: scores, then the goal events as an unordered set.
+// A blank form is NOT the draft.
+function formMatchesDraft(draft) {
+  const homeRaw = document.getElementById("r-home").value.trim();
+  const awayRaw = document.getElementById("r-away").value.trim();
+  if (homeRaw === "" || awayRaw === "") return false;
+  if (parseInt(homeRaw, 10) !== draft.homeScore || parseInt(awayRaw, 10) !== draft.awayScore) return false;
+  const signature = (e) => JSON.stringify([e.scorerPlayerId, e.minuteRegulation, e.minuteStoppage || null, !!e.isOwnGoal]);
+  const onScreen = readGoalEventRows().map(signature).sort();
+  const saved = (draft.goalEvents || []).map(signature).sort();
+  return onScreen.length === saved.length && onScreen.every((value, i) => value === saved[i]);
+}
+
+function describeEvent(e) {
+  const minute = e.minuteRegulation + (e.minuteStoppage ? "+" + e.minuteStoppage : "");
+  const team = (() => {
+    const match = cachedMatches.find((m) => m.matchId === (resultState.matchId || selectedResultMatchId()));
+    if (!match) return "";
+    if ((cachedRosters[match.homeTeamId] || []).some((p) => p.playerId === e.scorerPlayerId)) return teamNameById(match.homeTeamId);
+    if ((cachedRosters[match.awayTeamId] || []).some((p) => p.playerId === e.scorerPlayerId)) return teamNameById(match.awayTeamId);
+    return "";
+  })();
+  return `${minute}' ${playerNameById(e.scorerPlayerId)}${team ? " (" + team + ")" : ""}${e.isOwnGoal ? " (own goal)" : ""}${e.minuteRegulation > 90 ? " - extra time, not counted" : ""}`;
+}
+
+function scorelineFor(match, result) {
+  return `${teamNameById(match.homeTeamId)} ${result.homeScore}-${result.awayScore} ${teamNameById(match.awayTeamId)}`;
+}
+
+// The draft and the finalized result in an answer must each carry what a save, a review and a finalize depend on.
+function isResultSnapshot(value) {
+  return !!value && typeof value === "object"
+    && typeof value.matchResultId === "string"
+    && typeof value.contentDigest === "string"
+    && typeof value.homeScore === "number" && typeof value.awayScore === "number"
+    && Array.isArray(value.goalEvents);
+}
+
+function parseResultView(res) {
+  const json = res && res.status === 200 ? res.json : null;
+  if (!json || typeof json !== "object") return null;
+  if (typeof json.saveBase !== "string" || json.saveBase.trim() === "") return null;
+  if (json.draft !== null && !isResultSnapshot(json.draft)) return null;
+  if (json.currentFinalized !== null && !isResultSnapshot(json.currentFinalized)) return null;
+  return { draft: json.draft, finalized: json.currentFinalized, saveBase: json.saveBase };
+}
+
+function setStale(text) {
+  resultState.loaded = false;
+  renderResultState(text);
+}
+
+// The one line that says what this form is bound to and what may be done next.
+function renderResultState(extra) {
+  const note = document.getElementById("result-state");
+  const matchId = selectedResultMatchId();
+  const match = cachedMatches.find((m) => m.matchId === matchId);
+  const checkButton = document.getElementById("btn-check-finalize");
+  const unknown = finalizeUnknowns.get(matchId);
+  checkButton.hidden = !unknown;
+  if (!match) { setNodeMsg(note, "", ""); return; }
+  if (unknown) {
+    setNodeMsg(note, `Finalize status UNKNOWN for ${unknown.scoreline}: the answer never arrived, so the result may or may not be finalized. Saving and finalizing are paused. Press Check result status.`, "error");
+    return;
+  }
+  if (!resultState.loaded || resultState.matchId !== matchId) {
+    setNodeMsg(note, extra || "Press Load to read this match's saved result before saving or finalizing.", extra ? "warning" : "");
+    return;
+  }
+  const parts = [];
+  if (resultState.finalized) parts.push(`Finalized result: ${scorelineFor(match, resultState.finalized)}.`);
+  if (resultState.draft) {
+    parts.push(resultState.draft.supersedesMatchResultId
+      ? `Saved correction draft: ${scorelineFor(match, resultState.draft)}. Review the score and goals above, then press Finalize.`
+      : `Saved draft: ${scorelineFor(match, resultState.draft)}. Review the score and goals above, then press Finalize.`);
+  } else if (resultState.finalized) {
+    parts.push("To correct it, enter the corrected score and goals, press Save Draft, then Finalize with a reason.");
+  } else {
+    parts.push("No result saved yet.");
+  }
+  if (extra) parts.push(extra);
+  setNodeMsg(note, parts.join(" "), "");
+}
+
+// Called whenever the Matches list has been rebuilt, in case the picker no longer shows the match the form belongs to.
+function reconcileResultSelection() {
+  const selected = selectedResultMatchId();
+  if (lastResultMatchId === "") { lastResultMatchId = selected; renderResultState(); return; }
+  if (selected === lastResultMatchId) { renderResultState(); return; }
+  // The picker no longer shows the match this form was read for: the form content is not that match's any more.
+  resultEpoch += 1;
+  resultSeq += 1;
+  resultState.matchId = null;
+  resultState.loaded = false;
+  resultState.saveBase = null;
+  resultState.draft = null;
+  resultState.finalized = null;
+  clearResultForm();
+  lastResultMatchId = selected;
+  renderResultState();
+}
+
+document.getElementById("r-match").addEventListener("change", () => {
+  const select = document.getElementById("r-match");
+  const previous = lastResultMatchId;
+  if (previous && previous !== select.value && formHasContent()) {
+    const old = cachedMatches.find((m) => m.matchId === previous);
+    if (!window.confirm(`Discard the score and goals typed for ${old ? matchLabel(old) : "the previous match"}?\n\nNothing has been saved for them if they differ from the saved draft.`)) {
+      select.value = previous;
+      return;
+    }
+  }
+  resultEpoch += 1;
+  resultSeq += 1;
+  resultState.matchId = null;
+  resultState.loaded = false;
+  resultState.saveBase = null;
+  resultState.draft = null;
+  resultState.finalized = null;
+  clearResultForm();
+  setMsg("msg-result", "", "");
+  lastResultMatchId = select.value;
+  renderResultState();
 });
+
+// Reads the authoritative state of the selected match. A failed or stale read changes nothing on screen and never reports "no draft".
+// options.quiet: do not announce the read; options.keepForm: leave what is typed alone; options.expectDigest: the digest of the
+// draft a save just produced, to say whether the read shows it.
+async function loadResult(options) {
+  const opts = options || {};
+  const matchId = selectedResultMatchId();
+  if (!matchId) return false;
+  const epoch = resultEpoch;
+  const auth = authEpoch;
+  const seq = ++resultSeq;
+  const outdated = () => epoch !== resultEpoch || auth !== authEpoch || seq !== resultSeq || selectedResultMatchId() !== matchId;
+  if (!opts.quiet) setMsg("msg-result", "Loading…", "");
+
+  let res;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result`, undefined, RESULT_REQUEST_TIMEOUT_MS);
+  } catch (err) {
+    if (outdated()) return false;
+    resultState.loaded = false;
+    setMsg("msg-result", `Could not load the result. ${describeRequestFailure(err).text} What is on screen was left as it is, and saving and finalizing wait until a load succeeds.`, "error");
+    renderResultState();
+    return false;
+  }
+  if (outdated()) return false;
+
+  const view = parseResultView(res);
+  if (!view) {
+    resultState.loaded = false;
+    const reason = res.status === 200
+      ? "The server's answer was not understood."
+      : describeFailure(res, "Could not load the result.", "admin");
+    setMsg("msg-result", `${reason} What is on screen was left as it is, and saving and finalizing wait until a load succeeds.`, "error");
+    renderResultState();
+    return false;
+  }
+
+  resultState.matchId = matchId;
+  resultState.loaded = true;
+  resultState.saveBase = view.saveBase;
+  resultState.draft = view.draft;
+  resultState.finalized = view.finalized;
+  lastResultMatchId = matchId;
+
+  if (!opts.keepForm) {
+    if (view.draft) showDraftInForm(view.draft);
+    else clearResultForm();
+  }
+
+  let outcomeNote = "";
+  const unknown = finalizeUnknowns.get(matchId);
+  if (unknown) outcomeNote = settleFinalizeUnknown(matchId, view, false);
+
+  const match = cachedMatches.find((m) => m.matchId === matchId);
+  if (opts.expectDigest) {
+    if (view.draft && view.draft.contentDigest === opts.expectDigest) {
+      setMsg("msg-result", opts.savedMessage || "Draft saved.", "success");
+    } else {
+      setMsg("msg-result", "The draft was saved, but the saved result has changed again since. Press Load to review the current draft before finalizing.", "warning");
+    }
+  } else if (outcomeNote) {
+    // the unknown-outcome settlement wrote its own message
+  } else if (view.draft) {
+    setMsg("msg-result", view.draft.supersedesMatchResultId ? "Loaded correction draft." : "Loaded draft.", "success");
+  } else if (view.finalized && match) {
+    setMsg("msg-result", `No draft - this match already has a finalized result (${scorelineFor(match, view.finalized)}). Click Save Draft to start a correction.`, "");
+  } else {
+    setMsg("msg-result", "No draft yet.", "");
+  }
+  renderResultState();
+  return true;
+}
+
+document.getElementById("btn-load-result").addEventListener("click", async () => {
+  const matchId = selectedResultMatchId();
+  if (!matchId) return;
+  if (resultBusy) return;
+  const showsSavedDraft = resultState.loaded && resultState.matchId === matchId && !!resultState.draft && formMatchesDraft(resultState.draft);
+  const dirty = formHasContent() && !showsSavedDraft;
+  if (dirty && !window.confirm("Loading replaces the score and goals on screen with the saved result. Discard what you typed?")) return;
+  await loadResult({});
+});
+
+function readResultFormForSave() {
+  const homeRaw = document.getElementById("r-home").value.trim();
+  const awayRaw = document.getElementById("r-away").value.trim();
+  const homeScore = /^\d+$/.test(homeRaw) ? parseInt(homeRaw, 10) : NaN;
+  const awayScore = /^\d+$/.test(awayRaw) ? parseInt(awayRaw, 10) : NaN;
+  if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore)) {
+    return { error: "Enter the home and away scores as whole numbers (0 or more)." };
+  }
+  const events = readGoalEventRows();
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!e.scorerPlayerId) return { error: `Goal ${i + 1} needs a scorer.` };
+    if (!Number.isInteger(e.minuteRegulation) || e.minuteRegulation < 1 || e.minuteRegulation > 120) {
+      return { error: `Goal ${i + 1} needs a whole minute from 1 to 120.` };
+    }
+    if (e.minuteStoppage !== null && (!Number.isInteger(e.minuteStoppage) || e.minuteStoppage < 1)) {
+      return { error: `Goal ${i + 1} has an invalid stoppage time.` };
+    }
+  }
+  return { homeScore, awayScore, events };
+}
+
+function setResultButtons(disabled) {
+  document.getElementById("btn-save-draft").disabled = disabled;
+  document.getElementById("btn-finalize").disabled = disabled;
+}
 
 document.getElementById("btn-save-draft").addEventListener("click", async () => {
-  const matchId = document.getElementById("r-match").value;
+  if (resultBusy) return;
+  const matchId = selectedResultMatchId();
   if (!matchId) { setMsg("msg-result", "Select a match.", "error"); return; }
-  const homeScore = parseInt(document.getElementById("r-home").value, 10);
-  const awayScore = parseInt(document.getElementById("r-away").value, 10);
-  const officialGoalEvents = readGoalEventRows();
-  const res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result`, {
-    method: "POST",
-    body: JSON.stringify({ homeScore, awayScore, officialGoalEvents }),
-  });
-  if (res.status === 201) setMsg("msg-result", "Draft saved.", "success");
-  else setMsg("msg-result", (res.json && res.json.error) || "Failed to save draft.", "error");
+  if (finalizeUnknowns.has(matchId)) {
+    setMsg("msg-result", "A finalize attempt for this match has an UNKNOWN outcome. Press Check result status before saving anything.", "error");
+    return;
+  }
+  if (!resultState.loaded || resultState.matchId !== matchId || !resultState.saveBase) {
+    setMsg("msg-result", "Press Load first, so this page knows the current state of this match's result before you save over it. What you typed is kept.", "error");
+    return;
+  }
+  const form = readResultFormForSave();
+  if (form.error) { setMsg("msg-result", form.error, "error"); return; }
+
+  resultBusy = true;
+  setResultButtons(true);
+  const epoch = resultEpoch;
+  const auth = authEpoch;
+  const saveBase = resultState.saveBase;
+  setMsg("msg-result", "Saving…", "");
+  try {
+    let res;
+    try {
+      res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result`, {
+        method: "POST",
+        body: JSON.stringify({ homeScore: form.homeScore, awayScore: form.awayScore, officialGoalEvents: form.events, saveBase }),
+      }, RESULT_REQUEST_TIMEOUT_MS);
+    } catch (err) {
+      if (epoch !== resultEpoch || auth !== authEpoch) return;
+      const failure = describeRequestFailure(err);
+      if (failure.sent) {
+        setStale("");
+        setMsg("msg-result", `${failure.text} The draft may or may not have been saved. What you typed is still on screen. Press Load to see what is saved before saving or finalizing again.`, "error");
+      } else {
+        setMsg("msg-result", `${failure.text} Nothing was saved, and what you typed is still on screen.`, "error");
+      }
+      return;
+    }
+    if (epoch !== resultEpoch || auth !== authEpoch) return;
+
+    if (res.status === 201) {
+      const saved = res.json && res.json.result;
+      if (!saved || typeof saved.matchResultId !== "string" || typeof saved.contentDigest !== "string") {
+        setStale("");
+        setMsg("msg-result", "The server answered 201 without the saved draft's details, so this page cannot tell what was saved. Press Load before saving or finalizing again.", "error");
+        return;
+      }
+      resultState.saveBase = saved.contentDigest;
+      resultState.loaded = false;
+      const savedMessage = saved.isCorrection
+        ? "Correction draft saved. It replaces the finalized result only when you finalize it, with a reason."
+        : "Draft saved.";
+      const reloaded = await loadResult({ quiet: true, keepForm: true, expectDigest: saved.contentDigest, savedMessage });
+      if (!reloaded && epoch === resultEpoch && auth === authEpoch) {
+        setMsg("msg-result", "Draft saved, but this page could not read it back. Press Load to review it before finalizing.", "warning");
+      }
+      return;
+    }
+
+    if (res.status === 409) {
+      setStale("The saved result changed since you loaded it.");
+      setMsg("msg-result", `${serverMessage(res) || "The saved result changed since you loaded it."} What you typed is still on screen. Press Load to see the current result; nothing was saved.`, "error");
+      return;
+    }
+    setMsg("msg-result", `${describeFailure(res, "Failed to save draft.", "operational")} What you typed is still on screen.`, "error");
+  } finally {
+    resultBusy = false;
+    if (auth === authEpoch) setResultButtons(false);
+  }
 });
+
+function prizeTierWarning(matchId) {
+  const activations = cachedActivations.filter((a) => a.matchId === matchId);
+  if (activations.length === 0) {
+    return "WARNING: this match has no venue activation, so nobody can win a prize.\n\n";
+  }
+  const bare = activations.filter((a) => (a.prizeTiers || []).length === 0).map((a) => (a.venue ? a.venue.name : "?"));
+  if (bare.length === 0) return "";
+  return "WARNING: no prize tiers are set for " + bare.join(", ") + ". Winners are created only for tiers that exist when you finalize, so there would be NO winners. Press Cancel, add the prize tiers, then finalize.\n\n";
+}
+
+function isFinalizeConfirmation(res, matchResultId) {
+  const result = res.json && typeof res.json === "object" ? res.json.result : null;
+  return !!result && typeof result === "object" && result.matchResultId === matchResultId && typeof result.finalizedAt === "string";
+}
+
+// "success" | "rejected" | "unknown". res is null when the request itself failed or the answer never arrived.
+function classifyFinalize(res, matchResultId) {
+  if (!res) return "unknown";
+  if (res.status === 200) return isFinalizeConfirmation(res, matchResultId) ? "success" : "unknown";
+  if (res.status >= 400 && res.status < 500 && res.status !== 408) return "rejected";
+  return "unknown";
+}
 
 document.getElementById("btn-finalize").addEventListener("click", async () => {
-  const matchId = document.getElementById("r-match").value;
+  if (resultBusy) return;
+  const matchId = selectedResultMatchId();
   if (!matchId) { setMsg("msg-result", "Select a match.", "error"); return; }
-  const res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result/finalize`, { method: "POST" });
-  if (res.status === 200) setMsg("msg-result", "Finalized.", "success");
-  else setMsg("msg-result", (res.json && res.json.error) || "Failed to finalize.", "error");
+  const match = cachedMatches.find((m) => m.matchId === matchId);
+  if (!match) { setMsg("msg-result", "Match not found. Reload the page.", "error"); return; }
+  if (finalizeUnknowns.has(matchId)) {
+    setMsg("msg-result", "A finalize attempt for this match has an UNKNOWN outcome. Press Check result status; do not finalize again until it is settled.", "error");
+    return;
+  }
+  if (!resultState.loaded || resultState.matchId !== matchId) {
+    setMsg("msg-result", "Press Load to read and review this match's saved draft before finalizing. Nothing was finalized.", "error");
+    return;
+  }
+  const draft = resultState.draft;
+  if (!draft) {
+    setMsg("msg-result", resultState.finalized
+      ? "This match already has a finalized result and no draft. To change it, enter the corrected score and goals, press Save Draft, then Finalize with a reason. Nothing was finalized."
+      : "There is no saved draft for this match. Enter the score and goals, press Save Draft, then Finalize. Nothing was finalized.", "error");
+    return;
+  }
+  if (!formMatchesDraft(draft)) {
+    setMsg("msg-result", `The score or goals on screen are not the saved draft (${draft.homeScore}-${draft.awayScore}). Press Save Draft to keep your changes, or Load to review the saved draft. Nothing was finalized.`, "error");
+    return;
+  }
+  const isCorrection = Boolean(draft.supersedesMatchResultId);
+  const reasonInput = document.getElementById("r-reason");
+  const reason = (reasonInput.value || "").replace(/\s+/g, " ").trim();
+  if (isCorrection && !reason) {
+    setMsg("msg-result", "A correction needs a reason. Type it in the Reason box, then press Finalize again. Nothing was finalized.", "error");
+    reasonInput.focus();
+    return;
+  }
+
+  const scoreline = scorelineFor(match, draft);
+  const verb = isCorrection ? "Finalize this CORRECTION" : "Finalize";
+  const goals = draft.goalEvents.length ? "Goals:\n" + draft.goalEvents.map((e) => "  " + describeEvent(e)).join("\n") + "\n" : "No goals.\n";
+  const reasonLine = reason ? `Reason: ${reason}\n` : "";
+  const prizeNote = isCorrection
+    ? " A prize that was already handed over is never handed over twice: an unchanged prize is linked to the earlier handover, and a changed prize is put on hold for you to review."
+    : "";
+  if (!window.confirm(`${verb}?\n\n${scoreline}\n${matchLabel(match)}\n${goals}${reasonLine}\n${prizeTierWarning(matchId)}Predictions are scored and prize winners are created right away.${prizeNote}`)) return;
+
+  resultBusy = true;
+  setResultButtons(true);
+  const epoch = resultEpoch;
+  const auth = authEpoch;
+  const target = { matchResultId: draft.matchResultId, contentDigest: draft.contentDigest, isCorrection, scoreline };
+  setMsg("msg-result", "Finalizing…", "");
+  try {
+    let res = null;
+    let failure = null;
+    try {
+      const body = { matchResultId: target.matchResultId, contentDigest: target.contentDigest };
+      if (reason) body.reason = reason;
+      res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result/finalize`, { method: "POST", body: JSON.stringify(body) }, RESULT_REQUEST_TIMEOUT_MS);
+    } catch (err) {
+      failure = err;
+    }
+    if (auth !== authEpoch) return;
+
+    if (failure && failure.requestNotSent) {
+      const text = describeRequestFailure(failure).text;
+      if (epoch === resultEpoch) setMsg("msg-result", `${text} Nothing was finalized. Reload the page and sign in again before trying again.`, "error");
+      return;
+    }
+
+    const outcome = classifyFinalize(res, target.matchResultId);
+
+    if (outcome === "unknown") {
+      // The request may well have committed with only its answer lost. It is never sent again from here, and a correction is
+      // never started in its place: the operator checks by reading.
+      finalizeUnknowns.set(matchId, { ...target, episode: ++finalizeEpisode });
+      resultState.loaded = false;
+      if (epoch === resultEpoch) {
+        const cause = res
+          ? res.status === 200 ? "The server answered HTTP 200 without a finalize confirmation." : `The server answered HTTP ${res.status}${serverMessage(res) ? " (" + serverMessage(res) + ")" : ""} instead of confirming.`
+          : failure && failure.name === "AbortError" ? "No answer arrived from the server in time." : "The connection failed before the server's answer arrived.";
+        setMsg("msg-result", `Finalize status UNKNOWN for ${scoreline}. ${cause} The result may or may not be finalized, so do NOT assume it failed and do NOT enter it again. Press Check result status.`, "error");
+        renderResultState();
+      }
+      return;
+    }
+
+    if (outcome === "success") {
+      reasonInput.value = "";
+      const text = `${isCorrection ? "Correction finalized" : "Finalized"}: ${scoreline}.`;
+      if (epoch === resultEpoch) {
+        resultState.loaded = false;
+        setMsg("msg-result", text, "success");
+        const reloaded = await loadResult({ quiet: true, keepForm: true });
+        if (reloaded) setMsg("msg-result", text, "success");
+        else setMsg("msg-result", text + " This page could not read the result back; press Load to refresh it.", "success");
+      }
+      return;
+    }
+
+    // A definitive refusal: this request recorded nothing.
+    if (epoch !== resultEpoch) return;
+    if (res.status === 409) {
+      setStale("The result changed after you reviewed it.");
+      setMsg("msg-result", `${serverMessage(res) || "The result changed after you reviewed it."} Nothing was finalized. Press Load to review the current result.`, "error");
+      return;
+    }
+    setMsg("msg-result", describeFailure(res, "Failed to finalize.", "finalizer"), "error");
+  } finally {
+    resultBusy = false;
+    if (auth === authEpoch) setResultButtons(false);
+  }
 });
 
-document.getElementById("btn-load-qualifications").addEventListener("click", async () => {
-  const venueActivationId = document.getElementById("q-activation").value;
-  if (!venueActivationId) return;
-  const res = await authedFetch(`/api/gaming/predictions/admin/qualifications?venueActivationId=${venueActivationId}`);
+// Settles what a successful read says about a finalize whose answer was lost. Returns the message it wrote ("" if it wrote none).
+// Finalized, or replaced by other content, is always believed. A draft that is still there unchanged proves nothing on an ordinary
+// read (the earlier request could still be executing); only the operator's explicit check clears the doubt in that case.
+function settleFinalizeUnknown(matchId, view, explicit) {
+  const unknown = finalizeUnknowns.get(matchId);
+  if (!unknown) return "";
+  const match = cachedMatches.find((m) => m.matchId === matchId);
+  if (view.finalized && view.finalized.matchResultId === unknown.matchResultId) {
+    finalizeUnknowns.delete(matchId);
+    const text = `The server shows this result as FINALIZED${match ? " (" + scorelineFor(match, view.finalized) + ")" : ""}: the earlier request was recorded. Nothing more is needed here; check the Prizes list.`;
+    setMsg("msg-result", text, "success");
+    return text;
+  }
+  if (view.draft && view.draft.matchResultId === unknown.matchResultId && view.draft.contentDigest === unknown.contentDigest) {
+    if (!explicit) return "";
+    finalizeUnknowns.delete(matchId);
+    const text = "As of this check the result is NOT finalized and the draft is unchanged. The earlier request could still be recorded. Finalize is available again: pressing it is safe, because a result is finalized only once and the server reports if it already was.";
+    setMsg("msg-result", text, "warning");
+    return text;
+  }
+  finalizeUnknowns.delete(matchId);
+  const text = "The saved result is no longer the content you tried to finalize: it was changed or replaced. Review the current result before doing anything.";
+  setMsg("msg-result", text, "error");
+  return text;
+}
+
+document.getElementById("btn-check-finalize").addEventListener("click", async () => {
+  const matchId = selectedResultMatchId();
+  const unknown = finalizeUnknowns.get(matchId);
+  if (!unknown || guardedControls.has("check-finalize")) return;
+  guardedControls.add("check-finalize");
+  const button = document.getElementById("btn-check-finalize");
+  button.disabled = true;
+  const epoch = resultEpoch;
+  const auth = authEpoch;
+  const episode = unknown.episode;
+  setMsg("msg-result", "Checking…", "");
+  try {
+    let res;
+    try {
+      res = await authedFetch(`/api/gaming/predictions/admin/matches/${matchId}/result`, undefined, RESULT_REQUEST_TIMEOUT_MS);
+    } catch (err) {
+      if (epoch !== resultEpoch || auth !== authEpoch) return;
+      setMsg("msg-result", `Status could not be confirmed: ${describeRequestFailure(err).text.replace(/[.\s]+$/, "")}. The outcome is still UNKNOWN. Press Check result status to try again.`, "error");
+      return;
+    }
+    if (epoch !== resultEpoch || auth !== authEpoch) return;
+    const current = finalizeUnknowns.get(matchId);
+    if (!current || current.episode !== episode) return;
+    const view = parseResultView(res);
+    if (!view) {
+      const why = res.status === 200 ? "the server's answer could not be read" : describeFailure(res, "the check failed", "admin");
+      setMsg("msg-result", `Status could not be confirmed: ${why.replace(/[.\s]+$/, "")}. The outcome is still UNKNOWN. Press Check result status to try again.`, "error");
+      return;
+    }
+    resultState.matchId = matchId;
+    resultState.loaded = true;
+    resultState.saveBase = view.saveBase;
+    resultState.draft = view.draft;
+    resultState.finalized = view.finalized;
+    settleFinalizeUnknown(matchId, view, true);
+    // The form keeps what the operator has: a check only reads.
+    renderResultState();
+  } finally {
+    guardedControls.delete("check-finalize");
+    if (auth === authEpoch) button.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Prizes
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const STATUS_LABELS = { pending: "Pending", redeemed: "Redeemed", superseded: "Superseded", unknown: "Status unknown", held: "On hold", fulfilled: "Already delivered" };
+const STATUS_ORDER = { unknown: 0, held: 1, pending: 2, fulfilled: 3, redeemed: 4, superseded: 5 };
+
+/*
+ * Redemption outcomes. A redeem POST ends one of three ways:
+ *   - 200 carrying the route's own confirmation: the server recorded the redemption (result.alreadyRedeemed says whether this tap did it);
+ *   - a 4xx other than 408: the server refused, so this request recorded nothing;
+ *   - anything else (a lost response, a request that timed out, 408, 5xx, an odd status, or a 200 without that confirmation): UNKNOWN. The request may well have committed with only the
+ *     answer lost, so the row is parked in "Status unknown", the prize is withheld, and Mark Redeemed is not offered again.
+ * An unknown row has one action, Check status: a single explicit read of that row's own activation. Only that read, when it
+ * succeeds (200, a qualifications array, the row present), may settle the unknown state. An ordinary list reload is never
+ * proof that a request did not happen (it can be stale or racing), so it cannot clear an unknown row, but a reload that
+ * shows the row redeemed or superseded is always believed.
+ * These marks live on this screen (per page load), not in the server rows, so a reload or a switch of activation cannot
+ * erase them. Nothing here replays a POST: one operator confirm sends exactly one request.
+ *
+ * A correction never delivers a prize twice by itself. A replacement for a prize that was already handed over is either
+ * "Already delivered" (the earlier handover satisfies it; no button) or "On hold" (the prize changed; only a Consequential
+ * Finalizer can release it, with a reason, and releasing hands nothing over).
+ */
+const unknownOutcomes = new Map(); // prizeQualificationId -> { episode, venueActivationId, label }
+const redeemedNotes = new Map();   // prizeQualificationId -> { reconcile }: redemptions this screen has seen the server confirm
+const redeemInFlight = new Set();
+const checkInFlight = new Set();
+const releaseInFlight = new Set();
+let unknownEpisode = 0;            // identifies one unknown outcome, so a read from an earlier episode can never settle a later one
+let qualList = [];                 // the server rows last applied to the table
+let qualListActivationId = "";
+let qualRequestSeq = 0;            // numbers each list load as it starts
+let qualAppliedSeq = 0;            // the newest load to have completed; an older load arriving after it is dropped
+let qualEpoch = 0;                 // bumped when the selected activation changes, which invalidates every load in flight
+
+function qualificationStatus(q) {
+  if (q.supersededAt) return "superseded";
+  if (q.redeemedAt) return "redeemed";
+  if (q.fulfilledByPrizeQualificationId) return "fulfilled";
+  if (q.heldAt && !q.releasedAt) return "held";
+  return "pending";
+}
+
+// What the row shows: the server's status, plus what this screen knows that a list read cannot undo.
+function qualificationView(q) {
+  const id = q.prizeQualificationId;
+  const note = redeemedNotes.get(id);
+  const server = qualificationStatus(q);
+  if (server === "superseded") return { status: "superseded", wasRedeemed: !!q.redeemedAt || !!note, reconcile: false };
+  if (server === "redeemed" || note) {
+    return { status: "redeemed", wasRedeemed: true, reconcile: !!(note && note.reconcile) || unknownOutcomes.has(id) };
+  }
+  if (server === "held" || server === "fulfilled") return { status: server, wasRedeemed: false, reconcile: false };
+  if (unknownOutcomes.has(id)) return { status: "unknown", wasRedeemed: false, reconcile: false };
+  return { status: "pending", wasRedeemed: false, reconcile: false };
+}
+
+// Display names are member-chosen and not unique. Whitespace is collapsed so a name cannot add lines to the confirm text, and
+// invisible control and format characters (bidi overrides and isolates, zero-width marks) are dropped so a name cannot reorder
+// the safety sentence it is shown in. ZWJ and ZWNJ stay: emoji sequences and some scripts need them and they carry no direction.
+function qualificationPlayer(q) {
+  const name = typeof q.memberDisplayName === "string"
+    ? q.memberDisplayName.replace(/\s+/g, " ").replace(/(?![‌‍])[\p{Cc}\p{Cf}]/gu, "").replace(/ {2,}/g, " ").trim()
+    : "";
+  return name || "Member " + shortId(q.gamingMemberId);
+}
+
+// The prize and player are member- and admin-chosen text. In a banner they sit inside quotes, so wording inside a name cannot
+// read as part of the instruction around it.
+function quoted(label) {
+  return `"${label}"`;
+}
+
+function qualificationPrize(q) {
+  const label = typeof q.prizeLabel === "string" ? q.prizeLabel.trim() : "";
+  return label || "Tier " + shortId(q.prizeTierId);
+}
+
+// A 200 counts as the server's confirmation only when it carries the redeem route's own answer for this row. The route answers
+// 200 only with { result: { prizeQualificationId, redeemedAt, alreadyRedeemed } }, so any other 200 (an empty or non-JSON body, a
+// proxy or interstitial page) did not come from a completed redemption and proves nothing either way.
+function isRedeemConfirmation(res, id) {
+  const result = res.json && typeof res.json === "object" ? res.json.result : null;
+  return !!result && typeof result === "object" && result.prizeQualificationId === id && typeof result.alreadyRedeemed === "boolean";
+}
+
+// "success" | "rejected" | "unknown". res is null when the request itself failed or the answer never arrived.
+function classifyRedeem(res, id) {
+  if (!res) return "unknown";
+  if (res.status === 200) return isRedeemConfirmation(res, id) ? "success" : "unknown";
+  if (res.status >= 400 && res.status < 500 && res.status !== 408) return "rejected";
+  return "unknown";
+}
+
+// Buttons are looked up by their data attribute because a re-render can replace the node the click handler started with.
+function setRowButtonsDisabled(datasetKey, id, disabled) {
+  for (const button of document.querySelectorAll("#table-qualifications button")) {
+    if (button.dataset[datasetKey] === id) button.disabled = disabled;
+  }
+}
+
+// `failure` is the error that ended a request which never produced an answer (res is null then).
+function unknownRedeemMessage(label, res, failure) {
+  const detail = res ? serverMessage(res) : "";
+  const cause = res
+    ? res.status === 200
+      ? "The server answered HTTP 200 without a redemption confirmation."
+      : "The server answered HTTP " + res.status + (detail ? " (" + detail + ")" : "") + " instead of confirming."
+    : failure && failure.name === "AbortError"
+      ? "No answer arrived from the server in time."
+      : "The connection failed before the server's answer arrived.";
+  return `Redemption status UNKNOWN for ${quoted(label)}. ${cause} The prize may or may not be recorded as redeemed. Do NOT hand it over: withhold it until the status is confirmed. Press Check status on that row.`;
+}
+
+function reconcileMessage(labels) {
+  return `The server now shows ${labels.map(quoted).join("; ")} as redeemed, but this screen cannot tell whether that was your earlier tap or someone else's, nor whether the prize was already physically handed over. Reconcile with the winner and your colleagues before handing anything over.`;
+}
+
+// A correction supersedes the old row and, when the corrected result still earns a prize, adds a new row for the same member.
+function supersededMessage(labels) {
+  return `A result correction replaced ${labels.map(quoted).join("; ")}, so this entry is no longer a valid prize. Do NOT hand it over on this entry. If the member qualifies for a replacement prize, it is a separate row in the list.`;
+}
+
+function stillUnknownMessage(count) {
+  return `${count === 1 ? "1 prize" : count + " prizes"} on this list still ${count === 1 ? "has" : "have"} an UNKNOWN redemption status. Do NOT hand ${count === 1 ? "it" : "them"} over: withhold ${count === 1 ? "it" : "them"} until Check status confirms.`;
+}
+
+function unconfirmedMessage(label, reason) {
+  return `Status could not be confirmed for ${quoted(label)}: ${reason.replace(/[.\s]+$/, "")}. The outcome is still UNKNOWN and handover stays withheld. Do NOT hand over this prize; press Check status to try again.`;
+}
+
+function pendingAfterCheckMessage(label) {
+  return `As of this check the server shows ${quoted(label)} as NOT redeemed. The earlier request could still be recorded, so hand over only after this screen confirms a fresh redemption. Mark Redeemed is available again: pressing it is safe, because the server records a prize only once and will report if it was already recorded.`;
+}
+
+// Applies what a successful list read proves about rows that are in the unknown state: redeemed or superseded is
+// believed (neither can be undone); pending proves nothing, so those rows stay unknown.
+function absorbObservations(list) {
+  const seen = { reconciled: [], superseded: [] };
+  for (const q of list) {
+    const id = q.prizeQualificationId;
+    const entry = unknownOutcomes.get(id);
+    if (!entry) continue;
+    const server = qualificationStatus(q);
+    if (server !== "redeemed" && server !== "superseded") continue;
+    unknownOutcomes.delete(id);
+    if (server === "redeemed") {
+      redeemedNotes.set(id, { reconcile: true });
+      seen.reconciled.push(entry.label);
+    } else {
+      seen.superseded.push(entry.label);
+    }
+  }
+  return seen;
+}
+
+async function redeemPrize(q, prize, player) {
+  const id = q.prizeQualificationId;
+  if (redeemInFlight.has(id) || unknownOutcomes.has(id)) return;
+  const label = `${prize} for ${player}`;
+  const ok = window.confirm(`Mark this prize as redeemed?\n\nPrize: ${prize}\nPlayer: ${player}\nMember ID: ${shortId(q.gamingMemberId)}\n\nThe prize is handed over only AFTER this screen shows it recorded on the server.`);
+  if (!ok) return;
+  redeemInFlight.add(id);
+  const auth = authEpoch;
+  setRowButtonsDisabled("redeem", id, true);
+  setMsg("msg-prizes", "Marking redeemed…", "");
+  const venueActivationId = q.venueActivationId || qualListActivationId;
+  let res = null;
+  let failure = null;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/qualifications/${encodeURIComponent(id)}/redeem`, { method: "POST" }, REDEMPTION_REQUEST_TIMEOUT_MS);
+  } catch (err) {
+    res = null;
+    failure = err;
+  }
+  redeemInFlight.delete(id);
+  if (auth !== authEpoch) return; // a different admin is signed in now: this answer belongs to nobody on this screen
+
+  // The sign-in client failed before a request existed: nothing was sent, so there is no outcome to wait for.
+  if (failure && failure.requestNotSent) {
+    setMsg("msg-prizes", failure.tokenTimeout
+      ? "The sign-in did not answer in time, so nothing was sent and nothing was recorded. Reload the page and sign in again before trying again."
+      : "The request could not be signed (the sign-in failed), so nothing was sent and nothing was recorded. Reload the page and sign in again before trying again.", "error");
+    setRowButtonsDisabled("redeem", id, false);
+    return;
+  }
+
+  const outcome = classifyRedeem(res, id);
+
+  if (outcome === "unknown") {
+    unknownOutcomes.set(id, { episode: ++unknownEpisode, venueActivationId, label });
+    // A list read that landed while this request was in flight may already show the row redeemed or replaced. As in any
+    // reload, that read is believed, and the row (which then has no Check status) must not be described as still unknown.
+    const seen = absorbObservations(qualList.filter((x) => x.prizeQualificationId === id));
+    renderQualifications();
+    if (seen.reconciled.length) setMsg("msg-prizes", reconcileMessage(seen.reconciled), "warning");
+    else if (seen.superseded.length) setMsg("msg-prizes", supersededMessage(seen.superseded), "error");
+    else setMsg("msg-prizes", unknownRedeemMessage(label, res, failure), "error");
+    return;
+  }
+
+  if (outcome === "success") {
+    const recordedNow = res.json.result.alreadyRedeemed === false;
+    unknownOutcomes.delete(id);
+    redeemedNotes.set(id, { reconcile: !recordedNow });
+    const text = recordedNow
+      ? `Recorded on the server as redeemed: ${quoted(label)}. You can hand it over now.`
+      : `Already redeemed earlier: the server shows ${quoted(label)} as redeemed before this tap. This screen cannot tell whether it was physically handed over. Reconcile with the winner and your colleagues before handing anything over.`;
+    const kind = recordedNow ? "success" : "warning";
+    // The row shows the confirmed redemption at once, whatever the follow-up reload does. The reload keeps this text as the
+    // lead of the banner and adds any warning it finds about other rows, so a green confirmation never hides a standing one.
+    renderQualifications();
+    setMsg("msg-prizes", text, kind);
+    await loadQualifications({ quiet: true, lead: { text, kind } });
+    return;
+  }
+
+  const stale = res.status === 409;
+  const refreshed = stale ? await loadQualifications() : false;
+  const staleNote = refreshed ? " Do NOT hand over this prize. The list was refreshed." : " Do NOT hand over this prize. The list could not be refreshed - reload before acting.";
+  setMsg("msg-prizes", describeFailure(res, "Could not mark the prize redeemed.", "finalizer") + (stale ? staleNote : ""), "error");
+  setRowButtonsDisabled("redeem", id, false);
+}
+
+// The operator's explicit status check for one unknown row: one GET of the row's own activation.
+async function checkRedemptionStatus(id) {
+  const entry = unknownOutcomes.get(id);
+  if (!entry || checkInFlight.has(id)) return;
+  const episode = entry.episode;
+  const epoch = qualEpoch;
+  const auth = authEpoch;
+  checkInFlight.add(id);
+  setRowButtonsDisabled("checkStatus", id, true);
+  setMsg("msg-prizes", "Checking status…", "");
+
+  let res = null;
+  let failure = "";
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/qualifications?venueActivationId=${encodeURIComponent(entry.venueActivationId)}`, undefined, REDEMPTION_REQUEST_TIMEOUT_MS);
+  } catch (err) {
+    failure = err && err.requestNotSent ? (err.tokenTimeout ? "the sign-in did not answer in time, so nothing was sent" : "the request could not be signed (the sign-in failed), so nothing was sent")
+      : err && err.name === "AbortError" ? "the server did not answer in time"
+      : "the connection failed";
+  }
+  checkInFlight.delete(id);
+  if (auth !== authEpoch) return;
+  setRowButtonsDisabled("checkStatus", id, false);
+
+  // Another read already settled this row, or a newer outcome replaced it, or the operator moved to another activation: this answer is not for the screen any more.
+  const current = unknownOutcomes.get(id);
+  if (!current || current.episode !== episode || epoch !== qualEpoch) return;
+
+  let found = null;
+  if (!failure) {
+    if (res.status === 401 || res.status === 403) failure = describeFailure(res, "Not permitted.", "admin");
+    else if (res.status !== 200) failure = "the server answered HTTP " + res.status + (serverMessage(res) ? " (" + serverMessage(res) + ")" : "");
+    else if (!res.json || typeof res.json !== "object" || !Array.isArray(res.json.qualifications)) failure = "the server's answer could not be read";
+    else {
+      found = res.json.qualifications.find((x) => x && x.prizeQualificationId === id) || null;
+      if (!found) failure = "this prize was not in the server's list";
+    }
+  }
+  if (failure) {
+    setMsg("msg-prizes", unconfirmedMessage(current.label, failure), "error");
+    return;
+  }
+
+  unknownOutcomes.delete(id);
+  for (const q of qualList) {
+    if (q.prizeQualificationId !== id) continue;
+    if (found.redeemedAt && !q.redeemedAt) q.redeemedAt = found.redeemedAt;
+    if (found.supersededAt && !q.supersededAt) q.supersededAt = found.supersededAt;
+  }
+  const server = qualificationStatus(found);
+  if (server === "redeemed") {
+    redeemedNotes.set(id, { reconcile: true });
+    setMsg("msg-prizes", reconcileMessage([current.label]), "warning");
+  } else if (server === "superseded") {
+    setMsg("msg-prizes", supersededMessage([current.label]), "error");
+  } else {
+    setMsg("msg-prizes", pendingAfterCheckMessage(current.label), "warning");
+  }
+  renderQualifications();
+
+  // The correction that replaced this row may have created a replacement prize for the same member; only a list read shows it.
+  if (server === "superseded") {
+    const text = supersededMessage([current.label]);
+    const reloaded = await loadQualifications({ quiet: true, lead: { text, kind: "error" } });
+    if (!reloaded && epoch === qualEpoch) {
+      setMsg("msg-prizes", text + " The list could not be reloaded, so a replacement prize, if there is one, is not shown yet: press Load Qualifications.", "error");
+    }
+  }
+}
+
+// Releasing a hold is a reasoned Founder decision. It hands nothing over: the prize becomes redeemable through Mark Redeemed.
+async function releaseHold(q, prize, player) {
+  const id = q.prizeQualificationId;
+  if (releaseInFlight.has(id)) return;
+  const reasonInput = document.getElementById("q-release-reason");
+  const reason = (reasonInput.value || "").replace(/\s+/g, " ").trim();
+  if (!reason) {
+    setMsg("msg-prizes", "Releasing a hold needs a reason. Type it in the Reason box above the list, then press Release hold again. Nothing was released.", "error");
+    reasonInput.focus();
+    return;
+  }
+  const prior = qualList.find((x) => x.prizeQualificationId === q.holdPriorPrizeQualificationId);
+  const delivered = deliveredPrizeText(prior);
+  const unverified = holdNeedsVenueCheck(q) ? "The earlier delivery is not on record as a specific prize: confirm with the venue what was actually handed over before releasing.\n" : "";
+  const ok = window.confirm(`Release the hold on this prize?\n\nPrize: ${prize}\nPlayer: ${player}\nMember ID: ${shortId(q.gamingMemberId)}\n${delivered ? "Already delivered earlier: " + delivered + "\n" : ""}${unverified}Reason: ${reason}\n\nThis does NOT hand anything over. It only allows Mark Redeemed for this prize.`);
+  if (!ok) return;
+  releaseInFlight.add(id);
+  const auth = authEpoch;
+  const label = `${prize} for ${player}`;
+  setRowButtonsDisabled("releaseHold", id, true);
+  setMsg("msg-prizes", "Releasing the hold…", "");
+  let res = null;
+  let failure = null;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/qualifications/${encodeURIComponent(id)}/release-hold`, { method: "POST", body: JSON.stringify({ reason }) }, REDEMPTION_REQUEST_TIMEOUT_MS);
+  } catch (err) {
+    failure = err;
+  }
+  releaseInFlight.delete(id);
+  if (auth !== authEpoch) return;
+
+  const result = res && res.json && typeof res.json === "object" ? res.json.result : null;
+  const confirmed = !!res && res.status === 200 && !!result && result.prizeQualificationId === id && typeof result.alreadyReleased === "boolean";
+  if (confirmed) {
+    reasonInput.value = "";
+    const text = `Hold released on ${quoted(label)}. Nothing has been handed over: press Mark Redeemed only when you hand the prize over.`;
+    setMsg("msg-prizes", text, "success");
+    await loadQualifications({ quiet: true, lead: { text, kind: "success" } });
+    return;
+  }
+  if (res && res.status >= 400 && res.status < 500 && res.status !== 408) {
+    const refreshed = res.status === 409 ? await loadQualifications() : false;
+    setMsg("msg-prizes", describeFailure(res, "Could not release the hold.", "finalizer") + (res.status === 409 ? (refreshed ? " The list was refreshed." : " The list could not be refreshed - reload before acting.") : ""), "error");
+    setRowButtonsDisabled("releaseHold", id, false);
+    return;
+  }
+  const why = failure ? describeRequestFailure(failure).text : res && res.status === 200 ? "The server answered HTTP 200 without a release confirmation." : `The server answered HTTP ${res ? res.status : "?"} instead of confirming.`;
+  setMsg("msg-prizes", `Could not confirm that the hold on ${quoted(label)} was released. ${why} Press Load Qualifications to see the current state. Pressing Release hold again is safe: a hold is released only once.`, "error");
+  setRowButtonsDisabled("releaseHold", id, false);
+}
+
+function buildRedeemButton(q, prize, player) {
+  const id = q.prizeQualificationId;
+  const redeem = h("button", { type: "button", text: "Mark Redeemed", disabled: redeemInFlight.has(id), dataset: { redeem: id } });
+  redeem.addEventListener("click", () => redeemPrize(q, prize, player));
+  return redeem;
+}
+
+function buildCheckStatusButton(id) {
+  const check = h("button", { type: "button", class: "secondary", text: "Check status", disabled: checkInFlight.has(id), dataset: { checkStatus: id } });
+  check.addEventListener("click", () => checkRedemptionStatus(id));
+  return check;
+}
+
+function buildReleaseHoldButton(q, prize, player) {
+  const id = q.prizeQualificationId;
+  const release = h("button", { type: "button", class: "secondary", text: "Release hold", disabled: releaseInFlight.has(id), dataset: { releaseHold: id } });
+  release.addEventListener("click", () => releaseHold(q, prize, player));
+  return release;
+}
+
+// What an earlier delivery is known to have been. Only a label recorded AT the handover is a fact. A delivery from before those labels
+// were kept says so instead: today's definition of that prize is shown as a clue, never as what was handed over.
+function deliveredPrizeText(prior) {
+  if (!prior || !prior.redeemedAt) return "";
+  const when = " on " + new Date(prior.redeemedAt).toLocaleString();
+  if (prior.redeemedPrizeLabelBasis === "SNAPSHOT_AT_REDEMPTION" && prior.redeemedPrizeLabel) return prior.redeemedPrizeLabel + when;
+  const clue = prior.legacyObservedPrizeLabel ? ` (its definition today is "${prior.legacyObservedPrizeLabel}", which may not be what was handed over)` : "";
+  return "a prize whose label was not recorded" + when + clue;
+}
+
+// A hold whose earlier delivery cannot be tied to a specific prize needs a word with the venue before it is released.
+function holdNeedsVenueCheck(q) {
+  return q.holdBasis === "DELIVERY_EQUIVALENCE_UNKNOWN" || q.holdBasis === "DELIVERY_ORDER_UNKNOWN" || q.holdBasis === "LEGACY_PENDING_TWIN";
+}
+
+function deliveredNote(q) {
+  return deliveredPrizeText(qualList.find((x) => x.prizeQualificationId === (q.fulfilledByPrizeQualificationId || q.holdPriorPrizeQualificationId)));
+}
+
+function buildQualificationRow(q, nameShared) {
+  const view = qualificationView(q);
+  const status = view.status;
+  const player = nameShared ? `${qualificationPlayer(q)} (member ${shortId(q.gamingMemberId)})` : qualificationPlayer(q);
+  const prize = qualificationPrize(q);
+  let statusText = STATUS_LABELS[status];
+  if (status === "redeemed" && view.reconcile) statusText += " - reconcile";
+  if (status === "superseded" && view.wasRedeemed) statusText += " (was redeemed)";
+  const actionCell = h("td", { class: "cell-action" });
+
+  if (status === "pending") actionCell.appendChild(buildRedeemButton(q, prize, player));
+  else if (status === "unknown") actionCell.appendChild(buildCheckStatusButton(q.prizeQualificationId));
+  else if (status === "held") actionCell.appendChild(buildReleaseHoldButton(q, prize, player));
+
+  const statusCell = h("td", { "data-label": "Status" }, h("span", { class: "pill " + status + (status === "redeemed" && view.reconcile ? " reconcile" : ""), text: statusText }));
+  if (status === "held") {
+    const delivered = deliveredNote(q);
+    statusCell.appendChild(h("div", { class: "hold-note", text: "Do NOT hand this over. " + (delivered ? "Already delivered earlier: " + delivered + ". " : "") + (q.holdReason ? "Why it is on hold: " + q.holdReason : "A correction changed this prize.") + (holdNeedsVenueCheck(q) ? " Confirm with the venue what was actually handed over before releasing." : "") }));
+  } else if (status === "fulfilled") {
+    const delivered = deliveredNote(q);
+    statusCell.appendChild(h("div", { class: "hold-note", text: "An earlier handover already satisfies this prize" + (delivered ? " (" + delivered + ")" : "") + ". Do NOT hand it over again." }));
+  } else if (status === "pending" && q.releasedAt) {
+    statusCell.appendChild(h("div", { class: "hold-note", text: "Hold released" + (q.releaseReason ? ": " + q.releaseReason : "") + ". Mark Redeemed only when you hand the prize over." }));
+  } else if (status === "redeemed" && q.redeemedPrizeLabelBasis === "SNAPSHOT_AT_REDEMPTION" && q.redeemedPrizeLabel && q.redeemedPrizeLabel !== prize) {
+    statusCell.appendChild(h("div", { class: "member-id", text: "Delivered as: " + q.redeemedPrizeLabel }));
+  } else if (status === "redeemed" && q.redeemedPrizeLabelBasis && q.redeemedPrizeLabelBasis !== "SNAPSHOT_AT_REDEMPTION") {
+    statusCell.appendChild(h("div", { class: "member-id", text: "Delivered before delivery records were kept: what was handed over is not recorded." }));
+  }
+
+  return h("tr", { dataset: { qualification: q.prizeQualificationId, status, memberId: q.gamingMemberId, player: searchKey(player + " " + (q.gamingMemberId || "")) } },
+    h("td", { class: "cell-primary" }, h("div", { class: "player-name", text: player }), h("div", { class: "member-id", text: "Member ID " + shortId(q.gamingMemberId) })),
+    h("td", { "data-label": "Prize", text: prize }),
+    statusCell,
+    actionCell
+  );
+}
+
+// Lower-cased and accent-free, so "jose" finds "José".
+function searchKey(text) {
+  return foldName(text).normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+let prizesSummaryText = "";
+
+function applyQualificationFilter() {
+  const raw = document.getElementById("q-filter").value;
+  const needle = searchKey(raw);
+  const rows = [...document.querySelectorAll("#table-qualifications tbody tr")];
+  let shown = 0;
+  for (const tr of rows) {
+    tr.hidden = !!needle && !(tr.dataset.player || "").includes(needle);
+    if (!tr.hidden) shown += 1;
+  }
+  if (rows.length === 0) return;
+  setMsg("prizes-summary", prizesSummaryText + (needle ? ` Showing ${shown} matching "${raw.trim()}".` : ""), "");
+}
+
+// Draws the table from qualList and what this screen knows about each row. Unknown rows sort first so they cannot hide in a long list.
+function renderQualifications() {
   const tbody = document.querySelector("#table-qualifications tbody");
   tbody.innerHTML = "";
-  for (const q of (res.json && res.json.qualifications) || []) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${q.gamingMemberId}</td><td>${q.prizeTierId}</td><td>${q.redeemedAt ? "Yes" : "No"}</td><td>${q.supersededAt ? "Yes" : "No"}</td><td>${q.redeemedAt ? "" : `<button data-redeem="${q.prizeQualificationId}">Mark Redeemed</button>`}</td>`;
-    tbody.appendChild(tr);
+  if (qualList.length === 0) return;
+  const membersByName = new Map();
+  for (const q of qualList) {
+    const key = qualificationPlayer(q).toLowerCase();
+    if (!membersByName.has(key)) membersByName.set(key, new Set());
+    membersByName.get(key).add(q.gamingMemberId);
   }
-  tbody.querySelectorAll("[data-redeem]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      await authedFetch(`/api/gaming/predictions/admin/qualifications/${btn.dataset.redeem}/redeem`, { method: "POST" });
-      document.getElementById("btn-load-qualifications").click();
-    });
-  });
+  const rows = qualList
+    .map((q) => ({ q, status: qualificationView(q).status, nameShared: membersByName.get(qualificationPlayer(q).toLowerCase()).size > 1 }))
+    .sort((a, b) =>
+      STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+      qualificationPlayer(a.q).localeCompare(qualificationPlayer(b.q), undefined, { sensitivity: "base" })
+    );
+  const counts = { unknown: 0, held: 0, pending: 0, fulfilled: 0, redeemed: 0, superseded: 0 };
+  for (const { q, status, nameShared } of rows) {
+    counts[status] += 1;
+    tbody.appendChild(buildQualificationRow(q, nameShared));
+  }
+  prizesSummaryText =
+    (counts.unknown ? `${counts.unknown} status unknown, ` : "") +
+    (counts.held ? `${counts.held} on hold, ` : "") +
+    `${counts.pending} pending, ` +
+    (counts.fulfilled ? `${counts.fulfilled} already delivered, ` : "") +
+    `${counts.redeemed} redeemed, ${counts.superseded} superseded.`;
+  setMsg("prizes-summary", prizesSummaryText, "");
+  applyQualificationFilter();
+}
+
+function clearQualifications() {
+  qualEpoch += 1;
+  qualList = [];
+  qualListActivationId = "";
+  document.querySelector("#table-qualifications tbody").innerHTML = "";
+  prizesSummaryText = "";
+  setMsg("prizes-heading", "", "");
+  setMsg("prizes-summary", "", "");
+  setMsg("msg-prizes", "", "");
+}
+
+// Resolves true when the list was applied. `quiet` is for the reload that follows a settled redemption outcome: if it fails it
+// changes nothing on screen and says nothing, so it cannot contradict the answer the server just gave. `lead` is the banner
+// text that reload belongs to: when the reload finds a warning about other rows it is shown after the lead, so a confirmation
+// never hides a standing warning.
+// A read that fails never clears the table: rows already on screen (and any Status unknown on them) stay visible, and the
+// message says the list may be out of date.
+async function loadQualifications(options) {
+  const quiet = !!(options && options.quiet);
+  const lead = options && options.lead;
+  const outOfDate = () => (qualList.length ? " The list below is the last one loaded and may be out of date." : "");
+  const activationSelect = document.getElementById("q-activation");
+  const venueActivationId = activationSelect.value;
+  if (!venueActivationId) {
+    if (!quiet) {
+      setMsg("msg-prizes", activationsState === "failed"
+        ? "The activations could not be loaded, so there is nothing to choose from yet. Press Load Qualifications to try again; this is not the same as having no activation."
+        : "No activation to load. Create a venue activation for the match in the Venue Activations section first.", "error");
+    }
+    return false;
+  }
+  const seq = ++qualRequestSeq;
+  const epoch = qualEpoch;
+  const auth = authEpoch;
+  // Dropped when the operator has since chosen another activation, when a newer load has already completed, or when another admin is signed in.
+  const outdated = () => auth !== authEpoch || epoch !== qualEpoch || activationSelect.value !== venueActivationId || seq < qualAppliedSeq;
+  let res;
+  try {
+    res = await authedFetch(`/api/gaming/predictions/admin/qualifications?venueActivationId=${encodeURIComponent(venueActivationId)}`);
+  } catch (err) {
+    if (outdated()) return false;
+    qualAppliedSeq = seq;
+    if (!quiet) setMsg("msg-prizes", "Network error - could not load prizes." + outOfDate(), "error");
+    return false;
+  }
+  if (outdated()) return false;
+  qualAppliedSeq = seq;
+
+  const rows = res.status === 200 && res.json && Array.isArray(res.json.qualifications)
+    ? res.json.qualifications.filter((q) => q && typeof q === "object" && typeof q.prizeQualificationId === "string")
+    : null;
+  if (rows === null) {
+    if (quiet) return false;
+    setMsg("msg-prizes", (res.status !== 200 ? describeFailure(res, "Could not load prizes.", "admin") : "Could not read the prize list: the server's answer was not understood.") + outOfDate(), "error");
+    return false;
+  }
+
+  const seen = absorbObservations(rows);
+  qualList = rows;
+  qualListActivationId = venueActivationId;
+  const selected = activationSelect.options[activationSelect.selectedIndex];
+  setMsg("prizes-heading", "Prizes for: " + (selected ? selected.textContent : ""), "");
+  if (rows.length === 0) {
+    renderQualifications();
+    prizesSummaryText = "";
+    setMsg("prizes-summary", "", "");
+    if (lead) setMsg("msg-prizes", lead.text, lead.kind);
+    else setMsg("msg-prizes", "No prize qualifications yet. Winners are created when the match result is finalized, and only for prize tiers that already existed at that moment.", "");
+    return true;
+  }
+  renderQualifications();
+
+  // A reload may reveal that a row in doubt was in fact redeemed or replaced, and must keep saying so for rows still in doubt.
+  const notes = [];
+  let kind = "";
+  if (seen.reconciled.length) { notes.push(reconcileMessage(seen.reconciled)); kind = "warning"; }
+  if (seen.superseded.length) { notes.push(supersededMessage(seen.superseded)); kind = "error"; }
+  const stillUnknown = rows.filter((q) => unknownOutcomes.has(q.prizeQualificationId)).length;
+  if (stillUnknown) { notes.push(stillUnknownMessage(stillUnknown)); kind = "error"; }
+  const onHold = rows.filter((q) => qualificationStatus(q) === "held").length;
+  if (onHold && !quiet) { notes.push(`${onHold === 1 ? "1 prize is" : onHold + " prizes are"} ON HOLD because a correction changed a prize that was already handed over. Do not hand ${onHold === 1 ? "it" : "them"} over until the hold is released.`); if (!kind) kind = "warning"; }
+  if (lead) {
+    if (notes.length) notes.unshift(lead.text);
+    else { notes.push(lead.text); kind = lead.kind; }
+  }
+  if (notes.length) setMsg("msg-prizes", notes.join(" "), kind);
+  return true;
+}
+
+document.getElementById("btn-load-qualifications").addEventListener("click", async () => {
+  setMsg("msg-prizes", "", "");
+  if (activationsState === "failed" || !document.getElementById("q-activation").value) await loadActivations();
+  return loadQualifications();
 });
 
+document.getElementById("q-filter").addEventListener("input", applyQualificationFilter);
+
+// The list on screen belongs to the activation it was loaded for; changing the select must not leave it under a new name,
+// and must not let a load still in flight for the old one render under the new one.
+document.getElementById("q-activation").addEventListener("change", () => {
+  document.getElementById("q-filter").value = "";
+  clearQualifications();
+});
 UrbanoAuth.onAuthStateChange(refreshAuthState);
 refreshAuthState();
 </script>

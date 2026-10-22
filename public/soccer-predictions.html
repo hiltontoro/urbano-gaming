@@ -201,6 +201,56 @@ function el(html) {
   return div.firstElementChild;
 }
 
+// Team names, player names, competition names and prize labels are
+// admin-entered and reach this page through el() templates, so every
+// such string passes through esc() first.
+function esc(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// The prize this qualification is for, resolved from the match's own
+// venue activations (no extra API call). null when it cannot be resolved.
+function prizeLabelForQualification(match, qualification) {
+  const activations = match.venueActivations || [];
+  const sameActivation = activations.find((a) => a.venueActivationId === qualification.venueActivationId);
+  for (const activation of sameActivation ? [sameActivation] : activations) {
+    const tier = (activation.prizeTiers || []).find((t) => t.prizeTierId === qualification.prizeTierId);
+    if (tier && typeof tier.prizeLabel === "string" && tier.prizeLabel.trim()) return tier.prizeLabel.trim();
+  }
+  return null;
+}
+
+// What the member is told about a prize. A result correction never hands a prize over twice: a prize an earlier handover already
+// satisfies says so, and a prize the venue is still reviewing (a correction changed an already-delivered prize) is not shown as
+// ready to collect.
+function prizeStatusText(qualification) {
+  if (qualification.supersededAt) return "(superseded by a result correction).";
+  if (qualification.redeemedAt) return "already redeemed.";
+  if (qualification.alreadyDelivered) return "already handed over earlier — the corrected result does not change it.";
+  if (qualification.underReview) return "being reviewed by the venue after a result correction — ask an URBANO host before collecting.";
+  return "not yet redeemed — see an URBANO host.";
+}
+
+function buildPrizeQualifiedLine(match, qualification) {
+  const label = prizeLabelForQualification(match, qualification);
+  const line = document.createElement("p");
+  line.className = qualification.underReview && !qualification.supersededAt && !qualification.redeemedAt ? "msg" : "msg success";
+  line.appendChild(document.createTextNode("Prize qualified: "));
+  if (label) {
+    const strong = document.createElement("strong");
+    strong.textContent = label;
+    line.appendChild(strong);
+    line.appendChild(document.createTextNode(qualification.supersededAt ? " " : " — "));
+  }
+  line.appendChild(document.createTextNode(prizeStatusText(qualification)));
+  return line;
+}
+
 async function authedFetch(path, options) {
   const token = await UrbanoAuth.getAccessToken();
   const headers = Object.assign({ "content-type": "application/json" }, (options && options.headers) || {});
@@ -257,12 +307,12 @@ async function renderMatch(match) {
   const authState = await UrbanoAuth.getState();
   const kickoffPassed = new Date() >= new Date(match.kickoffAt);
 
-  const homeTeamName = match.homeTeam ? match.homeTeam.name : "Home";
-  const awayTeamName = match.awayTeam ? match.awayTeam.name : "Away";
+  const homeTeamName = esc(match.homeTeam ? match.homeTeam.name : "Home");
+  const awayTeamName = esc(match.awayTeam ? match.awayTeam.name : "Away");
 
-  const card = el(`<div class="card accent">
+  const card = el(`<div class="card accent" data-match-id="${esc(match.matchId)}">
     <div class="match-teams"><span>${homeTeamName}</span><span class="match-vs">vs</span><span>${awayTeamName}</span></div>
-    <div class="match-meta"><span>${match.competition}</span><span>${new Date(match.kickoffAt).toLocaleString()}</span></div>
+    <div class="match-meta"><span>${esc(match.competition)}</span><span>${new Date(match.kickoffAt).toLocaleString()}</span></div>
     <div id="match-body-${match.matchId}"></div>
   </div>`);
   const body = card.querySelector(`#match-body-${match.matchId}`);
@@ -274,7 +324,15 @@ async function renderMatch(match) {
   }
 
   if (authState.status !== "authenticated") {
-    body.appendChild(el(`<p class="msg">Sign in with URBANO to make your prediction.</p>`));
+    // Not signed in (or signed in but the account is not finished): one clear next step that remembers THIS match, so after
+    // logging in or creating an account the person lands back here, not on a generic page.
+    const unfinished = authState.status === "profile_incomplete";
+    const entry = el(`<div>
+      <p class="msg">${unfinished ? "One more step: choose a display name to finish creating your account, then make your prediction." : "Log in or create an account to make your prediction."}</p>
+      <button type="button" class="btn-primary" data-login-cta>${unfinished ? "Finish creating your account" : "Log in or create account"}</button>
+    </div>`);
+    entry.querySelector("[data-login-cta]").addEventListener("click", () => openAccountEntry(match.matchId));
+    body.appendChild(entry);
     return card;
   }
 
@@ -284,7 +342,7 @@ async function renderMatch(match) {
   if (match.finalized && mine.evaluation) {
     const ev = mine.evaluation;
     const pred = mine.prediction;
-    const scorerName = findPlayerName(match, pred.predictedGoalscorerPlayerId) || "No Goalscorer";
+    const scorerName = esc(findPlayerName(match, pred.predictedGoalscorerPlayerId) || "No Goalscorer");
     const minuteLabel = formatGoalMinute(pred.predictedGoalMinuteRegulation, pred.predictedGoalMinuteStoppage);
     const firstTeamLabel =
       pred.predictedFirstTeamToScore === "HOME" ? homeTeamName :
@@ -301,10 +359,13 @@ async function renderMatch(match) {
           <div class="dimension-cell ${ev.firstTeamToScoreCorrect ? "correct" : "incorrect"}"><div class="label">First Scorer</div><div class="mark">${ev.firstTeamToScoreCorrect ? "✓" : "✗"}</div></div>
         </div>
         <p class="msg success">${ev.correctDimensionCount} of 4 correct.</p>
-        ${mine.qualification ? `<p class="msg success">Prize qualified: ${mine.qualification.supersededAt ? "(superseded by a result correction)" : mine.qualification.redeemedAt ? "already redeemed" : "not yet redeemed — see an URBANO host"}.</p>` : ""}
+        <div data-prize-slot></div>
         <p class="msg">Your prediction: ${pred.predictedHomeScore}–${pred.predictedAwayScore}, ${scorerName}, ${minuteLabel}, first: ${firstTeamLabel}</p>
       </div>
     `));
+    if (mine.qualification) {
+      body.querySelector("[data-prize-slot]").appendChild(buildPrizeQualifiedLine(match, mine.qualification));
+    }
     return card;
   }
 
@@ -342,10 +403,10 @@ async function renderMatch(match) {
       <select id="goalscorer-select-${match.matchId}">
         <option value="">No Goalscorer / No Goal</option>
         <optgroup label="${homeTeamName}">
-          ${(match.homeTeam ? match.homeTeam.players : []).map((p) => `<option value="${p.playerId}">${p.name}</option>`).join("")}
+          ${(match.homeTeam ? match.homeTeam.players : []).map((p) => `<option value="${esc(p.playerId)}">${esc(p.name)}</option>`).join("")}
         </optgroup>
         <optgroup label="${awayTeamName}">
-          ${(match.awayTeam ? match.awayTeam.players : []).map((p) => `<option value="${p.playerId}">${p.name}</option>`).join("")}
+          ${(match.awayTeam ? match.awayTeam.players : []).map((p) => `<option value="${esc(p.playerId)}">${esc(p.name)}</option>`).join("")}
         </optgroup>
       </select>
     </div>
@@ -483,27 +544,85 @@ async function renderMatch(match) {
   return card;
 }
 
-async function init() {
+// Opens the shared account-entry panel and remembers the match, so the journey continues here once the person is in.
+function openAccountEntry(matchId) {
+  const intent = { kind: "predict", matchId };
+  if (typeof UrbanoAuth.openSignIn === "function" && UrbanoAuth.openSignIn({ intent })) return;
+  const header = document.getElementById("btn-signin");
+  if (header) header.click();
+}
+
+// Every build of the match list is numbered. When who is signed in changes while a build is still waiting on the network, the
+// older build is dropped instead of being painted over the newer one (and never shows the previous person's prediction).
+let renderGeneration = 0;
+
+function emptyState(text) {
+  return el(`<div class="empty-state">${esc(text)}</div>`);
+}
+
+async function refresh() {
+  const generation = ++renderGeneration;
   const res = await fetch("/api/gaming/predictions/matches");
   const data = await res.json();
-  content.innerHTML = "";
+  if (generation !== renderGeneration) return false;
 
   if (!data.matches || data.matches.length === 0) {
-    content.appendChild(el(`<div class="empty-state">No matches are open for prediction yet — check back soon.</div>`));
-    return;
+    content.replaceChildren(emptyState("No matches are open for prediction yet — check back soon."));
+    return true;
   }
 
+  const cards = [];
   for (const match of data.matches) {
     if (match.cancelledAt) continue;
-    content.appendChild(await renderMatch(match));
+    const card = await renderMatch(match);
+    if (generation !== renderGeneration) return false;
+    cards.push(card);
   }
+  if (generation !== renderGeneration) return false;
 
-  if (content.children.length === 0) {
-    content.appendChild(el(`<div class="empty-state">No matches are open for prediction yet — check back soon.</div>`));
+  if (cards.length === 0) content.replaceChildren(emptyState("No matches are open for prediction yet — check back soon."));
+  else content.replaceChildren(...cards);
+  return true;
+}
+
+// After a successful sign-in, take the person back to the match they came for.
+function resumeIntent(state) {
+  if (!state || state.status !== "authenticated" || typeof UrbanoAuth.consumeIntent !== "function") return;
+  const intent = UrbanoAuth.consumeIntent();
+  if (!intent || intent.kind !== "predict") return;
+  const card = [...content.querySelectorAll("[data-match-id]")].find((c) => c.getAttribute("data-match-id") === String(intent.matchId));
+  if (!card) return;
+  if (typeof card.scrollIntoView === "function") card.scrollIntoView({ block: "center" });
+  const firstInput = card.querySelector('input[type="number"]');
+  if (firstInput) firstInput.focus();
+  const note = card.querySelector('[id^="submit-msg-"]');
+  if (note) {
+    note.className = "msg success";
+    note.textContent = "You're signed in. Make your prediction below.";
   }
 }
 
-init();
+// Signing in, signing out, or a different person: nothing that belonged to the previous identity stays on screen, and the list is
+// rebuilt for the new one without a page reload.
+async function onIdentityChanged(state) {
+  content.replaceChildren(emptyState("Updating…"));
+  try {
+    await refresh();
+  } catch (err) {
+    console.error("Soccer Predictions: refresh after sign-in change failed:", err);
+    content.replaceChildren(emptyState("Couldn't update the matches. Reload the page to try again."));
+    return;
+  }
+  resumeIntent(state);
+}
+
+refresh().catch((err) => {
+  console.error("Soccer Predictions: failed to load matches:", err);
+  content.replaceChildren(emptyState("Couldn't load the matches. Reload the page to try again."));
+});
+if (typeof UrbanoAuth.onIdentityChange === "function") {
+  UrbanoAuth.onIdentityChange(onIdentityChanged).catch(() => {});
+}
 </script>
 
 </body>

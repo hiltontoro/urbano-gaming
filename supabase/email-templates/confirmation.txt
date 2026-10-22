@@ -1,0 +1,22 @@
+URBANO GAMING
+
+Te damos la bienvenida a URBANO Gaming
+
+Gracias por iniciar tu registro. Tu correo aún no está verificado: quedará verificado al ingresar el código o usar el enlace.
+
+CÓDIGO DE VERIFICACIÓN: {{ .Token }}
+
+Ingresá este código en la pantalla de URBANO Gaming donde iniciaste tu registro.
+
+¿Preferís usar un enlace?
+Verificar con este enlace: {{ .ConfirmationURL }}
+
+- El código y el enlace vencen en 1 hora y solo se pueden usar una vez. Si pedís otro código, el anterior deja de funcionar.
+- Nunca compartás este código con nadie. El equipo de URBANO no te lo pedirá.
+- Si no lo solicitaste, podés ignorar este correo.
+
+--
+URBANO Gaming · Una experiencia URBANO
+ACCESS | EXPERIENCES | COMMUNITY
+Powered by TecnoMovi
+Enviado a {{ .Email }}. Mensaje automático de seguridad: no respondás a este correo.

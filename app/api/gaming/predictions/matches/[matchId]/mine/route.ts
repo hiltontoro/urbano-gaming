@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildPredictionsRepo, requireGamingMember } from "@/lib/gaming/predictions/httpAuth";
+import { toMemberQualificationView } from "@/lib/gaming/predictions/qualificationDetails";
 
 /**
  * GET /api/gaming/predictions/matches/[matchId]/mine — the caller's
@@ -36,5 +37,9 @@ export async function GET(
     ? await repo.getQualificationForEvaluation(evaluation.evaluationId)
     : null;
 
-  return NextResponse.json({ prediction, evaluation, qualification });
+  return NextResponse.json({
+    prediction,
+    evaluation,
+    qualification: qualification ? toMemberQualificationView(qualification) : null,
+  });
 }

@@ -3,10 +3,14 @@ import { ReasonRequiredError } from "../authority/types";
 
 /**
  * FINALIZE_CORRECTION — the correction counterpart to
- * finalizeMatchResult. matchResultId must already be a draft created
- * with supersedesMatchResultId set (via saveDraftResult in
- * adminCatalog.ts) — all compensation/supersession logic lives inside
- * correct_match_result_atomically itself.
+ * finalizeMatchResult. matchResultId must already be a draft that
+ * supersedes the current finalized result (saveMatchResultDraft in
+ * adminCatalog.ts creates it) — all compensation/supersession logic
+ * lives inside correct_match_result_atomically itself.
+ *
+ * expectedDigest is the digest of the exact content the finalizer
+ * reviewed; a missing or stale one is rejected, as for first
+ * finalization.
  *
  * CONSEQUENTIAL_FINALIZER authority is enforced inside the RPC (same
  * reasoning as finalizeMatchResult). reason is mandatory for
@@ -20,6 +24,7 @@ export async function correctMatchResult(
   repo: PredictionsRepository,
   matchResultId: string,
   finalizedByGamingMemberId: string,
+  expectedDigest: string,
   reason: string
 ): Promise<{
   matchResultId: string;
@@ -30,5 +35,5 @@ export async function correctMatchResult(
   if (!reason || reason.trim().length === 0) {
     throw new ReasonRequiredError();
   }
-  return repo.correctMatchResult(matchResultId, finalizedByGamingMemberId, reason);
+  return repo.correctMatchResult(matchResultId, finalizedByGamingMemberId, reason, expectedDigest);
 }

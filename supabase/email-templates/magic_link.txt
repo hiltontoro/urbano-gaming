@@ -1,0 +1,22 @@
+URBANO GAMING
+
+Tu código de acceso
+
+Se solicitó un código para entrar a tu cuenta de URBANO Gaming.
+
+CÓDIGO DE ACCESO: {{ .Token }}
+
+Ingresá este código en la pantalla donde pediste el acceso.
+
+¿Preferís usar un enlace?
+Entrar con este enlace: {{ .ConfirmationURL }}
+
+- El código y el enlace vencen en 1 hora y solo se pueden usar una vez. Si pedís otro código, el anterior deja de funcionar.
+- Nunca compartás este código con nadie. El equipo de URBANO no te lo pedirá.
+- Si no lo solicitaste, podés ignorar este correo.
+
+--
+URBANO Gaming · Una experiencia URBANO
+ACCESS | EXPERIENCES | COMMUNITY
+Powered by TecnoMovi
+Enviado a {{ .Email }}. Mensaje automático de seguridad: no respondás a este correo.

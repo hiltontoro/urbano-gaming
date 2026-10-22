@@ -6,43 +6,11 @@ import type {
   VenueRecord,
   VenueActivationRecord,
   PrizeTierRecord,
-  MatchResultRecord,
+  SavedMatchResult,
   OfficialGoalEventInput,
 } from "./types";
-import {
-  InvalidPrizeTierDimensionCountError,
-  InvalidOfficialGoalMinuteError,
-  DraftResultAlreadyExistsError,
-  NoFinalizedResultToCorrectError,
-  ResultAlreadyBeingCorrectedError,
-} from "./types";
-
-/**
- * Official Goal-Time boundary check, shared by first-time draft entry
- * and correction — mirrors 0100's own official_goal_events_minute_
- * stoppage_requires_boundary CHECK constraint so a malformed tuple
- * (e.g. a stoppage offset attached to a non-boundary minute like
- * (46, 1)) is rejected here, with a clear typed error, before it ever
- * reaches either repository backend. The DB constraint remains the
- * authoritative backstop; this is the single shared entry point for
- * both backends, since (unlike Predictions' own upsert_prediction_
- * atomically RPC) official goal events are never written via a route
- * a Gaming Member's own client could call directly — adminCatalog.ts
- * is already the sole write path, so one check here is sufficient.
- */
-function validateOfficialGoalEvents(events: OfficialGoalEventInput[]): void {
-  for (const event of events) {
-    if (
-      event.minuteStoppage != null &&
-      event.minuteRegulation !== 45 &&
-      event.minuteRegulation !== 90 &&
-      event.minuteRegulation !== 105 &&
-      event.minuteRegulation !== 120
-    ) {
-      throw new InvalidOfficialGoalMinuteError();
-    }
-  }
-}
+import { InvalidPrizeTierDimensionCountError } from "./types";
+import { validateGoalEventInputs, validateResultScores } from "./resultIntegrity";
 
 /**
  * The smallest founder/admin catalog surface: Team/Player roster,
@@ -247,8 +215,22 @@ export async function createPrizeTier(
   return repo.createPrizeTier({ ...input, prizeLabel: input.prizeLabel.trim() });
 }
 
-/** First-time draft entry: creates or edits the Match's one un-finalized draft. */
-export async function saveDraftResult(
+/**
+ * Saves the Match's one un-finalized draft: a first result when the
+ * Match has no finalized one, a correction of the current finalized
+ * result when it has. The caller never chooses which — the repository
+ * decides inside the same transaction that serializes finalization — and
+ * reports it in isCorrection.
+ *
+ * saveBase is the digest of the draft the caller loaded, or
+ * NO_RESULT_SAVE_BASE when it loaded none; a save over a draft that has
+ * changed since is rejected. Malformed input, a score that the
+ * regulation-time goal events do not add up to, and a scorer outside the
+ * match's two teams are all rejected without changing the prior draft.
+ * The returned contentDigest identifies the exact saved content — it is
+ * what finalize/correct must be given.
+ */
+export async function saveMatchResultDraft(
   repo: PredictionsRepository,
   input: {
     matchId: string;
@@ -256,45 +238,10 @@ export async function saveDraftResult(
     awayScore: number;
     officialGoalEvents: OfficialGoalEventInput[];
     enteredByGamingMemberId: string;
+    saveBase: string;
   }
-): Promise<MatchResultRecord> {
-  const currentFinalized = await repo.getCurrentFinalizedMatchResult(input.matchId);
-  if (currentFinalized) {
-    // A finalized result already exists — this must go through
-    // startResultCorrection, not a plain first-time draft save.
-    throw new DraftResultAlreadyExistsError();
-  }
-  validateOfficialGoalEvents(input.officialGoalEvents);
-  return repo.saveDraftMatchResult({
-    ...input,
-    supersedesMatchResultId: null,
-  });
-}
-
-/** Starts (or edits) a correction draft against the Match's current finalized Result. */
-export async function startResultCorrection(
-  repo: PredictionsRepository,
-  input: {
-    matchId: string;
-    homeScore: number;
-    awayScore: number;
-    officialGoalEvents: OfficialGoalEventInput[];
-    enteredByGamingMemberId: string;
-  }
-): Promise<MatchResultRecord> {
-  const currentFinalized = await repo.getCurrentFinalizedMatchResult(input.matchId);
-  if (!currentFinalized) {
-    throw new NoFinalizedResultToCorrectError();
-  }
-
-  const existingDraft = await repo.getDraftMatchResult(input.matchId);
-  if (existingDraft && existingDraft.supersedesMatchResultId !== currentFinalized.matchResultId) {
-    throw new ResultAlreadyBeingCorrectedError();
-  }
-
-  validateOfficialGoalEvents(input.officialGoalEvents);
-  return repo.saveDraftMatchResult({
-    ...input,
-    supersedesMatchResultId: currentFinalized.matchResultId,
-  });
+): Promise<SavedMatchResult> {
+  validateResultScores(input.homeScore, input.awayScore);
+  validateGoalEventInputs(input.officialGoalEvents);
+  return repo.saveDraftMatchResult(input);
 }

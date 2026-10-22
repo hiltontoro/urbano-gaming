@@ -7,11 +7,13 @@ import type {
   PrizeTierRecord,
   PredictionRecord,
   MatchResultRecord,
+  SavedMatchResult,
   OfficialGoalEventRecord,
   OfficialGoalEventInput,
   EvaluationRecord,
   GamingProgressionEventRecord,
   PrizeQualificationRecord,
+  PrizeQualificationDetailRecord,
   LeaderboardEntry,
 } from "../types";
 
@@ -130,16 +132,29 @@ export interface PredictionsRepository {
   ): Promise<PredictionRecord | null>;
   listPredictionsForMatch(matchId: string): Promise<PredictionRecord[]>;
 
-  // Match Results (draft entry is plain CRUD; finalize/correct below are RPCs)
+  // Match Results. Draft save, finalize and correct are all atomic RPCs
+  // serialized per match: the save decides initial draft versus
+  // correction under the same lock that finalize/correct take.
+  /**
+   * Saves the Match's one un-finalized draft in a single transaction.
+   * saveBase is the digest of the draft the caller loaded (or
+   * NO_RESULT_SAVE_BASE when it loaded none); a save over a draft that
+   * changed since is rejected, as is any score/event inconsistency, with
+   * the prior draft left untouched. Whether the draft is a first result
+   * or a correction of the current finalized one is decided inside the
+   * transaction, never by the caller.
+   */
   saveDraftMatchResult(input: {
     matchId: string;
     homeScore: number;
     awayScore: number;
     officialGoalEvents: OfficialGoalEventInput[];
     enteredByGamingMemberId: string;
-    supersedesMatchResultId?: string | null;
-  }): Promise<MatchResultRecord>;
+    saveBase: string;
+  }): Promise<SavedMatchResult>;
   getMatchResultById(matchResultId: string): Promise<MatchResultRecord | null>;
+  /** The digest of the result's exact content (null when the result does not exist). */
+  getMatchResultContentDigest(matchResultId: string): Promise<string | null>;
   getDraftMatchResult(matchId: string): Promise<MatchResultRecord | null>;
   /** The latest finalized, non-superseded Result Version for a Match. */
   getCurrentFinalizedMatchResult(
@@ -149,17 +164,24 @@ export interface PredictionsRepository {
     matchResultId: string
   ): Promise<OfficialGoalEventRecord[]>;
 
-  /** reason is optional for first finalization — pass null when the caller supplies none. */
+  /**
+   * reason is optional for first finalization — pass null when the
+   * caller supplies none. expectedDigest is the digest of the content the
+   * caller reviewed; a missing or stale one is rejected. An
+   * already-finalized result replays idempotently only for that content.
+   */
   finalizeMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string | null
+    reason: string | null,
+    expectedDigest: string
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }>;
   /** reason is mandatory for correction — enforced both here and at the RPC layer. */
   correctMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string
+    reason: string,
+    expectedDigest: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;
@@ -193,9 +215,32 @@ export interface PredictionsRepository {
   listQualificationsForActivation(
     venueActivationId: string
   ): Promise<PrizeQualificationRecord[]>;
+  /**
+   * listQualificationsForActivation plus the winner's display name and
+   * the prize label, resolved in a bounded number of queries. Admin
+   * surface only — display names must stay behind admin authority.
+   */
+  listQualificationDetailsForActivation(
+    venueActivationId: string
+  ): Promise<PrizeQualificationDetailRecord[]>;
+  /**
+   * Redeems an entitlement. Rejects a superseded, held or already
+   * fulfilled one; a replay of an already-redeemed one is idempotent.
+   */
   redeemPrizeQualification(
     prizeQualificationId: string,
     redeemedByGamingMemberId: string,
     reason: string | null
   ): Promise<{ prizeQualificationId: string; redeemedAt: string; alreadyRedeemed: boolean }>;
+  /**
+   * Releases the hold on a replacement entitlement whose prize changed
+   * after the original was delivered. Requires CONSEQUENTIAL_FINALIZER
+   * authority and a reason; releasing does not deliver anything — the
+   * entitlement is then redeemable through the ordinary redemption.
+   */
+  releasePrizeQualificationHold(
+    prizeQualificationId: string,
+    releasedByGamingMemberId: string,
+    reason: string
+  ): Promise<{ prizeQualificationId: string; releasedAt: string; alreadyReleased: boolean }>;
 }

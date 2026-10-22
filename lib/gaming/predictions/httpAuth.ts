@@ -9,7 +9,7 @@ import { SupabasePredictionsRepository } from "./db/supabasePredictionsRepositor
 import { SupabaseAuthorityRepository } from "../authority/db/supabaseAuthorityRepository";
 import { requirePlatformAuthority, requireAnyPlatformAuthority } from "../authority/requirePlatformAuthority";
 import type { PlatformAuthorityClass } from "../authority/types";
-import { InsufficientPlatformAuthorityError } from "../authority/types";
+import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../authority/types";
 import {
   MatchNotFoundError,
   MatchCancelledError,
@@ -36,10 +36,26 @@ import {
   ResultAlreadyBeingCorrectedError,
   ActivityClassificationLockedError,
   XpEligibilityLockedError,
+  MatchResultDigestRequiredError,
+  MatchResultDigestMismatchError,
+  MatchResultBaseRequiredError,
+  MatchResultBaseStaleError,
+  InvalidMatchResultScoreError,
+  InvalidMatchResultEventsError,
+  MatchResultEventMinuteInvalidError,
+  MatchResultScorerNotInMatchError,
+  MatchResultEventsContradictScoreError,
+  MatchResultIsCorrectionError,
+  MatchResultFinalizedImmutableError,
+  PrizeQualificationHeldError,
+  PrizeAlreadyFulfilledError,
+  PrizeQualificationNotHeldError,
 } from "./types";
+import { ResultChangedWhileLoadingError } from "./resultView";
 
 /** Maps a known Predictions domain error to its HTTP status; null if unrecognized. */
 export function statusForPredictionsError(err: unknown): number | null {
+  if (err instanceof InsufficientPlatformAuthorityError) return 403;
   if (
     err instanceof MatchNotFoundError ||
     err instanceof VenueActivationNotFoundError ||
@@ -61,7 +77,15 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof NoFinalizedResultToCorrectError ||
     err instanceof ResultAlreadyBeingCorrectedError ||
     err instanceof ActivityClassificationLockedError ||
-    err instanceof XpEligibilityLockedError
+    err instanceof XpEligibilityLockedError ||
+    err instanceof MatchResultDigestMismatchError ||
+    err instanceof MatchResultBaseStaleError ||
+    err instanceof MatchResultIsCorrectionError ||
+    err instanceof MatchResultFinalizedImmutableError ||
+    err instanceof PrizeQualificationHeldError ||
+    err instanceof PrizeAlreadyFulfilledError ||
+    err instanceof PrizeQualificationNotHeldError ||
+    err instanceof ResultChangedWhileLoadingError
   ) {
     return 409;
   }
@@ -73,7 +97,15 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof InvalidOfficialGoalMinuteError ||
     err instanceof InvalidFirstTeamError ||
     err instanceof InvalidGoalscorerSelectionError ||
-    err instanceof InvalidPrizeTierDimensionCountError
+    err instanceof InvalidPrizeTierDimensionCountError ||
+    err instanceof ReasonRequiredError ||
+    err instanceof MatchResultDigestRequiredError ||
+    err instanceof MatchResultBaseRequiredError ||
+    err instanceof InvalidMatchResultScoreError ||
+    err instanceof InvalidMatchResultEventsError ||
+    err instanceof MatchResultEventMinuteInvalidError ||
+    err instanceof MatchResultScorerNotInMatchError ||
+    err instanceof MatchResultEventsContradictScoreError
   ) {
     return 400;
   }

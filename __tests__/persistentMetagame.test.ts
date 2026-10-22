@@ -10,8 +10,12 @@ import { ExperienceSummaryNotFoundError } from "../lib/gaming/metagame/types";
 
 import { InMemoryPredictionsRepository } from "../lib/gaming/predictions/db/inMemoryPredictionsRepository";
 import { submitPrediction } from "../lib/gaming/predictions/submitPrediction";
-import { finalizeMatchResult } from "../lib/gaming/predictions/finalizeMatchResult";
-import { correctMatchResult } from "../lib/gaming/predictions/correctMatchResult";
+import {
+  saveDraftResult,
+  startResultCorrection,
+  finalizeMatchResult,
+  correctMatchResult,
+} from "./helpers/predictionsResultFixtures";
 import {
   createTeam,
   createPlayer,
@@ -19,8 +23,6 @@ import {
   createVenue,
   createVenueActivation,
   createPrizeTier,
-  saveDraftResult,
-  startResultCorrection,
   setMatchActivityClassification,
   setMatchXpEligibility,
 } from "../lib/gaming/predictions/adminCatalog";
@@ -106,7 +108,8 @@ describe("Finalized Experience Summary — authorship and idempotency", () => {
   it("Soccer Predictions: occurred_at is the first accepted Prediction's own created_at, never moved by a later pre-kickoff revision", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
-    const { match, activation, striker } = await setupRankedMatch(repo);
+    const { match, activation, striker, away } = await setupRankedMatch(repo);
+    const rival = await createPlayer(repo, { teamId: away.teamId, name: "Rival" });
     const gamingMemberId = "gm-1";
 
     const first = await submitPrediction(repo, {
@@ -122,7 +125,11 @@ describe("Finalized Experience Summary — authorship and idempotency", () => {
     expect(revised.predictionId).toBe(first.predictionId);
     expect(revised.createdAt).toBe(first.createdAt);
 
-    const draft = await saveDraftResult(repo, { matchId: match.matchId, homeScore: 2, awayScore: 1, officialGoalEvents: [{ scorerPlayerId: striker.playerId, minuteRegulation: 10 }], enteredByGamingMemberId: "gm-admin" });
+    const draft = await saveDraftResult(repo, { matchId: match.matchId, homeScore: 2, awayScore: 1, officialGoalEvents: [
+      { scorerPlayerId: striker.playerId, minuteRegulation: 10 },
+      { scorerPlayerId: striker.playerId, minuteRegulation: 40 },
+      { scorerPlayerId: rival.playerId, minuteRegulation: 70 },
+    ], enteredByGamingMemberId: "gm-admin" });
     await finalizeMatchResult(repo, draft.matchResultId, "gm-admin");
 
     const events = await repo.metagameRepository.listXpEventsForMember(gamingMemberId);
@@ -696,7 +703,8 @@ describe("Missing-policy boundary — absence of configuration is never an error
   it("NO CONFIGURATION: a real Prediction finalize succeeds end-to-end with zero policy/rule rows — Evaluation, Summary, and Prize Qualification all behave normally, zero XP events", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
-    const { match, activation, striker } = await setupRankedMatchNoXpConfig(repo);
+    const { match, activation, striker, away } = await setupRankedMatchNoXpConfig(repo);
+    const rival = await createPlayer(repo, { teamId: away.teamId, name: "Rival" });
     const gamingMemberId = "gm-no-config";
 
     await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Grand Prize" });
@@ -707,7 +715,11 @@ describe("Missing-policy boundary — absence of configuration is never an error
       predictedGoalscorerPlayerId: striker.playerId, predictedGoalMinuteRegulation: 10, predictedGoalMinuteStoppage: null, predictedFirstTeamToScore: "HOME", geo: INSIDE,
     });
 
-    const draft = await saveDraftResult(repo, { matchId: match.matchId, homeScore: 2, awayScore: 1, officialGoalEvents: [{ scorerPlayerId: striker.playerId, minuteRegulation: 10 }], enteredByGamingMemberId: "gm-admin" });
+    const draft = await saveDraftResult(repo, { matchId: match.matchId, homeScore: 2, awayScore: 1, officialGoalEvents: [
+      { scorerPlayerId: striker.playerId, minuteRegulation: 10 },
+      { scorerPlayerId: striker.playerId, minuteRegulation: 40 },
+      { scorerPlayerId: rival.playerId, minuteRegulation: 70 },
+    ], enteredByGamingMemberId: "gm-admin" });
 
     // Must not throw — this is the exact defect being corrected: a
     // missing policy/rule must never roll back Evaluation/Summary/

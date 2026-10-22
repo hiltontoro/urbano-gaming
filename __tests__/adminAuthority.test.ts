@@ -23,14 +23,16 @@ import {
   createVenue,
   createVenueActivation,
   createPrizeTier,
-  saveDraftResult,
-  startResultCorrection,
   setMatchActivityClassification,
   setMatchXpEligibility,
 } from "../lib/gaming/predictions/adminCatalog";
 import { submitPrediction } from "../lib/gaming/predictions/submitPrediction";
-import { finalizeMatchResult } from "../lib/gaming/predictions/finalizeMatchResult";
-import { correctMatchResult } from "../lib/gaming/predictions/correctMatchResult";
+import {
+  saveDraftResult,
+  startResultCorrection,
+  finalizeMatchResult,
+  correctMatchResult,
+} from "./helpers/predictionsResultFixtures";
 import { redeemPrizeQualification } from "../lib/gaming/predictions/redeemPrizeQualification";
 import { ActivityClassificationLockedError, XpEligibilityLockedError } from "../lib/gaming/predictions/types";
 

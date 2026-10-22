@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 
 import { InMemoryPredictionsRepository } from "../lib/gaming/predictions/db/inMemoryPredictionsRepository";
 import { submitPrediction } from "../lib/gaming/predictions/submitPrediction";
-import { finalizeMatchResult } from "../lib/gaming/predictions/finalizeMatchResult";
-import { correctMatchResult } from "../lib/gaming/predictions/correctMatchResult";
+import {
+  saveDraftResult,
+  startResultCorrection,
+  finalizeMatchResult,
+  correctMatchResult,
+} from "./helpers/predictionsResultFixtures";
 import { redeemPrizeQualification } from "../lib/gaming/predictions/redeemPrizeQualification";
 import {
   createTeam,
@@ -13,8 +18,6 @@ import {
   createVenue,
   createVenueActivation,
   createPrizeTier,
-  saveDraftResult,
-  startResultCorrection,
   setMatchActivityClassification,
   setMatchXpEligibility,
 } from "../lib/gaming/predictions/adminCatalog";
@@ -32,6 +35,23 @@ import {
 } from "../lib/gaming/predictions/types";
 import { cancelMatch } from "../lib/gaming/predictions/adminCatalog";
 import { haversineDistanceMeters, evaluateGeoEligibility } from "../lib/gaming/predictions/geolocation";
+import { attachQualificationDetails, chunk } from "../lib/gaming/predictions/qualificationDetails";
+import { selectPublicMatches } from "../lib/gaming/predictions/publicMatchList";
+
+// Mocks only the module boundary between the two routes under test and the
+// outside world (credentials, repository construction, caller identity); the
+// repository behind it is the real in-memory implementation.
+vi.mock("@/lib/gaming/predictions/httpAuth", async () => {
+  const actual = await vi.importActual<typeof import("../lib/gaming/predictions/httpAuth")>(
+    "../lib/gaming/predictions/httpAuth"
+  );
+  return {
+    ...actual,
+    getSupabaseCredentials: vi.fn(),
+    buildPredictionsRepo: vi.fn(),
+    requireAnyAdminAuthority: vi.fn(),
+  };
+});
 
 const VENUE_LAT = 10.0;
 const VENUE_LON = 10.0;
@@ -107,7 +127,7 @@ describe("Scoreline dimension", () => {
   it("exact scoreline match is correct", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
-    const { match, activation, mbappe } = await setupMatchAndVenue(repo);
+    const { match, activation, mbappe, vini, lewa } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 2, predictedAwayScore: 1,
@@ -116,7 +136,11 @@ describe("Scoreline dimension", () => {
     });
     const draft = await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 2, awayScore: 1,
-      officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 20 }],
+      officialGoalEvents: [
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 20 },
+        { scorerPlayerId: vini.playerId, minuteRegulation: 30 },
+        { scorerPlayerId: lewa.playerId, minuteRegulation: 50 },
+      ],
       enteredByGamingMemberId: "gm-admin",
     });
     await finalizeMatchResult(repo, draft.matchResultId, "gm-admin");
@@ -127,7 +151,7 @@ describe("Scoreline dimension", () => {
   it("a mismatched scoreline is incorrect even when the other three dimensions are correct", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
-    const { match, activation, mbappe } = await setupMatchAndVenue(repo);
+    const { match, activation, mbappe, vini, lewa } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 3, predictedAwayScore: 1,
@@ -136,7 +160,11 @@ describe("Scoreline dimension", () => {
     });
     const draft = await saveDraftResult(repo, {
       matchId: match.matchId, homeScore: 2, awayScore: 1,
-      officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 20 }],
+      officialGoalEvents: [
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 20 },
+        { scorerPlayerId: vini.playerId, minuteRegulation: 30 },
+        { scorerPlayerId: lewa.playerId, minuteRegulation: 50 },
+      ],
       enteredByGamingMemberId: "gm-admin",
     });
     await finalizeMatchResult(repo, draft.matchResultId, "gm-admin");
@@ -477,7 +505,7 @@ describe("Independence of the four dimensions", () => {
   it("the founder's own example: Mbappe 20' + a Barcelona player 70', predicted as 2-1/Mbappe/70'/Barcelona-first", async () => {
     const repo = new InMemoryPredictionsRepository();
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
-    const { match, activation, mbappe, lewa } = await setupMatchAndVenue(repo);
+    const { match, activation, mbappe, lewa, pedri } = await setupMatchAndVenue(repo);
     const prediction = await submitPrediction(repo, {
       matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
       predictedHomeScore: 2, predictedAwayScore: 1,
@@ -489,6 +517,7 @@ describe("Independence of the four dimensions", () => {
       officialGoalEvents: [
         { scorerPlayerId: mbappe.playerId, minuteRegulation: 20 },
         { scorerPlayerId: lewa.playerId, minuteRegulation: 70 },
+        { scorerPlayerId: pedri.playerId, minuteRegulation: 80 },
       ],
       enteredByGamingMemberId: "gm-admin",
     });
@@ -1261,11 +1290,12 @@ describe("Predictions-v2 — regulation-time boundary", () => {
       predictedFirstTeamToScore: null, geo: INSIDE,
     });
     // Only goal in the match happened in extra time (minute 101) — zero
-    // *regulation-time* goals, so every No-Goal/No-Goalscorer/No-Team
-    // pick must still settle as correct, and the extra-time goal must
-    // not satisfy anyone predicting that exact player/minute either.
+    // *regulation-time* goals, so the regulation score is 0-0, every
+    // No-Goal/No-Goalscorer/No-Team pick must still settle as correct,
+    // and the extra-time goal (kept as evidence only) must not satisfy
+    // anyone predicting that exact player/minute either.
     const draft = await saveDraftResult(repo, {
-      matchId: match.matchId, homeScore: 1, awayScore: 0,
+      matchId: match.matchId, homeScore: 0, awayScore: 0,
       officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 101 }],
       enteredByGamingMemberId: "gm-admin",
     });
@@ -1274,7 +1304,8 @@ describe("Predictions-v2 — regulation-time boundary", () => {
     expect(evaluation!.goalscorerCorrect).toBe(true); // No Goalscorer, zero eligible goals
     expect(evaluation!.goalMinuteCorrect).toBe(true); // No Goal, zero eligible goals
     expect(evaluation!.firstTeamToScoreCorrect).toBe(true); // No Team, zero eligible goals
-    expect(evaluation!.scorelineCorrect).toBe(false); // Exact Scoreline is unaffected by this predicate — 1-0 was really entered
+    expect(evaluation!.scorelineCorrect).toBe(true); // regulation score 0-0: the extra-time goal is not part of it
+    expect(evaluation!.correctDimensionCount).toBe(4);
   });
 
   it("a prediction naming the extra-time scorer/minute is NOT satisfied by that extra-time goal", async () => {
@@ -1288,7 +1319,7 @@ describe("Predictions-v2 — regulation-time boundary", () => {
       predictedFirstTeamToScore: "HOME", geo: INSIDE,
     });
     const draft = await saveDraftResult(repo, {
-      matchId: match.matchId, homeScore: 1, awayScore: 0,
+      matchId: match.matchId, homeScore: 0, awayScore: 0,
       officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 101 }],
       enteredByGamingMemberId: "gm-admin",
     });
@@ -1442,7 +1473,7 @@ describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () 
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     const draft = await saveDraftResult(repo, {
-      matchId: match.matchId, homeScore: 4, awayScore: 0,
+      matchId: match.matchId, homeScore: 2, awayScore: 0,
       officialGoalEvents: [
         { scorerPlayerId: mbappe.playerId, minuteRegulation: 45, minuteStoppage: 2 },
         { scorerPlayerId: mbappe.playerId, minuteRegulation: 90, minuteStoppage: 7 },
@@ -1460,7 +1491,7 @@ describe("Predictions-v2 — official Goal-Time boundary validation (0100)", () 
     repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
     const { match, mbappe } = await setupMatchAndVenue(repo);
     const draft = await saveDraftResult(repo, {
-      matchId: match.matchId, homeScore: 1, awayScore: 0,
+      matchId: match.matchId, homeScore: 0, awayScore: 0,
       officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 101 }],
       enteredByGamingMemberId: "gm-admin",
     });
@@ -1741,5 +1772,421 @@ describe("Predictions-v2 — XP eligibility declaration (Match-level, distinct f
     // is under test here.
     const events = await repo.metagameRepository.listXpEventsForMember("gm-correction");
     expect(events.filter((e) => e.points > 0)).toHaveLength(1);
+  });
+});
+
+// --- ADMIN QUALIFICATION DETAILS + PUBLIC LIST ----------------------
+
+async function submitGoallessPrediction(
+  repo: InMemoryPredictionsRepository,
+  matchId: string,
+  venueActivationId: string,
+  gamingMemberId: string,
+  scoreline: { home: number; away: number } = { home: 0, away: 0 }
+) {
+  return submitPrediction(repo, {
+    matchId, gamingMemberId, venueActivationId,
+    predictedHomeScore: scoreline.home, predictedAwayScore: scoreline.away,
+    predictedGoalscorerPlayerId: null, predictedGoalMinuteRegulation: null, predictedGoalMinuteStoppage: null,
+    predictedFirstTeamToScore: null, geo: INSIDE,
+  });
+}
+
+async function finalizeGoallessResult(repo: InMemoryPredictionsRepository, matchId: string) {
+  const draft = await saveDraftResult(repo, {
+    matchId, homeScore: 0, awayScore: 0, officialGoalEvents: [], enteredByGamingMemberId: "gm-admin",
+  });
+  await finalizeMatchResult(repo, draft.matchResultId, "gm-admin");
+  return draft;
+}
+
+describe("Admin qualification details — winner display name and prize label", () => {
+  it("each qualification carries every existing field plus memberDisplayName and prizeLabel", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    repo.setMemberDisplayName("gm-1", "Ana Perez");
+    await submitGoallessPrediction(repo, match.matchId, activation.venueActivationId, "gm-1");
+    await finalizeGoallessResult(repo, match.matchId);
+
+    const [base] = await repo.listQualificationsForActivation(activation.venueActivationId);
+    const details = await repo.listQualificationDetailsForActivation(activation.venueActivationId);
+
+    expect(details).toEqual([{ ...base, memberDisplayName: "Ana Perez", prizeLabel: "Jersey" }]);
+  });
+
+  it("attaches each winner's own name and own tier label when several members win different tiers", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 3, prizeLabel: "Cap" });
+    repo.setMemberDisplayName("gm-four", "Ana Perez");
+    repo.setMemberDisplayName("gm-three", "Luis Mejia");
+    await submitGoallessPrediction(repo, match.matchId, activation.venueActivationId, "gm-four");
+    // Scoreline wrong, the other three dimensions right against a 0-0 result.
+    await submitGoallessPrediction(repo, match.matchId, activation.venueActivationId, "gm-three", { home: 1, away: 0 });
+    await finalizeGoallessResult(repo, match.matchId);
+
+    const details = await repo.listQualificationDetailsForActivation(activation.venueActivationId);
+    const byMember = new Map(details.map((d) => [d.gamingMemberId, d]));
+
+    expect(details).toHaveLength(2);
+    expect(byMember.get("gm-four")).toMatchObject({ memberDisplayName: "Ana Perez", prizeLabel: "Jersey" });
+    expect(byMember.get("gm-three")).toMatchObject({ memberDisplayName: "Luis Mejia", prizeLabel: "Cap" });
+  });
+
+  it("a redeemed and then superseded qualification still carries its own label next to the replacement's", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation, mbappe, vini } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 3, prizeLabel: "Cap" });
+    repo.setMemberDisplayName("gm-1", "Ana Perez");
+    await submitPrediction(repo, {
+      matchId: match.matchId, gamingMemberId: "gm-1", venueActivationId: activation.venueActivationId,
+      predictedHomeScore: 2, predictedAwayScore: 0,
+      predictedGoalscorerPlayerId: mbappe.playerId, predictedGoalMinuteRegulation: 20, predictedGoalMinuteStoppage: null,
+      predictedFirstTeamToScore: "HOME", geo: INSIDE,
+    });
+    const draft = await saveDraftResult(repo, {
+      matchId: match.matchId, homeScore: 2, awayScore: 0,
+      officialGoalEvents: [
+        { scorerPlayerId: mbappe.playerId, minuteRegulation: 20 },
+        { scorerPlayerId: vini.playerId, minuteRegulation: 70 },
+      ],
+      enteredByGamingMemberId: "gm-admin",
+    });
+    await finalizeMatchResult(repo, draft.matchResultId, "gm-admin");
+    const [original] = await repo.listQualificationsForActivation(activation.venueActivationId);
+    await redeemPrizeQualification(repo, original.prizeQualificationId, "gm-admin");
+
+    // The second goal is disallowed: 1-0 is now a 3/4 and the 4/4 no longer holds.
+    const correctionDraft = await startResultCorrection(repo, {
+      matchId: match.matchId, homeScore: 1, awayScore: 0,
+      officialGoalEvents: [{ scorerPlayerId: mbappe.playerId, minuteRegulation: 20 }],
+      enteredByGamingMemberId: "gm-admin",
+    });
+    await correctMatchResult(repo, correctionDraft.matchResultId, "gm-admin", "Second goal disallowed on review.");
+
+    const details = await repo.listQualificationDetailsForActivation(activation.venueActivationId);
+    expect(details).toHaveLength(2);
+    const superseded = details.find((d) => d.prizeQualificationId === original.prizeQualificationId)!;
+    const replacement = details.find((d) => d.prizeQualificationId !== original.prizeQualificationId)!;
+
+    expect(superseded.supersededAt).not.toBeNull();
+    expect(superseded.redeemedAt).not.toBeNull();
+    expect(superseded).toMatchObject({ memberDisplayName: "Ana Perez", prizeLabel: "Jersey" });
+    expect(replacement.supersededAt).toBeNull();
+    expect(replacement).toMatchObject({ memberDisplayName: "Ana Perez", prizeLabel: "Cap" });
+  });
+
+  it("a member the repository cannot resolve yields a null name without throwing, and keeps the label", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    await submitGoallessPrediction(repo, match.matchId, activation.venueActivationId, "gm-unknown");
+    await finalizeGoallessResult(repo, match.matchId);
+
+    const details = await repo.listQualificationDetailsForActivation(activation.venueActivationId);
+    expect(details).toHaveLength(1);
+    expect(details[0].memberDisplayName).toBeNull();
+    expect(details[0].prizeLabel).toBe("Jersey");
+  });
+
+  it("attachQualificationDetails yields null, never an error, for a missing member and for a missing tier", () => {
+    const qualification = {
+      prizeQualificationId: "pq-1", evaluationId: "ev-1", gamingMemberId: "gm-1", venueActivationId: "va-1",
+      prizeTierId: "pt-1", redeemedAt: null, redeemedByGamingMemberId: null, redeemedPrizeLabel: null,
+      redeemedPrizeLabelBasis: null, legacyObservedPrizeLabel: null, lineageOrdinal: null,
+      supersededAt: null, replacesPrizeQualificationId: null, fulfilledByPrizeQualificationId: null,
+      holdPriorPrizeQualificationId: null, heldAt: null, holdBasis: null, holdReason: null, releasedAt: null,
+      releasedByGamingMemberId: null, releaseReason: null,
+      createdAt: "2026-10-24T00:00:00.000Z",
+    };
+
+    expect(attachQualificationDetails([qualification], new Map([["gm-1", "Ana Perez"]]), new Map())).toEqual([
+      { ...qualification, memberDisplayName: "Ana Perez", prizeLabel: null },
+    ]);
+    expect(attachQualificationDetails([qualification], new Map(), new Map([["pt-1", "Jersey"]]))).toEqual([
+      { ...qualification, memberDisplayName: null, prizeLabel: "Jersey" },
+    ]);
+    expect(attachQualificationDetails([qualification], new Map(), new Map())).toEqual([
+      { ...qualification, memberDisplayName: null, prizeLabel: null },
+    ]);
+    expect(attachQualificationDetails([], new Map(), new Map())).toEqual([]);
+  });
+
+  it("chunk splits id lists into bounded groups without dropping or duplicating an id", () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `id-${i}`);
+    const chunks = chunk(ids, 100);
+
+    expect(chunks.map((c) => c.length)).toEqual([100, 100, 50]);
+    expect(chunks.flat()).toEqual(ids);
+    expect(chunk(ids.slice(0, 100), 100)).toHaveLength(1);
+    expect(chunk(ids.slice(0, 101), 100).map((c) => c.length)).toEqual([100, 1]);
+    expect(chunk([], 100)).toEqual([]);
+  });
+
+  it("an activation with no qualifications, and an unknown activation id, both yield an empty list", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { activation } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+
+    expect(await repo.listQualificationDetailsForActivation(activation.venueActivationId)).toEqual([]);
+    expect(await repo.listQualificationDetailsForActivation("no-such-activation")).toEqual([]);
+  });
+
+  it("never leaks another activation's winners or labels into a venue's list", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation: activationA } = await setupMatchAndVenue(repo);
+    const venueB = await createVenue(repo, { name: "Second Venue", latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activationB = await createVenueActivation(repo, { matchId: match.matchId, venueId: venueB.venueId });
+    await createPrizeTier(repo, { venueActivationId: activationA.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    await createPrizeTier(repo, { venueActivationId: activationB.venueActivationId, correctDimensionCount: 4, prizeLabel: "Gift Card" });
+    repo.setMemberDisplayName("gm-a", "Ana Perez");
+    repo.setMemberDisplayName("gm-b", "Luis Mejia");
+    await submitGoallessPrediction(repo, match.matchId, activationA.venueActivationId, "gm-a");
+    await submitGoallessPrediction(repo, match.matchId, activationB.venueActivationId, "gm-b");
+    await finalizeGoallessResult(repo, match.matchId);
+
+    const forA = await repo.listQualificationDetailsForActivation(activationA.venueActivationId);
+    const forB = await repo.listQualificationDetailsForActivation(activationB.venueActivationId);
+
+    expect(forA.map((d) => [d.memberDisplayName, d.prizeLabel, d.venueActivationId])).toEqual([
+      ["Ana Perez", "Jersey", activationA.venueActivationId],
+    ]);
+    expect(forB.map((d) => [d.memberDisplayName, d.prizeLabel, d.venueActivationId])).toEqual([
+      ["Luis Mejia", "Gift Card", activationB.venueActivationId],
+    ]);
+  });
+});
+
+describe("Public match list — cancelled matches", () => {
+  async function seedMatch(repo: InMemoryPredictionsRepository, label: string) {
+    const home = await createTeam(repo, { name: `${label} Home` });
+    const away = await createTeam(repo, { name: `${label} Away` });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Liga Nacional", kickoffAt: futureIso(),
+    });
+    const venue = await createVenue(repo, { name: `${label} Venue`, latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: `${label} Prize` });
+    return { home, away, match, venue, activation };
+  }
+
+  it("selectPublicMatches omits cancelled matches, keeps the rest in order, and leaves listMatches() untouched", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    const first = await seedMatch(repo, "First");
+    const cancelled = await seedMatch(repo, "Cancelled");
+    const last = await seedMatch(repo, "Last");
+    await cancelMatch(repo, cancelled.match.matchId);
+
+    const all = await repo.listMatches();
+    const selected = selectPublicMatches(all);
+
+    expect(all.map((m) => m.matchId)).toEqual([first.match.matchId, cancelled.match.matchId, last.match.matchId]);
+    expect(selected.map((m) => m.matchId)).toEqual([first.match.matchId, last.match.matchId]);
+    expect(all).toHaveLength(3);
+  });
+
+  it("selectPublicMatches of an empty list or an all-cancelled list is empty", async () => {
+    const repo = new InMemoryPredictionsRepository();
+    expect(selectPublicMatches([])).toEqual([]);
+    const only = await seedMatch(repo, "Only");
+    await cancelMatch(repo, only.match.matchId);
+    expect(selectPublicMatches(await repo.listMatches())).toEqual([]);
+  });
+});
+
+describe("Predictions routes — admin qualification details and public list", () => {
+  let httpAuth: typeof import("../lib/gaming/predictions/httpAuth");
+
+  beforeEach(async () => {
+    httpAuth = await import("../lib/gaming/predictions/httpAuth");
+    vi.clearAllMocks();
+    vi.mocked(httpAuth.getSupabaseCredentials).mockReturnValue({ url: "http://fake", serviceKey: "fake" });
+  });
+
+  function useRepo(repo: InMemoryPredictionsRepository) {
+    vi.mocked(httpAuth.buildPredictionsRepo).mockReturnValue(
+      repo as unknown as ReturnType<typeof httpAuth.buildPredictionsRepo>
+    );
+  }
+
+  function adminRequest(venueActivationId: string) {
+    return new Request(
+      `http://localhost/api/gaming/predictions/admin/qualifications?venueActivationId=${venueActivationId}`,
+      { headers: { authorization: "Bearer token" } }
+    );
+  }
+
+  async function seedWinner() {
+    const repo = new InMemoryPredictionsRepository();
+    repo.authorityRepository.seedAuthority("gm-admin", "CONSEQUENTIAL_FINALIZER");
+    const { match, activation } = await setupMatchAndVenue(repo);
+    await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: "Jersey" });
+    repo.setMemberDisplayName("gm-1", "Ana Perez");
+    await submitGoallessPrediction(repo, match.matchId, activation.venueActivationId, "gm-1");
+    await finalizeGoallessResult(repo, match.matchId);
+    return { repo, activation };
+  }
+
+  it("GET admin/qualifications returns memberDisplayName and prizeLabel next to every existing field", async () => {
+    const { GET } = await import("../app/api/gaming/predictions/admin/qualifications/route");
+    const { repo, activation } = await seedWinner();
+    useRepo(repo);
+    vi.mocked(httpAuth.requireAnyAdminAuthority).mockResolvedValue({ gamingMemberId: "gm-admin" });
+
+    const res = await GET(adminRequest(activation.venueActivationId));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.qualifications).toHaveLength(1);
+    expect(Object.keys(body.qualifications[0]).sort()).toEqual(
+      [
+        "prizeQualificationId", "evaluationId", "gamingMemberId", "venueActivationId", "prizeTierId",
+        "redeemedAt", "redeemedByGamingMemberId", "redeemedPrizeLabel", "redeemedPrizeLabelBasis",
+        "legacyObservedPrizeLabel", "lineageOrdinal", "supersededAt", "createdAt",
+        "replacesPrizeQualificationId", "fulfilledByPrizeQualificationId", "holdPriorPrizeQualificationId",
+        "heldAt", "holdBasis", "holdReason", "releasedAt", "releasedByGamingMemberId", "releaseReason",
+        "memberDisplayName", "prizeLabel",
+      ].sort()
+    );
+    expect(body.qualifications[0]).toMatchObject({ memberDisplayName: "Ana Perez", prizeLabel: "Jersey" });
+  });
+
+  it("GET admin/qualifications is refused without admin authority and never reaches the repository", async () => {
+    const { GET } = await import("../app/api/gaming/predictions/admin/qualifications/route");
+    const { repo, activation } = await seedWinner();
+    useRepo(repo);
+    const detailsSpy = vi.spyOn(repo, "listQualificationDetailsForActivation");
+    const listSpy = vi.spyOn(repo, "listQualificationsForActivation");
+    vi.mocked(httpAuth.requireAnyAdminAuthority).mockResolvedValue({
+      errorResponse: NextResponse.json({ error: "no" }, { status: 403 }),
+    });
+
+    const res = await GET(adminRequest(activation.venueActivationId));
+
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(await res.json())).not.toContain("Ana Perez");
+    expect(detailsSpy).not.toHaveBeenCalled();
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("GET matches omits a cancelled match and spends no per-match queries on it, while listMatches() still has it", async () => {
+    const { GET } = await import("../app/api/gaming/predictions/matches/route");
+    const repo = new InMemoryPredictionsRepository();
+    async function seed(label: string) {
+      const home = await createTeam(repo, { name: `${label} Home` });
+      const away = await createTeam(repo, { name: `${label} Away` });
+      const match = await createMatch(repo, {
+        homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Liga Nacional", kickoffAt: futureIso(),
+      });
+      const venue = await createVenue(repo, { name: `${label} Venue`, latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+      const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+      await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: `${label} Prize` });
+      return { home, away, match, venue };
+    }
+    const liveA = await seed("LiveA");
+    const cancelled = await seed("Cancelled");
+    const liveB = await seed("LiveB");
+    await cancelMatch(repo, cancelled.match.matchId);
+    useRepo(repo);
+
+    const teamSpy = vi.spyOn(repo, "getTeamById");
+    const playersSpy = vi.spyOn(repo, "listPlayersForTeam");
+    const activationsSpy = vi.spyOn(repo, "listVenueActivationsForMatch");
+    const venueSpy = vi.spyOn(repo, "getVenueById");
+    const tiersSpy = vi.spyOn(repo, "listPrizeTiersForActivation");
+    const resultSpy = vi.spyOn(repo, "getCurrentFinalizedMatchResult");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.matches.map((m: { matchId: string }) => m.matchId)).toEqual([liveA.match.matchId, liveB.match.matchId]);
+    expect(JSON.stringify(body)).not.toContain(cancelled.match.matchId);
+
+    const cancelledTeamIds = [cancelled.home.teamId, cancelled.away.teamId];
+    expect(teamSpy).toHaveBeenCalledTimes(4);
+    expect(playersSpy).toHaveBeenCalledTimes(4);
+    for (const id of cancelledTeamIds) {
+      expect(teamSpy.mock.calls.map(([teamId]) => teamId)).not.toContain(id);
+      expect(playersSpy.mock.calls.map(([teamId]) => teamId)).not.toContain(id);
+    }
+    expect(activationsSpy.mock.calls.map(([matchId]) => matchId)).toEqual([liveA.match.matchId, liveB.match.matchId]);
+    expect(venueSpy).toHaveBeenCalledTimes(2);
+    expect(venueSpy.mock.calls.map(([venueId]) => venueId)).not.toContain(cancelled.venue.venueId);
+    expect(tiersSpy).toHaveBeenCalledTimes(2);
+    expect(resultSpy).toHaveBeenCalledTimes(2);
+    expect(resultSpy.mock.calls.map(([matchId]) => matchId)).not.toContain(cancelled.match.matchId);
+
+    const adminView = await repo.listMatches();
+    expect(adminView.map((m) => m.matchId)).toContain(cancelled.match.matchId);
+    expect(adminView.find((m) => m.matchId === cancelled.match.matchId)!.cancelledAt).not.toBeNull();
+  });
+
+  async function seedActivatedMatch(repo: InMemoryPredictionsRepository, label: string, withTier: boolean) {
+    const home = await createTeam(repo, { name: `${label} Home` });
+    const away = await createTeam(repo, { name: `${label} Away` });
+    const match = await createMatch(repo, {
+      homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Liga Nacional", kickoffAt: futureIso(),
+    });
+    const venue = await createVenue(repo, { name: `${label} Venue`, latitude: VENUE_LAT, longitude: VENUE_LON, radiusMeters: 100 });
+    const activation = await createVenueActivation(repo, { matchId: match.matchId, venueId: venue.venueId });
+    if (withTier) await createPrizeTier(repo, { venueActivationId: activation.venueActivationId, correctDimensionCount: 4, prizeLabel: `${label} Prize` });
+    return { match, venue, activation };
+  }
+
+  it("GET admin/activations lists every activation with its venue and prize tiers, including a cancelled match's", async () => {
+    const { GET } = await import("../app/api/gaming/predictions/admin/activations/route");
+    const repo = new InMemoryPredictionsRepository();
+    const live = await seedActivatedMatch(repo, "Live", true);
+    const cancelled = await seedActivatedMatch(repo, "Cancelled", true);
+    const bare = await seedActivatedMatch(repo, "Bare", false);
+    await cancelMatch(repo, cancelled.match.matchId);
+    useRepo(repo);
+    vi.mocked(httpAuth.requireAnyAdminAuthority).mockResolvedValue({ gamingMemberId: "gm-admin" });
+
+    const res = await GET(new Request("http://localhost/api/gaming/predictions/admin/activations", { headers: { authorization: "Bearer token" } }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.activations).toHaveLength(3);
+    const byMatch = new Map(body.activations.map((a: { matchId: string }) => [a.matchId, a]));
+    expect(byMatch.get(live.match.matchId)).toMatchObject({
+      venueActivationId: live.activation.venueActivationId,
+      enabled: true,
+      venue: { venueId: live.venue.venueId, name: "Live Venue" },
+      prizeTiers: [{ correctDimensionCount: 4, prizeLabel: "Live Prize" }],
+    });
+    expect(byMatch.get(cancelled.match.matchId)).toMatchObject({
+      venueActivationId: cancelled.activation.venueActivationId,
+      prizeTiers: [{ correctDimensionCount: 4, prizeLabel: "Cancelled Prize" }],
+    });
+    expect((byMatch.get(bare.match.matchId) as { prizeTiers: unknown[] }).prizeTiers).toEqual([]);
+    expect(JSON.stringify(body)).not.toMatch(/latitude|longitude|radiusMeters/);
+  });
+
+  it("GET admin/activations is refused without admin authority and never reaches the repository", async () => {
+    const { GET } = await import("../app/api/gaming/predictions/admin/activations/route");
+    const repo = new InMemoryPredictionsRepository();
+    await seedActivatedMatch(repo, "Hidden", true);
+    useRepo(repo);
+    const listSpy = vi.spyOn(repo, "listMatches");
+    vi.mocked(httpAuth.requireAnyAdminAuthority).mockResolvedValue({
+      errorResponse: NextResponse.json({ error: "no" }, { status: 403 }),
+    });
+
+    const res = await GET(new Request("http://localhost/api/gaming/predictions/admin/activations"));
+
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(await res.json())).not.toContain("Hidden");
+    expect(listSpy).not.toHaveBeenCalled();
   });
 });

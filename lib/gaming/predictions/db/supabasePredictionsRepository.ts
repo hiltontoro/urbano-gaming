@@ -11,11 +11,13 @@ import type {
   PrizeTierRecord,
   PredictionRecord,
   MatchResultRecord,
+  SavedMatchResult,
   OfficialGoalEventRecord,
   OfficialGoalEventInput,
   EvaluationRecord,
   GamingProgressionEventRecord,
   PrizeQualificationRecord,
+  PrizeQualificationDetailRecord,
   LeaderboardEntry,
 } from "../types";
 import {
@@ -39,9 +41,29 @@ import {
   SupersededResultNotFinalizedError,
   PrizeQualificationNotFoundError,
   QualificationSupersededError,
-  DraftResultAlreadyExistsError,
+  ResultAlreadyBeingCorrectedError,
+  MatchResultBaseRequiredError,
+  MatchResultBaseStaleError,
+  MatchResultDigestRequiredError,
+  MatchResultDigestMismatchError,
+  InvalidMatchResultScoreError,
+  InvalidMatchResultEventsError,
+  MatchResultEventMinuteInvalidError,
+  MatchResultScorerNotInMatchError,
+  MatchResultEventsContradictScoreError,
+  MatchResultIsCorrectionError,
+  MatchResultFinalizedImmutableError,
+  PrizeQualificationHeldError,
+  PrizeAlreadyFulfilledError,
+  PrizeQualificationNotHeldError,
 } from "../types";
 import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../../authority/types";
+import { attachQualificationDetails, chunk } from "../qualificationDetails";
+import { lineageOrdinalOf } from "../deliveryPolicy";
+
+// PostgREST carries .in() ids in the request URL; chunking keeps a
+// large activation from exceeding the gateway's URL length limit.
+const IN_LOOKUP_CHUNK_SIZE = 100;
 
 function mapTeam(row: any): TeamRecord {
   return {
@@ -192,15 +214,54 @@ function mapQualification(row: any): PrizeQualificationRecord {
     prizeTierId: row.prize_tier_id,
     redeemedAt: row.redeemed_at,
     redeemedByGamingMemberId: row.redeemed_by_gaming_member_id,
+    redeemedPrizeLabel: row.redeemed_prize_label ?? null,
+    redeemedPrizeLabelBasis: row.redeemed_prize_label_basis ?? null,
+    legacyObservedPrizeLabel: row.legacy_observed_prize_label ?? null,
+    lineageOrdinal: row.lineage_ordinal ?? null,
     supersededAt: row.superseded_at,
+    replacesPrizeQualificationId: row.replaces_prize_qualification_id ?? null,
+    fulfilledByPrizeQualificationId: row.fulfilled_by_prize_qualification_id ?? null,
+    holdPriorPrizeQualificationId: row.hold_prior_prize_qualification_id ?? null,
+    heldAt: row.held_at ?? null,
+    holdBasis: row.hold_basis ?? null,
+    holdReason: row.hold_reason ?? null,
+    releasedAt: row.released_at ?? null,
+    releasedByGamingMemberId: row.released_by_gaming_member_id ?? null,
+    releaseReason: row.release_reason ?? null,
     createdAt: row.created_at,
   };
+}
+
+/** The text after "CODE: " in a P0001 message — the human detail the function raised. */
+function detailAfter(message: string, code: string): string | undefined {
+  const marker = `${code}: `;
+  const at = message.indexOf(marker);
+  if (at < 0) return undefined;
+  const detail = message.slice(at + marker.length).trim();
+  return detail.length > 0 ? detail : undefined;
 }
 
 /** Translates a P0001-coded exception, raised by name inside the body, into its typed error class. */
 function translateNamedError(error: { code?: string; message?: string }): Error | null {
   if (error.code !== "P0001" || typeof error.message !== "string") return null;
-  const table: Array<[string, () => Error]> = [
+  const message = error.message;
+  // Longer, more specific codes first: matching is by substring.
+  const table: Array<[string, (detail: string | undefined) => Error]> = [
+    ["MATCH_RESULT_BASE_REQUIRED", () => new MatchResultBaseRequiredError()],
+    ["MATCH_RESULT_BASE_STALE", () => new MatchResultBaseStaleError()],
+    ["MATCH_RESULT_DIGEST_REQUIRED", () => new MatchResultDigestRequiredError()],
+    ["MATCH_RESULT_DIGEST_MISMATCH", () => new MatchResultDigestMismatchError()],
+    ["MATCH_RESULT_SCORE_INVALID", () => new InvalidMatchResultScoreError()],
+    ["MATCH_RESULT_EVENTS_INVALID", (detail) => new InvalidMatchResultEventsError(detail)],
+    ["MATCH_RESULT_EVENT_MINUTE_INVALID", (detail) => new MatchResultEventMinuteInvalidError(detail)],
+    ["MATCH_RESULT_SCORER_NOT_IN_MATCH", (detail) => new MatchResultScorerNotInMatchError(detail)],
+    ["MATCH_RESULT_EVENTS_CONTRADICT_SCORE", (detail) => new MatchResultEventsContradictScoreError(detail)],
+    ["MATCH_RESULT_IS_CORRECTION", () => new MatchResultIsCorrectionError()],
+    ["MATCH_RESULT_FINALIZED_IMMUTABLE", () => new MatchResultFinalizedImmutableError()],
+    ["RESULT_ALREADY_BEING_CORRECTED", () => new ResultAlreadyBeingCorrectedError()],
+    ["PRIZE_QUALIFICATION_NOT_HELD", () => new PrizeQualificationNotHeldError()],
+    ["PRIZE_QUALIFICATION_HELD", () => new PrizeQualificationHeldError()],
+    ["PRIZE_ALREADY_FULFILLED", () => new PrizeAlreadyFulfilledError()],
     ["MATCH_NOT_FOUND", () => new MatchNotFoundError()],
     ["MATCH_CANCELLED", () => new MatchCancelledError()],
     ["MATCH_NOT_CLASSIFIED", () => new MatchNotClassifiedError()],
@@ -225,7 +286,7 @@ function translateNamedError(error: { code?: string; message?: string }): Error 
     ["REASON_REQUIRED", () => new ReasonRequiredError()],
   ];
   for (const [code, build] of table) {
-    if (error.message.includes(code)) return build();
+    if (message.includes(code)) return build(detailAfter(message, code));
   }
   return null;
 }
@@ -653,69 +714,44 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
     awayScore: number;
     officialGoalEvents: OfficialGoalEventInput[];
     enteredByGamingMemberId: string;
-    supersedesMatchResultId?: string | null;
-  }): Promise<MatchResultRecord> {
-    const existingDraft = await this.getDraftMatchResult(input.matchId);
-
-    let matchResultId: string;
-    let mappedResult: MatchResultRecord;
-
-    if (existingDraft) {
-      const { data, error } = await this.client
-        .from("match_results")
-        .update({ home_score: input.homeScore, away_score: input.awayScore })
-        .eq("match_result_id", existingDraft.matchResultId)
-        .select()
-        .single();
-      if (error) throw error;
-      matchResultId = existingDraft.matchResultId;
-      mappedResult = mapMatchResult(data);
-    } else {
-      const { data, error } = await this.client
-        .from("match_results")
-        .insert({
-          match_id: input.matchId,
-          home_score: input.homeScore,
-          away_score: input.awayScore,
-          entered_by_gaming_member_id: input.enteredByGamingMemberId,
-          supersedes_match_result_id: input.supersedesMatchResultId ?? null,
-        })
-        .select()
-        .single();
-      if (error) {
-        if (
-          error.code === "23505" &&
-          error.message.includes("match_results_one_draft_per_match")
-        ) {
-          throw new DraftResultAlreadyExistsError();
-        }
-        throw error;
-      }
-      matchResultId = data.match_result_id;
-      mappedResult = mapMatchResult(data);
+    saveBase: string;
+  }): Promise<SavedMatchResult> {
+    // One transaction in Postgres: the match is locked, initial draft
+    // versus correction is decided under that lock, the input is
+    // validated, and the draft's goal events are replaced together with
+    // the draft row. A failure leaves the prior draft untouched.
+    const { data, error } = await this.client.rpc("save_draft_match_result_atomically", {
+      p_match_id: input.matchId,
+      p_entered_by_gaming_member_id: input.enteredByGamingMemberId,
+      p_home_score: input.homeScore,
+      p_away_score: input.awayScore,
+      p_events: input.officialGoalEvents.map((event) => ({
+        scorerPlayerId: event.scorerPlayerId,
+        minuteRegulation: event.minuteRegulation,
+        minuteStoppage: event.minuteStoppage ?? null,
+        isOwnGoal: event.isOwnGoal ?? false,
+      })),
+      p_save_base: input.saveBase,
+    });
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
     }
-
-    const { error: deleteError } = await this.client
-      .from("official_goal_events")
-      .delete()
-      .eq("match_result_id", matchResultId);
-    if (deleteError) throw deleteError;
-
-    if (input.officialGoalEvents.length > 0) {
-      const { error: insertError } = await this.client.from("official_goal_events").insert(
-        input.officialGoalEvents.map((event, index) => ({
-          match_result_id: matchResultId,
-          scorer_player_id: event.scorerPlayerId,
-          minute_regulation: event.minuteRegulation,
-          minute_stoppage: event.minuteStoppage ?? null,
-          is_own_goal: event.isOwnGoal ?? false,
-          ordinal: index + 1,
-        }))
-      );
-      if (insertError) throw insertError;
-    }
-
-    return mappedResult;
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      matchResultId: row.match_result_id,
+      matchId: row.match_id,
+      homeScore: row.home_score,
+      awayScore: row.away_score,
+      finalizedAt: null,
+      supersedesMatchResultId: row.supersedes_match_result_id,
+      enteredByGamingMemberId: row.entered_by_gaming_member_id,
+      finalizedByGamingMemberId: null,
+      createdAt: row.created_at,
+      contentDigest: row.content_digest,
+      isCorrection: row.is_correction,
+    };
   }
 
   async getMatchResultById(matchResultId: string): Promise<MatchResultRecord | null> {
@@ -726,6 +762,14 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       .maybeSingle();
     if (error) throw error;
     return data ? mapMatchResult(data) : null;
+  }
+
+  async getMatchResultContentDigest(matchResultId: string): Promise<string | null> {
+    const { data, error } = await this.client.rpc("match_result_content_digest", {
+      p_match_result_id: matchResultId,
+    });
+    if (error) throw error;
+    return typeof data === "string" ? data : null;
   }
 
   async getDraftMatchResult(matchId: string): Promise<MatchResultRecord | null> {
@@ -741,19 +785,22 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
 
   async getCurrentFinalizedMatchResult(matchId: string): Promise<MatchResultRecord | null> {
     // The currently-authoritative finalized version is the one no
-    // other finalized row supersedes yet — walking "not referenced as
-    // a supersedes target by any row" is equivalent to and simpler
-    // than following the chain forward.
+    // other finalized row supersedes yet — the same supersession-chain
+    // definition save_draft_match_result_atomically uses, independent
+    // of finalization timestamps.
     const { data, error } = await this.client
       .from("match_results")
       .select("*")
       .eq("match_id", matchId)
-      .not("finalized_at", "is", null)
-      .order("finalized_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .not("finalized_at", "is", null);
     if (error) throw error;
-    return data ? mapMatchResult(data) : null;
+    const finalized = (data ?? []).map(mapMatchResult);
+    return (
+      finalized.find(
+        (candidate) =>
+          !finalized.some((other) => other.supersedesMatchResultId === candidate.matchResultId)
+      ) ?? null
+    );
   }
 
   async listGoalEventsForResult(matchResultId: string): Promise<OfficialGoalEventRecord[]> {
@@ -769,12 +816,14 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
   async finalizeMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string | null
+    reason: string | null,
+    expectedDigest: string
   ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }> {
     const { data, error } = await this.client.rpc("finalize_match_result_atomically", {
       p_match_result_id: matchResultId,
       p_finalized_by_gaming_member_id: finalizedByGamingMemberId,
       p_reason: reason,
+      p_expected_digest: expectedDigest,
     });
     if (error) {
       const translated = translateNamedError(error);
@@ -792,7 +841,8 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
   async correctMatchResult(
     matchResultId: string,
     finalizedByGamingMemberId: string,
-    reason: string
+    reason: string,
+    expectedDigest: string
   ): Promise<{
     matchResultId: string;
     finalizedAt: string;
@@ -803,6 +853,7 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       p_match_result_id: matchResultId,
       p_finalized_by_gaming_member_id: finalizedByGamingMemberId,
       p_reason: reason,
+      p_expected_digest: expectedDigest,
     });
     if (error) {
       const translated = translateNamedError(error);
@@ -835,15 +886,39 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
   async getCurrentEvaluationForPrediction(
     predictionId: string
   ): Promise<EvaluationRecord | null> {
+    // The current evaluation is the one for the result at the highest
+    // position of the explicit supersession chain — never the latest
+    // timestamp (transaction-start times cannot order a chain).
     const { data, error } = await this.client
       .from("evaluations")
-      .select("*")
-      .eq("prediction_id", predictionId)
-      .order("evaluated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .select("*, predictions!inner(match_id)")
+      .eq("prediction_id", predictionId);
     if (error) throw error;
-    return data ? mapEvaluation(data) : null;
+    const evaluations = data ?? [];
+    if (evaluations.length === 0) return null;
+    if (evaluations.length === 1) return mapEvaluation(evaluations[0]);
+
+    const matchId = (evaluations[0] as any).predictions.match_id as string;
+    const { data: results, error: resultsError } = await this.client
+      .from("match_results")
+      .select("match_result_id, supersedes_match_result_id")
+      .eq("match_id", matchId);
+    if (resultsError) throw resultsError;
+    const parentOf = new Map<string, string | null>(
+      (results ?? []).map((r: any) => [r.match_result_id as string, (r.supersedes_match_result_id as string | null) ?? null])
+    );
+
+    let current: any = null;
+    let currentLineage = -1;
+    for (const evaluation of evaluations) {
+      const lineage = lineageOrdinalOf(evaluation.match_result_id, (id) => parentOf.get(id));
+      if (lineage === null) throw new Error("evaluation order cannot be established: unreadable result chain");
+      if (lineage > currentLineage) {
+        current = evaluation;
+        currentLineage = lineage;
+      }
+    }
+    return mapEvaluation(current);
   }
 
   async listProgressionEventsForMember(
@@ -916,6 +991,48 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
     return (data ?? []).map(mapQualification);
   }
 
+  async listQualificationDetailsForActivation(
+    venueActivationId: string
+  ): Promise<PrizeQualificationDetailRecord[]> {
+    const qualifications = await this.listQualificationsForActivation(venueActivationId);
+    if (qualifications.length === 0) return [];
+
+    const memberIds = [...new Set(qualifications.map((q) => q.gamingMemberId))];
+    const tierIds = [...new Set(qualifications.map((q) => q.prizeTierId))];
+
+    const [memberResults, tierResults] = await Promise.all([
+      Promise.all(
+        chunk(memberIds, IN_LOOKUP_CHUNK_SIZE).map((ids) =>
+          this.client
+            .from("gaming_members")
+            .select("gaming_member_id, display_name")
+            .in("gaming_member_id", ids)
+        )
+      ),
+      Promise.all(
+        chunk(tierIds, IN_LOOKUP_CHUNK_SIZE).map((ids) =>
+          this.client
+            .from("prize_tiers")
+            .select("prize_tier_id, prize_label")
+            .in("prize_tier_id", ids)
+        )
+      ),
+    ]);
+
+    const memberDisplayNames = new Map<string, string>();
+    for (const { data, error } of memberResults) {
+      if (error) throw error;
+      for (const row of data ?? []) memberDisplayNames.set(row.gaming_member_id, row.display_name);
+    }
+    const prizeLabels = new Map<string, string>();
+    for (const { data, error } of tierResults) {
+      if (error) throw error;
+      for (const row of data ?? []) prizeLabels.set(row.prize_tier_id, row.prize_label);
+    }
+
+    return attachQualificationDetails(qualifications, memberDisplayNames, prizeLabels);
+  }
+
   async redeemPrizeQualification(
     prizeQualificationId: string,
     redeemedByGamingMemberId: string,
@@ -936,6 +1053,29 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       prizeQualificationId: row.prize_qualification_id,
       redeemedAt: row.redeemed_at,
       alreadyRedeemed: row.already_redeemed,
+    };
+  }
+
+  async releasePrizeQualificationHold(
+    prizeQualificationId: string,
+    releasedByGamingMemberId: string,
+    reason: string
+  ): Promise<{ prizeQualificationId: string; releasedAt: string; alreadyReleased: boolean }> {
+    const { data, error } = await this.client.rpc("release_prize_qualification_hold_atomically", {
+      p_prize_qualification_id: prizeQualificationId,
+      p_released_by_gaming_member_id: releasedByGamingMemberId,
+      p_reason: reason,
+    });
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      prizeQualificationId: row.prize_qualification_id,
+      releasedAt: row.released_at,
+      alreadyReleased: row.already_released,
     };
   }
 }

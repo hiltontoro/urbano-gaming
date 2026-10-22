@@ -9,6 +9,12 @@ import type { PredictionsRepository } from "./db/predictionsRepository";
  * codebase gets one: a stable, testable seam between the API route and
  * the repository.
  *
+ * expectedDigest is the digest of the exact content the finalizer
+ * reviewed (see resultIntegrity.ts). Finalizing without one, or with a
+ * digest that no longer matches the draft, is rejected — so content that
+ * was not reviewed can never be settled. The digest says WHICH content
+ * was reviewed; it is not authorization.
+ *
  * CONSEQUENTIAL_FINALIZER authority is enforced inside the RPC itself
  * (the sole enforcement boundary — no fast-path duplicate check here,
  * since this function has no data already in hand to check against
@@ -20,7 +26,8 @@ export async function finalizeMatchResult(
   repo: PredictionsRepository,
   matchResultId: string,
   finalizedByGamingMemberId: string,
+  expectedDigest: string,
   reason?: string | null
 ): Promise<{ matchResultId: string; finalizedAt: string; alreadyFinalized: boolean }> {
-  return repo.finalizeMatchResult(matchResultId, finalizedByGamingMemberId, reason ?? null);
+  return repo.finalizeMatchResult(matchResultId, finalizedByGamingMemberId, reason ?? null, expectedDigest);
 }

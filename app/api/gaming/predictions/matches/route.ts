@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildPredictionsRepo } from "@/lib/gaming/predictions/httpAuth";
+import { selectPublicMatches } from "@/lib/gaming/predictions/publicMatchList";
 
 // This route has no dynamic path segment and never reads the request
 // object, so Next.js would otherwise treat it as statically
@@ -8,7 +9,7 @@ import { getSupabaseCredentials, buildPredictionsRepo } from "@/lib/gaming/predi
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/gaming/predictions/matches — public: every Match, its two
+ * GET /api/gaming/predictions/matches — public: every non-cancelled Match, its two
  * Teams (each with its currently-active selectable roster, for the
  * member-facing Goalscorer picker — grouped by Team, no free text),
  * its Venue Activations (with Venue coordinates/radius for client-side
@@ -27,7 +28,7 @@ export async function GET() {
   }
 
   const repo = buildPredictionsRepo(credentials);
-  const matches = await repo.listMatches();
+  const matches = selectPublicMatches(await repo.listMatches());
 
   const result = await Promise.all(
     matches.map(async (match) => {

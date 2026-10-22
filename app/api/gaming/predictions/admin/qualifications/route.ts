@@ -9,7 +9,9 @@ import {
  * GET /api/gaming/predictions/admin/qualifications?venueActivationId=...
  * — Prize Qualifications for one Venue Activation, including
  * superseded/redeemed state, so the admin surface can show a
- * correction discrepancy without hiding redemption history.
+ * correction discrepancy without hiding redemption history. Each row
+ * also carries memberDisplayName and prizeLabel so staff can identify
+ * the winner and the prize; both sit behind the admin gate above.
  */
 export async function GET(request: Request) {
   const credentials = getSupabaseCredentials();
@@ -32,6 +34,6 @@ export async function GET(request: Request) {
   }
 
   const repo = buildPredictionsRepo(credentials);
-  const qualifications = await repo.listQualificationsForActivation(venueActivationId);
+  const qualifications = await repo.listQualificationDetailsForActivation(venueActivationId);
   return NextResponse.json({ qualifications });
 }
