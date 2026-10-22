@@ -1,3 +1,5 @@
+import type { SoccerFormatKey } from "./formats";
+
 /**
  * URBANO Gaming Competitions — Soccer Slice 001.
  *
@@ -26,7 +28,11 @@ export interface CompetitionRecord {
   competitionId: string;
   /** Opaque, non-identifying public identifier (UG-CR-GATE-081 Phase 3A) — the only competition identifier ever placed in a user-visible URL or invitation. Never derived from competitionId; see lib/gaming/competitions/publicCode.ts. */
   publicCode: string;
-  activityKey: "SOCCER_5V5";
+  /**
+   * The competition's soccer format key. Every creation path still accepts only SOCCER_5V5; the type is the registry's closed set because
+   * the database now records formats through a foreign key to competition_format_rules (UG-CR-GATE-SSS-001).
+   */
+  activityKey: SoccerFormatKey;
   name: string;
   organizerGamingMemberId: string;
   state: CompetitionState;
@@ -608,7 +614,19 @@ export class RegulationScoreEventMismatchError extends Error {
   constructor() { super("The regulation score must equal the count of attributed goal events per team."); this.name = "RegulationScoreEventMismatchError"; }
 }
 export class MinimumParticipationNotMetError extends Error {
-  constructor() { super("Each team requires at least 4 actually-participating rostered members for a normal result — use forfeit or void instead."); this.name = "MinimumParticipationNotMetError"; }
+  /**
+   * `minimum` is the threshold of the competition's OWN format (UG-CR-GATE-SSS-001). The default is 5v5's historical four, so the
+   * no-argument error is exactly the message it always was. `null` means the threshold could not be read from the database message;
+   * the error then states no number rather than guessing one.
+   */
+  constructor(minimum: number | null = 4) {
+    super(
+      minimum === null
+        ? "Each team requires its format's minimum number of actually-participating rostered members for a normal result — use forfeit or void instead."
+        : `Each team requires at least ${minimum} actually-participating rostered members for a normal result — use forfeit or void instead.`
+    );
+    this.name = "MinimumParticipationNotMetError";
+  }
 }
 export class FixtureNotReadyToFinalizeError extends Error {
   constructor() { super("Evidence must be submitted before a fixture can be finalized."); this.name = "FixtureNotReadyToFinalizeError"; }

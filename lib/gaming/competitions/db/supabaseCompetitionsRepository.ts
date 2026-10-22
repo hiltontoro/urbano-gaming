@@ -26,6 +26,16 @@ import {
   TeamNotAcceptedError, CompetitionNotCancellableError, CompetitionCancelledError, HostAccessRevokedError, FixtureTeamScopeError,
 } from "../types";
 
+/**
+ * The threshold a MINIMUM_PARTICIPATION_NOT_MET refusal states ("at least N actually-participating"): each format has its own (UG-CR-GATE-SSS-001).
+ * Only a whole number from 1 to 8 is believed; anything else yields null, so the error states no number rather than inventing one.
+ */
+function minimumParticipationFrom(message: string): number | null {
+  const match = /at least (\d{1,2}) actually-participating/.exec(message);
+  const minimum = match ? Number(match[1]) : NaN;
+  return Number.isInteger(minimum) && minimum >= 1 && minimum <= 8 ? minimum : null;
+}
+
 /** Translates a P0001-coded RPC error into its typed domain error. Exported so contract tests can translate the one raw-RPC signature the repository itself does not call. */
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
@@ -65,7 +75,7 @@ export function translateError(error: { code?: string; message?: string }): Erro
     ["EVIDENCE_PARTICIPANT_NOT_ATTESTED", () => new EvidenceParticipantNotAttestedError(msg)],
     ["INVALID_ASSIST", () => new InvalidAssistError()],
     ["REGULATION_SCORE_EVENT_MISMATCH", () => new RegulationScoreEventMismatchError()],
-    ["MINIMUM_PARTICIPATION_NOT_MET", () => new MinimumParticipationNotMetError()],
+    ["MINIMUM_PARTICIPATION_NOT_MET", () => new MinimumParticipationNotMetError(minimumParticipationFrom(msg))],
     ["FIXTURE_NOT_READY_TO_FINALIZE", () => new FixtureNotReadyToFinalizeError()],
     ["EVIDENCE_MISSING", () => new EvidenceMissingError()],
     ["INVALID_FORFEITING_TEAM", () => new InvalidForfeitingTeamError()],
