@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -24,6 +25,7 @@ const subjects = JSON.parse(read("subjects.json")) as Record<string, string>;
 
 const ALLOWED_VARIABLES = new Set(["{{ .Token }}", "{{ .ConfirmationURL }}", "{{ .SiteURL }}", "{{ .Email }}"]);
 const LOGO_URL = "{{ .SiteURL }}/email/urbano-lockup-email.png";
+const APPROVED_LOGO_SHA256 = "072982b3fd0051557fb87b0e7e0826bd86c5ed1975d8982ac178bf7b7b2d95b5";
 
 function luminance(hex: string): number {
   const channel = (i: number) => {
@@ -198,7 +200,7 @@ describe.each(NAMES)("%s: plain-text equivalent", (name) => {
   });
 });
 
-describe("the logo asset and the publication boundary", () => {
+describe("the logo asset and its publication in source", () => {
   const asset = join(DIR, "assets", "urbano-lockup-email.png");
 
   it("keeps an email-sized PNG export next to the templates", () => {
@@ -209,7 +211,18 @@ describe("the logo asset and the publication boundary", () => {
     expect(statSync(asset).size).toBeLessThan(100_000);
   });
 
-  it("does NOT publish it: nothing is added under public/ by this change", () => {
-    expect(existsSync(join(ROOT, "public", "email"))).toBe(false);
+  it("publishes it from source: public/email holds the approved PNG, byte-identical to the asset, and nothing else", () => {
+    const published = join(ROOT, "public", "email", "urbano-lockup-email.png");
+    expect(existsSync(published)).toBe(true);
+    const bytes = readFileSync(published);
+    expect(bytes.equals(readFileSync(asset))).toBe(true);
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(APPROVED_LOGO_SHA256);
+    expect(readdirSync(join(ROOT, "public", "email"))).toEqual(["urbano-lockup-email.png"]);
+  });
+
+  it("sits exactly where the templates ask for it: {{ .SiteURL }} plus the logo path resolves to a file under public/", () => {
+    const requested = LOGO_URL.replace("{{ .SiteURL }}", "");
+    expect(requested).toBe("/email/urbano-lockup-email.png");
+    expect(existsSync(join(ROOT, "public", requested))).toBe(true);
   });
 });
