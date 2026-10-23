@@ -22,6 +22,9 @@ const READER_SOURCE = readFileSync(path.join(process.cwd(), "public/hostAvailabi
 
 const HOST_FLAG = "BECOME_A_HOST_SCHEMA_READY";
 const AVAILABILITY_URL = "/api/gaming/host/availability";
+// The Home page's separate Soccer Predictions entry reads the public matches list (covered by __tests__/homePredictionsEntry.test.ts).
+// It is answered here with "no matches" so these Become a Host tests keep counting only the host availability requests.
+const MATCHES_URL = "/api/gaming/predictions/matches";
 const BECOME_A_HOST_PAGE = "/become-a-host.html";
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -74,6 +77,7 @@ async function realRouteReply(): Promise<Reply> {
 /** `readerSource: null` models a page whose /hostAvailability.js failed to load. */
 async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compressTimeout?: boolean; html?: string; readerSource?: string | null } = {}) {
   const calls: FetchCall[] = [];
+  const matchCalls: FetchCall[] = [];
   const dom = new JSDOM(opts.html ?? INDEX_HTML, {
     url: "http://localhost/",
     runScripts: "dangerously",
@@ -87,6 +91,10 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
         w.setTimeout = (fn: TimerHandler, ms?: number, ...rest: unknown[]) => realSetTimeout(fn, ms === 4000 ? 25 : ms, ...rest);
       }
       w.fetch = (url: string, init: Record<string, any> = {}) => {
+        if (String(url) === MATCHES_URL) {
+          matchCalls.push({ url: String(url), init });
+          return Promise.resolve({ status: 200, json: async () => ({ matches: [] }) });
+        }
         calls.push({ url: String(url), init });
         return (async () => {
           const out = await reply();
@@ -114,7 +122,7 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
   const card = () => Array.from(doc.querySelectorAll("#experiences-carousel .exp-card")).find((c) => (c.querySelector("h3")?.textContent ?? "") === "Become a Host") as HTMLElement | undefined;
   const settle = async (ms = 60) => { await new Promise((r) => setTimeout(r, ms)); };
   return {
-    win, doc, calls, card, settle,
+    win, doc, calls, matchCalls, card, settle,
     markup: () => { const c = doc.body.cloneNode(true) as HTMLElement; c.querySelectorAll("script").forEach((s) => s.remove()); return c.innerHTML; },
     /** Rendered text only: the page's own script source is not content. */
     text: () => { const c = doc.body.cloneNode(true) as HTMLElement; c.querySelectorAll("script").forEach((x) => x.remove()); return (c.textContent ?? "").replace(/\s+/g, " "); },

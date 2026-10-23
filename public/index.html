@@ -144,9 +144,10 @@
 
   /* Match module — structured as a single-item horizontal track so a
      second/third upcoming fixture can be appended later without
-     redesigning this section. Only one verified fixture exists today;
-     no slide controls are built since there's nothing yet to navigate
-     between. Original URBANO treatment (typography + gradients +
+     redesigning this section. It shows the one soonest match that is
+     open for predictions, taken from the public matches list; there is
+     no hardcoded fixture. No slide controls are built since there's
+     nothing yet to navigate between. Original URBANO treatment (typography + gradients +
      a subtle repeating diagonal texture evoking stadium light) —
      deliberately no crests, no broadcast graphics, no third-party
      marks; team names appear as plain text only. */
@@ -177,6 +178,9 @@
     font-size: 12.5px; color: var(--muted);
   }
   .featured-note { color: var(--muted); font-size: 13.5px; margin: 16px 0 20px; }
+  .featured-card .status-pill { margin-bottom: 4px; }
+  .featured-history { display: inline-block; margin-top: 4px; font-size: 13px; color: var(--muted); text-decoration: underline; }
+  #featured-action:not(:empty) { margin-bottom: 14px; }
   .featured-cta {
     display: inline-flex; align-items: center; gap: 8px;
     background: var(--primary-fill); color: var(--primary-ink);
@@ -276,25 +280,15 @@
 
 <div class="section">
   <div class="section-label">Featured</div>
-  <div class="featured-card">
-    <div class="featured-eyebrow">⚽ Featured Match</div>
+  <!-- Soccer Predictions entry. First paint is always the unavailable state (no play button, no fixture): the card is upgraded only
+       when the public matches list shows a match that is actually open for predictions (see openMatchFrom below). -->
+  <div class="featured-card" id="featured-predictions">
+    <span class="status-pill status-soon" id="featured-status">Próximamente / Coming Soon</span>
     <h2>Soccer Predictions</h2>
-    <div class="match-track">
-      <div class="match-slide">
-        <div class="match-teams">
-          <span>Espanyol</span>
-          <span class="match-vs">vs</span>
-          <span>Real Madrid</span>
-        </div>
-        <div class="match-meta">
-          <span>LaLiga · Sat, Aug 22</span>
-          <span>RCDE Stadium</span>
-          <span>1:30 PM · Tegucigalpa</span>
-        </div>
-      </div>
-    </div>
-    <p class="featured-note">Live now — sign in with URBANO to make your prediction.</p>
-    <a class="featured-cta" href="/soccer-predictions.html">Enter Soccer Predictions →</a>
+    <div class="match-track" id="featured-match" hidden></div>
+    <p class="featured-note" id="featured-note">No match is open for predictions right now.</p>
+    <div id="featured-action"></div>
+    <a class="featured-history" id="featured-history" href="/soccer-predictions.html">View my predictions and results →</a>
   </div>
 </div>
 
@@ -442,6 +436,72 @@
   resolveHostAvailability().then((open) => {
     if (open === true) renderCatalog(experiencesCatalog(true), "experiences-carousel");
   });
+
+  // Soccer Predictions entry. Eligibility is read from the existing public matches list, using only the facts the server itself relies on
+  // before it accepts a prediction: the match is not cancelled, has no final result, has both teams, kicks off in the future, and has at
+  // least one ENABLED Venue Activation at an ACTIVE Venue. Anything else — a failed or slow read, a malformed answer, a missing field,
+  // no match, a disabled activation — leaves the entry as "Próximamente / Coming Soon" with no play button.
+  const MATCHES_URL = "/api/gaming/predictions/matches";
+  const MATCHES_TIMEOUT_MS = 6000;
+
+  function openMatchFrom(body, nowMs) {
+    if (!body || typeof body !== "object" || !Array.isArray(body.matches)) return null;
+    let best = null;
+    let bestKickoff = Infinity;
+    for (const match of body.matches) {
+      if (!match || typeof match !== "object") continue;
+      if (typeof match.matchId !== "string" || match.matchId === "") continue;
+      if (match.cancelledAt !== null || match.finalized !== false) continue;
+      if (typeof match.kickoffAt !== "string") continue;
+      const kickoff = Date.parse(match.kickoffAt);
+      if (!Number.isFinite(kickoff) || kickoff <= nowMs) continue;
+      const home = match.homeTeam && typeof match.homeTeam.name === "string" ? match.homeTeam.name.trim() : "";
+      const away = match.awayTeam && typeof match.awayTeam.name === "string" ? match.awayTeam.name.trim() : "";
+      if (home === "" || away === "") continue;
+      const activations = Array.isArray(match.venueActivations) ? match.venueActivations : [];
+      const hasOpenVenue = activations.some((a) => a && a.enabled === true && a.venue && typeof a.venue === "object" && a.venue.active === true);
+      if (!hasOpenVenue) continue;
+      if (kickoff < bestKickoff) { best = { home, away, competition: typeof match.competition === "string" ? match.competition.trim() : "", kickoff }; bestKickoff = kickoff; }
+    }
+    return best;
+  }
+
+  function showOpenPredictionsEntry(match) {
+    const card = document.getElementById("featured-predictions");
+    const status = document.getElementById("featured-status");
+    const track = document.getElementById("featured-match");
+    const note = document.getElementById("featured-note");
+    const action = document.getElementById("featured-action");
+    if (!card || !status || !track || !note || !action) return;
+    const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
+    status.className = "status-pill status-featured";
+    status.textContent = "Open for predictions";
+    const teams = el("div", "match-teams");
+    teams.append(el("span", "", match.home), el("span", "match-vs", "vs"), el("span", "", match.away));
+    const meta = el("div", "match-meta");
+    if (match.competition) meta.append(el("span", "", match.competition));
+    meta.append(el("span", "", new Date(match.kickoff).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Tegucigalpa" }) + " · Tegucigalpa"));
+    const slide = el("div", "match-slide");
+    slide.append(teams, meta);
+    track.replaceChildren(slide);
+    track.hidden = false;
+    note.textContent = "Predictions are open until kickoff — sign in with URBANO to make yours.";
+    const cta = el("a", "featured-cta", "Enter Soccer Predictions →");
+    cta.href = "/soccer-predictions.html";
+    action.replaceChildren(cta);
+  }
+
+  function resolvePredictionsEntry() {
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), MATCHES_TIMEOUT_MS) : null;
+    return fetch(MATCHES_URL, { method: "GET", credentials: "omit", cache: "no-store", signal: controller ? controller.signal : undefined })
+      .then((response) => (response && response.status === 200 ? response.json() : null))
+      .then((body) => openMatchFrom(body, Date.now()))
+      .catch(() => null)
+      .then((match) => { if (timer) clearTimeout(timer); return match; });
+  }
+
+  resolvePredictionsEntry().then((match) => { if (match) showOpenPredictionsEntry(match); });
 </script>
 
 </body>
