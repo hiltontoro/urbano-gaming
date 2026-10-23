@@ -963,7 +963,9 @@ describe("the Organizer Planning migration (static contract)", () => {
     expect(all).toHaveLength(1);
     expect(all[0]).toMatch(/^\d{14}_[a-z0-9_]*organizer_planning[a-z0-9_]*\.sql$/);
     expect(all[0] > SSS_001_MIGRATION).toBe(true);
-    const after = readdirSync(MIGRATIONS_DIR).filter((f) => f > SSS_001_MIGRATION);
+    // UG-CR-GATE-SSS-007 adds one LATER migration (registration deadline and freeze): the Organizer Planning migration is still the only one between the
+    // format-rules foundation and itself.
+    const after = readdirSync(MIGRATIONS_DIR).filter((f) => f > SSS_001_MIGRATION && f <= all[0]);
     expect(after).toEqual(all);
   });
 

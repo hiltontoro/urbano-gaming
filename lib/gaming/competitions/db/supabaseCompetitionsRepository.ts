@@ -8,8 +8,10 @@ import type {
   SoccerGoalEventRecord, SoccerAssistEventRecord, SoccerPenaltyShootoutRecord, CompetitionDisputeRecord,
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
   ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
+  RegistrationStatusRead, RegistrationFreezeRecord,
 } from "../types";
 import { PlanningIntentMismatchError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
+import { registrationFreezeErrorFromDatabase, registrationOpeningErrorFromDatabase } from "../registrationFreeze";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
   CompetitionTeamCountInvalidError, CompetitionPairingInvalidError, CompetitionNotPublishedError, CompetitionTeamNotFoundError,
@@ -41,6 +43,19 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    // UG-CR-GATE-SSS-007: the opening and freeze refusals have their own typed errors (the shared status table does not know them; the two routes that
+    // raise them answer for them). A deadline or freeze refusal of any OTHER write uses the existing TEAM_REGISTRATION_NOT_OPEN code below.
+    ["REGISTRATION_OPENING_PLAN_MISSING", () => registrationOpeningErrorFromDatabase(msg)!],
+    ["REGISTRATION_OPENING_PLAN_INVALID", () => registrationOpeningErrorFromDatabase(msg)!],
+    ["REGISTRATION_OPENING_DEADLINE_EXPIRED", () => registrationOpeningErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_PLAN_MISSING", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_PLAN_INVALID", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_DEADLINE_NOT_REACHED", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_PENDING_PROPOSALS", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_PENDING_JOIN_REQUESTS", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_ROSTER_BELOW_MINIMUM", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_ROSTER_ABOVE_MAXIMUM", () => registrationFreezeErrorFromDatabase(msg)!],
+    ["REGISTRATION_FREEZE_MEMBER_CONFLICT", () => registrationFreezeErrorFromDatabase(msg)!],
     ["PLANNING_INTENT_MISMATCH", () => new PlanningIntentMismatchError()],
     ["PLANNING_INVALID", () => planningValidationFromDatabase(msg)],
     ["OPERATIONAL_AUTHORITY_REQUIRED", () => new OperationalAuthorityRequiredError()],
@@ -162,6 +177,58 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository, C
     this.client = createClient(supabaseUrl, supabaseServiceKey, {
       global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" } as RequestInit) },
     });
+  }
+
+  async getRegistrationStatus(competitionId: string): Promise<RegistrationStatusRead | null> {
+    const { data, error } = await this.client.rpc("get_competition_registration_status", { p_competition_id: competitionId });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) return null;
+    return {
+      deadlineUtc: new Date(row.deadline_utc).toISOString(),
+      timeZone: row.time_zone,
+      deadlineLocal: String(row.deadline_local).slice(0, 16).replace(" ", "T"),
+      deadlinePassed: row.deadline_passed === true,
+      acceptingNewWrites: row.accepting_new_writes === true,
+      frozen: row.is_frozen === true,
+      rosterMinimum: Number(row.roster_minimum),
+      rosterMaximum: Number(row.roster_maximum),
+    };
+  }
+
+  async getRegistrationFreeze(competitionId: string): Promise<RegistrationFreezeRecord | null> {
+    const { data: freeze, error } = await this.client.from("competition_registration_freezes").select("*").eq("competition_id", competitionId).maybeSingle();
+    if (error) throw translateError(error);
+    if (!freeze) return null;
+    const [teamsResult, membersResult] = await Promise.all([
+      this.client.from("competition_registration_freeze_teams").select("position, competition_team_id, captain_gaming_member_id, member_count").eq("registration_freeze_id", freeze.registration_freeze_id).order("position", { ascending: true }),
+      this.client.from("competition_registration_freeze_members").select("competition_team_id, gaming_member_id").eq("registration_freeze_id", freeze.registration_freeze_id),
+    ]);
+    if (teamsResult.error) throw translateError(teamsResult.error);
+    if (membersResult.error) throw translateError(membersResult.error);
+    const membersOf = new Map<string, string[]>();
+    for (const m of membersResult.data ?? []) membersOf.set(m.competition_team_id, [...(membersOf.get(m.competition_team_id) ?? []), m.gaming_member_id]);
+    return {
+      registrationFreezeId: freeze.registration_freeze_id,
+      competitionId: freeze.competition_id,
+      planningRevisionId: freeze.planning_revision_id,
+      formatKey: freeze.format_key,
+      rosterMinimum: freeze.roster_minimum,
+      rosterMaximum: freeze.roster_maximum,
+      registrationDeadlineUtc: new Date(freeze.registration_deadline_utc).toISOString(),
+      frozenAt: new Date(freeze.frozen_at).toISOString(),
+      frozenByGamingMemberId: freeze.frozen_by_gaming_member_id,
+      teamCount: freeze.team_count,
+      memberCount: freeze.member_count,
+      snapshotDigest: freeze.snapshot_digest,
+      teams: (teamsResult.data ?? []).map((t) => ({
+        position: t.position,
+        competitionTeamId: t.competition_team_id,
+        captainGamingMemberId: t.captain_gaming_member_id,
+        memberCount: t.member_count,
+        memberGamingMemberIds: [...(membersOf.get(t.competition_team_id) ?? [])].sort(),
+      })),
+    };
   }
 
   async savePlanningRevision(competitionId: string, organizerGamingMemberId: string, intentId: string, plan: CompetitionPlanningPlan): Promise<SavePlanningRevisionResult> {

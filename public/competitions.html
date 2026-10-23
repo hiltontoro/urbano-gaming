@@ -312,6 +312,24 @@ async function renderCompetitionList() {
   return wrap;
 }
 
+/**
+ * UG-CR-GATE-SSS-007 — the registration status of THIS addressed competition, exactly as the server derived it (with the database clock). The page renders
+ * it; it never reads this browser's clock and never decides from it that a write is allowed — every write is judged again by the database. Anything but
+ * the expected shape is not a status at all.
+ */
+function isValidRegistrationStatus(r) {
+  return !!r && typeof r === "object" && !Array.isArray(r)
+    && typeof r.deadlineUtc === "string" && typeof r.timeZone === "string" && typeof r.deadlineLocal === "string"
+    && typeof r.deadlinePassed === "boolean" && typeof r.acceptingNewWrites === "boolean" && typeof r.frozen === "boolean";
+}
+
+function describeRegistrationStatus(r) {
+  const when = r.deadlineLocal.replace("T", " ") + " (" + r.timeZone + ")";
+  if (r.frozen) return "Registration is closed and the teams are locked.";
+  if (r.deadlinePassed || !r.acceptingNewWrites) return "Registration closed on " + when + ". The organizer is finalizing the teams.";
+  return "Registration is open until " + when + ".";
+}
+
 async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
   const res = await authedFetch(`/api/gaming/competitions/${competitionId}`);
   if (res.status !== 200) {
@@ -382,8 +400,27 @@ async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
     wrap.appendChild(skCard);
   }
 
-  const acceptingRegistration = competition.state === "TEAM_REGISTRATION_OPEN" || competition.state === "READY_TO_PUBLISH" || competition.state === "PUBLISHED";
-  const teamRegistrationOpen = competition.state === "TEAM_REGISTRATION_OPEN";
+  // --- Registration status (UG-CR-GATE-SSS-007 and 007A). The SERVER's word decides which intake controls are offered, and only an exact valid status that
+  // says "accepting" — for a competition that is itself open, and that is neither past its deadline nor frozen — opens any. A missing, null, partial or
+  // malformed status is a CLOSED registration: never a guess, and never the older lifecycle rules (which offered registration with no deadline at all). A status
+  // that says "accepting" for a competition that is not itself open still offers nothing — a closed state is never turned into an open action. A draft has not
+  // opened registration, so there is nothing to gate and nothing to offer. ---
+  const isDraft = competition.state === "DRAFT";
+  const statusPresent = view.registration !== null && view.registration !== undefined;
+  const statusValid = statusPresent && isValidRegistrationStatus(view.registration);
+  const serverWritesOpen = !isDraft && statusValid
+    && view.registration.acceptingNewWrites === true && view.registration.deadlinePassed === false && view.registration.frozen === false
+    && competition.state === "TEAM_REGISTRATION_OPEN";
+  if (!isDraft && competition.state !== "CANCELLED_WITHOUT_CHAMPION") {
+    const statusCard = el(`<div class="card" id="registration-status"><h2>Registration</h2><p class="msg registration-line"></p></div>`);
+    statusCard.querySelector(".registration-line").textContent = statusValid
+      ? describeRegistrationStatus(view.registration)
+      : statusPresent ? "Registration status is unavailable right now." : "Registration is closed for this competition.";
+    wrap.appendChild(statusCard);
+  }
+
+  const acceptingRegistration = serverWritesOpen;
+  const teamRegistrationOpen = serverWritesOpen;
 
   // --- Registration — a separate, distinct state from team proposal/
   // membership (URBANO identity continuity: these must never be
@@ -460,14 +497,16 @@ async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
         wrap.appendChild(createCard);
       }
 
-      const teamsCard = el(`<div class="card"><h2>Join a Team</h2><div class="team-list" id="teams-list"></div><p class="msg" id="join-msg" aria-live="polite"></p></div>`);
+      const teamsCard = el(`<div class="card"><h2>${serverWritesOpen ? "Join a Team" : "Teams"}</h2><div class="team-list" id="teams-list"></div><p class="msg" id="join-msg" aria-live="polite"></p></div>`);
       const list = teamsCard.querySelector("#teams-list");
       if (teams.length === 0) {
-        list.appendChild(el(`<p class="msg">No accepted teams yet — check back soon, or create your own above.</p>`));
+        list.appendChild(el(`<p class="msg">${serverWritesOpen ? "No accepted teams yet — check back soon, or create your own above." : "No accepted teams."}</p>`));
       }
       for (const t of teams) {
         const row = el(`<div class="team-row"><span class="team-name"></span><button class="btn-secondary" type="button">Request to Join</button></div>`);
         row.querySelector(".team-name").textContent = t.name;
+        // When the server says registration is closed there is nothing to request: the team is listed by name only, with no control.
+        if (!serverWritesOpen) { row.querySelector("button").remove(); list.appendChild(row); continue; }
         row.querySelector("button").addEventListener("click", async () => {
           const r = await authedFetch(`/api/gaming/competitions/${competitionId}/join-requests`, { method: "POST", body: JSON.stringify({ competitionTeamId: t.competitionTeamId }) });
           if (r.status === 201) renderApp();
@@ -870,9 +909,17 @@ async function renderApp() {
     }
   }
 
-  const rendered = currentCompetitionId
-    ? await renderCompetitionDetail(currentCompetitionId, currentCompetitionCode, currentTeamId)
-    : await renderCompetitionList();
+  let rendered;
+  try {
+    rendered = currentCompetitionId
+      ? await renderCompetitionDetail(currentCompetitionId, currentCompetitionCode, currentTeamId)
+      : await renderCompetitionList();
+  } catch (err) {
+    // UG-CR-GATE-SSS-007A: a request that cannot even be made (the network, the server) shows one bounded sentence and nothing else — never a stale or
+    // earlier-lifecycle page with write controls it cannot vouch for.
+    rendered = el(`<div class="empty-state"></div>`);
+    rendered.textContent = "This could not be loaded right now. Please try again in a moment.";
+  }
   if (myGeneration !== renderGeneration) return;
   content.innerHTML = "";
   content.appendChild(rendered);

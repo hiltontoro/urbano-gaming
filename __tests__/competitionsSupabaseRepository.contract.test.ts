@@ -134,6 +134,35 @@ async function cleanupCompetitions(competitionIds: string[]): Promise<void> {
   await cleanupClient.from("competitions").delete().in("competition_id", competitionIds);
 }
 
+/**
+ * UG-CR-GATE-SSS-007. A competition now carries APPEND-ONLY evidence (its Organizer Planning revisions and, once frozen, its freeze): no browser or server
+ * role may delete a row of it, by design. The database owner removes it here with row triggers off, one statement at a time (so one that cannot run never
+ * stops the rest), before the strict cleanup below deletes the competitions themselves. Only rows of competitions this file created are touched.
+ */
+async function purgeAppendOnlyEvidence(competitionIds: string[]): Promise<void> {
+  if (competitionIds.length === 0) return;
+  const db = new Client({ connectionString: supabaseDbUrl, statement_timeout: 60000 });
+  try {
+    await db.connect();
+    await db.query("set session_replication_role = replica");
+    const revs = "(select planning_revision_id from competition_planning_revisions where competition_id = any($1))";
+    for (const statement of [
+      "delete from competition_registration_freeze_members where competition_id = any($1)",
+      "delete from competition_registration_freeze_teams where competition_id = any($1)",
+      "delete from competition_registration_freezes where competition_id = any($1)",
+      `delete from competition_planning_windows where planning_revision_id in ${revs}`,
+      `delete from competition_planning_dates where planning_revision_id in ${revs}`,
+      `delete from competition_planning_pitch_formats where planning_pitch_id in (select planning_pitch_id from competition_planning_pitches where planning_revision_id in ${revs})`,
+      `delete from competition_planning_pitches where planning_revision_id in ${revs}`,
+      "delete from competition_planning_revisions where competition_id = any($1)",
+    ]) await db.query(statement, [competitionIds]).catch(() => undefined);
+  } catch {
+    /* the strict proof below reports anything that remains */
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
 // UG-CR-GATE-090 — teardown. Two defects, one fix.
 //  1. The known "Hook timed out in 10000ms": this hook deletes every synthetic auth user the file created (about 550), one request at a
 //     time, and that takes about as long as vitest's 10 s default hook timeout, so it tips over whenever local Auth is a little slow.
@@ -156,6 +185,7 @@ function inChunks<T>(items: T[], size = CLEANUP_ID_CHUNK): T[][] {
 
 afterAll(async () => {
   const problems: string[] = [];
+  await purgeAppendOnlyEvidence(createdCompetitionIds);
   await cleanupCompetitions(createdCompetitionIds);
   for (const ids of inChunks(createdGamingMemberIds)) {
     const { error } = await cleanupClient.from("authority_grants").delete().in("gaming_member_id", ids);
@@ -217,7 +247,87 @@ afterAll(async () => {
   }
 }, CLEANUP_HOOK_TIMEOUT_MS);
 
-async function setUpCompetitionWith4Teams() {
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 fixtures. Opening team registration now needs a usable plan (a saved Organizer Planning revision whose deadline is still ahead), and the
+// freeze (CLOSE_TEAM_REGISTRATION) needs that deadline to have passed and every roster to be within the plan's bounds. These helpers give a competition a REAL
+// plan through the real save operation and — only when a test needs "the deadline has passed" — record a LATER revision as the database owner (a service-side
+// fixture: the save operation itself needs a DRAFT) whose deadline is the first whole second after the competition's newest registration-related row, so every
+// row already written is stamped before it. Nothing here waits for a real deadline.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const FIXTURE_DAY = 24 * 3600_000;
+const COSTA_RICA_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving: always UTC-06:00
+
+async function saveFixturePlan(competitionId: string, organizerId: string, deadlineInMs = 30 * FIXTURE_DAY) {
+  const { parsePlanningPlan } = await import("../lib/gaming/competitions/planning");
+  const deadlineMs = Date.now() + deadlineInMs;
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const plan = parsePlanningPlan({
+    venue: { name: "Cancha Contract", locationDescription: "Calle 5, San Jose, behind the central market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: "Draft registration rules, version one." },
+  }, "SOCCER_5V5");
+  return repo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
+}
+
+async function passDeadlineFixture(competitionId: string): Promise<void> {
+  const db = new Client({ connectionString: supabaseDbUrl, statement_timeout: 30000 });
+  await db.connect();
+  try {
+    const latest = (await db.query(
+      `select greatest(
+         coalesce((select max(registered_at) from competition_registrations where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_teams where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_join_requests where competition_id = $1), 'epoch'),
+         coalesce((select max(approved_at) from competition_team_memberships where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_planning_revisions where competition_id = $1), 'epoch')) as latest`, [competitionId])).rows[0].latest as Date;
+    const deadline = new Date((Math.floor(latest.getTime() / 1000) + 1) * 1000);
+    const wait = deadline.getTime() - Date.now() + 60;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await db.query("begin");
+    const cur = (await db.query("select * from competition_planning_revisions where competition_id = $1 order by revision_number desc limit 1", [competitionId])).rows[0];
+    const next = (await db.query(
+      `insert into competition_planning_revisions (competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, intent_id, payload_digest,
+         venue_name, venue_location_description, venue_time_zone, simultaneous_match_capacity, venue_restriction_notes, roster_minimum, roster_maximum,
+         registration_deadline_local, registration_deadline_time_zone, registration_deadline_utc_offset_minutes, registration_deadline_utc, rules_version, rules_snapshot, rules_snapshot_digest)
+       values ($1,$2,$3,$4,$5,gen_random_uuid(),$6,$7,$8,$9,$10,$11,$12,$13, ($14::timestamptz at time zone $15), $15, $16, $14::timestamptz, $17,$18,$19) returning planning_revision_id`,
+      [competitionId, cur.format_key, cur.revision_number + 1, cur.planning_revision_id, cur.authored_by_gaming_member_id, cur.payload_digest, cur.venue_name, cur.venue_location_description,
+        cur.venue_time_zone, cur.simultaneous_match_capacity, cur.venue_restriction_notes, cur.roster_minimum, cur.roster_maximum, deadline.toISOString(), cur.registration_deadline_time_zone,
+        cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
+    await db.query("insert into competition_planning_pitches (planning_revision_id, position, label, is_usable, restriction_notes) select $2::uuid, position, label, is_usable, restriction_notes from competition_planning_pitches where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query(
+      `insert into competition_planning_pitch_formats (planning_pitch_id, format_key)
+       select np.planning_pitch_id, f.format_key from competition_planning_pitches op join competition_planning_pitch_formats f on f.planning_pitch_id = op.planning_pitch_id
+         join competition_planning_pitches np on np.planning_revision_id = $2::uuid and np.position = op.position where op.planning_revision_id = $1::uuid`, [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_dates (planning_revision_id, plan_date, position) select $2::uuid, plan_date, position from competition_planning_dates where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_windows (planning_revision_id, plan_date, window_index, start_time, end_time) select $2::uuid, plan_date, window_index, start_time, end_time from competition_planning_windows where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("commit");
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
+// Shared people: a member belongs to one team per competition, so the same twenty people fill the rosters of every four-team competition this file builds.
+const TEAM_ROSTER_SIZE = 5; // the five-a-side roster minimum the fixture plan configures
+const ROSTER_POOL: Array<{ authUserId: string; gamingMemberId: string }> = [];
+async function ensureRosterPool(): Promise<void> {
+  while (ROSTER_POOL.length < 4 * TEAM_ROSTER_SIZE) {
+    const base = ROSTER_POOL.length;
+    ROSTER_POOL.push(...(await Promise.all(Array.from({ length: 5 }, (_, i) => createRealGamingMember(`Pool Player ${base + i}`)))));
+  }
+}
+/** team id -> the members approved on it BEFORE the freeze, i.e. the roster the freeze recorded (rosters can no longer be built afterwards). */
+const frozenRosterByTeam = new Map<string, string[]>();
+const nextRosterIndex = new Map<string, number>();
+
+/**
+ * A competition with four organizer-created teams whose rosters were built through the real operations (register, ask to join, the captain approves), the
+ * deadline passed (fixture) and the registration frozen: READY_TO_PUBLISH. `alsoRegister` registers further members before the deadline.
+ */
+async function setUpCompetitionWith4Teams(options: { alsoRegister?: string[] } = {}) {
+  await ensureRosterPool();
   const organizer = await createRealGamingMember("Organizer");
   await grantOperationalAuthority(organizer.gamingMemberId);
   const competition = await createCompetition(repo, organizer.gamingMemberId, `Contract Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
@@ -234,17 +344,25 @@ async function setUpCompetitionWith4Teams() {
     const team = await addCompetitionTeam(repo, competition.competitionId, organizer.gamingMemberId, `Team ${String.fromCharCode(65 + i)}`, captains[i].gamingMemberId);
     teams.push({ competitionTeamId: team.competitionTeamId, captainId: captains[i].gamingMemberId });
   }
-  // UG-CR-RPT-041/042 §3/§4 (Founder decision 1 — one unified lifecycle):
-  // PUBLISH_COMPETITION now requires READY_TO_PUBLISH, reached only via
-  // OPEN_TEAM_REGISTRATION -> (all four teams already ACCEPTED above,
-  // added while still DRAFT, which ADD_COMPETITION_TEAM still allows) ->
-  // CLOSE_TEAM_REGISTRATION. Every existing fixture-level contract test
-  // that builds its own context through this helper is unaffected beyond
-  // this: the resulting competition is still exactly four ACCEPTED
-  // organizer-created teams, just reached through the two additional,
-  // deliberate organizer checkpoints the corrected lifecycle now shares
-  // with the member-proposal path.
+  // UG-CR-RPT-041/042 §3/§4 (Founder decision 1 — one unified lifecycle): PUBLISH_COMPETITION requires READY_TO_PUBLISH, reached only via
+  // OPEN_TEAM_REGISTRATION -> CLOSE_TEAM_REGISTRATION. UG-CR-GATE-SSS-007: opening needs a plan, and closing is the FREEZE — the deadline has passed, exactly
+  // four accepted teams, nothing pending and every roster within the plan's bounds (so the rosters are built first, and cannot be built afterwards).
+  await saveFixturePlan(competition.competitionId, organizer.gamingMemberId);
   await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+  await Promise.all(teams.map(async (team, t) => {
+    const members: string[] = [];
+    for (let k = 0; k < TEAM_ROSTER_SIZE; k++) {
+      const person = ROSTER_POOL[t * TEAM_ROSTER_SIZE + k];
+      await registerForCompetition(repo, competition.competitionId, person.gamingMemberId, true);
+      const request = await requestJoinTeam(repo, competition.competitionId, team.competitionTeamId, person.gamingMemberId);
+      await decideJoinRequest(repo, request.competitionJoinRequestId, team.captainId, "APPROVE", false);
+      members.push(person.gamingMemberId);
+    }
+    frozenRosterByTeam.set(team.competitionTeamId, members);
+    nextRosterIndex.set(team.competitionTeamId, 0);
+  }));
+  for (const gamingMemberId of options.alsoRegister ?? []) await registerForCompetition(repo, competition.competitionId, gamingMemberId, true);
+  await passDeadlineFixture(competition.competitionId);
   await closeTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
   return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId, teams };
 }
@@ -253,12 +371,13 @@ function futureIso(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
 }
 
-/** A competition with team registration already open, no teams yet — the entry point for the Branded Team Registration and Invitation Journey's own contract tests (UG-CR-RPT-041/042). */
+/** A competition with a saved plan and team registration already open, no teams yet — the entry point for the Branded Team Registration and Invitation Journey's own contract tests (UG-CR-RPT-041/042). */
 async function setUpCompetitionForTeamRegistration() {
   const organizer = await createRealGamingMember("Organizer");
   await grantOperationalAuthority(organizer.gamingMemberId);
   const competition = await createCompetition(repo, organizer.gamingMemberId, `Registration Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
   createdCompetitionIds.push(competition.competitionId);
+  await saveFixturePlan(competition.competitionId, organizer.gamingMemberId);
   await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
   return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId };
 }
@@ -278,21 +397,23 @@ async function publishDefault(competitionId: string, organizerId: string, teams:
   );
 }
 
-/** Registers a fresh member, requests to join the given team, and has its captain approve — returns the new member's gamingMemberId. */
-async function joinTeamAsApprovedMember(competitionId: string, teamId: string, captainId: string, displayName: string): Promise<string> {
-  const member = await createRealGamingMember(displayName);
-  await registerForCompetition(repo, competitionId, member.gamingMemberId, true);
-  const joinRequest = await requestJoinTeam(repo, competitionId, teamId, member.gamingMemberId);
-  await decideJoinRequest(repo, joinRequest.competitionJoinRequestId, captainId, "APPROVE", false);
-  return member.gamingMemberId;
+/**
+ * The next member of the given team's FROZEN roster. Joining is a pre-freeze operation (once registration is frozen nobody can register, ask to join or be
+ * approved), so a test that needs "a member approved on this team" after the competition is published takes one of the members the freeze recorded.
+ */
+async function joinTeamAsApprovedMember(_competitionId: string, teamId: string, _captainId: string, _displayName: string): Promise<string> {
+  const roster = frozenRosterByTeam.get(teamId);
+  const index = nextRosterIndex.get(teamId) ?? 0;
+  if (!roster || index >= roster.length) throw new Error("This team's frozen roster has no further member.");
+  nextRosterIndex.set(teamId, index + 1);
+  return roster[index];
 }
 
-async function buildApprovedRosterOfFive(competitionId: string, teamId: string, captainId: string, label: string): Promise<string[]> {
-  const memberIds: string[] = [];
-  for (let i = 0; i < 5; i++) {
-    memberIds.push(await joinTeamAsApprovedMember(competitionId, teamId, captainId, `${label} Player ${i}`));
-  }
-  return memberIds;
+/** The five members the freeze recorded for the given team (the same five on every call: a team's roster is fixed once registration is frozen). */
+async function buildApprovedRosterOfFive(_competitionId: string, teamId: string, _captainId: string, _label: string): Promise<string[]> {
+  const roster = frozenRosterByTeam.get(teamId);
+  if (!roster || roster.length < TEAM_ROSTER_SIZE) throw new Error("This team has no frozen roster of five.");
+  return roster.slice(0, TEAM_ROSTER_SIZE);
 }
 
 describe("SupabaseCompetitionsRepository contract", () => {
@@ -412,10 +533,13 @@ describe("SupabaseCompetitionsRepository contract", () => {
 
   describe("negative and concurrency cases named by UG-CR-GATE-029", () => {
     it("two concurrent APPROVE decisions on the SAME join request create exactly one team membership", async () => {
-      const { organizerId, competitionId, teams } = await setUpCompetitionWith4Teams();
-      await publishDefault(competitionId, organizerId, teams);
-      const member = await createRealGamingMember("Race Applicant");
-      await registerForCompetition(repo, competitionId, member.gamingMemberId, true);
+      // Approving a join request changes membership, so (UG-CR-GATE-SSS-007) it happens while registration is open — after the freeze it is refused.
+      const ctx = await setUpCompetitionForTeamRegistration();
+      const captain = await createRealGamingMember("Race Captain");
+      const team = await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Race Team", captain.gamingMemberId);
+      const competitionId = ctx.competitionId;
+      const teams = [{ competitionTeamId: team.competitionTeamId, captainId: captain.gamingMemberId }];
+      const member = await registeredMember(competitionId, "Race Applicant");
       const joinRequest = await requestJoinTeam(repo, competitionId, teams[0].competitionTeamId, member.gamingMemberId);
 
       const [r1, r2] = await Promise.allSettled([
@@ -925,7 +1049,9 @@ describe("SupabaseCompetitionsRepository contract", () => {
     }
 
     beforeAll(async () => {
-      const { organizerId, competitionId, teams } = await setUpCompetitionWith4Teams();
+      // UG-CR-GATE-SSS-007: a registration after the freeze is refused, so the unrelated registered member registers before it.
+      const unrelatedRegistered = await createRealGamingMember("Unrelated Registered Member");
+      const { organizerId, competitionId, teams } = await setUpCompetitionWith4Teams({ alsoRegister: [unrelatedRegistered.gamingMemberId] });
       const published = await publishDefault(competitionId, organizerId, teams);
 
       const team0Players = await buildApprovedRosterOfFive(competitionId, teams[0].competitionTeamId, teams[0].captainId, "Disp-A");
@@ -967,8 +1093,6 @@ describe("SupabaseCompetitionsRepository contract", () => {
         [], null
       );
 
-      const unrelatedRegistered = await createRealGamingMember("Unrelated Registered Member");
-      await registerForCompetition(repo, competitionId, unrelatedRegistered.gamingMemberId, true);
       const unregistered = await createRealGamingMember("Never Registered Member");
       const otherCompetition = await setUpCompetitionWith4Teams();
 
@@ -1090,23 +1214,31 @@ describe("SupabaseCompetitionsRepository contract", () => {
 
 describe("Branded Team Registration and Invitation Journey — corrected lifecycle contract (UG-CR-RPT-041/042)", () => {
   describe("lifecycle transitions", () => {
-    it("registration works in TEAM_REGISTRATION_OPEN and READY_TO_PUBLISH, not only PUBLISHED — a strict widening of the original PUBLISHED-only rule", async () => {
+    it("registration works while TEAM_REGISTRATION_OPEN; once registration is frozen (READY_TO_PUBLISH) a NEW registration is refused, an existing one is returned unchanged — and an older competition with no plan is CLOSED, not left on the earlier rule (UG-CR-GATE-SSS-007A)", async () => {
       const ctx = await setUpCompetitionForTeamRegistration();
       const memberInOpen = await createRealGamingMember("Member In Open");
       const reg1 = await registerForCompetition(repo, ctx.competitionId, memberInOpen.gamingMemberId, true);
       expect(reg1.alreadyRegistered).toBe(false);
 
-      // Advance to READY_TO_PUBLISH via 4 accepted organizer-created teams.
-      const captains = await Promise.all([1, 2, 3, 4].map((i) => createRealGamingMember(`Cap ${i}`)));
-      for (let i = 0; i < 4; i++) {
-        await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Team ${i}`, captains[i].gamingMemberId);
-      }
-      await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
-
+      // Advance to READY_TO_PUBLISH: four teams within the plan's roster bounds, the deadline passed, then the freeze.
+      const frozen = await setUpCompetitionWith4Teams({ alsoRegister: [memberInOpen.gamingMemberId] });
       const memberInReady = await createRealGamingMember("Member In Ready");
-      const reg2 = await registerForCompetition(repo, ctx.competitionId, memberInReady.gamingMemberId, true);
-      expect(reg2.alreadyRegistered).toBe(false);
-    });
+      await expect(registerForCompetition(repo, frozen.competitionId, memberInReady.gamingMemberId, true)).rejects.toBeInstanceOf(TeamRegistrationNotOpenError);
+      const replay = await registerForCompetition(repo, frozen.competitionId, memberInOpen.gamingMemberId, true);
+      expect(replay.alreadyRegistered).toBe(true);
+
+      // UG-CR-GATE-SSS-007A: an older competition (no plan: there is no authoritative deadline to date a registration by) is a CLOSED registration, whatever its
+      // state. It used to be left on the earlier rule, under which READY_TO_PUBLISH still accepted a registration; that was a way around the freeze.
+      const organizer = await createRealGamingMember("Older Organizer");
+      await grantOperationalAuthority(organizer.gamingMemberId);
+      const older = await createCompetition(repo, organizer.gamingMemberId, `Older Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
+      createdCompetitionIds.push(older.competitionId);
+      const { error } = await cleanupClient.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", older.competitionId);
+      expect(error).toBeNull();
+      await expect(registerForCompetition(repo, older.competitionId, memberInReady.gamingMemberId, true)).rejects.toBeInstanceOf(TeamRegistrationNotOpenError);
+      const { count } = await cleanupClient.from("competition_registrations").select("*", { count: "exact", head: true }).eq("competition_id", older.competitionId);
+      expect(count).toBe(0);
+    }, 90000);
 
     it("registration still fails from DRAFT (before team registration ever opens)", async () => {
       const organizer = await createRealGamingMember("Draft Organizer");
@@ -1127,6 +1259,9 @@ describe("Branded Team Registration and Invitation Journey — corrected lifecyc
 
       await expect(openTeamRegistration(repo, competition.competitionId, impostor.gamingMemberId)).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
 
+      // UG-CR-GATE-SSS-007: opening needs a usable plan; without one it is refused (for the organizer only — the impostor above learned nothing of it).
+      await expect(openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId)).rejects.toMatchObject({ name: "RegistrationOpeningError", code: "PLAN_MISSING" });
+      await saveFixturePlan(competition.competitionId, organizer.gamingMemberId);
       await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
       await expect(openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId)).rejects.toBeInstanceOf(CompetitionNotDraftError);
     });
@@ -1144,15 +1279,16 @@ describe("Branded Team Registration and Invitation Journey — corrected lifecyc
         futureIso(60000), futureIso(120000), futureIso(180000),
       ] as const;
 
-      // Still TEAM_REGISTRATION_OPEN — not yet closed.
+      // Still TEAM_REGISTRATION_OPEN — not yet frozen.
       await expect(publishCompetition(repo, ...publishArgs)).rejects.toBeInstanceOf(CompetitionNotReadyToPublishError);
 
-      await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
-      const published = await publishCompetition(repo, ...publishArgs);
+      // Frozen (UG-CR-GATE-SSS-007: the rosters are built, the deadline has passed, the registration is frozen): now it publishes.
+      const frozen = await setUpCompetitionWith4Teams();
+      const published = await publishDefault(frozen.competitionId, frozen.organizerId, frozen.teams);
       expect(published.state).toBe("PUBLISHED");
-    });
+    }, 90000);
 
-    it("CLOSE_TEAM_REGISTRATION requires exactly four ACCEPTED teams, and is organizer-only", async () => {
+    it("CLOSE_TEAM_REGISTRATION (the freeze) requires exactly four ACCEPTED teams, and is organizer-only", async () => {
       const ctx = await setUpCompetitionForTeamRegistration();
       const impostor = await createRealGamingMember("Impostor");
       await expect(closeTeamRegistration(repo, ctx.competitionId, impostor.gamingMemberId)).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
@@ -1162,11 +1298,16 @@ describe("Branded Team Registration and Invitation Journey — corrected lifecyc
       for (let i = 0; i < 3; i++) await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, `Team ${i}`, captains[i].gamingMemberId);
       await expect(closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId)).rejects.toBeInstanceOf(TeamRegistrationCapacityNotReachedError);
 
+      // UG-CR-GATE-SSS-007: with exactly four accepted teams the freeze's own prerequisites are judged next — here the deadline has not been reached.
       const fourth = await createRealGamingMember("Cap 4");
       await addCompetitionTeam(repo, ctx.competitionId, ctx.organizerId, "Team 4", fourth.gamingMemberId);
-      const closed = await closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId);
-      expect(closed.state).toBe("READY_TO_PUBLISH");
-    });
+      await expect(closeTeamRegistration(repo, ctx.competitionId, ctx.organizerId)).rejects.toMatchObject({ name: "RegistrationFreezeError", code: "DEADLINE_NOT_REACHED" });
+      expect((await repo.getCompetitionById(ctx.competitionId))!.state).toBe("TEAM_REGISTRATION_OPEN");
+
+      // Four accepted teams, each within the plan's roster bounds, and the deadline passed: the freeze records itself and the state is READY_TO_PUBLISH.
+      const frozen = await setUpCompetitionWith4Teams();
+      expect((await repo.getCompetitionById(frozen.competitionId))!.state).toBe("READY_TO_PUBLISH");
+    }, 90000);
 
     it("ADD_COMPETITION_TEAM (the organizer-created path) is ALSO hard-capped at four — a fifth organizer-created team fails with TeamCapacityReachedError rather than being silently accepted", async () => {
       // Regression coverage for a real defect caught only by live browser
@@ -1986,6 +2127,8 @@ async function setUpDraftCompetitionForSerialization() {
   await grantOperationalAuthority(organizer.gamingMemberId);
   const competition = await createCompetition(repo, organizer.gamingMemberId, `Serialization Cup ${randomUUID().slice(0, 8)}`, "SOCCER_5V5");
   createdCompetitionIds.push(competition.competitionId);
+  // UG-CR-GATE-SSS-007: opening needs a plan, and these tests race the opening, so the draft carries one (the plan is saved before any lock is taken).
+  await saveFixturePlan(competition.competitionId, organizer.gamingMemberId);
   return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId };
 }
 
@@ -2090,6 +2233,7 @@ describe("UG-CR-GATE-083 corrections (UG-CR-REV-054 finding 1) — competition-s
       createdCompetitionIds.push(competition.competitionId);
       const captain = await createRealGamingMember("Race Captain");
       const team = await addCompetitionTeam(repo, competition.competitionId, organizer.gamingMemberId, "Race Team", captain.gamingMemberId);
+      await saveFixturePlan(competition.competitionId, organizer.gamingMemberId);
       await openTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
       const requester = await registeredMember(competition.competitionId, "Racing Requester");
 

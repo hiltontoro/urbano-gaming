@@ -18,6 +18,10 @@ import { addCompetitionTeam } from "../lib/gaming/competitions/addCompetitionTea
 import { publishCompetition } from "../lib/gaming/competitions/publishCompetition";
 import { appointScorekeeper } from "../lib/gaming/competitions/appointScorekeeper";
 import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
+import { Client } from "pg";
+import { registerForCompetition } from "../lib/gaming/competitions/registerForCompetition";
+import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
+import { decideJoinRequest } from "../lib/gaming/competitions/decideJoinRequest";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 // The REAL route handlers, called with real user access tokens against the real local database.
 import { GET as generalListRoute } from "../app/api/gaming/competitions/route";
@@ -50,6 +54,11 @@ const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseServiceRoleKey || !supabaseAnonKey) {
   throw new Error("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY are required for contract tests.");
+}
+// Raw pg runs the deadline fixture (UG-CR-GATE-SSS-007). The URL is supplied explicitly, never read from .env.local, and must be loopback.
+const supabaseDbUrl = process.env.COMPETITIONS_LOCAL_DB_URL ?? "";
+if (!/^postgresql:\/\/[^@]+@(127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(supabaseDbUrl)) {
+  throw new Error("COMPETITIONS_LOCAL_DB_URL must be set to a loopback Postgres URL for the organizer-access contract tests.");
 }
 
 const hostRepo = new SupabaseHostRepository(supabaseUrl, supabaseServiceRoleKey);
@@ -117,14 +126,97 @@ async function approvedHost(label: string): Promise<{ person: Person; code: stri
 
 const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 
-/** Opens registration, adds four captained teams, closes registration and publishes the bracket. */
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 fixtures. Opening team registration now needs a usable plan (a saved Organizer Planning revision whose deadline is still ahead), and the
+// freeze (CLOSE_TEAM_REGISTRATION) needs that deadline to have passed and every roster to be within the plan's bounds. These helpers give a competition a REAL
+// plan through the real save operation and — only when a test needs "the deadline has passed" — record a LATER revision as the database owner (a service-side
+// fixture: the save operation itself needs a DRAFT) whose deadline is the first whole second after the competition's newest registration-related row, so every
+// row already written is stamped before it. Nothing here waits for a real deadline. (UG-CR-GATE-SSS-007A: the deadline fixture is the ONE service-side step in these lifecycles; every registration, join, approval and the freeze itself go through the real operations.)
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const FIXTURE_DAY = 24 * 3600_000;
+const COSTA_RICA_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving: always UTC-06:00
+
+async function saveFixturePlan(competitionId: string, organizerId: string, deadlineInMs = 30 * FIXTURE_DAY) {
+  const { parsePlanningPlan } = await import("../lib/gaming/competitions/planning");
+  const deadlineMs = Date.now() + deadlineInMs;
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const plan = parsePlanningPlan({
+    venue: { name: "Cancha Contract", locationDescription: "Calle 5, San Jose, behind the central market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: "Draft registration rules, version one." },
+  }, "SOCCER_5V5");
+  return compRepo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
+}
+
+async function passDeadlineFixture(competitionId: string): Promise<void> {
+  const db = new Client({ connectionString: supabaseDbUrl, statement_timeout: 30000 });
+  await db.connect();
+  try {
+    const latest = (await db.query(
+      `select greatest(
+         coalesce((select max(registered_at) from competition_registrations where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_teams where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_join_requests where competition_id = $1), 'epoch'),
+         coalesce((select max(approved_at) from competition_team_memberships where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_planning_revisions where competition_id = $1), 'epoch')) as latest`, [competitionId])).rows[0].latest as Date;
+    const deadline = new Date((Math.floor(latest.getTime() / 1000) + 1) * 1000);
+    const wait = deadline.getTime() - Date.now() + 60;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await db.query("begin");
+    const cur = (await db.query("select * from competition_planning_revisions where competition_id = $1 order by revision_number desc limit 1", [competitionId])).rows[0];
+    const next = (await db.query(
+      `insert into competition_planning_revisions (competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, intent_id, payload_digest,
+         venue_name, venue_location_description, venue_time_zone, simultaneous_match_capacity, venue_restriction_notes, roster_minimum, roster_maximum,
+         registration_deadline_local, registration_deadline_time_zone, registration_deadline_utc_offset_minutes, registration_deadline_utc, rules_version, rules_snapshot, rules_snapshot_digest)
+       values ($1,$2,$3,$4,$5,gen_random_uuid(),$6,$7,$8,$9,$10,$11,$12,$13, ($14::timestamptz at time zone $15), $15, $16, $14::timestamptz, $17,$18,$19) returning planning_revision_id`,
+      [competitionId, cur.format_key, cur.revision_number + 1, cur.planning_revision_id, cur.authored_by_gaming_member_id, cur.payload_digest, cur.venue_name, cur.venue_location_description,
+        cur.venue_time_zone, cur.simultaneous_match_capacity, cur.venue_restriction_notes, cur.roster_minimum, cur.roster_maximum, deadline.toISOString(), cur.registration_deadline_time_zone,
+        cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
+    await db.query("insert into competition_planning_pitches (planning_revision_id, position, label, is_usable, restriction_notes) select $2::uuid, position, label, is_usable, restriction_notes from competition_planning_pitches where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query(
+      `insert into competition_planning_pitch_formats (planning_pitch_id, format_key)
+       select np.planning_pitch_id, f.format_key from competition_planning_pitches op join competition_planning_pitch_formats f on f.planning_pitch_id = op.planning_pitch_id
+         join competition_planning_pitches np on np.planning_revision_id = $2::uuid and np.position = op.position where op.planning_revision_id = $1::uuid`, [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_dates (planning_revision_id, plan_date, position) select $2::uuid, plan_date, position from competition_planning_dates where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_windows (planning_revision_id, plan_date, window_index, start_time, end_time) select $2::uuid, plan_date, window_index, start_time, end_time from competition_planning_windows where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("commit");
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
+/** Builds `size` members on each given team through the real operations (register, ask to join, the captain approves) — the rosters a freeze needs, which cannot be built afterwards. */
+async function buildRostersBeforeFreeze(competitionId: string, teams: Array<{ id: string; captainId: string }>, makeMember: (label: string) => Promise<{ gamingMemberId: string }>, size = 5): Promise<string[][]> {
+  return Promise.all(teams.map(async (team, t) => {
+    const members: string[] = [];
+    for (let k = 0; k < size; k++) {
+      const member = await makeMember(`Roster ${t}-${k}`);
+      await registerForCompetition(compRepo, competitionId, member.gamingMemberId, true);
+      const request = await requestJoinTeam(compRepo, competitionId, team.id, member.gamingMemberId);
+      await decideJoinRequest(compRepo, request.competitionJoinRequestId, team.captainId, "APPROVE", false);
+      members.push(member.gamingMemberId);
+    }
+    return members;
+  }));
+}
+
+/** Opens registration (it needs a plan), adds four captained teams, builds their rosters, lets the deadline pass, freezes registration and publishes the bracket. */
 async function publishedBracket(competitionId: string, organizerId: string, label: string) {
+  await saveFixturePlan(competitionId, organizerId);
   await openTeamRegistration(compRepo, competitionId, organizerId);
   const teamIds: string[] = [];
+  const teamsForRoster: Array<{ id: string; captainId: string }> = [];
   for (let i = 0; i < 4; i++) {
     const captain = await newPerson(`${label} Cap${i}`);
-    teamIds.push((await addCompetitionTeam(compRepo, competitionId, organizerId, `${label} Team ${i} ${RUN}`, captain.gamingMemberId)).competitionTeamId);
+    const team = await addCompetitionTeam(compRepo, competitionId, organizerId, `${label} Team ${i} ${RUN}`, captain.gamingMemberId);
+    teamIds.push(team.competitionTeamId);
+    teamsForRoster.push({ id: team.competitionTeamId, captainId: captain.gamingMemberId });
   }
+  await buildRostersBeforeFreeze(competitionId, teamsForRoster, newPerson);
+  await passDeadlineFixture(competitionId);
   await closeTeamRegistration(compRepo, competitionId, organizerId);
   return publishCompetition(compRepo, competitionId, organizerId, teamIds[0], teamIds[1], teamIds[2], teamIds[3], inMs(3_600_000), inMs(7_200_000), inMs(10_800_000));
 }
@@ -225,6 +317,7 @@ beforeAll(async () => {
   // An unrelated internal competition, open for team registration (the shape of the preserved pilot).
   const operatorB = await makeOperator("OpB");
   const b = await createCompetition(compRepo, operatorB.gamingMemberId, `Internal B ${RUN}`, "SOCCER_5V5");
+  await saveFixturePlan(b.competitionId, operatorB.gamingMemberId);
   await openTeamRegistration(compRepo, b.competitionId, operatorB.gamingMemberId);
 
   // Hosts: active (a DRAFT pilot), revoked, revoked-after-self-appointing-as-scorekeeper, and one whose capability is still unused.

@@ -123,6 +123,23 @@
     table.stack-table td[data-label]:has(> button[hidden])::before { display: none; }
     table.stack-table td[data-label] > button { min-height: 44px; margin: 0 8px 8px 0; }
   }
+  /* UG-CR-GATE-SSS-007: the registration freeze checkpoint (deadline, prerequisites, confirmation, summary). */
+  #freeze-card h3 { margin-top: 0; }
+  .freeze-checklist { list-style: none; margin: 8px 0; padding: 0; font-size: 14px; }
+  .freeze-checklist li { margin: 4px 0; padding-left: 22px; position: relative; overflow-wrap: break-word; }
+  .freeze-checklist li::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+  .freeze-checklist li[data-met="true"]::before { content: "\2713"; color: var(--good); }
+  .freeze-checklist li[data-met="false"]::before { content: "\2022"; color: var(--bad); }
+  .freeze-checklist li ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 4px; color: var(--muted); }
+  #freeze-summary dl { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0; }
+  #freeze-summary dt { color: var(--muted); }
+  #freeze-summary dd { margin: 0; min-width: 0; overflow-wrap: break-word; }
+  #freeze-summary ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+  #freeze-confirm { margin: 10px 0; }
+  @media (max-width: 720px) {
+    #freeze-summary dl { grid-template-columns: 1fr; }
+    #freeze-card button { min-height: 44px; }
+  }
   /* UG-CR-GATE-SSS-004: the draft planning editor (built only after an owned DRAFT competition is loaded). */
   .planning-card h3 { margin-top: 0; }
   .planning-card fieldset { margin: 14px 0; }
@@ -215,10 +232,27 @@
 
     <div class="row" id="registration-controls" style="margin-top:4px;">
       <button id="btn-open-registration">Open Team Registration</button>
-      <button class="secondary" id="btn-close-registration">Close Team Registration</button>
+      <button class="secondary" id="btn-close-registration">Freeze Registration</button>
       <span class="capacity-badge" id="capacity-badge"></span>
     </div>
     <p class="msg" id="msg-registration" aria-live="polite"></p>
+
+    <!-- UG-CR-GATE-SSS-007: Freeze Registration is the explicit checkpoint. This card only SHOWS what the server said (the deadline, what the freeze still
+         needs, and, once frozen, the recorded summary); the freeze itself is judged and recorded by the server, and success is claimed only after it answers. -->
+    <div id="freeze-card" class="card" hidden>
+      <h3 id="freeze-heading" tabindex="-1">Registration freeze</h3>
+      <p class="msg" id="freeze-deadline"></p>
+      <ul id="freeze-checklist" class="freeze-checklist" hidden></ul>
+      <div id="freeze-confirm" class="cancel-panel" hidden>
+        <p class="msg">Freezing registration is permanent. The four teams and their rosters are recorded exactly as they stand, and nobody can register, propose a team, request to join or be approved afterwards.</p>
+        <div class="row">
+          <button type="button" class="secondary" id="btn-freeze-dismiss">Keep Registration Open</button>
+          <button type="button" class="danger" id="btn-freeze-confirm">Confirm Freeze</button>
+        </div>
+      </div>
+      <p class="msg" id="freeze-status" aria-live="polite"></p>
+      <div id="freeze-summary" hidden></div>
+    </div>
 
     <div id="cancel-section" style="margin-top:10px;">
       <button class="danger" id="btn-open-cancel" type="button">Cancel This Competition</button>
@@ -537,6 +571,8 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
   // call loadCompetitionDetail directly, bypassing this reset, so their
   // own success/error message still survives that refresh as intended.
   setMsg("msg-registration", "", "");
+  setMsg("freeze-status", "", "");
+  document.getElementById("freeze-confirm").hidden = true;
   setMsg("msg-publish", "", "");
   setMsg("cancel-status", "", "");
   document.getElementById("cancel-panel").hidden = true;
@@ -848,22 +884,218 @@ function renderCompetitionDetail() {
     fixturesList.appendChild(renderFixtureBlock(f, teams, "ORGANIZER"));
   }
 
+  renderFreezeCard(competition, currentView);
+
   // UG-CR-GATE-SSS-004: a DRAFT competition the organizer owns offers its draft plan; any other state offers none.
   if (competition.state === "DRAFT") ensurePlanning(competition.competitionId);
   else removePlanningSection();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 — the registration freeze checkpoint. Everything here SHOWS what the server said; nothing here decides that registration may be
+// frozen (the database judges the deadline, the teams, the rosters and the ownership again) and nothing claims success before the server confirms it.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+function isFiniteCount(n) { return typeof n === "number" && Number.isFinite(n) && n >= 0; }
+
+function validRegistrationFacts(r) {
+  return !!r && typeof r === "object" && !Array.isArray(r) && typeof r.deadlineLocal === "string" && typeof r.timeZone === "string" && typeof r.deadlinePassed === "boolean";
+}
+
+function validTeamCounts(teams) {
+  return Array.isArray(teams) && teams.every((t) => !!t && typeof t === "object" && typeof t.name === "string" && isFiniteCount(t.memberCount));
+}
+
+function validReadiness(r) {
+  return !!r && typeof r === "object" && !Array.isArray(r) && typeof r.deadlinePassed === "boolean" && isFiniteCount(r.acceptedTeamCount)
+    && isFiniteCount(r.pendingProposalCount) && isFiniteCount(r.pendingJoinRequestCount) && isFiniteCount(r.rosterMinimum) && isFiniteCount(r.rosterMaximum) && validTeamCounts(r.teams);
+}
+
+/** A recorded freeze exactly as the server must describe it: four teams, each a name and a count. Anything else is not a confirmed freeze. */
+function validFreezeSummary(f) {
+  return !!f && typeof f === "object" && !Array.isArray(f) && typeof f.frozenAt === "string" && typeof f.registrationDeadlineUtc === "string"
+    && isFiniteCount(f.rosterMinimum) && isFiniteCount(f.rosterMaximum) && f.teamCount === 4 && isFiniteCount(f.memberCount)
+    && Array.isArray(f.teams) && f.teams.length === 4 && validTeamCounts(f.teams);
+}
+
+function checklistItem(key, met, text, detailTeams) {
+  const li = document.createElement("li");
+  li.setAttribute("data-key", key);
+  li.setAttribute("data-met", met ? "true" : "false");
+  li.appendChild(document.createTextNode(text));
+  if (detailTeams && detailTeams.length > 0) {
+    const sub = document.createElement("ul");
+    for (const t of detailTeams) {
+      const row = document.createElement("li");
+      row.textContent = t.name + ": " + t.memberCount;
+      sub.appendChild(row);
+    }
+    li.appendChild(sub);
+  }
+  return li;
+}
+
+function renderFreezeSummary(container, freeze) {
+  container.innerHTML = "";
+  const list = document.createElement("dl");
+  const add = (term, value) => {
+    const dt = document.createElement("dt"); dt.textContent = term;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    list.appendChild(dt); list.appendChild(dd);
+  };
+  add("Frozen at", freeze.frozenAt.replace("T", " ").replace(/\.\d+Z$/, "Z"));
+  // The deadline is an exact instant: its milliseconds are shown when it has any, and left out when it has none.
+  add("Registration deadline", freeze.registrationDeadlineUtc.replace("T", " ").replace(/\.000Z$/, "Z"));
+  add("Roster range", freeze.rosterMinimum + "\u2013" + freeze.rosterMaximum + " members per team");
+  add("Teams", String(freeze.teamCount));
+  add("Members", String(freeze.memberCount));
+  container.appendChild(list);
+  const teams = document.createElement("ul");
+  for (const t of freeze.teams) {
+    const li = document.createElement("li");
+    li.textContent = t.name + ": " + t.memberCount + (t.memberCount === 1 ? " member" : " members");
+    teams.appendChild(li);
+  }
+  container.appendChild(teams);
+}
+
+function renderFreezeCard(competition, view) {
+  const card = document.getElementById("freeze-card");
+  const deadlineEl = document.getElementById("freeze-deadline");
+  const checklist = document.getElementById("freeze-checklist");
+  const summary = document.getElementById("freeze-summary");
+  const confirm = document.getElementById("freeze-confirm");
+  checklist.innerHTML = ""; checklist.hidden = true;
+  summary.innerHTML = ""; summary.hidden = true;
+  deadlineEl.textContent = "";
+  if (competition.state !== "TEAM_REGISTRATION_OPEN") confirm.hidden = true;
+
+  const registration = view.registration;
+  const facts = validRegistrationFacts(registration);
+  const frozen = validFreezeSummary(view.registrationFreeze);
+  const open = competition.state === "TEAM_REGISTRATION_OPEN";
+  if (!open && !frozen) { card.hidden = true; return; }
+  card.hidden = false;
+
+  if (facts) {
+    deadlineEl.textContent = "Registration deadline: " + registration.deadlineLocal.replace("T", " ") + " (" + registration.timeZone + ") \u2014 " + (registration.deadlinePassed ? "reached." : "not yet reached.");
+  } else {
+    // UG-CR-GATE-SSS-007A: without a usable plan the server accepts nothing new, whatever the state says; the way out is the cancellation that already exists.
+    deadlineEl.textContent = "No registration deadline is recorded for this competition, so it accepts no new registrations. It can be cancelled.";
+  }
+
+  if (frozen) {
+    renderFreezeSummary(summary, view.registrationFreeze);
+    summary.hidden = false;
+    return;
+  }
+  const readiness = view.registrationReadiness;
+  if (open && validReadiness(readiness)) {
+    const range = readiness.rosterMinimum + "\u2013" + readiness.rosterMaximum;
+    const rostersMet = readiness.teams.length > 0 && readiness.teams.every((t) => t.memberCount >= readiness.rosterMinimum && t.memberCount <= readiness.rosterMaximum);
+    checklist.appendChild(checklistItem("deadline", readiness.deadlinePassed, readiness.deadlinePassed ? "The registration deadline has been reached." : "The registration deadline has not been reached yet."));
+    checklist.appendChild(checklistItem("teams", readiness.acceptedTeamCount === 4, readiness.acceptedTeamCount + " of 4 teams accepted."));
+    checklist.appendChild(checklistItem("proposals", readiness.pendingProposalCount === 0, readiness.pendingProposalCount === 0 ? "No team proposals are pending." : readiness.pendingProposalCount + " team proposal" + (readiness.pendingProposalCount === 1 ? " is" : "s are") + " still pending."));
+    checklist.appendChild(checklistItem("joins", readiness.pendingJoinRequestCount === 0, readiness.pendingJoinRequestCount === 0 ? "No join requests are pending." : readiness.pendingJoinRequestCount + " join request" + (readiness.pendingJoinRequestCount === 1 ? " is" : "s are") + " still pending."));
+    checklist.appendChild(checklistItem("rosters", rostersMet, "Every team has " + range + " members.", readiness.teams));
+    checklist.hidden = false;
+  }
+}
+
+/** The bounded wording for every freeze refusal the server can give, by its stable code. The server's own text is never shown. */
+const FREEZE_MESSAGES = {
+  DEADLINE_NOT_REACHED: "The registration deadline has not been reached yet. Registration can be frozen only after it.",
+  PLAN_MISSING: "This competition has no registration plan, so registration cannot be frozen.",
+  PLAN_INVALID: "The registration plan cannot be used to freeze registration.",
+  TEAM_COUNT: "Exactly four accepted teams are required to freeze registration.",
+  PENDING_PROPOSALS: "Accept or reject every pending team proposal before freezing registration.",
+  PENDING_JOIN_REQUESTS: "Approve or reject every pending join request before freezing registration.",
+  ROSTER_BELOW_MINIMUM: "At least one team has fewer members than the roster minimum.",
+  ROSTER_ABOVE_MAXIMUM: "At least one team has more members than the roster maximum.",
+  MEMBER_CONFLICT: "A person appears in more than one team, so registration cannot be frozen.",
+  ORGANIZER_REVOKED: "Your organizer access to this competition has ended.",
+  NOT_ORGANIZER: "Only this competition's organizer can freeze registration.",
+  WRONG_STATE: "Team registration is not open, so it cannot be frozen now.",
+  NOT_FOUND: "This competition could not be found.",
+  CANCELLED: "This competition was cancelled.",
+};
+const FREEZE_UNVERIFIED = "The server's answer could not be verified. Reload to see whether registration was frozen.";
+const OPENING_MESSAGES = {
+  PLAN_MISSING: "Save a registration plan with a future deadline before opening team registration.",
+  DEADLINE_EXPIRED: "The registration deadline has already passed. Save a plan with a future deadline to open registration.",
+  PLAN_INVALID: "The saved registration plan cannot be used to open registration. Save the plan again.",
+};
+
+function setFreezeStatus(text, kind) {
+  const elm = document.getElementById("freeze-status");
+  elm.textContent = text;
+  elm.className = "msg" + (kind ? " " + kind : "");
+}
+
+function setFreezeBusy(busy) {
+  document.getElementById("btn-freeze-confirm").disabled = busy;
+  document.getElementById("btn-freeze-dismiss").disabled = busy;
 }
 
 document.getElementById("btn-open-registration").addEventListener("click", async () => {
   if (!isOrganizerView()) return;
   const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/open-team-registration`, { method: "POST" });
   if (res.status === 200) { setMsg("msg-registration", "Team registration opened.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
-  else setMsg("msg-registration", (res.json && res.json.error) || "Failed to open team registration.", "error");
+  else {
+    // UG-CR-GATE-SSS-007: a refusal for the plan or the deadline is explained in this page's own bounded words, by the server's stable code.
+    const code = res.json && typeof res.json.code === "string" ? res.json.code : null;
+    setMsg("msg-registration", (code && OPENING_MESSAGES[code]) || (res.json && res.json.error) || "Failed to open team registration.", "error");
+  }
 });
-document.getElementById("btn-close-registration").addEventListener("click", async () => {
+
+// Freeze Registration is the explicit checkpoint: the first click only asks for confirmation; nothing is sent until it is given.
+document.getElementById("btn-close-registration").addEventListener("click", () => {
   if (!isOrganizerView()) return;
-  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/close-team-registration`, { method: "POST" });
-  if (res.status === 200) { setMsg("msg-registration", "Team registration closed — ready to publish.", "success"); await loadCompetitionDetail(currentView.competition.competitionId); }
-  else setMsg("msg-registration", (res.json && res.json.error) || "Failed to close team registration.", "error");
+  setFreezeStatus("", "");
+  document.getElementById("freeze-card").hidden = false;
+  document.getElementById("freeze-confirm").hidden = false;
+  document.getElementById("btn-freeze-confirm").focus();
+});
+document.getElementById("btn-freeze-dismiss").addEventListener("click", () => {
+  if (document.getElementById("btn-freeze-dismiss").disabled) return;
+  document.getElementById("freeze-confirm").hidden = true;
+  setFreezeStatus("", "");
+  document.getElementById("btn-close-registration").focus();
+});
+document.getElementById("btn-freeze-confirm").addEventListener("click", async () => {
+  // Disabling synchronously, before the first await, is what prevents a second click from sending a second request.
+  if (document.getElementById("btn-freeze-confirm").disabled || !isOrganizerView()) return;
+  setFreezeBusy(true);
+  setFreezeStatus("Freezing registration\u2026", "");
+  const competitionId = currentView.competition.competitionId;
+  let res;
+  try {
+    res = await Promise.race([
+      authedFetch(`/api/gaming/competitions/${competitionId}/close-team-registration`, { method: "POST" }),
+      new Promise((_resolve, reject) => setTimeout(() => reject(new Error("timeout")), READ_TIMEOUT_MS)),
+    ]);
+  } catch (err) {
+    // A request that failed or never answered may or may not have taken effect: nothing is claimed.
+    setFreezeStatus("Could not confirm whether registration was frozen. Reload to see the current state.", "error");
+    setFreezeBusy(false);
+    return;
+  }
+  const result = res && res.json && typeof res.json === "object" ? res.json.result : null;
+  if (res.status === 200) {
+    if (result && typeof result === "object" && result.state === "READY_TO_PUBLISH" && validFreezeSummary(result.freeze)) {
+      setFreezeStatus("Registration frozen. The four teams and their rosters are locked.", "success");
+      setFreezeBusy(false);
+      document.getElementById("freeze-confirm").hidden = true;
+      await loadCompetitionDetail(competitionId);
+      return;
+    }
+    setFreezeStatus(FREEZE_UNVERIFIED, "error");
+    setFreezeBusy(false);
+    return;
+  }
+  const code = res.json && typeof res.json === "object" && typeof res.json.code === "string" ? res.json.code : null;
+  setFreezeStatus((code && Object.prototype.hasOwnProperty.call(FREEZE_MESSAGES, code) && FREEZE_MESSAGES[code]) || "Could not freeze registration.", "error");
+  setFreezeBusy(false);
 });
 
 document.getElementById("btn-publish").addEventListener("click", async () => {

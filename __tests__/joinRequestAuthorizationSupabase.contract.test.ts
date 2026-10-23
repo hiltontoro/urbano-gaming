@@ -136,11 +136,37 @@ afterAll(async () => {
 interface Team { id: string; captainId: string }
 interface Comp { competitionId: string; organizerId: string; teamA: Team; teamB: Team }
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 fixtures. Opening team registration now needs a usable plan (a saved Organizer Planning revision whose deadline is still ahead), and the
+// freeze (CLOSE_TEAM_REGISTRATION) needs that deadline to have passed and every roster to be within the plan's bounds. These helpers give a competition a REAL
+// plan through the real save operation and — only when a test needs "the deadline has passed" — record a LATER revision as the database owner (a service-side
+// fixture: the save operation itself needs a DRAFT) whose deadline is the first whole second after the competition's newest registration-related row, so every
+// row already written is stamped before it. Nothing here waits for a real deadline. (UG-CR-GATE-SSS-007A: the deadline fixture is the ONE service-side step in these lifecycles; every registration, join, approval and the freeze itself go through the real operations.)
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const FIXTURE_DAY = 24 * 3600_000;
+const COSTA_RICA_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving: always UTC-06:00
+
+async function saveFixturePlan(competitionId: string, organizerId: string, deadlineInMs = 30 * FIXTURE_DAY) {
+  const { parsePlanningPlan } = await import("../lib/gaming/competitions/planning");
+  const deadlineMs = Date.now() + deadlineInMs;
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const plan = parsePlanningPlan({
+    venue: { name: "Cancha Contract", locationDescription: "Calle 5, San Jose, behind the central market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: "Draft registration rules, version one." },
+  }, "SOCCER_5V5");
+  return compRepo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
+}
+
 /** A competition with registration open and two accepted teams, run by an internal OPERATIONAL organizer. */
 async function buildCompetition(label: string): Promise<Comp> {
   const operator = await createMember(`${label} Operator`);
   await grantOperational(operator.gamingMemberId);
   const created = await createCompetition(compRepo, operator.gamingMemberId, `JoinAuth ${label} ${RUN}`, "SOCCER_5V5");
+  await saveFixturePlan(created.competitionId, operator.gamingMemberId);
   await openTeamRegistration(compRepo, created.competitionId, operator.gamingMemberId);
   const teams: Team[] = [];
   for (const letter of ["A", "B"]) {
@@ -177,6 +203,7 @@ async function buildHostPilot(label: string) {
   });
   await withGovernance(() => decideHostApplication(hostRepo, reviewer.gamingMemberId, application.publicCode, "APPROVE", null));
   const pilot = await createHostCompetition(hostRepo, member.gamingMemberId, `Join Pilot ${label} ${RUN}`);
+  await saveFixturePlan(pilot.competitionId, member.gamingMemberId);
   await openTeamRegistration(compRepo, pilot.competitionId, member.gamingMemberId);
   const ownTeam = await addCompetitionTeam(compRepo, pilot.competitionId, member.gamingMemberId, `Host Team ${label} ${RUN}`, member.gamingMemberId);
   const otherCaptain = (await createMember(`${label} Pilot Captain`)).gamingMemberId;

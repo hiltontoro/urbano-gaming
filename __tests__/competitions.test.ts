@@ -201,6 +201,9 @@ function makeFakeRepository(): CompetitionsRepository {
     getDisputes: vi.fn(),
     getCurrentFinalization: vi.fn(),
     getMemberParticipationRecords: vi.fn(),
+    // UG-CR-GATE-SSS-007: the two server-only registration reads the addressed view and the close command are built on.
+    getRegistrationStatus: vi.fn(),
+    getRegistrationFreeze: vi.fn(),
   };
 }
 

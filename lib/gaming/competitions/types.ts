@@ -309,6 +309,11 @@ export interface DecideCompetitionTeamResult {
 export interface CloseTeamRegistrationResult {
   competitionId: string;
   state: CompetitionState;
+  /**
+   * UG-CR-GATE-SSS-007. The close operation is the registration FREEZE checkpoint. When the competition has a recorded freeze, this is what the
+   * organizer is shown of it: team names and counts only — never an identifier, the digest or the actor. Absent for a competition with no freeze.
+   */
+  freeze?: RegistrationFreezeSummary;
 }
 
 export interface PublishCompetitionResult {
@@ -455,6 +460,17 @@ export interface CompetitionView {
    * competition page offers its scorekeeper action only when this is non-empty; the scorekeeper-administration route re-confirms it.
    */
   myScorekeeperFixtureIds: string[];
+  /**
+   * UG-CR-GATE-SSS-007 — the bounded registration status of THIS addressed competition, derived by the server (and the database clock). It is the
+   * only place a member learns the deadline; the general list never carries it. null for a draft (its plan is still a draft) and for a competition that
+   * has no usable plan — and for a competition that is not a draft, null means CLOSED: nothing is offered and the database refuses every new write. The
+   * browser renders it and never decides from it that a write is allowed: the database decides every write.
+   */
+  registration: RegistrationStatus | null;
+  /** Organizer only, while registration is open: what the freeze still needs, as counts. null for everyone else and once frozen. */
+  registrationReadiness: RegistrationReadiness | null;
+  /** Organizer only, once frozen: team names and counts. null for everyone else. */
+  registrationFreeze: RegistrationFreezeSummary | null;
 }
 
 export interface CompetitionFixtureViewEntry {
@@ -758,4 +774,86 @@ export interface SavePlanningRevisionResult {
   alreadySaved: boolean;
   /** False only for a replay of an earlier revision that a newer one has since superseded. */
   isCurrent: boolean;
+}
+
+// ---------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 — Registration Deadline and Competition Freeze foundation.
+//
+// The authoritative deadline is the UTC instant of a competition's CURRENT Organizer Planning revision, judged by the database clock inside each
+// atomic operation. These are plain data shapes only; the typed refusals, the digest and the summaries live in registrationFreeze.ts (an error
+// exported from this file would have to be mapped in httpAuth.ts's status table, and the freeze refusals are judged by the two routes that raise them).
+// ---------------------------------------------------------------------
+
+/**
+ * What the server read about a competition's registration: the deadline facts and whether the DATABASE says new entries are accepted right now.
+ * The roster bounds are the plan's own and are for the organizer's readiness only: they are never part of {@link RegistrationStatus}.
+ */
+export interface RegistrationStatusRead {
+  /** The one authoritative instant, ISO-8601 UTC. */
+  deadlineUtc: string;
+  /** The venue's IANA time zone. */
+  timeZone: string;
+  /** The deadline as the venue's wall clock, YYYY-MM-DDTHH:MM. */
+  deadlineLocal: string;
+  /** True when the database clock is at or after the deadline. */
+  deadlinePassed: boolean;
+  /** True only while the competition is open, not frozen and before the deadline, by the database clock. */
+  acceptingNewWrites: boolean;
+  frozen: boolean;
+  rosterMinimum: number;
+  rosterMaximum: number;
+}
+
+/** The bounded registration status a member is shown: exactly these six facts, and nothing else of the plan. */
+export type RegistrationStatus = Pick<RegistrationStatusRead, "deadlineUtc" | "timeZone" | "deadlineLocal" | "deadlinePassed" | "acceptingNewWrites" | "frozen">;
+
+/** A team's name and how many competitive members it has: all an organizer's readiness or freeze summary says about a team. */
+export interface RegistrationTeamCount {
+  name: string;
+  memberCount: number;
+}
+
+/** What the freeze still needs, for the organizer. The server judges every one of these again when the freeze is requested. */
+export interface RegistrationReadiness {
+  deadlinePassed: boolean;
+  acceptedTeamCount: number;
+  pendingProposalCount: number;
+  pendingJoinRequestCount: number;
+  rosterMinimum: number;
+  rosterMaximum: number;
+  teams: RegistrationTeamCount[];
+}
+
+/** The recorded freeze as an organizer is shown it: names and counts. No identifier, no digest, no actor. */
+export interface RegistrationFreezeSummary {
+  frozenAt: string;
+  registrationDeadlineUtc: string;
+  rosterMinimum: number;
+  rosterMaximum: number;
+  teamCount: number;
+  memberCount: number;
+  teams: RegistrationTeamCount[];
+}
+
+/** A recorded freeze exactly as the server holds it (never returned to a browser as is). Teams are in their frozen order; members are sorted. */
+export interface RegistrationFreezeRecord {
+  registrationFreezeId: string;
+  competitionId: string;
+  planningRevisionId: string;
+  formatKey: SoccerFormatKey;
+  rosterMinimum: number;
+  rosterMaximum: number;
+  registrationDeadlineUtc: string;
+  frozenAt: string;
+  frozenByGamingMemberId: string;
+  teamCount: number;
+  memberCount: number;
+  snapshotDigest: string;
+  teams: Array<{
+    position: number;
+    competitionTeamId: string;
+    captainGamingMemberId: string;
+    memberCount: number;
+    memberGamingMemberIds: string[];
+  }>;
 }

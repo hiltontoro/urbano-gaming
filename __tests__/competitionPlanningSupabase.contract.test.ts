@@ -20,6 +20,8 @@ import { registerForCompetition } from "../lib/gaming/competitions/registerForCo
 import { appointScorekeeper } from "../lib/gaming/competitions/appointScorekeeper";
 import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
 import { CompetitionAccessDeniedError, CompetitionNotDraftError, HostAccessRevokedError, UnsupportedActivityKeyError } from "../lib/gaming/competitions/types";
+import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
+import { decideJoinRequest } from "../lib/gaming/competitions/decideJoinRequest";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 // The REAL route handlers, called with real user access tokens against the real local database.
 import { POST as generalCreateRoute } from "../app/api/gaming/competitions/route";
@@ -228,20 +230,116 @@ async function draftCompetition(label: string): Promise<{ competitionId: string;
   return { competitionId: created.competitionId, organizer };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 fixtures. Opening team registration now needs a usable plan (a saved Organizer Planning revision whose deadline is still ahead), and the
+// freeze (CLOSE_TEAM_REGISTRATION) needs that deadline to have passed and every roster to be within the plan's bounds. These helpers give a competition a REAL
+// plan through the real save operation and — only when a test needs "the deadline has passed" — record a LATER revision as the database owner (a service-side
+// fixture: the save operation itself needs a DRAFT) whose deadline is the first whole second after the competition's newest registration-related row, so every
+// row already written is stamped before it. Nothing here waits for a real deadline. (UG-CR-GATE-SSS-007A: the deadline fixture is the ONE service-side step in these lifecycles; every registration, join, approval and the freeze itself go through the real operations.)
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const FIXTURE_DAY = 24 * 3600_000;
+const COSTA_RICA_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving: always UTC-06:00
+
+async function saveFixturePlan(competitionId: string, organizerId: string, deadlineInMs = 30 * FIXTURE_DAY) {
+  const { parsePlanningPlan } = await import("../lib/gaming/competitions/planning");
+  const deadlineMs = Date.now() + deadlineInMs;
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const plan = parsePlanningPlan({
+    venue: { name: "Cancha Contract", locationDescription: "Calle 5, San Jose, behind the central market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: "Draft registration rules, version one." },
+  }, "SOCCER_5V5");
+  return compRepo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
+}
+
+async function passDeadlineFixture(competitionId: string): Promise<void> {
+  const db = new Client({ connectionString: supabaseDbUrl, statement_timeout: 30000 });
+  await db.connect();
+  try {
+    const latest = (await db.query(
+      `select greatest(
+         coalesce((select max(registered_at) from competition_registrations where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_teams where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_join_requests where competition_id = $1), 'epoch'),
+         coalesce((select max(approved_at) from competition_team_memberships where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_planning_revisions where competition_id = $1), 'epoch')) as latest`, [competitionId])).rows[0].latest as Date;
+    const deadline = new Date((Math.floor(latest.getTime() / 1000) + 1) * 1000);
+    const wait = deadline.getTime() - Date.now() + 60;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await db.query("begin");
+    const cur = (await db.query("select * from competition_planning_revisions where competition_id = $1 order by revision_number desc limit 1", [competitionId])).rows[0];
+    const next = (await db.query(
+      `insert into competition_planning_revisions (competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, intent_id, payload_digest,
+         venue_name, venue_location_description, venue_time_zone, simultaneous_match_capacity, venue_restriction_notes, roster_minimum, roster_maximum,
+         registration_deadline_local, registration_deadline_time_zone, registration_deadline_utc_offset_minutes, registration_deadline_utc, rules_version, rules_snapshot, rules_snapshot_digest)
+       values ($1,$2,$3,$4,$5,gen_random_uuid(),$6,$7,$8,$9,$10,$11,$12,$13, ($14::timestamptz at time zone $15), $15, $16, $14::timestamptz, $17,$18,$19) returning planning_revision_id`,
+      [competitionId, cur.format_key, cur.revision_number + 1, cur.planning_revision_id, cur.authored_by_gaming_member_id, cur.payload_digest, cur.venue_name, cur.venue_location_description,
+        cur.venue_time_zone, cur.simultaneous_match_capacity, cur.venue_restriction_notes, cur.roster_minimum, cur.roster_maximum, deadline.toISOString(), cur.registration_deadline_time_zone,
+        cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
+    await db.query("insert into competition_planning_pitches (planning_revision_id, position, label, is_usable, restriction_notes) select $2::uuid, position, label, is_usable, restriction_notes from competition_planning_pitches where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query(
+      `insert into competition_planning_pitch_formats (planning_pitch_id, format_key)
+       select np.planning_pitch_id, f.format_key from competition_planning_pitches op join competition_planning_pitch_formats f on f.planning_pitch_id = op.planning_pitch_id
+         join competition_planning_pitches np on np.planning_revision_id = $2::uuid and np.position = op.position where op.planning_revision_id = $1::uuid`, [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_dates (planning_revision_id, plan_date, position) select $2::uuid, plan_date, position from competition_planning_dates where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_windows (planning_revision_id, plan_date, window_index, start_time, end_time) select $2::uuid, plan_date, window_index, start_time, end_time from competition_planning_windows where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("commit");
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
+/** Builds `size` members on each given team through the real operations (register, ask to join, the captain approves) — the rosters a freeze needs, which cannot be built afterwards. */
+async function buildRostersBeforeFreeze(competitionId: string, teams: Array<{ id: string; captainId: string }>, makeMember: (label: string) => Promise<{ gamingMemberId: string }>, size = 5): Promise<string[][]> {
+  return Promise.all(teams.map(async (team, t) => {
+    const members: string[] = [];
+    for (let k = 0; k < size; k++) {
+      const member = await makeMember(`Roster ${t}-${k}`);
+      await registerForCompetition(compRepo, competitionId, member.gamingMemberId, true);
+      const request = await requestJoinTeam(compRepo, competitionId, team.id, member.gamingMemberId);
+      await decideJoinRequest(compRepo, request.competitionJoinRequestId, team.captainId, "APPROVE", false);
+      members.push(member.gamingMemberId);
+    }
+    return members;
+  }));
+}
+
+/**
+ * Overrides that move a raw plan's dates and deadline to a moment relative to now, for the tests that go on to OPEN registration (UG-CR-GATE-SSS-007: opening
+ * needs a deadline that is still ahead, so a fixed calendar date would stop working the day after it).
+ */
+function futurePlanOverrides(): Record<string, unknown> {
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const deadlineMs = Date.now() + 30 * FIXTURE_DAY;
+  return {
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+  };
+}
+
 async function publishedBracket(label: string) {
   const organizer = await makeOperator(`${label} Organizer`);
   const created = await createCompetition(compRepo, organizer.gamingMemberId, `Plan ${label} ${RUN}`, "SOCCER_5V5");
+  await saveFixturePlan(created.competitionId, organizer.gamingMemberId);
   await openTeamRegistration(compRepo, created.competitionId, organizer.gamingMemberId);
   const teams: string[] = [];
+  const teamsForRoster: Array<{ id: string; captainId: string }> = [];
   for (let i = 0; i < 4; i++) {
     const captain = await newPerson(`${label} Captain ${i}`);
     const team = await addCompetitionTeam(compRepo, created.competitionId, organizer.gamingMemberId, `${label} Team ${i} ${RUN}`, captain.gamingMemberId);
     teams.push(team.competitionTeamId);
+    teamsForRoster.push({ id: team.competitionTeamId, captainId: captain.gamingMemberId });
   }
+  await buildRostersBeforeFreeze(created.competitionId, teamsForRoster, newPerson);
+  await passDeadlineFixture(created.competitionId);
   await closeTeamRegistration(compRepo, created.competitionId, organizer.gamingMemberId);
   const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
   const published = await publishCompetition(compRepo, created.competitionId, organizer.gamingMemberId, teams[0], teams[1], teams[2], teams[3], inMs(3600_000), inMs(7200_000), inMs(10800_000));
-  return { competitionId: created.competitionId, organizer, fixtureId: published.semifinal1FixtureId };
+  // UG-CR-GATE-SSS-007: a bracket now carries the plan that opening required (and the later revision the deadline fixture records): the rows a test must see UNCHANGED.
+  return { competitionId: created.competitionId, organizer, fixtureId: published.semifinal1FixtureId, baselineRows: await countRows(created.competitionId) };
 }
 
 /** An approved host's one private pilot (a DRAFT, host-bound competition) and a way to revoke the host. */
@@ -657,13 +755,15 @@ describe("[authority] ordinary organizer planning needs organizer ownership and 
     const draft = await draftCompetition("authority-scorekeeper-other");
     await expect(compRepo.savePlanningRevision(bracket.competitionId, scorekeeper.gamingMemberId, randomUUID(), await validPlan())).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
     await expect(compRepo.savePlanningRevision(draft.competitionId, scorekeeper.gamingMemberId, randomUUID(), await validPlan())).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
-    expect(await countRows(bracket.competitionId)).toBe(0);
+    expect(await countRows(bracket.competitionId)).toBe(bracket.baselineRows);
     expect(await countRows(draft.competitionId)).toBe(0);
   }, 120000);
 
   it("23. a registrant, a captain candidate, an applicant and a holder of an unused host capability are denied", async () => {
     const organizer = await makeOperator("Authority Open Organizer");
     const created = await createCompetition(compRepo, organizer.gamingMemberId, `Plan open ${RUN}`, "SOCCER_5V5");
+    await saveFixturePlan(created.competitionId, organizer.gamingMemberId);
+    const savedRows = await countRows(created.competitionId); // the organizer's own plan, saved before registration could open: what the denied callers must leave unchanged
     await openTeamRegistration(compRepo, created.competitionId, organizer.gamingMemberId);
     const registrant = await newPerson("Registrant");
     await registerForCompetition(compRepo, created.competitionId, registrant.gamingMemberId, true);
@@ -684,7 +784,7 @@ describe("[authority] ordinary organizer planning needs organizer ownership and 
       await expect(compRepo.savePlanningRevision(draft.competitionId, person.gamingMemberId, randomUUID(), await validPlan())).rejects.toBeInstanceOf(CompetitionAccessDeniedError);
     }
     expect(await countRows(draft.competitionId)).toBe(0);
-    expect(await countRows(created.competitionId)).toBe(0);
+    expect(await countRows(created.competitionId)).toBe(savedRows);
   }, 120000);
 
   it("a NULL caller is denied at the authorization boundary and nothing is written (the null-safe comparison)", async () => {
@@ -707,6 +807,7 @@ describe("[authority] ordinary organizer planning needs organizer ownership and 
 
   it("25. a competition that is no longer a DRAFT refuses planning: open registration, ready to publish, published, and cancelled", async () => {
     const open = await draftCompetition("state-open");
+    await saveFixturePlan(open.competitionId, open.organizer.gamingMemberId);
     await openTeamRegistration(compRepo, open.competitionId, open.organizer.gamingMemberId);
     await expect(compRepo.savePlanningRevision(open.competitionId, open.organizer.gamingMemberId, randomUUID(), await validPlan())).rejects.toBeInstanceOf(CompetitionNotDraftError);
 
@@ -720,7 +821,7 @@ describe("[authority] ordinary organizer planning needs organizer ownership and 
     // A plan saved while the competition was a draft stays readable after it moves on, and cannot be replayed into a new revision.
     const moved = await draftCompetition("state-moved");
     const intent = randomUUID();
-    const plan = await validPlan();
+    const plan = await validPlan(futurePlanOverrides());
     await compRepo.savePlanningRevision(moved.competitionId, moved.organizer.gamingMemberId, intent, plan);
     await openTeamRegistration(compRepo, moved.competitionId, moved.organizer.gamingMemberId);
     await expect(compRepo.savePlanningRevision(moved.competitionId, moved.organizer.gamingMemberId, intent, plan)).rejects.toBeInstanceOf(CompetitionNotDraftError);
@@ -1159,7 +1260,7 @@ describe("[routes] the planning routes, with real tokens against the real databa
     const unauthenticated = await route.GET(new Request(planningUrl(competitionId)), ctx(competitionId));
     expect(unauthenticated.status).toBe(401);
     expect(await countRows(competitionId)).toBe(1);
-    expect(await countRows(bracket.competitionId)).toBe(0);
+    expect(await countRows(bracket.competitionId)).toBe(bracket.baselineRows);
     expect(await countRows(pilot.competitionId)).toBe(1);
   }, 240000);
 
@@ -1167,9 +1268,10 @@ describe("[routes] the planning routes, with real tokens against the real databa
     const route = await loadPlanningRoute();
     const { competitionId, organizer } = await draftCompetition("routes-state");
     const token = await tokenFor(organizer);
-    await route.POST(request(planningUrl(competitionId), "POST", token, { intentId: randomUUID(), plan: rawPlan() }), ctx(competitionId));
+    const futurePlan = rawPlan(futurePlanOverrides()); // opening needs a deadline that is still ahead
+    await route.POST(request(planningUrl(competitionId), "POST", token, { intentId: randomUUID(), plan: futurePlan }), ctx(competitionId));
     await openTeamRegistration(compRepo, competitionId, organizer.gamingMemberId);
-    const refused = await route.POST(request(planningUrl(competitionId), "POST", token, { intentId: randomUUID(), plan: rawPlan() }), ctx(competitionId));
+    const refused = await route.POST(request(planningUrl(competitionId), "POST", token, { intentId: randomUUID(), plan: futurePlan }), ctx(competitionId));
     expect(refused.status).toBe(409);
     const read = await route.GET(request(planningUrl(competitionId), "GET", token), ctx(competitionId));
     expect(read.status).toBe(200);

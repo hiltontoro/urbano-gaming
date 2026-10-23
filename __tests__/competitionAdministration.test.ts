@@ -293,6 +293,7 @@ describe("getCompetitionView — the addressed competition carries the caller's 
     getMyRegistration: vi.fn().mockResolvedValue(null), getMyTeamMembership: vi.fn().mockResolvedValue(null),
     getMyPendingJoinRequest: vi.fn().mockResolvedValue(null), getMemberParticipationRecords: vi.fn().mockResolvedValue([]),
     getDisplayNames: vi.fn().mockResolvedValue({}), getCurrentRoster: vi.fn().mockResolvedValue(null),
+    getRegistrationStatus: vi.fn().mockResolvedValue(null), getRegistrationFreeze: vi.fn().mockResolvedValue(null),
   });
 
   it("lists only the fixtures of THIS competition the caller is currently appointed to; an unrelated member gets an empty list", async () => {
@@ -313,7 +314,8 @@ describe("getCompetitionView — the addressed competition carries the caller's 
     expect(view.isOrganizer).toBe(false);
     expect(Object.keys(view).sort()).toEqual([
       "competition", "fixtures", "isOrganizer", "myPendingJoinRequest", "myPersistentRecords", "myRegistration", "myScorekeeperFixtureIds",
-      "myTeamMembership", "myTeamMemberships", "myTeamProposals", "pendingTeamProposals", "rejectedTeamProposals", "teams",
+      "myTeamMembership", "myTeamMemberships", "myTeamProposals", "pendingTeamProposals", "registration", "registrationFreeze", "registrationReadiness",
+      "rejectedTeamProposals", "teams",
     ]);
   });
 });
@@ -714,6 +716,7 @@ describe("UG-CR-GATE-100 correction — the nine required cases (unit)", () => {
       getMyRegistration: vi.fn().mockResolvedValue(null), getMyTeamMembership: vi.fn().mockResolvedValue(null),
       getMyPendingJoinRequest: vi.fn().mockResolvedValue(null), getMemberParticipationRecords: vi.fn().mockResolvedValue([]),
       getDisplayNames: vi.fn().mockResolvedValue({}), getCurrentRoster: vi.fn().mockResolvedValue(null),
+      getRegistrationStatus: vi.fn().mockResolvedValue(null), getRegistrationFreeze: vi.fn().mockResolvedValue(null),
     };
     const view = await getCompetitionView(stub as never, "11111111-1111-4111-8111-111111111111", ME);
     expect((view as unknown as { myScorekeeperFixtureIds?: string[] }).myScorekeeperFixtureIds).toEqual(["f-mine"]);

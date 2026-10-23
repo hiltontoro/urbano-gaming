@@ -112,6 +112,10 @@ const serviceClient = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: 
 const anonClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+// UG-CR-GATE-SSS-007A: what a bearer token looks like — THREE dot-separated base64url segments, the first starting "eyJ" (the encoding of `{"`), the last possibly
+// empty (an unsigned token). The three letters "eyJ" alone are not a token: a random public code can contain them, and the earlier guard (`eyJ` plus ten
+// characters) failed a run whenever one did.
+const JWT_SHAPE = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/;
 const RUN = randomUUID().slice(0, 8);
 
 interface Member {
@@ -1059,6 +1063,7 @@ describe("[T18] internal OPERATIONAL creation is unchanged", () => {
       expect(isActiveOrganizer(record, operator.gamingMemberId)).toBe(true);
       expect(isListedFor({ ...record, state: "TEAM_REGISTRATION_OPEN" }, "someone-else")).toBe(true);
     }
+    await saveFixturePlan(a.competitionId, operator.gamingMemberId); // UG-CR-GATE-SSS-007: opening needs a plan
     const open = await openTeamRegistration(compRepo, a.competitionId, operator.gamingMemberId);
     expect(open.state).toBe("TEAM_REGISTRATION_OPEN");
     // The legacy three-argument create signature keeps working too, with its OPERATIONAL-only rule.
@@ -1091,6 +1096,100 @@ describe("[T18] internal OPERATIONAL creation is unchanged", () => {
 // Competition scaffolding shared by the matrix: a fully published bracket
 // =============================================================================
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-007 fixtures. Opening team registration now needs a usable plan (a saved Organizer Planning revision whose deadline is still ahead), and the
+// freeze (CLOSE_TEAM_REGISTRATION) needs that deadline to have passed and every roster to be within the plan's bounds. These helpers give a competition a REAL
+// plan through the real save operation and — only when a flow needs "the deadline has passed" — record a LATER revision as the database owner (a service-side
+// fixture: the save operation itself needs a DRAFT) whose deadline is the first whole second after the competition's newest registration-related row, so every
+// row already written is stamped before it. Rosters are built through the real operations (register, ask to join, the captain approves), all BEFORE the
+// freeze: afterwards nobody can register, ask to join or be approved. Nothing here waits for a real deadline.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const FIXTURE_DAY = 24 * 3600_000;
+const COSTA_RICA_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving: always UTC-06:00
+
+async function saveFixturePlan(competitionId: string, organizerId: string, deadlineInMs = 30 * FIXTURE_DAY) {
+  const { parsePlanningPlan } = await import("../lib/gaming/competitions/planning");
+  const deadlineMs = Date.now() + deadlineInMs;
+  const local = (ms: number) => new Date(ms + COSTA_RICA_OFFSET_MS).toISOString();
+  const plan = parsePlanningPlan({
+    venue: { name: "Cancha Contract", locationDescription: "Calle 5, San Jose, behind the central market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: local(deadlineMs + 3 * FIXTURE_DAY).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: local(deadlineMs).slice(0, 16), timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: "Draft registration rules, version one." },
+  }, "SOCCER_5V5");
+  return compRepo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
+}
+
+async function passDeadlineFixture(competitionId: string): Promise<void> {
+  const db = new Client({ connectionString: supabaseDbUrl, statement_timeout: 30000 });
+  await db.connect();
+  try {
+    const latest = (await db.query(
+      `select greatest(
+         coalesce((select max(registered_at) from competition_registrations where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_teams where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_join_requests where competition_id = $1), 'epoch'),
+         coalesce((select max(approved_at) from competition_team_memberships where competition_id = $1), 'epoch'),
+         coalesce((select max(created_at) from competition_planning_revisions where competition_id = $1), 'epoch')) as latest`, [competitionId])).rows[0].latest as Date;
+    const deadline = new Date((Math.floor(latest.getTime() / 1000) + 1) * 1000);
+    const wait = deadline.getTime() - Date.now() + 60;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await db.query("begin");
+    const cur = (await db.query("select * from competition_planning_revisions where competition_id = $1 order by revision_number desc limit 1", [competitionId])).rows[0];
+    const next = (await db.query(
+      `insert into competition_planning_revisions (competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, intent_id, payload_digest,
+         venue_name, venue_location_description, venue_time_zone, simultaneous_match_capacity, venue_restriction_notes, roster_minimum, roster_maximum,
+         registration_deadline_local, registration_deadline_time_zone, registration_deadline_utc_offset_minutes, registration_deadline_utc, rules_version, rules_snapshot, rules_snapshot_digest)
+       values ($1,$2,$3,$4,$5,gen_random_uuid(),$6,$7,$8,$9,$10,$11,$12,$13, ($14::timestamptz at time zone $15), $15, $16, $14::timestamptz, $17,$18,$19) returning planning_revision_id`,
+      [competitionId, cur.format_key, cur.revision_number + 1, cur.planning_revision_id, cur.authored_by_gaming_member_id, cur.payload_digest, cur.venue_name, cur.venue_location_description,
+        cur.venue_time_zone, cur.simultaneous_match_capacity, cur.venue_restriction_notes, cur.roster_minimum, cur.roster_maximum, deadline.toISOString(), cur.registration_deadline_time_zone,
+        cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
+    await db.query("insert into competition_planning_pitches (planning_revision_id, position, label, is_usable, restriction_notes) select $2::uuid, position, label, is_usable, restriction_notes from competition_planning_pitches where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query(
+      `insert into competition_planning_pitch_formats (planning_pitch_id, format_key)
+       select np.planning_pitch_id, f.format_key from competition_planning_pitches op join competition_planning_pitch_formats f on f.planning_pitch_id = op.planning_pitch_id
+         join competition_planning_pitches np on np.planning_revision_id = $2::uuid and np.position = op.position where op.planning_revision_id = $1::uuid`, [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_dates (planning_revision_id, plan_date, position) select $2::uuid, plan_date, position from competition_planning_dates where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("insert into competition_planning_windows (planning_revision_id, plan_date, window_index, start_time, end_time) select $2::uuid, plan_date, window_index, start_time, end_time from competition_planning_windows where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
+    await db.query("commit");
+  } finally {
+    await db.end().catch(() => undefined);
+  }
+}
+
+const TEAM_ROSTER_SIZE = 5; // the five-a-side roster minimum the fixture plan configures
+const ROSTER_POOL: Member[] = []; // shared people: a member belongs to one team per competition, so the same twenty fill the rosters of every bracket this file builds
+async function ensureRosterPool(): Promise<void> {
+  while (ROSTER_POOL.length < 4 * TEAM_ROSTER_SIZE) {
+    const base = ROSTER_POOL.length;
+    ROSTER_POOL.push(...(await Promise.all(Array.from({ length: 5 }, (_, i) => createMember(`Pool Player ${base + i}`)))));
+  }
+}
+
+/** Each team's roster, built through the real operations while registration is still open. Returns the members approved on each team, in order. */
+async function buildRosters(competitionId: string, teams: Array<{ competitionTeamId: string; captainId: string }>): Promise<string[][]> {
+  await ensureRosterPool();
+  return Promise.all(teams.map(async (team, t) => {
+    const members: string[] = [];
+    for (let k = 0; k < TEAM_ROSTER_SIZE; k++) {
+      const person = ROSTER_POOL[t * TEAM_ROSTER_SIZE + k];
+      await registerForCompetition(compRepo, competitionId, person.gamingMemberId, true);
+      const request = await requestJoinTeam(compRepo, competitionId, team.competitionTeamId, person.gamingMemberId);
+      await decideJoinRequest(compRepo, request.competitionJoinRequestId, team.captainId, "APPROVE", false);
+      members.push(person.gamingMemberId);
+    }
+    return members;
+  }));
+}
+
+/** The next member of a team's FROZEN roster (wrapping around): joining is a pre-freeze operation, so a flow that needs "a member approved on this team" afterwards takes one the freeze recorded. */
+function nextFrozenMember(rosters: string[][], cursor: number[], teamIndex: number): string {
+  const roster = rosters[teamIndex];
+  return roster[cursor[teamIndex]++ % roster.length];
+}
+
 interface CompetitionCtx {
   competitionId: string;
   publicCode: string;
@@ -1107,13 +1206,17 @@ interface CompetitionCtx {
 
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
 
+// The dates are relative to the moment this file starts (computed ONCE, so every call in a run saves the same payload) and the deadline is in the future:
+// UG-CR-GATE-SSS-007 refuses to open registration for a plan whose deadline has passed, and a fixed calendar date would rot.
+const PLAN_START_MS = Date.now();
+const planLocal = (ms: number) => new Date(ms - 6 * 3600_000).toISOString(); // America/Costa_Rica: UTC-06:00, no daylight saving
 /** A valid Organizer Planning plan for a 5v5 competition (UG-CR-GATE-SSS-004): the one payload every planning call below saves. */
 const planningPlan = () => parsePlanningPlan({
   venue: { name: `Matrix Venue ${RUN}`, locationDescription: "A fictional venue used only by the local contract suite.", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
   pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
-  dates: [{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }] }],
+  dates: [{ date: planLocal(PLAN_START_MS + 33 * 24 * 3600_000).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
   roster: { minimum: 5, maximum: 8 },
-  registrationDeadline: { local: "2026-11-01T18:00", timeZone: "America/Costa_Rica" },
+  registrationDeadline: { local: planLocal(PLAN_START_MS + 30 * 24 * 3600_000).slice(0, 16), timeZone: "America/Costa_Rica" },
   rules: { version: "matrix-1", snapshot: "Planning evidence for the organizer matrix." },
 }, "SOCCER_5V5");
 
@@ -1125,15 +1228,20 @@ async function publishBracket(competitionId: string, organizerId: string, labelP
     const team = await addCompetitionTeam(compRepo, competitionId, organizerId, `${labelPrefix} Team ${i} ${RUN}`, captains[i].gamingMemberId);
     teams.push({ competitionTeamId: team.competitionTeamId, captainId: captains[i].gamingMemberId });
   }
+  // UG-CR-GATE-SSS-007: closing is the FREEZE. The rosters are built first; the matrix still needs a registrant with a join request, but a PENDING request would
+  // (rightly) block the freeze, so the team's captain decides it (rejected) before the deadline passes — the organizer matrix then has a request to review.
+  await buildRosters(competitionId, teams);
+  const member = await createMember(`${labelPrefix} Registrant`);
+  await registerForCompetition(compRepo, competitionId, member.gamingMemberId, true);
+  const joinRequest = await requestJoinTeam(compRepo, competitionId, teams[0].competitionTeamId, member.gamingMemberId);
+  await decideJoinRequest(compRepo, joinRequest.competitionJoinRequestId, teams[0].captainId, "REJECT", false);
+  await passDeadlineFixture(competitionId);
   await closeTeamRegistration(compRepo, competitionId, organizerId);
   const published = await publishCompetition(
     compRepo, competitionId, organizerId,
     teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,
     iso(3600_000), iso(7200_000), iso(10800_000)
   );
-  const member = await createMember(`${labelPrefix} Registrant`);
-  await registerForCompetition(compRepo, competitionId, member.gamingMemberId, true);
-  const joinRequest = await requestJoinTeam(compRepo, competitionId, teams[0].competitionTeamId, member.gamingMemberId);
   return { teams, published, joinRequestId: joinRequest.competitionJoinRequestId, someMemberId: member.gamingMemberId };
 }
 
@@ -1141,6 +1249,7 @@ async function publishBracket(competitionId: string, organizerId: string, labelP
 async function buildHostCompetition(label: string): Promise<CompetitionCtx> {
   const { member, code } = await approvedHost(label);
   const created = await createHostCompetition(hostRepo, member.gamingMemberId, `Pilot ${label} ${RUN}`);
+  await saveFixturePlan(created.competitionId, member.gamingMemberId);
   await openTeamRegistration(compRepo, created.competitionId, member.gamingMemberId);
   const built = await publishBracket(created.competitionId, member.gamingMemberId, label);
   const record = (await compRepo.getCompetitionById(created.competitionId))!;
@@ -1157,6 +1266,7 @@ async function buildInternalCompetition(label: string): Promise<CompetitionCtx> 
   const operator = await createMember(`${label} Operator`);
   await grantOperational(operator.gamingMemberId);
   const created = await createCompetition(compRepo, operator.gamingMemberId, `Internal ${label} ${RUN}`, "SOCCER_5V5");
+  await saveFixturePlan(created.competitionId, operator.gamingMemberId);
   await openTeamRegistration(compRepo, created.competitionId, operator.gamingMemberId);
   const built = await publishBracket(created.competitionId, operator.gamingMemberId, label);
   const record = (await compRepo.getCompetitionById(created.competitionId))!;
@@ -1724,13 +1834,44 @@ describe("[T21, T22] hostile text is data, and nothing identifying leaves the se
     for (const body of [status, review]) {
       expect(body).not.toMatch(UUID_PATTERN);
       expect(body).not.toContain("@example.com");
-      expect(body).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}/); // no JWT
+      expect(body).not.toMatch(JWT_SHAPE); // no JWT
       expect(body).not.toContain(member.gamingMemberId);
       expect(body).not.toContain(member.authUserId);
     }
     expect(status).not.toContain(reviewer.gamingMemberId);
     void code;
   }, 60000);
+
+  // UG-CR-GATE-SSS-007A Correction C. The guard above must recognise a structurally plausible token — three dot-separated base64url segments whose first
+  // starts "eyJ" (the encoding of `{"`) — and not the three letters "eyJ" that a random 22-character public code happens to contain. These controls pin both.
+  // (Red-first: this block first ran against the previous guard, which flagged the incidental code; PREVIOUS_GUARD below keeps that fact checked.)
+  const GUARD = JWT_SHAPE;
+  const PREVIOUS_GUARD = /eyJ[A-Za-z0-9_-]{10,}/;
+  it("[T22] the JWT guard ignores the letters 'eyJ' inside an ordinary public code, wherever they fall", () => {
+    const filler = "A1b2C3d4E5f6G7h8I9j0K1";
+    for (let offset = 0; offset <= 9; offset++) {
+      const code = (filler.slice(0, offset) + "eyJ" + filler.slice(offset + 3)).slice(0, 22);
+      expect(code).toHaveLength(22);
+      expect(code).toContain("eyJ");
+      const body = JSON.stringify({ publicCode: `CR-p-${code}`, nested: [{ code }, { code: "eyJ" + filler.slice(3, 22) }] });
+      expect(body, `incidental eyJ at offset ${offset}`).not.toMatch(GUARD);
+      expect(body, `the control is meaningful: the previous guard flagged offset ${offset}`).toMatch(PREVIOUS_GUARD);
+    }
+    // Hyphens and underscores are legitimate inside a code and never make it a token.
+    expect(JSON.stringify({ publicCode: "CR-p-eyJ_abc-DEFGH12345" })).not.toMatch(GUARD);
+  });
+
+  it("[T22] the JWT guard still detects a complete JWT-shaped value, quoted, bearer-prefixed or unsigned", () => {
+    // Clearly synthetic: the header decodes to {"alg":"none","typ":"synthetic"}, the payload to {"sub":"synthetic-control-only"}; nothing here is a credential.
+    const header = "eyJhbGciOiJub25lIiwidHlwIjoic3ludGhldGljIn0";
+    const payload = "eyJzdWIiOiJzeW50aGV0aWMtY29udHJvbC1vbmx5In0";
+    const signature = "c3ludGhldGljLXNpZ25hdHVyZS1jb250cm9sLW9ubHk";
+    for (const value of [`${header}.${payload}.${signature}`, `${header}.${payload}.`]) {
+      expect(JSON.stringify({ token: value }), value).toMatch(GUARD);
+      expect(`Authorization: Bearer ${value}`, value).toMatch(GUARD);
+      expect(JSON.stringify({ a: "CR-p-AbCdEfGhIjKlMnOpQrStUv", nested: { deep: [value] } }), value).toMatch(GUARD);
+    }
+  });
 
   it("[T22] the typed errors a browser can receive never carry SQL text, ids or the caller's data", async () => {
     const member = await createMember("Applicant Messages");

@@ -3,6 +3,7 @@ import type { CompetitionView, CompetitionFixtureViewEntry, FixtureState } from 
 import { CompetitionNotFoundError } from "./types";
 import { isActiveOrganizer, toPublicCompetition } from "./organizerAccess";
 import { appointedFixtureIds } from "./administration";
+import { buildRegistrationReadiness, summarizeRegistrationFreeze, toRegistrationStatus } from "./registrationFreeze";
 
 const EVIDENCE_VISIBLE_STATES: FixtureState[] = [
   "EVIDENCE_SUBMITTED",
@@ -66,6 +67,35 @@ export async function getCompetitionView(
     const rawMemberships = await repo.getTeamMemberships(myTeamMembership.competitionTeamId);
     for (const m of rawMemberships) displayNameIds.add(m.gamingMemberId);
     myTeamMemberships = rawMemberships; // display names attached below, once resolved
+  }
+
+  // UG-CR-GATE-SSS-007 — the registration deadline, as the server derives it, for THIS addressed competition only. A draft has none (its plan is still
+  // a draft), and neither does a competition with no USABLE plan: for that one the answer is null, and null means CLOSED (UG-CR-GATE-SSS-007A) — the page offers
+  // no write for a missing status, and the database refuses every write the same way. The read is the database's own word on "passed" and "accepting"; it is
+  // not part of the general list, and a failure to read it fails the whole view rather than rendering a page that could offer a write it cannot vouch for.
+  const registrationRead = competition.state === "DRAFT" ? null : await repo.getRegistrationStatus(competitionId);
+  const registration = toRegistrationStatus(registrationRead, competition.state);
+  let registrationReadiness: CompetitionView["registrationReadiness"] = null;
+  let registrationFreeze: CompetitionView["registrationFreeze"] = null;
+  if (registrationRead && registration && isOrganizer) {
+    if (registration.frozen) {
+      const evidence = await repo.getRegistrationFreeze(competitionId);
+      registrationFreeze = evidence ? summarizeRegistrationFreeze(evidence, acceptedTeams) : null;
+    } else if (competition.state === "TEAM_REGISTRATION_OPEN") {
+      // What the freeze still needs, as counts: bounded by the four accepted teams, and read only for the organizer who administers them.
+      const perTeam = await Promise.all(
+        acceptedTeams.map(async (team) => {
+          const [memberships, requests] = await Promise.all([repo.getTeamMemberships(team.competitionTeamId), repo.getPendingJoinRequestsForTeam(team.competitionTeamId)]);
+          return { name: team.name, memberCount: memberships.length, pendingRequests: requests.length };
+        })
+      );
+      registrationReadiness = buildRegistrationReadiness(
+        registrationRead,
+        perTeam,
+        allTeams.filter((t) => t.status === "PENDING_ORGANIZER_APPROVAL").length,
+        perTeam.reduce((sum, t) => sum + t.pendingRequests, 0)
+      );
+    }
   }
 
   const displayNames = await repo.getDisplayNames(Array.from(displayNameIds));
@@ -162,5 +192,8 @@ export async function getCompetitionView(
     // UG-CR-GATE-100: the fixtures of THIS addressed competition the caller is currently appointed to score — the only way the member
     // competition page learns it may offer the scorekeeper action. Decided here, per competition; never a list across competitions.
     myScorekeeperFixtureIds: appointedFixtureIds(competition, fixtures, callerGamingMemberId),
+    registration,
+    registrationReadiness,
+    registrationFreeze,
   };
 }

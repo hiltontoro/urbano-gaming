@@ -44,6 +44,8 @@ import type {
   CompetitionPlanningPlan,
   CompetitionPlanningRevisionRecord,
   SavePlanningRevisionResult,
+  RegistrationStatusRead,
+  RegistrationFreezeRecord,
 } from "../types";
 
 /**
@@ -157,6 +159,13 @@ export interface CompetitionsRepository {
   getDisputes(competitionFixtureId: string): Promise<CompetitionDisputeRecord[]>;
   getCurrentFinalization(competitionFixtureId: string): Promise<CompetitionFixtureFinalizationRecord | null>;
   getMemberParticipationRecords(competitionId: string, gamingMemberId: string): Promise<CompetitionMemberParticipationRecord[]>;
+
+  // UG-CR-GATE-SSS-007 — the two server-only reads the registration deadline and freeze are shown from. Each is for ONE addressed competition; neither is
+  // part of discovery, and neither decides anything: the atomic operations above judge every write by the database clock themselves.
+  /** The deadline facts and whether the DATABASE says new entries are accepted now, or null for a draft or a competition that has no plan. */
+  getRegistrationStatus(competitionId: string): Promise<RegistrationStatusRead | null>;
+  /** The recorded freeze of this competition, or null if it has none. */
+  getRegistrationFreeze(competitionId: string): Promise<RegistrationFreezeRecord | null>;
 }
 
 /**
