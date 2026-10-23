@@ -255,7 +255,7 @@ describe("the rest of Home is unchanged", () => {
     const page = await loadHome(() => list());
     await page.settle();
     const titles = Array.from(page.doc.querySelectorAll(".exp-card h3")).map((h) => h.textContent);
-    expect(titles).toEqual(["Trivia", "Quiz", "Poker", "Duel", "Become a Host", "Community Voting", "Level 33"]);
+    expect(titles).toEqual(["Poker", "Trivia", "Quiz", "Duel", "Become a Host", "Community Voting", "Level 33"]);
     const byTitle = (t: string) => Array.from(page.doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h3")?.textContent === t) as HTMLElement;
     for (const [title, href] of [["Trivia", "/trivia-playtest.html"], ["Quiz", "/quiz-playtest.html"], ["Poker", "/host.html?experience=poker"]] as const) {
       expect(byTitle(title).getAttribute("href"), title).toBe(href);

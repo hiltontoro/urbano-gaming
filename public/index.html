@@ -323,6 +323,19 @@
   // for it here would be redundant, not additive.
   const SKILL_GAMES_CATALOG = [
     {
+      icon: "🃏",
+      title: "Poker",
+      sub: "Host a private No-Limit Hold'em table for your group.",
+      status: "playtest",
+      // Host Unified Entry Slice 003 §18: converges on the canonical
+      // picker shell with Poker preselected, replacing the standalone
+      // /poker-host.html entry point — that page still works
+      // indefinitely as a compatibility surface (§17/§19), it is just
+      // no longer where this card sends a Host.
+      href: "/host.html?experience=poker",
+      action: "Host →",
+    },
+    {
       icon: "🧠",
       title: "Trivia",
       sub: "Host or join a live session — try the current Trivia playtest.",
@@ -335,19 +348,6 @@
       sub: "Self-paced — everyone answers on their own time, results reveal together.",
       status: "playtest",
       href: "/quiz-playtest.html",
-    },
-    {
-      icon: "🃏",
-      title: "Poker",
-      sub: "Host a private No-Limit Hold'em table for your group.",
-      status: "playtest",
-      // Host Unified Entry Slice 003 §18: converges on the canonical
-      // picker shell with Poker preselected, replacing the standalone
-      // /poker-host.html entry point — that page still works
-      // indefinitely as a compatibility surface (§17/§19), it is just
-      // no longer where this card sends a Host.
-      href: "/host.html?experience=poker",
-      action: "Host →",
     },
     {
       icon: "⚔️",

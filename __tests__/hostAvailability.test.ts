@@ -454,7 +454,7 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     const page = await loadLanding(() => "reject");
     await page.settle(30);
     const games = Array.from(page.doc.querySelectorAll("#games-carousel h3")).map((h) => h.textContent);
-    expect(games).toEqual(["Trivia", "Quiz", "Poker", "Duel"]);
+    expect(games).toEqual(["Poker", "Trivia", "Quiz", "Duel"]);
     const experiences = Array.from(page.doc.querySelectorAll("#experiences-carousel h3")).map((h) => h.textContent);
     expect(experiences).toEqual(["Become a Host", "Community Voting", "Level 33"]);
     expect(page.doc.querySelectorAll("#experiences-carousel .exp-card.is-locked").length).toBe(3); // all three informational while closed
