@@ -232,6 +232,41 @@ describe("SupabaseSessionRepository contract — Math Duel migration-created sch
     expect(probe.error).toBeNull();
   });
 
+  it("duel_math_challenges_reached is closed to client roles, while the server (service-role) path still reads it", async () => {
+    const anonKey = env.SUPABASE_ANON_KEY;
+    if (!anonKey) throw new Error("SUPABASE_ANON_KEY is required for this contract test.");
+    const anonClient = createClient(supabaseUrl, anonKey);
+    const email = `view-acl-${randomUUID()}@example.test`;
+    const password = `Pw-${randomUUID()}`;
+    const created = await cleanupClient.auth.admin.createUser({ email, password, email_confirm: true });
+    expect(created.error).toBeNull();
+    try {
+      const signedIn = await anonClient.auth.signInWithPassword({ email, password });
+      expect(signedIn.error).toBeNull();
+      const authedClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${signedIn.data.session!.access_token}` } },
+      });
+      for (const [label, client] of [["anon", anonClient], ["authenticated", authedClient]] as const) {
+        const read = await client.from("duel_math_challenges_reached").select("duel_id").limit(1);
+        expect(read.error?.code, `${label} select`).toBe("42501");
+        const write = await client
+          .from("duel_math_challenges_reached")
+          .update({ question_text: "x" })
+          .eq("duel_id", randomUUID());
+        expect(write.error?.code, `${label} update`).toBe("42501");
+        const removal = await client
+          .from("duel_math_challenges_reached")
+          .delete()
+          .eq("duel_id", randomUUID());
+        expect(removal.error?.code, `${label} delete`).toBe("42501");
+      }
+      const server = await cleanupClient.from("duel_math_challenges_reached").select("duel_id").limit(1);
+      expect(server.error).toBeNull();
+    } finally {
+      if (created.data.user) await cleanupClient.auth.admin.deleteUser(created.data.user.id);
+    }
+  });
+
   it("rejects a math response with no corresponding challenge (composite FK)", async () => {
     const { session, participants } = await setupDuelReadySession();
     const [a, b] = participants;
