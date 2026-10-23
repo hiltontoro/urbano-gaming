@@ -314,16 +314,27 @@ describe("[transition] activity_key is restricted by a foreign key to the regist
     for (const good of KEYS) expect(await violation(insert(good)), good).toBeNull();
   }, 60000);
 
-  it("re-applying the SSS-001 migration over the pre-migration state keeps every existing 5v5 row byte-for-byte unchanged", async () => {
+  it("re-applying the SSS-001 migration over the pre-migration state keeps every existing 5v5 row byte-for-byte unchanged — with LATER dependent schema present, entirely inside a rolled-back transaction", async () => {
     const dir = path.join(process.cwd(), "supabase/migrations");
     const files = readdirSync(dir).filter((f) => /small_sided_soccer_format_rules_foundation/.test(f));
     expect(files).toHaveLength(1);
     const migrationSql = readFileSync(path.join(dir, files[0]), "utf8");
     const organizer = await newPerson("Transition Organizer");
 
+    // The foreign keys that LATER migrations hung on the registry (every one except the competitions key SSS-001 itself creates), read from the catalog and
+    // never hard-coded. They are removed ONLY inside the rolled-back transaction below, and re-added there, so nothing later is dropped for good.
+    const dependentsQuery = `select conrelid::regclass::text as tbl, conname, pg_get_constraintdef(oid) as def from pg_constraint
+                              where contype = 'f' and confrelid = 'public.competition_format_rules'::regclass and conrelid <> 'public.competitions'::regclass order by 1, 2`;
+    type Dependent = { tbl: string; conname: string; def: string };
+    const dependents = await rawTransaction(async (db) => (await db.query(dependentsQuery)).rows as Dependent[]);
+    // Not vacuous: the planning table's key to the registry is one of them (SSS-004A).
+    expect(dependents).toContainEqual({ tbl: "competition_planning_pitch_formats", conname: "competition_planning_pitch_formats_format_registry_fkey", def: "FOREIGN KEY (format_key) REFERENCES competition_format_rules(format_key)" });
+    const registryBefore = await rawTransaction(async (db) => (await db.query("select * from competition_format_rules order by format_key")).rows);
+
     await rawTransaction(async (db) => {
-      // Rebuild the PRE-migration state: no registry, the single-value CHECK on activity_key.
+      // Rebuild the PRE-migration state: no registry, no later dependents, the single-value CHECK on activity_key. No CASCADE anywhere.
       await db.query("alter table competitions drop constraint competitions_activity_key_fkey");
+      for (const d of dependents) await db.query(`alter table ${d.tbl} drop constraint ${d.conname}`);
       await db.query("drop table competition_format_rules");
       await db.query("alter table competitions add constraint competitions_activity_key_check check (activity_key in ('SOCCER_5V5'))");
       // Existing rows, in several lifecycle states, as they were before the migration.
@@ -347,7 +358,18 @@ describe("[transition] activity_key is restricted by a foreign key to the regist
       await db.query("update competitions set name = name where name like $1", [`Pre-migration % ${RUN}`]);
       await db.query("update competitions set activity_key = 'SOCCER_6V6' where name = $1", [`Pre-migration 0 ${RUN}`]);
       expect((await db.query("select activity_key from competitions where name = $1", [`Pre-migration 0 ${RUN}`])).rows[0].activity_key).toBe("SOCCER_6V6");
+      // The later dependents layer back onto the REPRODUCED registry (re-adding a key validates every existing dependent row against it).
+      for (const d of dependents) await db.query(`alter table ${d.tbl} add constraint ${d.conname} ${d.def}`);
+      expect((await db.query(dependentsQuery)).rows).toEqual(dependents);
     });
+
+    // After the rollback, from a fresh connection: nothing of the simulation persisted, and every later dependent is exactly as it was.
+    expect(await rawTransaction(async (db) => (await db.query(dependentsQuery)).rows)).toEqual(dependents);
+    expect(await rawTransaction(async (db) => (await db.query("select * from competition_format_rules order by format_key")).rows)).toEqual(registryBefore);
+    expect(await rawTransaction(async (db) => (await db.query("select count(*)::int as n from competitions where name like $1", [`Pre-migration % ${RUN}`])).rows[0].n)).toBe(0);
+    expect(await rawTransaction(async (db) => (await db.query("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'competitions_activity_key_fkey'")).rows))
+      .toEqual([{ def: "FOREIGN KEY (activity_key) REFERENCES competition_format_rules(format_key)" }]);
+    expect(await rawTransaction(async (db) => (await db.query("select count(*)::int as n from pg_constraint where conname = 'competitions_activity_key_check'")).rows[0].n)).toBe(0);
   }, 120000);
 });
 

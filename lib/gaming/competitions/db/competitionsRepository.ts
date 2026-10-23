@@ -41,6 +41,9 @@ import type {
   ResolveCompetitionPublicCodeResult,
   ResolveCompetitionTeamPublicCodeResult,
   CancelCompetitionResult,
+  CompetitionPlanningPlan,
+  CompetitionPlanningRevisionRecord,
+  SavePlanningRevisionResult,
 } from "../types";
 
 /**
@@ -170,4 +173,19 @@ export interface CompetitionAdministrationReads {
   listCompetitions(): Promise<CompetitionRecord[]>;
   /** Does this member hold the active internal OPERATIONAL authority that create_competition_atomically itself requires? */
   hasOperationalAuthority(gamingMemberId: string): Promise<boolean>;
+}
+
+/**
+ * UG-CR-GATE-SSS-004 — the two operations Organizer Planning is built on. Kept apart from {@link CompetitionsRepository} for the same reason as the
+ * administration reads: planning is its own bounded surface, and it neither widens nor changes any existing read or command.
+ *
+ * Saving is ONE atomic database operation that makes every decision itself — exact organizer ownership, the host-revocation guard, the DRAFT state,
+ * the format taken from the locked competition, the whole payload — and never relies on a caller having checked first. The current revision is read
+ * for one addressed competition only; the application decides who may see it.
+ */
+export interface CompetitionPlanningStore {
+  /** SAVE_COMPETITION_PLANNING_REVISION: one immutable revision and its facts, or the existing one for an exact replay of the same intent. */
+  savePlanningRevision(competitionId: string, organizerGamingMemberId: string, intentId: string, plan: CompetitionPlanningPlan): Promise<SavePlanningRevisionResult>;
+  /** The highest-numbered revision of this one competition, or null if none was ever saved. */
+  getCurrentPlanningRevision(competitionId: string): Promise<CompetitionPlanningRevisionRecord | null>;
 }

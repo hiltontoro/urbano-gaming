@@ -1625,11 +1625,11 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
       else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
     });
 
-    it("discovered exactly the 29 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel)", () => {
-      expect(routeFiles).toHaveLength(29);
+    it("discovered exactly the 30 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning)", () => {
+      expect(routeFiles).toHaveLength(30);
     });
 
-    it("with readiness disabled, every one of the 30 discovered handlers (GET+POST both counted on the base route) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
+    it("with readiness disabled, every one of the 32 discovered handlers (GET+POST both counted on the base route and on [competitionId]/planning) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
       delete process.env.COMPETITIONS_SCHEMA_READY;
       let handlersTested = 0;
 
@@ -1666,7 +1666,7 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
         }
       }
 
-      expect(handlersTested).toBe(30);
+      expect(handlersTested).toBe(32);
     });
   });
 });

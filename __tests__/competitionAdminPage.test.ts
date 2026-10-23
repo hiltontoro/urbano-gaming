@@ -683,3 +683,518 @@ describe("UG-CR-GATE-100 correction — the nine required cases (page)", () => {
     page.close();
   });
 });
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-004 — the draft planning editor: organizer-owned mode only
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+describe("UG-CR-GATE-SSS-004 — the draft planning editor (organizer-owned DRAFT competitions only)", () => {
+  const DRAFT_ID = "c-draft";
+  const LIVE_ID = "c-live";
+  const PLAN_URL = (id: string) => `/api/gaming/competitions/${id}/planning`;
+  const PENDING_COPY = "Draft planning — registration enforcement, draw, scheduling and venue rehearsal remain pending.";
+  const SNAPSHOT = "Draft planning rules, version one. Full public rules are pending.";
+
+  const CONTEXT = {
+    formatKey: "SOCCER_5V5", formatLabel: "Soccer 5v5", playersOnField: 5,
+    roster: { defaultMinimum: 5, defaultMaximum: 8, minimumRange: { low: 5, high: 8 }, maximumRange: { low: 5, high: 10 }, absoluteMaximum: 10 },
+    timing: { halves: 2, minutesPerHalf: 10, halftimeMinutes: 3, pitchTransitionMinutes: 10, minimumTeamRestMinutes: 30, knockoutShootoutReserveMinutes: 15 },
+    limits: { maxDates: 3, maxSpanDays: 14, maxWindowsPerDate: 2, maxPitches: 16 },
+  };
+  const REVISION = {
+    revisionNumber: 2, supersedesRevisionNumber: 1, createdAt: "2026-10-22T20:00:00.000Z", formatKey: "SOCCER_5V5",
+    venue: { name: "Cancha Central", locationDescription: "Calle 5, San José", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 2, restrictionNotes: "No metal cleats." },
+    pitches: [
+      { label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" },
+      { label: "B", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "Lights off after 21:00." },
+    ],
+    dates: [{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }, { start: "15:00", end: "19:00" }] }],
+    roster: { minimum: 6, maximum: 9 },
+    registrationDeadline: { local: "2026-11-01T18:00", timeZone: "America/Costa_Rica", utcOffset: "-06:00", utc: "2026-11-02T00:00:00.000Z" },
+    rules: { version: "draft-1", snapshot: SNAPSHOT, snapshotDigest: "a1b2c3d4e5f6" + "0".repeat(52) },
+  };
+
+  /** Adds the visibility test the shared harness page does not carry. */
+  function decorate<T extends { doc: Document }>(page: T) {
+    const visible = (el: Element | null): boolean => {
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        if ((node as HTMLElement).hidden) return false;
+        if ((node as HTMLElement).style && (node as HTMLElement).style.display === "none") return false;
+      }
+      return !!el;
+    };
+    return Object.assign(page, { visible });
+  }
+
+  type PlanReply = Reply | Promise<Reply>;
+  interface Scenario {
+    get?: () => PlanReply;
+    post?: (body: any) => PlanReply;
+    entries?: unknown[];
+  }
+
+  async function openPlanning(s: Scenario = {}) {
+    const entries = s.entries ?? [
+      { competitionId: DRAFT_ID, name: "Draft Cup", state: "DRAFT", access: "ORGANIZER" },
+      { competitionId: LIVE_ID, name: "Live Cup", state: "PUBLISHED", access: "ORGANIZER" },
+    ];
+    const page = await openAdminPage({
+      auth: SIGNED_IN,
+      transport: (r) => {
+        if (r.url === ADMIN_SOURCE) return { status: 200, json: { competitions: entries, operations: NO_OPERATION } };
+        if (r.url === PLAN_URL(DRAFT_ID) || r.url === PLAN_URL(LIVE_ID)) {
+          if (r.method === "POST") return (s.post ?? (() => ({ status: 500, json: { error: "unexpected save" } })))(JSON.parse(r.body ?? "null")) as never;
+          return (s.get ?? (() => ({ status: 200, json: { context: CONTEXT, revision: null } })))() as never;
+        }
+        const detail = r.url.match(/^\/api\/gaming\/competitions\/(c-[a-z0-9-]+)$/);
+        if (detail) return { status: 200, json: viewFor(detail[1], `Name of ${detail[1]}`, detail[1] === DRAFT_ID ? "DRAFT" : "PUBLISHED") };
+        if (r.url.endsWith("/admin-detail")) return { status: 200, json: ADMIN_DETAIL };
+        return { status: 404, json: { error: "unexpected request" } };
+      },
+    });
+    await page.settle(() => page.doc.querySelectorAll("#comp-select option").length > 0, "the competition list");
+    return decorate(page);
+  }
+
+  type Page = Awaited<ReturnType<typeof openPlanning>>;
+  const $ = (page: Page, selector: string) => page.doc.querySelector(selector) as any;
+  const $$ = (page: Page, selector: string) => [...page.doc.querySelectorAll(selector)] as any[];
+  const planningRequests = (page: Page) => page.requests.filter((r) => r.url.endsWith("/planning")).map((r) => `${r.method} ${r.url}`);
+
+  async function loadCompetition(page: Page, id: string) {
+    ($(page, "#comp-select") as HTMLSelectElement).value = id;
+    ($(page, "#btn-load-competition") as HTMLButtonElement).click();
+    await page.settle(() => page.visible(page.doc.getElementById("competition-detail")), "the competition detail");
+  }
+  async function openEditor(page: Page, id = DRAFT_ID) {
+    await loadCompetition(page, id);
+    await page.settle(() => !!page.doc.getElementById("planning-form"), "the planning editor");
+  }
+  function setValue(page: Page, el: any, value: string) {
+    el.value = value;
+    el.dispatchEvent(new page.win.Event("input", { bubbles: true }));
+    el.dispatchEvent(new page.win.Event("change", { bubbles: true }));
+  }
+  function fillValidPlan(page: Page) {
+    setValue(page, $(page, "#planning-venue-name"), "Cancha Central");
+    setValue(page, $(page, "#planning-venue-location"), "Calle 5, behind the market");
+    setValue(page, $(page, "#planning-venue-timezone"), "America/Costa_Rica");
+    setValue(page, $(page, "#planning-venue-capacity"), "1");
+    setValue(page, $(page, ".planning-date-input"), "2026-11-07");
+    setValue(page, $(page, ".planning-window-start"), "09:00");
+    setValue(page, $(page, ".planning-window-end"), "13:00");
+    setValue(page, $(page, "#planning-deadline-local"), "2026-11-01T18:00");
+    setValue(page, $(page, "#planning-rules-version"), "draft-1");
+    setValue(page, $(page, "#planning-rules-snapshot"), SNAPSHOT);
+  }
+  const EXPECTED_FIRST_PLAN = {
+    venue: { name: "Cancha Central", locationDescription: "Calle 5, behind the market", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+    pitches: [{ label: "Pitch 1", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+    dates: [{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: "2026-11-01T18:00", timeZone: "America/Costa_Rica" },
+    rules: { version: "draft-1", snapshot: SNAPSHOT },
+  };
+  const save = (page: Page) => ($(page, "#planning-save") as HTMLButtonElement).click();
+  const statusText = (page: Page) => $(page, "#planning-status").textContent as string;
+
+  it("39. the editor is absent on first paint — in the shipped markup, once signed in, and once the competitions are listed — and is requested only when an owned DRAFT is loaded", async () => {
+    const shipped = new JSDOM(ADMIN_HTML).window.document;
+    expect(shipped.querySelectorAll('[id*="planning"], [class*="planning"], [name*="planning"]')).toHaveLength(0);
+    expect(ADMIN_HTML).not.toMatch(/id="planning/);
+
+    const page = await openPlanning();
+    expect(page.doc.querySelectorAll('[id*="planning"], [class*="planning"]')).toHaveLength(0);
+    expect(planningRequests(page)).toEqual([]);
+    expect(page.controls()).toEqual(["select#comp-select", "button#btn-load-competition"]);
+
+    await openEditor(page);
+    expect(planningRequests(page)).toEqual([`GET ${PLAN_URL(DRAFT_ID)}`]);
+    expect(page.doc.querySelectorAll("#planning-section")).toHaveLength(1);
+    page.close();
+  });
+
+  it("40. the editor is absent for a non-DRAFT competition, in the scorekeeper context, with no authority, and after authorization is lost", async () => {
+    // A competition that is no longer a draft: no editor and no planning request.
+    const live = await openPlanning();
+    await loadCompetition(live, LIVE_ID);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(live.doc.querySelectorAll('[id*="planning"]')).toHaveLength(0);
+    expect(planningRequests(live)).toEqual([]);
+    // Moving from a draft to a published competition removes the editor.
+    await openEditor(live, DRAFT_ID);
+    expect(live.doc.getElementById("planning-section")).not.toBeNull();
+    await loadCompetition(live, LIVE_ID);
+    await live.settle(() => !live.doc.getElementById("planning-section"), "the editor to be removed");
+    live.close();
+
+    // The scorekeeper's contextual experience never builds it and never asks for it.
+    const scorer = decorate(await openAdminPage({
+      auth: SIGNED_IN, search: `?c=${CODE}`,
+      transport: (r) => {
+        if (r.url.startsWith("/api/gaming/competitions/resolve")) return { status: 200, json: { competitionId: CID } };
+        if (r.url === SCORER_ROUTE) {
+          return { status: 200, json: { competition: { competitionId: CID, name: "Their Cup", state: "DRAFT" }, teams: [], fixtures: [{ competitionFixtureId: "fx-1", fixtureRole: "FINAL", state: "CHECKIN_OPEN", scheduledAt: null, teamACompetitionTeamId: null, teamBCompetitionTeamId: null }] } };
+        }
+        return { status: 404, json: { error: "unexpected request" } };
+      },
+    }));
+    await scorer.settle(() => scorer.visible(scorer.doc.getElementById("competition-detail")), "the scorekeeper view");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(scorer.doc.querySelectorAll('[id*="planning"]')).toHaveLength(0);
+    expect(scorer.requests.some((r) => r.url.endsWith("/planning"))).toBe(false);
+    scorer.close();
+
+    // No organizer authority at all: the closed state, nothing else.
+    const none = await openAdminPage({ auth: SIGNED_IN, transport: (r) => (r.url === ADMIN_SOURCE ? { status: 200, json: { competitions: [], operations: NO_OPERATION } } : { status: 404, json: {} }) });
+    await none.settle(() => (none.doc.getElementById("admin-gate")?.textContent ?? "").length > 0, "the closed state");
+    expect(none.doc.querySelectorAll('[id*="planning"]')).toHaveLength(0);
+    none.close();
+
+    // An authorization read that fails AFTER the editor opened closes it with everything else.
+    let sourceCalls = 0;
+    const lost = decorate(await openAdminPage({
+      auth: SIGNED_IN,
+      transport: (r) => {
+        if (r.url === ADMIN_SOURCE) {
+          sourceCalls += 1;
+          if (sourceCalls > 1) throw new Error("network down");
+          return { status: 200, json: { competitions: [{ competitionId: DRAFT_ID, name: "Draft Cup", state: "DRAFT", access: "ORGANIZER" }], operations: NO_OPERATION } };
+        }
+        if (r.url === PLAN_URL(DRAFT_ID)) return { status: 200, json: { context: CONTEXT, revision: null } };
+        const detail = r.url.match(/^\/api\/gaming\/competitions\/(c-[a-z0-9-]+)$/);
+        return detail ? { status: 200, json: viewFor(detail[1], "Draft Cup", "DRAFT") } : { status: 404, json: {} };
+      },
+    }));
+    await lost.settle(() => lost.doc.querySelectorAll("#comp-select option").length > 0, "the list");
+    await openEditor(lost);
+    await lost.fireAuthChange();
+    await lost.settle(() => !lost.doc.getElementById("planning-section"), "the editor to close");
+    expect(lost.doc.querySelectorAll('[id*="planning"]')).toHaveLength(0);
+    lost.close();
+  });
+
+  it("40b. only the exact successful 200 shape opens the editor: every other answer — the uniform 404, the retired 404-with-context, a malformed 200, an error, silence — leaves it closed", async () => {
+    const closed: Array<[string, Reply]> = [
+      ["the uniform not-found", { status: 404, json: { error: "Planning was not found for this competition." } }],
+      ["the RETIRED not-found-with-context shape (it no longer means anything)", { status: 404, json: { error: "none", context: CONTEXT } }],
+      ["a 200 with no `revision` key at all", { status: 200, json: { context: CONTEXT } }],
+      ["a 200 whose revision is undefined-by-omission and context malformed", { status: 200, json: { context: { formatKey: 5 }, revision: null } }],
+      ["a 200 whose revision is neither null nor a revision", { status: 200, json: { context: CONTEXT, revision: "none" } }],
+      ["a 200 whose revision is malformed", { status: 200, json: { context: CONTEXT, revision: { revisionNumber: "two" } } }],
+      ["a 200 with a context that is missing", { status: 200, json: { revision: null } }],
+      ["a 200 whose body is an array", { status: 200, json: [] }],
+      ["a 200 with no body", { status: 200 }],
+      ["a 201 (not the read's success status)", { status: 201, json: { context: CONTEXT, revision: null } }],
+    ];
+    for (const [label, reply] of closed) {
+      const page = await openPlanning({ get: () => reply });
+      await loadCompetition(page, DRAFT_ID);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(page.doc.getElementById("planning-form"), label).toBeNull();
+      expect(page.doc.querySelectorAll("#planning-section input, #planning-section textarea, #planning-section button"), label).toHaveLength(0);
+      expect(page.text(), label).not.toContain("Soccer 5v5");
+      page.close();
+    }
+    for (const [label, reply] of [
+      ["a 500", { status: 500, json: { error: "Failed to load the plan." } }],
+      ["a 401", { status: 401, json: { error: "A valid Authorization header" } }],
+      ["a 503", { status: 503, json: { error: "temporarily unavailable" } }],
+    ] as Array<[string, Reply]>) {
+      const page = await openPlanning({ get: () => reply });
+      await loadCompetition(page, DRAFT_ID);
+      await page.settle(() => (page.doc.getElementById("planning-status")?.textContent ?? "").length > 0, label);
+      expect(page.doc.getElementById("planning-status")!.textContent, label).toContain("Planning could not be loaded.");
+      expect(page.doc.getElementById("planning-form"), label).toBeNull();
+      page.close();
+    }
+    const silent = await openPlanning({ get: () => new Promise<Reply>(() => {}) });
+    silent.win.eval("PLANNING_TIMEOUT_MS = 40");
+    await loadCompetition(silent, DRAFT_ID);
+    await silent.settle(() => (silent.doc.getElementById("planning-status")?.textContent ?? "").length > 0, "the timeout");
+    expect(silent.doc.getElementById("planning-status")!.textContent).toContain("Planning could not be loaded.");
+    expect(silent.doc.getElementById("planning-form")).toBeNull();
+    silent.close();
+  });
+
+  it("SSS-004A: the initial state is a successful 200/null: the editor opens with the registry defaults and 'No plan has been saved yet.', and shows no error", async () => {
+    const page = await openPlanning({ get: () => ({ status: 200, json: { context: CONTEXT, revision: null } }) });
+    await openEditor(page);
+    expect($(page, "#planning-saved").textContent).toBe("No plan has been saved yet.");
+    expect(statusText(page)).toBe("");
+    expect([$(page, "#planning-roster-min").value, $(page, "#planning-roster-max").value]).toEqual(["5", "8"]);
+    expect($(page, "#planning-section").querySelectorAll(".error")).toHaveLength(0);
+    page.close();
+  });
+
+  it("41. the format and the timing are shown read-only, from the server's context: no format control, no timing control, and no other format anywhere", async () => {
+    const page = await openPlanning();
+    await openEditor(page);
+    const section = $(page, "#planning-section");
+    expect(section.querySelectorAll("select")).toHaveLength(0);
+    expect($(page, "#planning-format").textContent).toContain("Soccer 5v5");
+    expect($(page, "#planning-format").querySelectorAll("input, select, textarea, button")).toHaveLength(0);
+    expect($$(page, "#planning-timing li").map((li) => li.textContent)).toEqual([
+      "Halves: 2", "Minutes per half: 10", "Halftime: 3 minutes", "Time between matches on a pitch: 10 minutes",
+      "Minimum rest for a team between its matches: 30 minutes", "Reserve for a possible knockout shootout: 15 minutes",
+    ]);
+    expect($(page, "#planning-timing").querySelectorAll("input, select, textarea, button")).toHaveLength(0);
+    for (const el of $$(page, "#planning-section input, #planning-section textarea")) {
+      expect(`${el.id} ${el.className} ${el.name}`, "no control may be named for the format or the fixed timing").not.toMatch(/timing|minutes|halves|halftime|transition|rest|shootout|activity/i);
+    }
+    expect(page.text()).not.toMatch(/\b[678]v[678]\b|SOCCER_[678]V/i);
+    // The roster takes its bounds and defaults from the server's context and nothing is invented here.
+    const min = $(page, "#planning-roster-min"), max = $(page, "#planning-roster-max");
+    expect([min.value, min.min, min.max, max.value, max.min, max.max]).toEqual(["5", "5", "8", "8", "5", "10"]);
+    // Each pitch offers one yes/no for THIS competition's format, never a list of formats.
+    const suitable = $$(page, ".planning-pitch-format");
+    expect(suitable).toHaveLength(1);
+    expect(suitable[0].type).toBe("checkbox");
+    expect(suitable[0].checked).toBe(true);
+    page.close();
+  });
+
+  it("45/46. the pending-status copy is exact, the plan is called a draft plan, and nothing about authority or another record appears", async () => {
+    const page = await openPlanning({
+      get: () => ({
+        status: 200,
+        json: {
+          context: { ...CONTEXT, internalNote: "SENTINEL-CONTEXT" },
+          revision: { ...REVISION, planningRevisionId: "SENTINEL-REVISION-ID", authoredByGamingMemberId: "SENTINEL-MEMBER", competitionId: "SENTINEL-COMPETITION", organizerGamingMemberId: "SENTINEL-ORGANIZER", hostBound: true, authority: "OPERATIONAL" },
+        },
+      }),
+    });
+    await openEditor(page);
+    expect($(page, "#planning-pending-note").textContent).toBe(PENDING_COPY);
+    const text = $(page, "#planning-section").textContent as string;
+    expect(text).toContain("draft plan");
+    expect(text).toContain("does not approve the venue");
+    expect(text).toMatch(/Full public sporting rules, schedule validation and venue rehearsal remain pending\./);
+    // The rendered section, not the page's script source (which legitimately names things like OPERATIONAL in its older comments).
+    for (const secret of ["SENTINEL", "OPERATIONAL", "authority", "capability", "hostBound", "competitionId", "gamingMember", "approved"]) expect(text, secret).not.toContain(secret);
+    expect($(page, "#planning-section").innerHTML).not.toMatch(/SENTINEL|OPERATIONAL/);
+    expect(page.text()).not.toContain("SENTINEL");                  // nothing the server sent beyond the fields the page knows is placed anywhere on the page
+    page.close();
+  });
+
+  it("shows the saved revision read-only and fills the form from it, so the next save is an edit of the current plan", async () => {
+    const page = await openPlanning({ get: () => ({ status: 200, json: { context: CONTEXT, revision: REVISION } }) });
+    await openEditor(page);
+    const saved = $(page, "#planning-saved").textContent as string;
+    for (const part of ["Revision 2", "Cancha Central", "Calle 5, San José", "America/Costa_Rica", "No metal cleats.", "A", "B", "2026-11-07", "09:00–13:00", "15:00–19:00", "6–9 players", "2026-11-02T00:00:00.000Z", "draft-1", "a1b2c3d4e5f6"]) {
+      expect(saved, part).toContain(part);
+    }
+    expect($(page, "#planning-saved").querySelectorAll("input, select, textarea, button")).toHaveLength(0);
+    expect($(page, "#planning-venue-name").value).toBe("Cancha Central");
+    expect($(page, "#planning-venue-timezone").value).toBe("America/Costa_Rica");
+    expect($(page, "#planning-venue-capacity").value).toBe("2");
+    expect($$(page, ".planning-pitch-label").map((i) => i.value)).toEqual(["A", "B"]);
+    expect($$(page, ".planning-window-start").map((i) => i.value)).toEqual(["09:00", "15:00"]);
+    expect($(page, "#planning-deadline-local").value).toBe("2026-11-01T18:00");
+    expect([$(page, "#planning-roster-min").value, $(page, "#planning-roster-max").value]).toEqual(["6", "9"]);
+    expect($(page, "#planning-rules-snapshot").value).toBe(SNAPSHOT);
+    page.close();
+  });
+
+  it("42. saving posts exactly the plan the form holds — no format, no timing, no actor — and success is shown only after the server's own answer", async () => {
+    let release!: (r: Reply) => void;
+    const pending = new Promise<Reply>((resolve) => { release = resolve; });
+    const bodies: any[] = [];
+    const page = await openPlanning({ post: (body) => { bodies.push(body); return pending; } });
+    await openEditor(page);
+    expect(statusText(page)).toBe("");
+    fillValidPlan(page);
+    save(page);
+    await page.settle(() => bodies.length === 1, "the save request");
+    expect(Object.keys(bodies[0]).sort()).toEqual(["intentId", "plan"]);
+    expect(bodies[0].intentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(bodies[0].plan).toEqual(EXPECTED_FIRST_PLAN);
+    expect(JSON.stringify(bodies[0])).not.toMatch(/formatKey|activityKey|minutesPerHalf|organizerGamingMemberId|gamingMemberId|halves|timing/);
+    // While the request is in flight there is no success, the control is locked, and a second click sends nothing.
+    expect(statusText(page)).toBe("Saving…");
+    expect(($(page, "#planning-save") as HTMLButtonElement).disabled).toBe(true);
+    save(page);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(bodies).toHaveLength(1);
+    expect($(page, "#planning-saved").textContent).not.toContain("Revision 1");
+    release({ status: 201, json: { revision: { ...REVISION, revisionNumber: 1, supersedesRevisionNumber: null }, alreadySaved: false, isCurrent: true } });
+    await page.settle(() => statusText(page) === "Plan saved as revision 1.", "the success message");
+    expect($(page, "#planning-status").className).toContain("success");
+    expect($(page, "#planning-saved").textContent).toContain("Revision 1");
+    expect(($(page, "#planning-save") as HTMLButtonElement).disabled).toBe(false);
+    page.close();
+  });
+
+  it("42b. validation problems are listed with their fields marked; the prior saved revision stays on screen; an unchanged retry reuses the intent and an edited one does not", async () => {
+    const attempts: any[] = [];
+    const problems = [
+      { field: "venue.name", code: "REQUIRED", message: "Enter the venue name." },
+      { field: "dates[0].windows[0]", code: "WINDOW_CROSSES_MIDNIGHT", message: "Date 1, window 1: a window must end the same day it starts." },
+      { field: "registrationDeadline.local", code: "DEADLINE_AMBIGUOUS_LOCAL_TIME", message: "That local time happens twice that day. Enter the UTC offset that applies." },
+    ];
+    let mode: "problems" | "ok" = "problems";
+    const page = await openPlanning({
+      get: () => ({ status: 200, json: { context: CONTEXT, revision: REVISION } }),
+      post: (body) => {
+        attempts.push(body);
+        return mode === "problems"
+          ? { status: 400, json: { error: "The plan is not valid.", problems } }
+          : { status: 201, json: { revision: { ...REVISION, revisionNumber: 3, supersedesRevisionNumber: 2 }, alreadySaved: false, isCurrent: true } };
+      },
+    });
+    await openEditor(page);
+    save(page);
+    await page.settle(() => attempts.length === 1 && !($(page, "#planning-save") as HTMLButtonElement).disabled, "the first answer");
+    expect($$(page, "#planning-problems li").map((li) => li.textContent)).toEqual(problems.map((p) => p.message));
+    expect(statusText(page)).not.toMatch(/saved as revision/);
+    expect($(page, "#planning-status").className).toContain("error");
+    expect($(page, "#planning-venue-name").getAttribute("aria-invalid")).toBe("true");
+    expect($(page, "#planning-deadline-local").getAttribute("aria-invalid")).toBe("true");
+    expect($(page, "#planning-saved").textContent).toContain("Revision 2");           // the prior revision is still what is saved — and still shown
+    expect($(page, "#planning-saved").textContent).not.toContain("Revision 3");
+    // An ambiguous local time reveals the one optional field that resolves it.
+    expect(page.visible($(page, "#planning-deadline-offset-row"))).toBe(true);
+
+    save(page);                                                                         // unchanged payload: the same intent
+    await page.settle(() => attempts.length === 2 && !($(page, "#planning-save") as HTMLButtonElement).disabled, "the retry");
+    expect(attempts[1].intentId).toBe(attempts[0].intentId);
+    expect(attempts[1].plan).toEqual(attempts[0].plan);
+
+    setValue(page, $(page, "#planning-venue-name"), "Cancha Norte");                  // an edit: a new intent
+    mode = "ok";
+    save(page);
+    await page.settle(() => attempts.length === 3 && statusText(page) === "Plan saved as revision 3.", "the successful save");
+    expect(attempts[2].intentId).not.toBe(attempts[0].intentId);
+    expect(attempts[2].plan.venue.name).toBe("Cancha Norte");
+    expect($(page, "#planning-saved").textContent).toContain("Revision 3");
+    expect($$(page, "#planning-problems li")).toHaveLength(0);
+    expect($(page, "#planning-venue-name").getAttribute("aria-invalid")).not.toBe("true");
+
+    setValue(page, $(page, "#planning-venue-name"), "Cancha Sur");                    // after a success, the next edit is a new save again
+    save(page);
+    await page.settle(() => attempts.length === 4, "the next save");
+    expect(attempts[3].intentId).not.toBe(attempts[2].intentId);
+    page.close();
+  });
+
+  it("42c. the UTC offset is sent only when the organizer has entered one", async () => {
+    const attempts: any[] = [];
+    const page = await openPlanning({ post: (body) => { attempts.push(body); return { status: 400, json: { error: "x", problems: [{ field: "registrationDeadline.local", code: "DEADLINE_AMBIGUOUS_LOCAL_TIME", message: "That local time happens twice that day." }] } }; } });
+    await openEditor(page);
+    expect(page.visible($(page, "#planning-deadline-offset-row"))).toBe(false);
+    fillValidPlan(page);
+    save(page);
+    await page.settle(() => attempts.length === 1 && !($(page, "#planning-save") as HTMLButtonElement).disabled, "the first answer");
+    expect(attempts[0].plan.registrationDeadline).toEqual({ local: "2026-11-01T18:00", timeZone: "America/Costa_Rica" });
+    setValue(page, $(page, "#planning-deadline-offset"), "-06:00");
+    save(page);
+    await page.settle(() => attempts.length === 2, "the second request");
+    expect(attempts[1].plan.registrationDeadline).toEqual({ local: "2026-11-01T18:00", timeZone: "America/Costa_Rica", utcOffset: "-06:00" });
+    page.close();
+  });
+
+  it("43. a failure, a timeout, a refused connection and an answer the page cannot read never show success, and the prior revision stays visible", async () => {
+    const cases: Array<[string, (body: any) => PlanReply, RegExp]> = [
+      ["a 500", () => ({ status: 500, json: { error: "Failed to save the planning revision." } }), /Failed to save the planning revision\./],
+      ["a 409", () => ({ status: 409, json: { error: "This action is only available while the competition is DRAFT." } }), /only available while the competition is DRAFT/],
+      ["a 403", () => ({ status: 403, json: { error: "Access denied for this competition action." } }), /Access denied/],
+      ["a 201 with no readable revision", () => ({ status: 201, json: { alreadySaved: false } }), /could not be understood/],
+      ["a 201 with a malformed revision", () => ({ status: 201, json: { revision: { revisionNumber: "x" } } }), /could not be understood/],
+      ["a 200 with no body", () => ({ status: 200 }), /could not be understood/],
+      ["a refused connection", () => { throw new Error("network down"); }, /Could not reach the server/],
+      ["silence", () => new Promise<Reply>(() => {}), /did not answer in time/],
+    ];
+    for (const [label, post, expected] of cases) {
+      const page = await openPlanning({ get: () => ({ status: 200, json: { context: CONTEXT, revision: REVISION } }), post });
+      page.win.eval("PLANNING_TIMEOUT_MS = 60");
+      await openEditor(page);
+      save(page);
+      await page.settle(() => expected.test(statusText(page)), label);
+      expect(statusText(page), label).not.toMatch(/saved as revision/i);
+      expect($(page, "#planning-status").className, label).toContain("error");
+      expect($(page, "#planning-saved").textContent, label).toContain("Revision 2");
+      expect(($(page, "#planning-save") as HTMLButtonElement).disabled, label).toBe(false);
+      page.close();
+    }
+  });
+
+  it("44. hostile values render as plain text everywhere: the saved summary, the form and the problem list", async () => {
+    const hostile = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
+    const hostileRevision = {
+      ...REVISION,
+      venue: { ...REVISION.venue, name: hostile, locationDescription: hostile, restrictionNotes: hostile },
+      pitches: [{ label: hostile, usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: hostile }, { label: "B", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+      rules: { version: "draft-1", snapshot: hostile, snapshotDigest: "a".repeat(64) },
+    };
+    const page = await openPlanning({
+      get: () => ({ status: 200, json: { context: CONTEXT, revision: hostileRevision } }),
+      post: () => ({ status: 400, json: { error: hostile, problems: [{ field: "venue.name", code: "REQUIRED", message: hostile }] } }),
+    });
+    await openEditor(page);
+    const assertInert = () => {
+      const section = $(page, "#planning-section");
+      expect(section.querySelectorAll("img, script, svg, iframe, object, embed, link, style")).toHaveLength(0);
+      for (const el of [section, ...section.querySelectorAll("*")]) for (const attr of [...el.attributes]) expect(attr.name.toLowerCase().startsWith("on")).toBe(false);
+      expect((page.win as unknown as Record<string, unknown>).__xss).toBeUndefined();
+    };
+    assertInert();
+    expect($(page, "#planning-saved").textContent).toContain(hostile);
+    expect($(page, "#planning-venue-name").value).toBe(hostile);
+    expect($(page, ".planning-pitch-label").value).toBe(hostile);
+    expect($(page, "#planning-rules-snapshot").value).toBe(hostile);
+    save(page);
+    await page.settle(() => $$(page, "#planning-problems li").length === 1, "the problem list");
+    expect($$(page, "#planning-problems li")[0].textContent).toBe(hostile);
+    expect(statusText(page)).toContain(hostile);
+    assertInert();
+    page.close();
+  });
+
+  it("an organizer can add and remove pitches, dates and windows within the limits the server states, and the form sends what is on screen", async () => {
+    const attempts: any[] = [];
+    const page = await openPlanning({ post: (body) => { attempts.push(body); return { status: 400, json: { error: "x", problems: [] } }; } });
+    await openEditor(page);
+    fillValidPlan(page);
+    ($(page, "#planning-add-pitch") as HTMLButtonElement).click();
+    expect($$(page, ".planning-pitch-row")).toHaveLength(2);
+    setValue(page, $$(page, ".planning-pitch-label")[1], "Court 2");
+    $$(page, ".planning-pitch-usable")[1].checked = false;
+    ($(page, ".planning-add-window") as HTMLButtonElement).click();
+    expect($$(page, ".planning-window-row")).toHaveLength(2);
+    expect(page.visible($(page, ".planning-add-window"))).toBe(false);                 // two windows is the most a date may have
+    setValue(page, $$(page, ".planning-window-start")[1], "15:00");
+    setValue(page, $$(page, ".planning-window-end")[1], "19:00");
+    ($(page, "#planning-add-date") as HTMLButtonElement).click();
+    ($(page, "#planning-add-date") as HTMLButtonElement).click();
+    expect($$(page, ".planning-date-row")).toHaveLength(3);
+    expect(page.visible($(page, "#planning-add-date"))).toBe(false);                    // three dates is the most a plan may have
+    $$(page, ".planning-date-remove")[2].click();
+    expect($$(page, ".planning-date-row")).toHaveLength(2);
+    expect(page.visible($(page, "#planning-add-date"))).toBe(true);
+    $$(page, ".planning-date-remove")[1].click();
+    expect($$(page, ".planning-date-row")).toHaveLength(1);
+    expect($$(page, ".planning-date-remove").every((b) => !page.visible(b))).toBe(true);   // the last date cannot be removed
+    for (let i = 0; i < 20; i++) { const add = $(page, "#planning-add-pitch"); if (!page.visible(add)) break; add.click(); }
+    expect($$(page, ".planning-pitch-row")).toHaveLength(16);
+    save(page);
+    await page.settle(() => attempts.length === 1, "the request");
+    const plan = attempts[0].plan;
+    expect(plan.pitches).toHaveLength(16);
+    expect(plan.pitches[1]).toEqual({ label: "Court 2", usable: false, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" });
+    expect(plan.dates).toEqual([{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }, { start: "15:00", end: "19:00" }] }]);
+    page.close();
+  });
+
+  it("keeps a pitch's support for other registry formats exactly as saved, without ever showing them", async () => {
+    const attempts: any[] = [];
+    const revision = { ...REVISION, pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5", "SOCCER_7V7"], restrictionNotes: "" }, { label: "B", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }] };
+    const page = await openPlanning({ get: () => ({ status: 200, json: { context: CONTEXT, revision } }), post: (body) => { attempts.push(body); return { status: 400, json: { error: "x", problems: [] } }; } });
+    await openEditor(page);
+    expect(page.text()).not.toMatch(/7v7|SOCCER_7V7/i);
+    save(page);
+    await page.settle(() => attempts.length === 1, "the request");
+    expect(attempts[0].plan.pitches[0].supportedFormats).toEqual(["SOCCER_5V5", "SOCCER_7V7"]);
+    page.close();
+  });
+});

@@ -52,10 +52,12 @@ import { getCompetitionView } from "../lib/gaming/competitions/getCompetitionVie
 import { resolveCompetitionByPublicCode } from "../lib/gaming/competitions/resolveCompetitionByPublicCode";
 import {
   CompetitionAccessDeniedError,
+  CompetitionNotDraftError,
   HostAccessRevokedError,
   OperationalAuthorityRequiredError,
   FixtureNotInEvidencePhaseError,
 } from "../lib/gaming/competitions/types";
+import { parsePlanningPlan, planToRpcPayload } from "../lib/gaming/competitions/planning";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1105,6 +1107,16 @@ interface CompetitionCtx {
 
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
 
+/** A valid Organizer Planning plan for a 5v5 competition (UG-CR-GATE-SSS-004): the one payload every planning call below saves. */
+const planningPlan = () => parsePlanningPlan({
+  venue: { name: `Matrix Venue ${RUN}`, locationDescription: "A fictional venue used only by the local contract suite.", timeZone: "America/Costa_Rica", simultaneousMatchCapacity: 1, restrictionNotes: "" },
+  pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }],
+  dates: [{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }] }],
+  roster: { minimum: 5, maximum: 8 },
+  registrationDeadline: { local: "2026-11-01T18:00", timeZone: "America/Costa_Rica" },
+  rules: { version: "matrix-1", snapshot: "Planning evidence for the organizer matrix." },
+}, "SOCCER_5V5");
+
 async function publishBracket(competitionId: string, organizerId: string, labelPrefix: string) {
   const captains: Member[] = [];
   for (let i = 0; i < 4; i++) captains.push(await createMember(`${labelPrefix} Captain ${i}`));
@@ -1199,9 +1211,12 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   { rpc: "finalize_competition_fixture_atomically", label: "finalize a fixture", call: (c, a) => finalizeFixture(compRepo, c.semifinal1FixtureId, a) },
   { rpc: "forfeit_competition_fixture_atomically", label: "forfeit a fixture", call: (c, a) => forfeitFixture(compRepo, c.semifinal1FixtureId, a, c.teams[0].competitionTeamId, "Testing the boundary.") },
   { rpc: "void_competition_fixture_atomically", label: "void a fixture (cancels the competition)", call: (c, a) => voidFixture(compRepo, c.semifinal2FixtureId, a, "Testing the boundary.") },
+  // UG-CR-GATE-SSS-004: the Organizer Planning save. A published matrix competition is no longer a DRAFT, so for its OWN active organizer this reports the state
+  // refusal (CompetitionNotDraftError) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
+  { rpc: "save_competition_planning_revision_atomically", label: "save a draft planning revision", call: (c, a) => compRepo.savePlanningRevision(c.competitionId, a, randomUUID(), planningPlan()) },
 ];
 
-/** Organizer-gated functions the catalog must find: exactly these 14 names, plus the scorekeeper evidence path. */
+/** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
 const ORGANIZER_RPC_NAMES = Array.from(new Set(ORGANIZER_CALLS.map((c) => c.rpc))).sort();
 const SCOREKEEPER_RPC = "submit_competition_fixture_evidence_atomically";
 
@@ -1749,6 +1764,132 @@ async function mutateFunction(db: Client, name: string, argTypes: string, edit: 
   expect(edited, `the mutation of ${name} must actually change it (otherwise the control proves nothing)`).not.toBe(original);
   await db.query(edited);
 }
+
+describe("[SSS-004A] the Organizer Planning save holds to the same organizer boundary as every other organizer function", () => {
+  const FN = "save_competition_planning_revision_atomically";
+  const FIVE_TABLES = ["competition_planning_revisions", "competition_planning_pitches", "competition_planning_pitch_formats", "competition_planning_dates", "competition_planning_windows"];
+
+  async function draftPilot(label: string) {
+    const { member, code } = await approvedHost(label);
+    const created = await createHostCompetition(hostRepo, member.gamingMemberId, `Plan Pilot ${label} ${RUN}`);
+    return { member, code, competitionId: created.competitionId };
+  }
+
+  /** Every planning row this competition owns, counted table by table: a refusal must leave it exactly as it was. */
+  async function footprint(competitionId: string): Promise<number[]> {
+    const db = await connectRaw();
+    try {
+      const q = async (sql: string) => (await db.query(sql, [competitionId])).rows[0].n as number;
+      return [
+        await q("select count(*)::int as n from competition_planning_revisions where competition_id = $1"),
+        await q("select count(*)::int as n from competition_planning_pitches p join competition_planning_revisions r using (planning_revision_id) where r.competition_id = $1"),
+        await q("select count(*)::int as n from competition_planning_pitch_formats f join competition_planning_pitches p using (planning_pitch_id) join competition_planning_revisions r using (planning_revision_id) where r.competition_id = $1"),
+        await q("select count(*)::int as n from competition_planning_dates d join competition_planning_revisions r using (planning_revision_id) where r.competition_id = $1"),
+        await q("select count(*)::int as n from competition_planning_windows w join competition_planning_revisions r using (planning_revision_id) where r.competition_id = $1"),
+      ];
+    } finally {
+      await db.end();
+    }
+  }
+  const saveSql = "select * from save_competition_planning_revision_atomically($1, $2, $3, $4::jsonb)";
+
+  it("is service-role-only, SECURITY DEFINER and pinned to a safe search_path, per the catalog (and its five tables are server-only)", async () => {
+    const db = await connectRaw();
+    try {
+      const { rows } = await db.query(
+        `select p.oid, p.prosecdef, p.proconfig::text as cfg, pg_get_function_identity_arguments(p.oid) as args from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = $1`, [FN]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].prosecdef).toBe(true);
+      expect(rows[0].cfg).toContain("search_path=public");
+      expect(rows[0].args).toBe("p_competition_id uuid, p_organizer_gaming_member_id uuid, p_intent_id uuid, p_plan jsonb");
+      for (const role of ["anon", "authenticated"]) expect((await db.query("select has_function_privilege($1, $2::oid, 'EXECUTE') as ok", [role, rows[0].oid])).rows[0].ok, role).toBe(false);
+      expect((await db.query("select has_function_privilege('service_role', $1::oid, 'EXECUTE') as ok", [rows[0].oid])).rows[0].ok).toBe(true);
+      const pub = await db.query(`select count(*)::int as n from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = $1::oid and a.grantee = 0 and a.privilege_type = 'EXECUTE'`, [rows[0].oid]);
+      expect(pub.rows[0].n).toBe(0);
+      for (const table of FIVE_TABLES) {
+        const t = await db.query("select c.relrowsecurity, (select count(*)::int from pg_policies where tablename = c.relname) as policies from pg_class c where c.relname = $1 and c.relkind = 'r'", [table]);
+        expect(t.rows[0], table).toEqual({ relrowsecurity: true, policies: 0 });
+      }
+    } finally {
+      await db.end();
+    }
+  }, 60000);
+
+  it("a host's DRAFT pilot: the organizer saves; an unrelated organizer (even with OPERATIONAL) is denied; the refusal changes nothing", async () => {
+    const pilot = await draftPilot("plan-own");
+    const stranger = await createMember("Plan Stranger");
+    await grantOperational(stranger.gamingMemberId);
+    expect(await footprint(pilot.competitionId)).toEqual([0, 0, 0, 0, 0]);
+    await expectRejection(compRepo.savePlanningRevision(pilot.competitionId, stranger.gamingMemberId, randomUUID(), planningPlan()), CompetitionAccessDeniedError);
+    expect(await footprint(pilot.competitionId)).toEqual([0, 0, 0, 0, 0]);
+    const saved = await compRepo.savePlanningRevision(pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), planningPlan());
+    expect(saved.revision.revisionNumber).toBe(1);
+    expect(await footprint(pilot.competitionId)).toEqual([1, 1, 1, 1, 1]);
+  }, 120000);
+
+  it("DRAFT is required: once registration opens, the organizer is refused with the state error (neither a stranger nor revoked) and nothing changes", async () => {
+    const pilot = await draftPilot("plan-state");
+    await compRepo.savePlanningRevision(pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), planningPlan());
+    await openTeamRegistration(compRepo, pilot.competitionId, pilot.member.gamingMemberId);
+    const before = await footprint(pilot.competitionId);
+    await expectRejection(compRepo.savePlanningRevision(pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), planningPlan()), CompetitionNotDraftError);
+    expect(await footprint(pilot.competitionId)).toEqual(before);
+  }, 120000);
+
+  it("a REVOKED host organizer is refused as revoked — before the state and before the plan is read — and nothing changes", async () => {
+    const pilot = await draftPilot("plan-revoked");
+    await compRepo.savePlanningRevision(pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), planningPlan());
+    await revoke(pilot.code, "Planning matrix.");
+    const before = await footprint(pilot.competitionId);
+    await expectRejection(compRepo.savePlanningRevision(pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), planningPlan()), HostAccessRevokedError);
+    const viaRpc = await serviceClient.rpc(FN, { p_competition_id: pilot.competitionId, p_organizer_gaming_member_id: pilot.member.gamingMemberId, p_intent_id: randomUUID(), p_plan: { nonsense: true } });
+    expect(viaRpc.error?.message).toContain("HOST_ACCESS_REVOKED");
+    expect(await footprint(pilot.competitionId)).toEqual(before);
+  }, 120000);
+
+  it("takes the competition lock before it decides anything: a save waits behind the competition_scope lock, then completes", async () => {
+    const pilot = await draftPilot("plan-lock");
+    const holder = await connectRaw();
+    const actor = await connectRaw();
+    const observer = await connectRaw();
+    try {
+      await holder.query("begin");
+      await holder.query("select pg_advisory_xact_lock(hashtext('competition_scope:' || $1::text))", [pilot.competitionId]);
+      const { rows: pid } = await actor.query("select pg_backend_pid() as pid");
+      const pending = actor.query(saveSql, [pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), JSON.stringify(planToRpcPayload(planningPlan()))]).then(() => "completed", (e: Error) => e.message);
+      await waitUntilBlockedOnLock(observer, pid[0].pid);
+      expect(await footprint(pilot.competitionId)).toEqual([0, 0, 0, 0, 0]);          // nothing was decided or written while the lock was held elsewhere
+      await holder.query("commit");
+      expect(await pending).toBe("completed");
+      expect(await footprint(pilot.competitionId)).toEqual([1, 1, 1, 1, 1]);
+    } finally {
+      await holder.query("rollback").catch(() => {});
+      await Promise.all([holder.end(), actor.end(), observer.end()]);
+    }
+  }, 60000);
+
+  it("a revocation in flight makes a planning save WAIT, and the save then fails as revoked with nothing written", async () => {
+    const pilot = await draftPilot("plan-lock-revoke");
+    const revoker = await connectRaw();
+    const actor = await connectRaw();
+    const observer = await connectRaw();
+    try {
+      await withGovernance(async () => {
+        await revoker.query("begin");
+        await revoker.query("select * from revoke_host_capability_atomically($1, $2, $3)", [reviewer.gamingMemberId, pilot.code, "Revocation commits after the save starts."]);
+        const { rows: pid } = await actor.query("select pg_backend_pid() as pid");
+        const mutation = actor.query(saveSql, [pilot.competitionId, pilot.member.gamingMemberId, randomUUID(), JSON.stringify(planToRpcPayload(planningPlan()))]).then(() => "completed", (e: Error) => e.message);
+        await waitUntilBlockedOnLock(observer, pid[0].pid);
+        await revoker.query("commit");
+        expect(await mutation).toContain("HOST_ACCESS_REVOKED");
+      });
+      expect(await footprint(pilot.competitionId)).toEqual([0, 0, 0, 0, 0]);
+    } finally {
+      await revoker.query("rollback").catch(() => {});
+      await Promise.all([revoker.end(), actor.end(), observer.end()]);
+    }
+  }, 60000);
+});
 
 describe("negative controls: the tests above FAIL when the core enforcement is removed", () => {
   it("control 1 — remove the revocation guard: a revoked host's organizer call then SUCCEEDS (so [T17] would fail)", async () => {

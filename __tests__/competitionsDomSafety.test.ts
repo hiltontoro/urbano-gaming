@@ -359,3 +359,72 @@ describe("UG-CR-GATE-083 corrections (UG-CR-REV-054 finding 2) — DOM-safety ho
     });
   });
 });
+
+
+describe("UG-CR-GATE-SSS-004 — the draft planning editor's sinks (competitions-admin.html), the real shipped functions executed", () => {
+  const factSource = extractFunction(adminHtml, "appendPlanningFact");
+  const summarySource = extractFunction(adminHtml, "renderPlanningSavedSummary");
+  const problemsSource = extractFunction(adminHtml, "renderPlanningProblems");
+
+  const revisionWith = (value: string) => ({
+    revisionNumber: 4, supersedesRevisionNumber: 3, createdAt: "2026-10-22T20:00:00.000Z", formatKey: "SOCCER_5V5",
+    venue: { name: value, locationDescription: value, timeZone: value, simultaneousMatchCapacity: 2, restrictionNotes: value },
+    pitches: [{ label: value, usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: value }, { label: "B", usable: false, supportedFormats: [], restrictionNotes: "" }],
+    dates: [{ date: value, windows: [{ start: value, end: value }] }],
+    roster: { minimum: 5, maximum: 8 },
+    registrationDeadline: { local: value, timeZone: value, utcOffset: value, utc: value },
+    rules: { version: value, snapshot: value, snapshotDigest: value },
+  });
+
+  it("extracted the real function bodies (sanity check on the harness itself)", () => {
+    expect(summarySource).toContain("appendPlanningFact(");
+    expect(summarySource).toContain("textContent");
+    expect(problemsSource).toContain("textContent");
+    expect(summarySource).not.toMatch(/innerHTML\s*=\s*[^"'`\s]/);
+  });
+
+  for (const { label, value } of HOSTILE_PAYLOADS) {
+    it(`renders a hostile value (${label}) in every field of a saved revision as literal text, never a live element`, () => {
+      const win = makeRealm([factSource, summarySource]);
+      const container = win.document.createElement("div");
+      win.renderPlanningSavedSummary(container, revisionWith(value));
+      assertNoLiveInjection(container);
+      expect(container.querySelectorAll("img, svg, iframe, b")).toHaveLength(0);
+      expect(container.textContent).toContain(value);
+      expect(container.innerHTML).not.toContain("<img");
+      expect(container.innerHTML).not.toContain("<svg");
+      expect(container.innerHTML).not.toContain("<script");
+    });
+
+    it(`renders a hostile server message (${label}) in the problem list as literal text`, () => {
+      const win = makeRealm([problemsSource]);
+      const list = win.document.createElement("ul");
+      win.renderPlanningProblems(list, [{ field: "venue.name", code: "REQUIRED", message: value }, { field: value, code: value, message: "plain" }]);
+      assertNoLiveInjection(list);
+      const items = Array.from(list.querySelectorAll("li"));
+      expect(items).toHaveLength(2);
+      expect(items[0].textContent).toBe(value);
+      expect(items[0].children).toHaveLength(0);
+      expect(items[1].textContent).toBe("plain");
+    });
+  }
+
+  it("a revision with missing or non-string parts renders as far as it is well formed and never throws or injects", () => {
+    const win = makeRealm([factSource, summarySource]);
+    const container = win.document.createElement("div");
+    expect(() => win.renderPlanningSavedSummary(container, { revisionNumber: 1 })).not.toThrow();
+    expect(() => win.renderPlanningSavedSummary(container, null)).not.toThrow();
+    expect(() => win.renderPlanningSavedSummary(container, { revisionNumber: 2, venue: { name: { toString: () => "<img src=x>" } }, pitches: "nope", dates: [null, 7] })).not.toThrow();
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+  });
+
+  it("renderPlanningProblems ignores a malformed list and clears what it showed before", () => {
+    const win = makeRealm([problemsSource]);
+    const list = win.document.createElement("ul");
+    win.renderPlanningProblems(list, [{ field: "a", code: "B", message: "one" }]);
+    expect(list.querySelectorAll("li")).toHaveLength(1);
+    win.renderPlanningProblems(list, "nope");
+    win.renderPlanningProblems(list, [null, 5, { message: 7 }]);
+    expect(list.querySelectorAll("li")).toHaveLength(0);
+  });
+});

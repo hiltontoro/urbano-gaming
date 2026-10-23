@@ -123,6 +123,31 @@
     table.stack-table td[data-label]:has(> button[hidden])::before { display: none; }
     table.stack-table td[data-label] > button { min-height: 44px; margin: 0 8px 8px 0; }
   }
+  /* UG-CR-GATE-SSS-004: the draft planning editor (built only after an owned DRAFT competition is loaded). */
+  .planning-card h3 { margin-top: 0; }
+  .planning-card fieldset { margin: 14px 0; }
+  .planning-card .field { display: block; margin: 0 0 10px; }
+  .planning-card .field > label, .planning-card .field > span.label { display: block; margin-bottom: 3px; }
+  .planning-card input[type="text"], .planning-card input[type="number"], .planning-card input[type="date"], .planning-card input[type="time"],
+  .planning-card input[type="datetime-local"], .planning-card textarea { width: 100%; max-width: 420px; }
+  .planning-card textarea { min-height: 56px; resize: vertical; }
+  .planning-card input[aria-invalid="true"], .planning-card textarea[aria-invalid="true"] { border-color: var(--bad); }
+  .planning-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-card); }
+  .planning-row input[type="text"], .planning-row input[type="number"] { width: auto; flex: 1 1 140px; min-width: 0; }
+  .planning-row input[type="date"], .planning-row input[type="time"] { width: auto; flex: 0 1 150px; min-width: 0; }
+  .planning-windows { display: block; flex: 1 1 100%; }
+  .planning-window-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+  .planning-facts { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0; }
+  .planning-facts dt { color: var(--muted); }
+  .planning-facts dd { margin: 0; min-width: 0; overflow-wrap: break-word; }
+  .planning-timing { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+  #planning-problems { margin: 6px 0 0; padding-left: 18px; color: var(--bad); font-size: 14px; }
+  #planning-saved details pre { white-space: pre-wrap; overflow-wrap: break-word; font-family: inherit; font-size: 13px; margin: 6px 0 0; }
+  @media (max-width: 720px) {
+    .planning-facts { grid-template-columns: 1fr; }
+    .planning-card button { min-height: 44px; }
+    .planning-row input[type="text"], .planning-row input[type="number"], .planning-row input[type="date"], .planning-row input[type="time"] { flex: 1 1 100%; }
+  }
 </style>
 </head>
 <body>
@@ -363,6 +388,7 @@ function closeAdministration(message, offerOtherEntries, operations) {
   cachedCompetitions = [];
   currentView = null;
   currentAccess = null;
+  removePlanningSection();
   document.getElementById("select-section").hidden = true;
   document.getElementById("competition-detail").style.display = "none";
   document.getElementById("comp-select").innerHTML = "";
@@ -821,6 +847,10 @@ function renderCompetitionDetail() {
   for (const f of fixtures) {
     fixturesList.appendChild(renderFixtureBlock(f, teams, "ORGANIZER"));
   }
+
+  // UG-CR-GATE-SSS-004: a DRAFT competition the organizer owns offers its draft plan; any other state offers none.
+  if (competition.state === "DRAFT") ensurePlanning(competition.competitionId);
+  else removePlanningSection();
 }
 
 document.getElementById("btn-open-registration").addEventListener("click", async () => {
@@ -1159,6 +1189,620 @@ function renderFixtureDetail(f, detail, teams, mode) {
   }
 
   return wrap;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-004 — the draft planning editor: a competition-specific DRAFT PLAN, organizer-owned mode only.
+//
+// The editor does not exist in the markup. It is built here, only after the organizer has loaded a competition they own that is still a DRAFT, and
+// it is removed whenever that stops being true (another competition, a competition that moved on, the scorekeeper context, lost authorization).
+// It reads and saves through /api/gaming/competitions/{id}/planning, which re-authorizes every call; nothing this page holds decides anything.
+//
+// What it never offers: a format choice (the format is the competition's, shown read-only), any timing control (fixed by the format rules, shown
+// read-only), or any claim that a plan is venue approval or a schedule. Every value from the server is placed with textContent or .value, never
+// parsed as markup. A save is reported as done only when the server's own answer says so; a failure, a refusal, silence or an answer this page
+// cannot read leaves the last saved revision on screen and shows no success.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+const PLANNING_PENDING_COPY = "Draft planning — registration enforcement, draw, scheduling and venue rehearsal remain pending.";
+// A planning request that neither answers nor fails within this time is treated as FAILED.
+let PLANNING_TIMEOUT_MS = 20000;
+let planningState = null;
+let planningSerial = 0;
+
+/** One fact in a read-only summary list: the term and its value, both as text. */
+function appendPlanningFact(list, term, value) {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = value;
+  list.appendChild(dt);
+  list.appendChild(dd);
+}
+
+/** The saved revision, read-only. Anything missing or of the wrong type is simply not shown; nothing is ever coerced into markup. */
+function renderPlanningSavedSummary(container, revision) {
+  container.innerHTML = "";
+  const text = (v) => (typeof v === "string" ? v : "");
+  const isObject = (v) => !!v && typeof v === "object";
+  if (!isObject(revision) || !Number.isInteger(revision.revisionNumber)) {
+    const none = document.createElement("p");
+    none.className = "msg";
+    none.textContent = "No plan has been saved yet.";
+    container.appendChild(none);
+    return;
+  }
+  const head = document.createElement("p");
+  head.className = "msg";
+  const strong = document.createElement("strong");
+  strong.textContent = "Revision " + revision.revisionNumber;
+  head.appendChild(strong);
+  head.appendChild(document.createTextNode(" — the saved plan" + (Number.isInteger(revision.supersedesRevisionNumber) ? ", replacing revision " + revision.supersedesRevisionNumber : "") + (text(revision.createdAt) ? ", saved " + text(revision.createdAt) : "") + "."));
+  container.appendChild(head);
+
+  const dl = document.createElement("dl");
+  dl.className = "planning-facts";
+  const venue = isObject(revision.venue) ? revision.venue : {};
+  appendPlanningFact(dl, "Venue", text(venue.name));
+  appendPlanningFact(dl, "Location", text(venue.locationDescription));
+  appendPlanningFact(dl, "Time zone", text(venue.timeZone));
+  if (Number.isInteger(venue.simultaneousMatchCapacity)) appendPlanningFact(dl, "Simultaneous matches", String(venue.simultaneousMatchCapacity));
+  if (text(venue.restrictionNotes)) appendPlanningFact(dl, "Venue notes", text(venue.restrictionNotes));
+  (Array.isArray(revision.pitches) ? revision.pitches : []).forEach((p, i) => {
+    if (!isObject(p)) return;
+    appendPlanningFact(dl, "Pitch " + (i + 1), text(p.label) + (p.usable === true ? " (usable)" : " (not usable)") + (text(p.restrictionNotes) ? " — " + text(p.restrictionNotes) : ""));
+  });
+  (Array.isArray(revision.dates) ? revision.dates : []).forEach((d) => {
+    if (!isObject(d)) return;
+    const windows = (Array.isArray(d.windows) ? d.windows : []).filter(isObject).map((w) => text(w.start) + "–" + text(w.end));
+    appendPlanningFact(dl, "Date", text(d.date) + ": " + windows.join(", "));
+  });
+  const roster = isObject(revision.roster) ? revision.roster : {};
+  if (Number.isInteger(roster.minimum) && Number.isInteger(roster.maximum)) appendPlanningFact(dl, "Roster", roster.minimum + "–" + roster.maximum + " players");
+  const deadline = isObject(revision.registrationDeadline) ? revision.registrationDeadline : {};
+  appendPlanningFact(dl, "Registration deadline", text(deadline.local) + " (" + text(deadline.timeZone) + ", UTC" + text(deadline.utcOffset) + ")");
+  appendPlanningFact(dl, "Deadline as a UTC instant", text(deadline.utc));
+  const rules = isObject(revision.rules) ? revision.rules : {};
+  appendPlanningFact(dl, "Rules version", text(rules.version));
+  if (text(rules.snapshotDigest)) appendPlanningFact(dl, "Rules snapshot digest", text(rules.snapshotDigest).slice(0, 12) + "…");
+  container.appendChild(dl);
+
+  if (text(rules.snapshot)) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Rules snapshot saved with this revision";
+    const pre = document.createElement("pre");
+    pre.textContent = text(rules.snapshot);
+    details.appendChild(summary);
+    details.appendChild(pre);
+    container.appendChild(details);
+  }
+}
+
+/** The server's list of problems with a plan, one sentence each. A malformed list shows nothing. */
+function renderPlanningProblems(list, problems) {
+  list.innerHTML = "";
+  if (!Array.isArray(problems)) return;
+  for (const problem of problems) {
+    if (!problem || typeof problem !== "object" || typeof problem.message !== "string") continue;
+    const li = document.createElement("li");
+    li.textContent = problem.message;
+    list.appendChild(li);
+  }
+}
+
+function removePlanningSection() {
+  planningSerial += 1;
+  planningState = null;
+  const existing = document.getElementById("planning-section");
+  if (existing) existing.remove();
+}
+
+/** Opens the editor for this competition unless it is already open for it (so a refresh after another action never discards unsaved edits). */
+function ensurePlanning(competitionId) {
+  if (planningState && planningState.competitionId === competitionId && document.getElementById("planning-section")) return;
+  removePlanningSection();
+  loadPlanning(competitionId);
+}
+
+function planningRequest(method, competitionId, body) {
+  const path = "/api/gaming/competitions/" + encodeURIComponent(competitionId) + "/planning";
+  return Promise.race([
+    authedFetch(path, method === "POST" ? { method, body: JSON.stringify(body) } : undefined),
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error("timeout")), PLANNING_TIMEOUT_MS)),
+  ]);
+}
+
+const isPlanningObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const isCount = (v) => typeof v === "number" && Number.isFinite(v);
+const isPlanningText = (v) => typeof v === "string";
+
+/** The read-only profile of the competition's own format, as the server states it. Anything else is not trusted. */
+function validPlanningContext(c) {
+  return isPlanningObject(c) && isPlanningText(c.formatKey) && c.formatKey !== "" && isPlanningText(c.formatLabel)
+    && isPlanningObject(c.roster) && isCount(c.roster.defaultMinimum) && isCount(c.roster.defaultMaximum) && isCount(c.roster.absoluteMaximum)
+    && isPlanningObject(c.roster.minimumRange) && isCount(c.roster.minimumRange.low) && isCount(c.roster.minimumRange.high)
+    && isPlanningObject(c.roster.maximumRange) && isCount(c.roster.maximumRange.low) && isCount(c.roster.maximumRange.high)
+    && isPlanningObject(c.timing) && ["halves", "minutesPerHalf", "halftimeMinutes", "pitchTransitionMinutes", "minimumTeamRestMinutes", "knockoutShootoutReserveMinutes"].every((k) => isCount(c.timing[k]))
+    && isPlanningObject(c.limits) && isCount(c.limits.maxDates) && isCount(c.limits.maxWindowsPerDate) && isCount(c.limits.maxPitches);
+}
+
+function validPlanningRevision(r) {
+  return isPlanningObject(r) && Number.isInteger(r.revisionNumber)
+    && isPlanningObject(r.venue) && isPlanningText(r.venue.name) && isPlanningText(r.venue.locationDescription) && isPlanningText(r.venue.timeZone)
+    && Array.isArray(r.pitches) && r.pitches.every((p) => isPlanningObject(p) && isPlanningText(p.label) && Array.isArray(p.supportedFormats))
+    && Array.isArray(r.dates) && r.dates.every((d) => isPlanningObject(d) && isPlanningText(d.date) && Array.isArray(d.windows) && d.windows.every((w) => isPlanningObject(w) && isPlanningText(w.start) && isPlanningText(w.end)))
+    && isPlanningObject(r.roster) && isCount(r.roster.minimum) && isCount(r.roster.maximum)
+    && isPlanningObject(r.registrationDeadline) && isPlanningText(r.registrationDeadline.local)
+    && isPlanningObject(r.rules) && isPlanningText(r.rules.version) && isPlanningText(r.rules.snapshot);
+}
+
+function insertPlanningSection(section) {
+  const organizerOnly = document.getElementById("organizer-only");
+  const anchor = document.getElementById("table-teams").previousElementSibling;
+  organizerOnly.insertBefore(section, anchor);
+}
+
+function planningFailureSection(message) {
+  const section = document.createElement("div");
+  section.id = "planning-section";
+  section.className = "card planning-card";
+  const heading = document.createElement("h3");
+  heading.textContent = "Draft Planning";
+  const status = document.createElement("p");
+  status.id = "planning-status";
+  status.className = "msg error";
+  status.setAttribute("aria-live", "polite");
+  status.textContent = message;
+  section.appendChild(heading);
+  section.appendChild(status);
+  return section;
+}
+
+async function loadPlanning(competitionId) {
+  const serial = planningSerial;
+  const state = { competitionId, context: null, revision: null, lastAttempt: null };
+  planningState = state;
+  const stale = () => planningSerial !== serial || planningState !== state;
+  let res;
+  try {
+    res = await planningRequest("GET", competitionId);
+  } catch (err) {
+    if (stale()) return;
+    insertPlanningSection(planningFailureSection("Planning could not be loaded."));
+    return;
+  }
+  if (stale()) return;
+  const json = res.json;
+  // A not-found says nothing about why, and the page offers nothing for it. It carries no context to initialize anything from.
+  if (res.status === 404) { removePlanningSection(); return; }
+  // Only the exact successful shape opens the editor: a 200 whose body is `{ context, revision }`, the context well formed and the revision either
+  // `null` (nothing saved yet) or a well-formed revision. Anything else — another status, a malformed or partial body, silence — leaves it closed.
+  const ok = res.status === 200 && isPlanningObject(json) && validPlanningContext(json.context) && (json.revision === null || validPlanningRevision(json.revision));
+  if (!ok) { insertPlanningSection(planningFailureSection("Planning could not be loaded.")); return; }
+  state.context = json.context;
+  state.revision = json.revision;
+  insertPlanningSection(buildPlanningSection(state));
+  fillPlanningForm(state);
+}
+
+function planningField(labelText, control, id, hint) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  if (id) label.htmlFor = id;
+  wrap.appendChild(label);
+  wrap.appendChild(control);
+  if (hint) {
+    const note = document.createElement("div");
+    note.className = "msg";
+    note.textContent = hint;
+    wrap.appendChild(note);
+  }
+  return wrap;
+}
+
+function planningInput(id, type, field) {
+  const input = document.createElement("input");
+  if (id) input.id = id;
+  input.type = type;
+  if (field) input.dataset.field = field;
+  return input;
+}
+
+function planningText(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+function planningButton(text, className, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "secondary";
+  if (id) button.id = id;
+  button.textContent = text;
+  return button;
+}
+
+function buildPlanningSection(state) {
+  const context = state.context;
+  const section = document.createElement("div");
+  section.id = "planning-section";
+  section.className = "card planning-card";
+  section.setAttribute("role", "region");
+  section.setAttribute("aria-labelledby", "planning-heading");
+
+  const heading = planningText("h3", "Draft Planning");
+  heading.id = "planning-heading";
+  heading.tabIndex = -1;
+  section.appendChild(heading);
+  const pending = planningText("p", PLANNING_PENDING_COPY, "msg");
+  pending.id = "planning-pending-note";
+  section.appendChild(pending);
+  section.appendChild(planningText("p", "This is a draft plan for this competition. It does not approve the venue or verify any claim about it. Full public sporting rules, schedule validation and venue rehearsal remain pending.", "msg"));
+
+  const saved = document.createElement("div");
+  saved.id = "planning-saved";
+  section.appendChild(saved);
+  renderPlanningSavedSummary(saved, state.revision);
+
+  const form = document.createElement("form");
+  form.id = "planning-form";
+  form.noValidate = true;
+  form.addEventListener("submit", (e) => { e.preventDefault(); savePlanning(); });
+  section.appendChild(form);
+
+  // The format and the fixed timing: facts, not controls.
+  const format = document.createElement("div");
+  format.id = "planning-format";
+  format.className = "msg";
+  format.appendChild(document.createTextNode("Format: "));
+  format.appendChild(planningText("strong", context.formatLabel));
+  format.appendChild(document.createTextNode(" — set when the competition was created; it cannot be changed here."));
+  form.appendChild(format);
+  form.appendChild(planningText("p", "Match timing is fixed by the format rules and cannot be changed here:", "msg"));
+  const timing = document.createElement("ul");
+  timing.id = "planning-timing";
+  timing.className = "planning-timing";
+  const t = context.timing;
+  for (const line of [
+    "Halves: " + t.halves,
+    "Minutes per half: " + t.minutesPerHalf,
+    "Halftime: " + t.halftimeMinutes + " minutes",
+    "Time between matches on a pitch: " + t.pitchTransitionMinutes + " minutes",
+    "Minimum rest for a team between its matches: " + t.minimumTeamRestMinutes + " minutes",
+    "Reserve for a possible knockout shootout: " + t.knockoutShootoutReserveMinutes + " minutes",
+  ]) timing.appendChild(planningText("li", line));
+  form.appendChild(timing);
+
+  // Venue
+  const venue = document.createElement("fieldset");
+  venue.appendChild(planningText("legend", "Venue"));
+  const name = planningInput("planning-venue-name", "text", "venue.name"); name.maxLength = 120;
+  venue.appendChild(planningField("Venue name", name, "planning-venue-name"));
+  const location = document.createElement("textarea"); location.id = "planning-venue-location"; location.dataset.field = "venue.locationDescription"; location.maxLength = 300;
+  venue.appendChild(planningField("Where is it? (enough to find the venue)", location, "planning-venue-location"));
+  const zone = planningInput("planning-venue-timezone", "text", "venue.timeZone"); zone.placeholder = "e.g. America/Costa_Rica"; zone.maxLength = 64; zone.autocomplete = "off";
+  venue.appendChild(planningField("Time zone (the venue's, as an IANA name)", zone, "planning-venue-timezone", "Every date, window and the registration deadline below is in this time zone."));
+  const capacity = planningInput("planning-venue-capacity", "number", "venue.simultaneousMatchCapacity"); capacity.min = "1"; capacity.max = String(context.limits.maxPitches); capacity.step = "1";
+  venue.appendChild(planningField("Matches that can be played at the same time", capacity, "planning-venue-capacity", "From 1 up to the number of usable pitches."));
+  const notes = document.createElement("textarea"); notes.id = "planning-venue-notes"; notes.dataset.field = "venue.restrictionNotes"; notes.maxLength = 500;
+  venue.appendChild(planningField("Venue restrictions (optional)", notes, "planning-venue-notes"));
+  form.appendChild(venue);
+
+  // Pitches
+  const pitches = document.createElement("fieldset");
+  pitches.appendChild(planningText("legend", "Pitches"));
+  const pitchList = document.createElement("div"); pitchList.id = "planning-pitches";
+  pitches.appendChild(pitchList);
+  const addPitch = planningButton("Add pitch", "secondary", "planning-add-pitch");
+  addPitch.addEventListener("click", () => { addPlanningPitchRow({ label: "", usable: true, suitable: true, notes: "", others: [] }); refreshPlanningRows(); });
+  pitches.appendChild(addPitch);
+  form.appendChild(pitches);
+
+  // Dates and windows
+  const dates = document.createElement("fieldset");
+  dates.appendChild(planningText("legend", "Tournament dates and operating windows"));
+  dates.appendChild(planningText("p", "One to " + context.limits.maxDates + " dates within " + context.limits.maxSpanDays + " days; each date has one or " + (context.limits.maxWindowsPerDate === 2 ? "two" : context.limits.maxWindowsPerDate) + " windows that do not overlap or cross midnight.", "msg"));
+  const dateList = document.createElement("div"); dateList.id = "planning-dates";
+  dates.appendChild(dateList);
+  const addDate = planningButton("Add date", "secondary", "planning-add-date");
+  addDate.addEventListener("click", () => { addPlanningDateRow({ date: "", windows: [{ start: "", end: "" }] }); refreshPlanningRows(); });
+  dates.appendChild(addDate);
+  form.appendChild(dates);
+
+  // Roster
+  const roster = document.createElement("fieldset");
+  roster.appendChild(planningText("legend", "Roster size per team"));
+  const r = context.roster;
+  const min = planningInput("planning-roster-min", "number", "roster.minimum"); min.min = String(r.minimumRange.low); min.max = String(r.minimumRange.high); min.step = "1";
+  roster.appendChild(planningField("Minimum players", min, "planning-roster-min", "Allowed: " + r.minimumRange.low + " to " + r.minimumRange.high + " (default " + r.defaultMinimum + ")."));
+  const max = planningInput("planning-roster-max", "number", "roster.maximum"); max.min = String(r.maximumRange.low); max.max = String(r.maximumRange.high); max.step = "1";
+  roster.appendChild(planningField("Maximum players", max, "planning-roster-max", "Allowed: " + r.maximumRange.low + " to " + r.maximumRange.high + " (default " + r.defaultMaximum + ")."));
+  form.appendChild(roster);
+
+  // Registration deadline
+  const deadline = document.createElement("fieldset");
+  deadline.appendChild(planningText("legend", "Registration deadline"));
+  const local = planningInput("planning-deadline-local", "datetime-local", "registrationDeadline.local"); local.step = "60";
+  deadline.appendChild(planningField("Deadline (venue time)", local, "planning-deadline-local", "It is saved with the plan. It does not close registration by itself yet."));
+  const offsetRow = document.createElement("div"); offsetRow.id = "planning-deadline-offset-row"; offsetRow.hidden = true;
+  const offset = planningInput("planning-deadline-offset", "text", "registrationDeadline.utcOffset"); offset.placeholder = "e.g. -06:00"; offset.maxLength = 6; offset.autocomplete = "off";
+  offsetRow.appendChild(planningField("UTC offset (only needed when that local time happens twice)", offset, "planning-deadline-offset"));
+  deadline.appendChild(offsetRow);
+  form.appendChild(deadline);
+
+  // Rules
+  const rules = document.createElement("fieldset");
+  rules.appendChild(planningText("legend", "Rules this plan is made under"));
+  const version = planningInput("planning-rules-version", "text", "rules.version"); version.maxLength = 32; version.placeholder = "e.g. draft-1";
+  rules.appendChild(planningField("Rules version", version, "planning-rules-version"));
+  const snapshot = document.createElement("textarea"); snapshot.id = "planning-rules-snapshot"; snapshot.dataset.field = "rules.snapshot"; snapshot.maxLength = 4000;
+  rules.appendChild(planningField("Rules snapshot (saved with the revision and never rewritten)", snapshot, "planning-rules-snapshot"));
+  form.appendChild(rules);
+
+  const actions = document.createElement("div");
+  actions.className = "row";
+  const save = planningButton("Save draft plan", "dominant", "planning-save");
+  save.addEventListener("click", () => { savePlanning(); });
+  actions.appendChild(save);
+  form.appendChild(actions);
+  const status = planningText("p", "", "msg");
+  status.id = "planning-status";
+  status.setAttribute("aria-live", "polite");
+  form.appendChild(status);
+  const problems = document.createElement("ul");
+  problems.id = "planning-problems";
+  form.appendChild(problems);
+  return section;
+}
+
+function addPlanningPitchRow(data) {
+  const state = planningState;
+  const row = document.createElement("div");
+  row.className = "planning-row planning-pitch-row";
+  row.dataset.others = JSON.stringify(data.others || []);
+  const label = planningInput("", "text", ""); label.className = "planning-pitch-label"; label.placeholder = "Pitch label"; label.maxLength = 40; label.value = data.label;
+  label.setAttribute("aria-label", "Pitch label");
+  const usableWrap = document.createElement("label");
+  const usable = planningInput("", "checkbox", ""); usable.className = "planning-pitch-usable"; usable.checked = data.usable;
+  usableWrap.appendChild(usable); usableWrap.appendChild(document.createTextNode(" Usable"));
+  const suitableWrap = document.createElement("label");
+  const suitable = planningInput("", "checkbox", ""); suitable.className = "planning-pitch-format"; suitable.checked = data.suitable;
+  suitableWrap.appendChild(suitable); suitableWrap.appendChild(document.createTextNode(" Suitable for " + state.context.formatLabel));
+  const notes = planningInput("", "text", ""); notes.className = "planning-pitch-notes"; notes.placeholder = "Restrictions (optional)"; notes.maxLength = 300; notes.value = data.notes;
+  notes.setAttribute("aria-label", "Pitch restrictions");
+  const remove = planningButton("Remove pitch", "secondary planning-pitch-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshPlanningRows(); });
+  row.appendChild(label); row.appendChild(usableWrap); row.appendChild(suitableWrap); row.appendChild(notes); row.appendChild(remove);
+  document.getElementById("planning-pitches").appendChild(row);
+}
+
+function addPlanningWindowRow(windowsEl, data) {
+  const row = document.createElement("div");
+  row.className = "planning-window-row";
+  const start = planningInput("", "time", ""); start.className = "planning-window-start"; start.step = "60"; start.value = data.start; start.setAttribute("aria-label", "Window start");
+  const end = planningInput("", "time", ""); end.className = "planning-window-end"; end.step = "60"; end.value = data.end; end.setAttribute("aria-label", "Window end");
+  const remove = planningButton("Remove window", "secondary planning-window-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshPlanningRows(); });
+  row.appendChild(document.createTextNode("From "));
+  row.appendChild(start); row.appendChild(document.createTextNode(" to ")); row.appendChild(end); row.appendChild(remove);
+  windowsEl.appendChild(row);
+}
+
+function addPlanningDateRow(data) {
+  const row = document.createElement("div");
+  row.className = "planning-row planning-date-row";
+  const date = planningInput("", "date", ""); date.className = "planning-date-input"; date.value = data.date; date.setAttribute("aria-label", "Tournament date");
+  const remove = planningButton("Remove date", "secondary planning-date-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshPlanningRows(); });
+  const windowsEl = document.createElement("div");
+  windowsEl.className = "planning-windows";
+  const addWindow = planningButton("Add window", "secondary planning-add-window");
+  addWindow.addEventListener("click", () => { addPlanningWindowRow(windowsEl, { start: "", end: "" }); refreshPlanningRows(); });
+  row.appendChild(date); row.appendChild(remove); row.appendChild(windowsEl); row.appendChild(addWindow);
+  document.getElementById("planning-dates").appendChild(row);
+  for (const w of data.windows) addPlanningWindowRow(windowsEl, w);
+}
+
+/** Re-numbers the field paths the server's problems refer to, and shows only the add/remove controls the limits allow. */
+function refreshPlanningRows() {
+  const state = planningState;
+  if (!state) return;
+  const limits = state.context.limits;
+  const pitchRows = [...document.querySelectorAll("#planning-pitches .planning-pitch-row")];
+  pitchRows.forEach((row, i) => {
+    row.querySelector(".planning-pitch-label").dataset.field = "pitches[" + i + "].label";
+    row.querySelector(".planning-pitch-usable").dataset.field = "pitches[" + i + "].usable";
+    row.querySelector(".planning-pitch-format").dataset.field = "pitches[" + i + "].supportedFormats";
+    row.querySelector(".planning-pitch-notes").dataset.field = "pitches[" + i + "].restrictionNotes";
+    row.querySelector(".planning-pitch-remove").hidden = pitchRows.length <= 1;
+  });
+  document.getElementById("planning-add-pitch").hidden = pitchRows.length >= limits.maxPitches;
+  const dateRows = [...document.querySelectorAll("#planning-dates .planning-date-row")];
+  dateRows.forEach((row, i) => {
+    row.querySelector(".planning-date-input").dataset.field = "dates[" + i + "].date";
+    row.querySelector(".planning-date-remove").hidden = dateRows.length <= 1;
+    const windowRows = [...row.querySelectorAll(".planning-window-row")];
+    windowRows.forEach((w, j) => {
+      w.querySelector(".planning-window-start").dataset.field = "dates[" + i + "].windows[" + j + "].start";
+      w.querySelector(".planning-window-end").dataset.field = "dates[" + i + "].windows[" + j + "].end";
+      w.querySelector(".planning-window-remove").hidden = windowRows.length <= 1;
+    });
+    row.querySelector(".planning-add-window").hidden = windowRows.length >= limits.maxWindowsPerDate;
+  });
+  document.getElementById("planning-add-date").hidden = dateRows.length >= limits.maxDates;
+}
+
+/** Puts the saved revision (or, for a first plan, a minimal starting point and the registry defaults) into the form. */
+function fillPlanningForm(state) {
+  const context = state.context;
+  const revision = state.revision;
+  document.getElementById("planning-pitches").innerHTML = "";
+  document.getElementById("planning-dates").innerHTML = "";
+  if (revision) {
+    document.getElementById("planning-venue-name").value = revision.venue.name;
+    document.getElementById("planning-venue-location").value = revision.venue.locationDescription;
+    document.getElementById("planning-venue-timezone").value = revision.venue.timeZone;
+    document.getElementById("planning-venue-capacity").value = Number.isInteger(revision.venue.simultaneousMatchCapacity) ? String(revision.venue.simultaneousMatchCapacity) : "";
+    document.getElementById("planning-venue-notes").value = isPlanningText(revision.venue.restrictionNotes) ? revision.venue.restrictionNotes : "";
+    for (const p of revision.pitches) {
+      const formats = p.supportedFormats.filter(isPlanningText);
+      // Support for any other format is kept exactly as saved and never shown: this editor offers one yes/no, for this competition's own format.
+      addPlanningPitchRow({ label: p.label, usable: p.usable === true, suitable: formats.includes(context.formatKey), notes: isPlanningText(p.restrictionNotes) ? p.restrictionNotes : "", others: formats.filter((f) => f !== context.formatKey) });
+    }
+    for (const d of revision.dates) addPlanningDateRow({ date: d.date, windows: d.windows.length > 0 ? d.windows : [{ start: "", end: "" }] });
+    document.getElementById("planning-roster-min").value = String(revision.roster.minimum);
+    document.getElementById("planning-roster-max").value = String(revision.roster.maximum);
+    document.getElementById("planning-deadline-local").value = revision.registrationDeadline.local;
+    document.getElementById("planning-rules-version").value = revision.rules.version;
+    document.getElementById("planning-rules-snapshot").value = revision.rules.snapshot;
+  } else {
+    addPlanningPitchRow({ label: "Pitch 1", usable: true, suitable: true, notes: "", others: [] });
+    addPlanningDateRow({ date: "", windows: [{ start: "", end: "" }] });
+    document.getElementById("planning-venue-capacity").value = "1";
+    document.getElementById("planning-roster-min").value = String(context.roster.defaultMinimum);
+    document.getElementById("planning-roster-max").value = String(context.roster.defaultMaximum);
+  }
+  if (!revision && document.querySelectorAll("#planning-pitches .planning-pitch-row").length === 0) addPlanningPitchRow({ label: "Pitch 1", usable: true, suitable: true, notes: "", others: [] });
+  if (document.querySelectorAll("#planning-dates .planning-date-row").length === 0) addPlanningDateRow({ date: "", windows: [{ start: "", end: "" }] });
+  refreshPlanningRows();
+}
+
+function planningNumber(input) {
+  const raw = input.value.trim();
+  return raw === "" ? null : Number(raw);
+}
+
+/** The plan exactly as the form holds it. The save identifier, the format and the actor are never part of it. */
+function collectPlanningPayload() {
+  const state = planningState;
+  const value = (id) => document.getElementById(id).value;
+  const deadline = { local: value("planning-deadline-local"), timeZone: value("planning-venue-timezone") };
+  const offset = value("planning-deadline-offset").trim();
+  if (offset !== "") deadline.utcOffset = offset;
+  return {
+    venue: {
+      name: value("planning-venue-name"),
+      locationDescription: value("planning-venue-location"),
+      timeZone: value("planning-venue-timezone"),
+      simultaneousMatchCapacity: planningNumber(document.getElementById("planning-venue-capacity")),
+      restrictionNotes: value("planning-venue-notes"),
+    },
+    pitches: [...document.querySelectorAll("#planning-pitches .planning-pitch-row")].map((row) => {
+      let others = [];
+      try { const parsed = JSON.parse(row.dataset.others || "[]"); if (Array.isArray(parsed)) others = parsed; } catch (err) { others = []; }
+      return {
+        label: row.querySelector(".planning-pitch-label").value,
+        usable: row.querySelector(".planning-pitch-usable").checked,
+        supportedFormats: (row.querySelector(".planning-pitch-format").checked ? [state.context.formatKey] : []).concat(others),
+        restrictionNotes: row.querySelector(".planning-pitch-notes").value,
+      };
+    }),
+    dates: [...document.querySelectorAll("#planning-dates .planning-date-row")].map((row) => ({
+      date: row.querySelector(".planning-date-input").value,
+      windows: [...row.querySelectorAll(".planning-window-row")].map((w) => ({ start: w.querySelector(".planning-window-start").value, end: w.querySelector(".planning-window-end").value })),
+    })),
+    roster: { minimum: planningNumber(document.getElementById("planning-roster-min")), maximum: planningNumber(document.getElementById("planning-roster-max")) },
+    registrationDeadline: deadline,
+    rules: { version: value("planning-rules-version"), snapshot: value("planning-rules-snapshot") },
+  };
+}
+
+function newPlanningIntentId() {
+  try {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  } catch (err) { /* fall through */ }
+  const bytes = new Uint8Array(16);
+  if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+}
+
+function setPlanningStatus(text, kind) {
+  const status = document.getElementById("planning-status");
+  if (!status) return;
+  status.className = "msg" + (kind ? " " + kind : "");
+  status.textContent = text;
+}
+
+function clearPlanningMarks() {
+  for (const el of document.querySelectorAll("#planning-section [aria-invalid]")) el.removeAttribute("aria-invalid");
+}
+
+/** Marks the controls a problem refers to; "dates" marks every date, "dates[0].windows[1]" that window's two times. */
+function markPlanningProblems(problems) {
+  if (!Array.isArray(problems)) return;
+  for (const problem of problems) {
+    if (!problem || typeof problem.field !== "string") continue;
+    const field = problem.field === "registrationDeadline.timeZone" ? "venue.timeZone" : problem.field;
+    for (const el of document.querySelectorAll("#planning-section [data-field]")) {
+      const f = el.dataset.field;
+      if (f === field || f.startsWith(field + ".") || f.startsWith(field + "[")) el.setAttribute("aria-invalid", "true");
+    }
+  }
+}
+
+const PLANNING_OFFSET_CODES = ["DEADLINE_AMBIGUOUS_LOCAL_TIME", "DEADLINE_OFFSET_MISMATCH", "DEADLINE_OFFSET_INVALID"];
+
+async function savePlanning() {
+  const state = planningState;
+  const button = document.getElementById("planning-save");
+  if (!state || !button || button.disabled || !isOrganizerView()) return;
+  const payload = collectPlanningPayload();
+  const payloadJson = JSON.stringify(payload);
+  // A retry of exactly what was just attempted keeps its save identifier (so a lost answer can never create a second revision); any edit is a new save.
+  const intentId = state.lastAttempt && state.lastAttempt.payloadJson === payloadJson ? state.lastAttempt.intentId : newPlanningIntentId();
+  state.lastAttempt = { intentId, payloadJson };
+  button.disabled = true;
+  clearPlanningMarks();
+  renderPlanningProblems(document.getElementById("planning-problems"), []);
+  setPlanningStatus("Saving…", "");
+
+  const finish = (text, kind) => { if (planningState === state) { button.disabled = false; setPlanningStatus(text, kind); } };
+  let res;
+  try {
+    res = await planningRequest("POST", state.competitionId, { intentId, plan: payload });
+  } catch (err) {
+    finish(err && err.message === "timeout"
+      ? "The server did not answer in time. Your plan may not have been saved — check the saved plan above and try again."
+      : "Could not reach the server. Your plan was not confirmed as saved — try again.", "error");
+    return;
+  }
+  if (planningState !== state) return;
+  const json = res.json;
+  if ((res.status === 200 || res.status === 201) && json && validPlanningRevision(json.revision)) {
+    state.revision = json.revision;
+    state.lastAttempt = null;
+    renderPlanningSavedSummary(document.getElementById("planning-saved"), json.revision);
+    button.disabled = false;
+    setPlanningStatus("Plan saved as revision " + json.revision.revisionNumber + ".", "success");
+    if (json.isCurrent === false) {
+      // A replay of an earlier save that a newer revision has since replaced: show what is current, not what was replayed.
+      try {
+        const current = await planningRequest("GET", state.competitionId);
+        if (planningState === state && current.status === 200 && validPlanningRevision(current.json && current.json.revision)) {
+          state.revision = current.json.revision;
+          renderPlanningSavedSummary(document.getElementById("planning-saved"), current.json.revision);
+        }
+      } catch (err) { /* the replayed revision stays shown */ }
+    }
+    return;
+  }
+  if (res.status === 200 || res.status === 201) {
+    finish("The server's answer could not be understood. Your plan was not confirmed as saved — try again.", "error");
+    return;
+  }
+  const problems = json && Array.isArray(json.problems) ? json.problems : [];
+  renderPlanningProblems(document.getElementById("planning-problems"), problems);
+  markPlanningProblems(problems);
+  if (problems.some((p) => p && PLANNING_OFFSET_CODES.indexOf(p.code) !== -1)) document.getElementById("planning-deadline-offset-row").hidden = false;
+  finish((json && typeof json.error === "string" && json.error) || "Failed to save the plan.", "error");
 }
 
 UrbanoAuth.onAuthStateChange(refreshAuthState);

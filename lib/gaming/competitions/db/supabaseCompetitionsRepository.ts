@@ -1,14 +1,15 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository, CompetitionAdministrationReads } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
   CompetitionCheckInRecord, CompetitionParticipationAttestationRecord, CompetitionFixtureEvidenceRecord,
   SoccerGoalEventRecord, SoccerAssistEventRecord, SoccerPenaltyShootoutRecord, CompetitionDisputeRecord,
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
-  ParticipationAttestationInput,
+  ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
 } from "../types";
+import { PlanningIntentMismatchError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
   CompetitionTeamCountInvalidError, CompetitionPairingInvalidError, CompetitionNotPublishedError, CompetitionTeamNotFoundError,
@@ -40,6 +41,8 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    ["PLANNING_INTENT_MISMATCH", () => new PlanningIntentMismatchError()],
+    ["PLANNING_INVALID", () => planningValidationFromDatabase(msg)],
     ["OPERATIONAL_AUTHORITY_REQUIRED", () => new OperationalAuthorityRequiredError()],
     ["UNSUPPORTED_ACTIVITY_KEY", () => new UnsupportedActivityKeyError()],
     ["COMPETITION_NOT_FOUND", () => new CompetitionNotFoundError()],
@@ -103,13 +106,81 @@ export function translateError(error: { code?: string; message?: string }): Erro
   return new Error(msg || "Unknown Competitions repository error.");
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads {
+/** Everything one planning revision is made of, read in a single request so the answer is one consistent snapshot. */
+const PLANNING_REVISION_SELECT = [
+  "planning_revision_id, competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, created_at",
+  "venue_name, venue_location_description, venue_time_zone, simultaneous_match_capacity, venue_restriction_notes, roster_minimum, roster_maximum",
+  "registration_deadline_local, registration_deadline_time_zone, registration_deadline_utc_offset_minutes, registration_deadline_utc",
+  "rules_version, rules_snapshot, rules_snapshot_digest",
+  "pitches:competition_planning_pitches(position, label, is_usable, restriction_notes, formats:competition_planning_pitch_formats(format_key))",
+  "dates:competition_planning_dates(plan_date, position)",
+  "windows:competition_planning_windows(plan_date, window_index, start_time, end_time)",
+].join(", ");
+
+/** One stored revision, in the shapes the application uses: venue-local wall-clock strings, the UTC instant as ISO-8601, children in their saved order. */
+function mapPlanningRevision(row: any): CompetitionPlanningRevisionRecord {
+  const windows: any[] = row.windows ?? [];
+  return {
+    planningRevisionId: row.planning_revision_id,
+    competitionId: row.competition_id,
+    formatKey: row.format_key,
+    revisionNumber: row.revision_number,
+    // Revisions form one unbroken chain, so a revision's predecessor is always the one before it.
+    supersedesRevisionNumber: row.supersedes_revision_id ? row.revision_number - 1 : null,
+    authoredByGamingMemberId: row.authored_by_gaming_member_id,
+    createdAt: new Date(row.created_at).toISOString(),
+    venue: {
+      name: row.venue_name, locationDescription: row.venue_location_description, timeZone: row.venue_time_zone,
+      simultaneousMatchCapacity: row.simultaneous_match_capacity, restrictionNotes: row.venue_restriction_notes,
+    },
+    pitches: [...(row.pitches ?? [])].sort((a: any, b: any) => a.position - b.position).map((p: any) => ({
+      label: p.label,
+      usable: p.is_usable === true,
+      supportedFormats: (p.formats ?? []).map((f: any) => f.format_key).sort(),
+      restrictionNotes: p.restriction_notes ?? "",
+    })),
+    dates: [...(row.dates ?? [])].sort((a: any, b: any) => a.position - b.position).map((d: any) => ({
+      date: d.plan_date,
+      windows: windows.filter((w) => w.plan_date === d.plan_date).sort((a, b) => a.window_index - b.window_index)
+        .map((w) => ({ start: String(w.start_time).slice(0, 5), end: String(w.end_time).slice(0, 5) })),
+    })),
+    roster: { minimum: row.roster_minimum, maximum: row.roster_maximum },
+    registrationDeadline: {
+      local: String(row.registration_deadline_local).slice(0, 16).replace(" ", "T"),
+      timeZone: row.registration_deadline_time_zone,
+      utcOffset: formatUtcOffset(row.registration_deadline_utc_offset_minutes),
+      utc: new Date(row.registration_deadline_utc).toISOString(),
+    },
+    rules: { version: row.rules_version, snapshot: row.rules_snapshot, snapshotDigest: row.rules_snapshot_digest },
+  };
+}
+
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
     this.client = createClient(supabaseUrl, supabaseServiceKey, {
       global: { fetch: (input, init) => fetch(input, { ...init, cache: "no-store" } as RequestInit) },
     });
+  }
+
+  async savePlanningRevision(competitionId: string, organizerGamingMemberId: string, intentId: string, plan: CompetitionPlanningPlan): Promise<SavePlanningRevisionResult> {
+    const { data, error } = await this.client.rpc("save_competition_planning_revision_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_intent_id: intentId, p_plan: planToRpcPayload(plan),
+    });
+    if (error) throw translateError(error);
+    const row = Array.isArray(data) ? data[0] : data;
+    const { data: stored, error: readError } = await this.client.from("competition_planning_revisions").select(PLANNING_REVISION_SELECT)
+      .eq("planning_revision_id", row.planning_revision_id).single();
+    if (readError || !stored) throw new Error("The saved planning revision could not be read back.");
+    return { revision: mapPlanningRevision(stored), alreadySaved: row.already_saved === true, isCurrent: row.is_current === true };
+  }
+
+  async getCurrentPlanningRevision(competitionId: string): Promise<CompetitionPlanningRevisionRecord | null> {
+    const { data, error } = await this.client.from("competition_planning_revisions").select(PLANNING_REVISION_SELECT)
+      .eq("competition_id", competitionId).order("revision_number", { ascending: false }).limit(1);
+    if (error) throw translateError(error);
+    return data && data.length > 0 ? mapPlanningRevision(data[0]) : null;
   }
 
   async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {

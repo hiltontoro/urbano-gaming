@@ -676,3 +676,86 @@ export class HostAccessRevokedError extends Error {
 export class FixtureTeamScopeError extends Error {
   constructor() { super("This team is not part of this fixture."); this.name = "FixtureTeamScopeError"; }
 }
+
+// ---------------------------------------------------------------------
+// UG-CR-GATE-SSS-004 — Organizer Planning foundation.
+//
+// A competition-specific DRAFT PLAN, recorded as an append-only sequence of immutable revisions. These are plain data shapes only; the
+// validation, the typed planning errors and the commands live in planning.ts (an error exported from this file would have to be mapped in
+// httpAuth.ts's status table, and a planning refusal is judged by the planning route, which owns its own wording).
+//
+// A plan is not venue approval, not a verified claim about a venue, and not a schedule: it records validated planning capacity only.
+// The format is never a plan input — it is the competition's own, and each revision records it.
+// ---------------------------------------------------------------------
+
+export interface CompetitionPlanningVenue {
+  name: string;
+  locationDescription: string;
+  /** A confirmed IANA time zone; every date, window and the registration deadline are in it. */
+  timeZone: string;
+  /** How many matches the venue can host at once: from one up to the number of usable pitches. */
+  simultaneousMatchCapacity: number;
+  restrictionNotes: string;
+}
+
+export interface CompetitionPlanningPitch {
+  /** Unique (ignoring case) within one revision. */
+  label: string;
+  usable: boolean;
+  /** A closed subset of the registry's format keys. */
+  supportedFormats: SoccerFormatKey[];
+  restrictionNotes: string;
+}
+
+export interface CompetitionPlanningWindow {
+  /** Venue-local, 24-hour HH:MM; the window never crosses midnight. */
+  start: string;
+  end: string;
+}
+
+export interface CompetitionPlanningDate {
+  /** A real calendar day, YYYY-MM-DD, in the venue's time zone. */
+  date: string;
+  windows: CompetitionPlanningWindow[];
+}
+
+export interface CompetitionPlanningDeadline {
+  /** The venue-local wall-clock time, YYYY-MM-DDTHH:MM. */
+  local: string;
+  timeZone: string;
+  /** The UTC offset in force at that local time, ±HH:MM. */
+  utcOffset: string;
+  /** The one authoritative instant, as an ISO-8601 UTC timestamp. Always consistent with the three fields above. */
+  utc: string;
+}
+
+/** What an organizer may state in a plan, validated and normalized. Roster values are explicit (registry defaults are filled in). */
+export interface CompetitionPlanningPlan {
+  venue: CompetitionPlanningVenue;
+  pitches: CompetitionPlanningPitch[];
+  dates: CompetitionPlanningDate[];
+  roster: { minimum: number; maximum: number };
+  registrationDeadline: CompetitionPlanningDeadline;
+  rules: { version: string; snapshot: string };
+}
+
+/** A saved revision as the server holds it. Never returned to a browser as is: see publicRevision() in planning.ts. */
+export interface CompetitionPlanningRevisionRecord extends CompetitionPlanningPlan {
+  planningRevisionId: string;
+  competitionId: string;
+  /** Immutable: the competition's own format when the revision was saved. */
+  formatKey: SoccerFormatKey;
+  revisionNumber: number;
+  supersedesRevisionNumber: number | null;
+  authoredByGamingMemberId: string;
+  createdAt: string;
+  rules: { version: string; snapshot: string; snapshotDigest: string };
+}
+
+export interface SavePlanningRevisionResult {
+  revision: CompetitionPlanningRevisionRecord;
+  /** True when the same intent and payload had already been saved: nothing new was written. */
+  alreadySaved: boolean;
+  /** False only for a replay of an earlier revision that a newer one has since superseded. */
+  isCurrent: boolean;
+}
