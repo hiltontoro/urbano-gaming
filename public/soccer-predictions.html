@@ -1,15 +1,15 @@
 <!doctype html>
-<html>
+<html lang="es">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Soccer Predictions — URBANO Gaming</title>
+<title data-i18n="pred.title">URBANO Score — URBANO Gaming</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
-   * Soccer Predictions — real Experience. Built on Gaming Member
+   * URBANO Score (historically "Soccer Predictions": this file's name, its route and its identifiers keep that name) — real Experience. Built on Gaming Member
    * identity (urbanoAuth.js); Prediction data via
    * /api/gaming/predictions/*. Reuses the same identity tokens as
    * index.html/host.html/participant.html — no shell redesign.
@@ -39,10 +39,12 @@
   a { color: inherit; text-decoration: none; }
 
   .shell-header {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
     max-width: 720px; margin: 0 auto; padding: 20px 20px 0;
   }
-  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+  /* The URBANO mark and wordmark are one link to the parent site; the Gaming badge is a separate link back to this application's home. */
+  .brand-link { display: inline-flex; align-items: center; gap: 10px; border-radius: 6px; }
   .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
   .brand-mark-wrap::before {
     content: ""; position: absolute; inset: -9px;
@@ -56,12 +58,30 @@
     color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
     text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
   }
+  /* Language selector and account controls sit together on the right; on a phone the header wraps to two rows (brand, then the
+     selector on the left and the account group on the right) so nothing overflows at 375 px. */
+  .header-tools { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; max-width: 100%; }
+  .lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button {
+    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted);
+    background: transparent; border: none; padding: 9px 12px; min-height: 44px; min-width: 44px; cursor: pointer;
+  }
+  .lang-switch button[aria-pressed="true"] { color: var(--primary-ink); background: var(--primary-fill); }
+  .account-group { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; position: relative; }
+  .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
+  [hidden] { display: none !important; }
+  .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .back-link:focus-visible,
+  .lang-switch button:focus-visible, .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible,
+  .btn-primary:focus-visible, .team-toggle:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
   .signin-btn {
     font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
     border-radius: 8px; border: 1px solid var(--ink); background: transparent;
     color: var(--ink); cursor: pointer;
   }
   .signin-btn:hover { background: var(--surface-2); }
+  a.signin-btn { display: inline-block; text-align: center; }
+  .account-group .signin-btn { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .signin-status {
     display: none; max-width: 720px; margin: 10px auto 0; padding: 10px 20px 0;
     font-size: 12.5px; color: var(--muted); line-height: 1.5;
@@ -86,6 +106,16 @@
   .back-link:hover { color: var(--ink); }
 
   .content { max-width: 720px; margin: 20px auto 0; padding: 0 20px; }
+
+  /* The public name, its descriptor and the honest scope (soccer only for now) are static: they are on screen before, and whatever
+     happens to, the match list. */
+  .score-heading { max-width: 720px; margin: 18px auto 0; padding: 0 20px; }
+  .score-heading h1 { font-size: clamp(26px, 5vw, 34px); font-weight: 800; letter-spacing: -0.01em; margin: 0; }
+  .score-descriptor { margin: 6px 0 0; font-size: 16px; font-weight: 600; color: var(--ink); }
+  .score-scope {
+    margin: 10px 0 0; display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.4;
+    color: #b57cff; background: var(--exp-purple-bg); border: 1px solid rgba(124, 58, 237, 0.5); padding: 4px 10px; border-radius: 6px;
+  }
 
   .card {
     border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2);
@@ -150,50 +180,321 @@
 
   .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
 
+  footer {
+    max-width: 720px; margin: 48px auto 0; padding: 20px; text-align: center;
+    color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+  }
+  footer p { margin: 0 0 6px; }
+  footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
+
   @media (max-width: 640px) {
     .shell-header { padding: 16px 16px 0; }
+    /* On a phone the tools are not one block: the header wraps into two rows. Row 1 is the brand and the language selector; row 2 is
+       the account group alone, the full width, right-aligned, so a real name has room before it is ever truncated. */
+    .header-tools { display: contents; }
+    .lang-switch { margin-left: auto; }
+    .account-group { flex: 1 1 100%; }
     .brand-word { font-size: 15px; }
     .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
     .primary-nav { padding: 0 16px 2px; }
-    .back-link, .content { padding-left: 16px; padding-right: 16px; }
+    .back-link, .content, .score-heading { padding-left: 16px; padding-right: 16px; }
     .match-teams { font-size: 17px; }
   }
 </style>
 </head>
 <body>
 
-<div class="shell-header">
+<header class="shell-header">
   <div class="brand">
-    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
-    <span class="brand-word">URBANO</span>
-    <span class="brand-badge">Gaming</span>
+    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+      <span class="brand-word">URBANO</span>
+    </a>
+    <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
   </div>
-  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
-</div>
+  <div class="header-tools">
+    <div class="lang-switch" role="group" aria-label="Idioma" data-i18n-attr="aria-label:shell.lang.label">
+      <button type="button" data-lang="es" lang="es" aria-pressed="true" aria-label="Cambiar a español" data-i18n-attr="aria-label:shell.lang.es">ES</button>
+      <button type="button" data-lang="en" lang="en" aria-pressed="false" aria-label="Cambiar a inglés" data-i18n-attr="aria-label:shell.lang.en">EN</button>
+    </div>
+    <div class="account-group">
+      <a class="signin-btn" id="account-link" href="/profile.html" hidden></a>
+      <button class="signin-btn" id="btn-signin" style="visibility:hidden">Iniciar sesión / Crear cuenta</button>
+    </div>
+  </div>
+</header>
 <p class="signin-status" id="signin-status"></p>
 
-<nav class="primary-nav">
-  <a class="nav-link" href="/">Home</a>
-  <a class="nav-link" href="/#play">Play</a>
-  <a class="nav-link is-active" href="/#experiences">Experiences</a>
-  <a class="nav-link" href="/leaderboards.html">Leaderboards</a>
-  <a class="nav-link" href="/rewards.html">Rewards</a>
+<nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
+  <a class="nav-link" href="/" data-i18n="shell.nav.home">Inicio</a>
+  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
+  <a class="nav-link is-active" href="/#experiences" aria-current="page" data-i18n="shell.nav.experiences">Experiencias</a>
+  <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
+  <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
 </nav>
 
-<a class="back-link" href="/">← Back to URBANO Gaming</a>
+<a class="back-link" href="/" data-i18n="pred.back">← Volver a URBANO Gaming</a>
+
+<section class="score-heading" aria-labelledby="score-title">
+  <h1 id="score-title">URBANO Score</h1>
+  <p class="score-descriptor" data-i18n="pred.descriptor">Tus predicciones deportivas</p>
+  <p class="score-scope" data-i18n="pred.scope">Por ahora solo hay fútbol disponible.</p>
+</section>
 
 <div class="content" id="content">
-  <div class="empty-state">Loading Soccer Predictions…</div>
+  <div class="empty-state" data-i18n="pred.loading">Cargando URBANO Score…</div>
 </div>
 
+<footer>
+  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+</footer>
+
+<script src="/urbanoI18n.js"></script>
+<script id="i18n-fallback">
+/* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
+   If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
+   supplies the language table; nothing here decides what is available or allowed. There is no English without the module, so the
+   language selector is hidden instead of offering a control that does nothing. */
+(function (w) {
+  "use strict";
+  var m = w.UrbanoI18n;
+  if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
+  var ES = {
+    "shell.lang.label": "Idioma",
+    "shell.lang.es": "Cambiar a español",
+    "shell.lang.en": "Cambiar a inglés",
+    "shell.brand.urbano": "URBANO — ir a urbanohn.com",
+    "shell.brand.gaming": "URBANO Gaming — inicio",
+    "shell.nav.label": "Navegación principal",
+    "shell.nav.home": "Inicio",
+    "shell.nav.play": "Jugar",
+    "shell.nav.experiences": "Experiencias",
+    "shell.nav.leaderboards": "Clasificaciones",
+    "shell.nav.rewards": "Premios",
+    "shell.footer.part": "URBANO Gaming — parte de URBANO",
+    "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
+    "auth.btn.finish": "Terminá de crear tu cuenta",
+    "auth.btn.hi": "Hola, {name}",
+    "auth.profile.title": "Ver mi perfil",
+    "auth.signOut": "Cerrar sesión",
+    "auth.panel.aria": "Iniciar sesión o crear una cuenta",
+    "auth.entry.title": "Entrá a URBANO",
+    "auth.entry.note": "Iniciá sesión en tu cuenta o creá una.",
+    "auth.login": "Iniciar sesión",
+    "auth.register": "Crear cuenta",
+    "auth.method.loginNote": "Elegí cómo recibir tu código.",
+    "auth.method.registerNote": "Te enviaremos un código para confirmar que sos vos.",
+    "auth.method.email": "Correo",
+    "auth.method.phone": "Teléfono",
+    "auth.method.phoneSoon": "Teléfono — todavía no disponible",
+    "auth.method.phoneSoonTitle": "El acceso por teléfono todavía no está disponible.",
+    "auth.method.phoneSoonMsg": "El acceso por teléfono todavía no está disponible. Usá tu correo.",
+    "auth.input.emailPlaceholder": "tu@ejemplo.com",
+    "auth.input.emailAria": "Correo electrónico",
+    "auth.input.phoneAria": "Número de teléfono",
+    "auth.sendLogin": "Enviar código de acceso",
+    "auth.sendVerification": "Enviar código de verificación",
+    "auth.phoneHint": "Usá el código de país, por ejemplo +504 9999 9999.",
+    "auth.back": "Volver",
+    "auth.switch.toRegister": "Crear una cuenta en su lugar",
+    "auth.switch.toLogin": "Ya tengo una cuenta",
+    "auth.code.title": "Ingresá tu código",
+    "auth.code.introLoginEmail": "Si {id} tiene una cuenta, te llegará un código en breve. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introLoginPhone": "Si {id} tiene una cuenta, te llegará un mensaje de texto con un código. Puede tardar un minuto.",
+    "auth.code.introRegisterEmail": "Enviamos un código a {id}. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introRegisterPhone": "Enviamos un mensaje de texto con un código a {id}. Puede tardar un minuto.",
+    "auth.code.placeholder": "Código de verificación",
+    "auth.code.verify": "Verificar",
+    "auth.code.resend": "Reenviar código",
+    "auth.code.resendIn": "Reenviar código en {s} s",
+    "auth.code.otherNumber": "Usar otro número",
+    "auth.code.otherEmail": "Usar otro correo",
+    "auth.code.noCodeEmail": "¿No te llegó el código por correo? ",
+    "auth.code.noCodePhone": "¿No te llegó el código por mensaje de texto? ",
+    "auth.name.title": "Elegí tu nombre para mostrar",
+    "auth.name.note": "Así vas a aparecer en los juegos.",
+    "auth.name.placeholder": "Cómo vas a aparecer en los juegos",
+    "auth.name.aria": "Nombre para mostrar",
+    "auth.continue": "Continuar",
+    "auth.welcome.title": "Te damos la bienvenida de nuevo",
+    "auth.welcome.email": "Este correo ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.welcome.phone": "Este número de teléfono ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.msg.phoneEmpty": "Ingresá tu número de teléfono con el código de país, por ejemplo +504 9999 9999.",
+    "auth.msg.phoneNoCountry": "Empezá con el código de país, por ejemplo +504 9999 9999 para Honduras.",
+    "auth.msg.phoneInvalid": "Ese número de teléfono no parece válido. Usá el código de país seguido del número, por ejemplo +504 9999 9999.",
+    "auth.msg.emailEmpty": "Ingresá tu correo electrónico.",
+    "auth.msg.emailInvalid": "Eso no parece un correo electrónico. Revisalo e intentá de nuevo.",
+    "auth.msg.requestingLogin": "Solicitando tu código de acceso...",
+    "auth.msg.sendingVerification": "Enviando tu código de verificación...",
+    "auth.msg.sendingNew": "Enviando un código nuevo...",
+    "auth.msg.resentLogin": "Si existe una cuenta, te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.resentRegister": "Te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.codeEmptyPhone": "Ingresá el código de tu mensaje de texto.",
+    "auth.msg.codeEmptyEmail": "Ingresá el código de tu correo.",
+    "auth.msg.verifying": "Verificando...",
+    "auth.msg.incompleteLogin": "Encontramos tu acceso pero no una cuenta terminada. Elegí un nombre para mostrar para terminarla.",
+    "auth.msg.lastStep": "Un último paso para terminar de crear tu cuenta.",
+    "auth.msg.nameEmpty": "Ingresá un nombre para mostrar.",
+    "auth.msg.saving": "Guardando...",
+    "auth.err.rateLimited": "Demasiadas solicitudes. Esperá {seconds} segundos e intentá de nuevo.",
+    "auth.err.rateLimitedFew": "Demasiadas solicitudes. Esperá unos segundos e intentá de nuevo.",
+    "auth.err.codeInvalid": "Ese código no es válido o venció. Revisá el código o pedí uno nuevo.",
+    "auth.err.signupClosed": "Por ahora no se pueden crear cuentas nuevas.",
+    "auth.err.phoneUnavailable": "El acceso por teléfono no está disponible en este momento.",
+    "auth.err.phoneUnavailableYet": "El acceso por teléfono todavía no está disponible.",
+    "auth.err.invalidPhone": "Ese número de teléfono no se puede usar.",
+    "auth.err.invalidEmail": "Ese correo electrónico no se puede usar.",
+    "auth.err.network": "No pudimos conectarnos con el servidor. Revisá tu conexión e intentá de nuevo.",
+    "auth.err.unknown": "Algo salió mal. Intentá de nuevo.",
+    "auth.err.notSignedIn": "No iniciaste sesión.",
+    "auth.err.identityChanged": "Tu sesión cambió. Intentá de nuevo.",
+    "auth.err.profileFailed": "No se pudo completar el perfil.",
+    "auth.srv.nameEmpty": "El nombre para mostrar no puede estar vacío.",
+    "auth.srv.nameTooLong": "El nombre para mostrar no puede superar los 40 caracteres.",
+    "auth.link.error": "Este enlace de acceso no es válido, ya se usó o venció. Pedí uno nuevo para iniciar sesión.",
+    "auth.link.retry": "Pedir un código nuevo",
+    "pred.title": "URBANO Score — URBANO Gaming",
+    "pred.back": "← Volver a URBANO Gaming",
+    "pred.loading": "Cargando URBANO Score…",
+    "pred.descriptor": "Tus predicciones deportivas",
+    "pred.scope": "Por ahora solo hay fútbol disponible.",
+    "pred.empty": "Todavía no hay partidos abiertos para predicciones — volvé pronto.",
+    "pred.updating": "Actualizando…",
+    "pred.err.refresh": "No pudimos actualizar los partidos. Recargá la página para intentar de nuevo.",
+    "pred.err.load": "No pudimos cargar los partidos. Recargá la página para intentar de nuevo.",
+    "pred.home": "Local",
+    "pred.away": "Visitante",
+    "pred.vs": "vs",
+    "pred.result": "Resultado: {home}–{away}",
+    "pred.locked": "Bloqueado — esperando el resultado oficial",
+    "pred.login.unfinished": "Un paso más: elegí un nombre para mostrar y terminá de crear tu cuenta; después hacé tu predicción.",
+    "pred.login.prompt": "Iniciá sesión o creá una cuenta para hacer tu predicción.",
+    "pred.login.finishBtn": "Terminá de crear tu cuenta",
+    "pred.login.btn": "Iniciar sesión o crear cuenta",
+    "pred.dim.scoreline": "Marcador",
+    "pred.dim.goalscorer": "Goleador",
+    "pred.dim.goalMinute": "Minuto del gol",
+    "pred.dim.firstScorer": "Primer anotador",
+    "pred.correctCount": "{n} de 4 correctas.",
+    "pred.noGoalscorer": "Sin goleador",
+    "pred.noGoal": "Sin gol",
+    "pred.yours.full": "Tu predicción: {home}–{away}, {scorer}, {minute}, primero: {first}",
+    "pred.yours.awaiting": "Tu predicción: {home}–{away}. Esperando el resultado oficial.",
+    "pred.missed": "No enviaste una predicción antes del inicio del partido.",
+    "pred.noVenue": "Por ahora no hay ninguna sede activa para este partido.",
+    "pred.f.venue": "Sede",
+    "pred.f.checking": "Verificando tu ubicación…",
+    "pred.f.exact": "Marcador exacto",
+    "pred.f.who": "¿Quién va a marcar?",
+    "pred.f.noScorerOpt": "Sin goleador / Sin gol",
+    "pred.f.minuteQ": "¿En qué minuto se marcará algún gol?",
+    "pred.f.minutePlaceholder": "Sin gol — dejalo en blanco",
+    "pred.f.stoppagePlaceholder": "agregado",
+    "pred.f.minuteHint": "El tiempo agregado solo aplica en el minuto 45 o 90.",
+    "pred.f.firstQ": "¿Quién marca primero?",
+    "pred.f.update": "Actualizar predicción",
+    "pred.f.submit": "Enviar predicción",
+    "pred.geo.unavailable": "Ubicación no disponible — activá el acceso a la ubicación para enviar una predicción.",
+    "pred.geo.within": "Estás dentro del alcance de esta sede.",
+    "pred.geo.outside": "Parecés estar fuera del alcance de esta sede — el envío podría ser rechazado.",
+    "pred.submitting": "Enviando…",
+    "pred.locationRequired": "Se requiere tu ubicación para enviar una predicción.",
+    "pred.saved": "Predicción guardada. Podés editarla hasta el inicio del partido.",
+    "pred.failed": "No se pudo enviar la predicción.",
+    "pred.signedInNote": "Ya iniciaste sesión. Hacé tu predicción abajo.",
+    "pred.prize.qualified": "Premio obtenido: ",
+    "pred.prize.superseded": "(reemplazado por una corrección del resultado).",
+    "pred.prize.redeemed": "ya canjeado.",
+    "pred.prize.delivered": "ya entregado antes — el resultado corregido no lo cambia.",
+    "pred.prize.review": "en revisión por la sede tras una corrección del resultado — consultá con un anfitrión de URBANO antes de retirarlo.",
+    "pred.prize.pending": "todavía sin canjear — consultá con un anfitrión de URBANO.",
+    "pred.srv.matchNotFound": "No existe un partido con ese identificador.",
+    "pred.srv.cancelled": "Este partido fue cancelado.",
+    "pred.srv.locked": "Las predicciones están cerradas para este partido.",
+    "pred.srv.notClassified": "Este partido todavía no tiene una clasificación de actividad declarada y no puede recibir predicciones.",
+    "pred.srv.activationNotFound": "No existe una activación de sede con ese identificador.",
+    "pred.srv.activationMismatch": "Esta activación de sede no corresponde al partido indicado.",
+    "pred.srv.activationDisabled": "Esta activación de sede no está habilitada por ahora.",
+    "pred.srv.activationImmutable": "Esta predicción se envió por primera vez a través de otra activación de sede.",
+    "pred.srv.geoNotEligible": "El envío no cumplió los requisitos de ubicación.",
+    "pred.srv.geoUnavailable": "No se pudo determinar la ubicación de este envío.",
+    "pred.srv.invalidScore": "Los marcadores predichos no pueden ser negativos.",
+    "pred.srv.invalidMinute": "El minuto de gol predicho debe ser un minuto reglamentario entre 1 y 90, y el tiempo agregado solo se admite cuando el minuto reglamentario es 45 o 90.",
+    "pred.srv.invalidFirstTeam": "El primer equipo en marcar debe ser el local, el visitante o ninguno.",
+    "pred.srv.invalidGoalscorer": "El goleador elegido debe ser un jugador activo de uno de los dos equipos de este partido.",
+    "pred.srv.invalidJson": "El cuerpo de la solicitud debe ser un JSON válido.",
+    "pred.srv.invalidPayload": "La predicción enviada no es válida.",
+    "pred.srv.authRequired": "Necesitás iniciar sesión como miembro de URBANO Gaming para hacer esto.",
+    "pred.srv.generic": "No pudimos guardar tu predicción. Intentá de nuevo."
+  };
+  var SERVER = {
+    "No match exists for this id.": "pred.srv.matchNotFound",
+    "This match has been cancelled.": "pred.srv.cancelled",
+    "Predictions are locked for this match.": "pred.srv.locked",
+    "This match has no declared Activity Classification and cannot accept predictions yet.": "pred.srv.notClassified",
+    "No venue activation exists for this id.": "pred.srv.activationNotFound",
+    "This venue activation is not for the supplied match.": "pred.srv.activationMismatch",
+    "This venue activation is not currently enabled.": "pred.srv.activationDisabled",
+    "This prediction was first submitted through a different venue activation.": "pred.srv.activationImmutable",
+    "Submission failed geolocation eligibility.": "pred.srv.geoNotEligible",
+    "Location could not be determined for this submission.": "pred.srv.geoUnavailable",
+    "Predicted scores must be non-negative.": "pred.srv.invalidScore",
+    "Predicted goal minute must be a regulation minute between 1 and 90, with a positive stoppage offset allowed only when the regulation minute is 45 or 90.": "pred.srv.invalidMinute",
+    "Predicted first team to score must be HOME, AWAY, or null.": "pred.srv.invalidFirstTeam",
+    "The selected goalscorer must be an active player on one of this match's two teams.": "pred.srv.invalidGoalscorer",
+    "Request body must be valid JSON.": "pred.srv.invalidJson",
+    "Invalid prediction payload.": "pred.srv.invalidPayload",
+    "A valid Authorization header for an authenticated Gaming Member is required.": "pred.srv.authRequired",
+    "Failed to submit prediction.": "pred.srv.generic",
+    "Display name cannot be empty.": "auth.srv.nameEmpty",
+    "Display name cannot exceed 40 characters.": "auth.srv.nameTooLong",
+    "Failed to create Gaming Member.": "auth.err.profileFailed"
+  };
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+  function t(key, vars) {
+    var template = own(ES, key) ? ES[key] : key;
+    return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
+      if (!vars || !own(vars, name)) return whole;
+      var value = vars[name];
+      if (value && typeof value === "object" && typeof value.$t === "string") return t(value.$t);
+      return value === null || value === undefined ? "" : String(value);
+    });
+  }
+  w.UrbanoI18n = {
+    fallback: true,
+    STORAGE_KEY: "urbano.lang",
+    DEFAULT_LANG: "es",
+    LANGS: ["es"],
+    getLang: function () { return "es"; },
+    setLang: function () { return false; },
+    t: t,
+    has: function (key) { return own(ES, key); },
+    locale: function () { return "es-HN"; },
+    serverMessageKey: function (message) { return own(SERVER, message) ? SERVER[message] : null; },
+    onChange: function () { return function () {}; },
+    apply: function () {},
+    dictionary: function () { return { es: ES, en: {} }; }
+  };
+  var groups = w.document.querySelectorAll(".lang-switch");
+  for (var i = 0; i < groups.length; i++) { groups[i].hidden = true; groups[i].style.display = "none"; }
+})(window);
+</script>
 <script src="/urbanoAuth.js"></script>
 <script>
 UrbanoAuth.attachSignInButton(
   document.getElementById("btn-signin"),
-  document.getElementById("signin-status")
+  document.getElementById("signin-status"),
+  { accountLink: document.getElementById("account-link") }
 );
 
 const content = document.getElementById("content");
+
+// Language. Every sentence on this page comes from the language table (urbanoI18n.js) and carries data-i18n (and, when it has
+// variables, data-i18n-vars) so that changing language re-translates it IN PLACE — nothing is rebuilt, so a form the person is
+// filling in keeps what they typed. Team, player, venue and competition names and prize labels are data: they are never translated.
+const t = (key, vars) => UrbanoI18n.t(key, vars);
 
 function el(html) {
   const div = document.createElement("div");
@@ -213,6 +514,42 @@ function esc(value) {
     .replace(/'/g, "&#39;");
 }
 
+// Attribute text for a translatable node inside an el() template, and its initial (current-language) text.
+function ix(key, vars) {
+  return `data-i18n="${esc(key)}"${vars ? ` data-i18n-vars="${esc(JSON.stringify(vars))}"` : ""}`;
+}
+function tx(key, vars) {
+  return esc(t(key, vars));
+}
+
+// Sets a node's text from the language table and remembers the key (and variables) so a change of language re-translates it.
+function setText(node, key, vars) {
+  node.setAttribute("data-i18n", key);
+  if (vars) node.setAttribute("data-i18n-vars", JSON.stringify(vars));
+  else node.removeAttribute("data-i18n-vars");
+  node.removeAttribute("data-server-message");
+  node.textContent = t(key, vars);
+}
+
+// A message that came from the server. A known, exact message is translated; an unknown one is never guessed at: it is shown as
+// received in English and replaced by a generic sentence in Spanish. The raw text is kept so a change of language can redraw it.
+function serverMessageText(raw) {
+  const key = UrbanoI18n.serverMessageKey(raw);
+  if (key) return t(key);
+  return UrbanoI18n.getLang() === "en" ? raw : t("pred.srv.generic");
+}
+function setServerMessage(node, raw) {
+  node.removeAttribute("data-i18n");
+  node.removeAttribute("data-i18n-vars");
+  node.setAttribute("data-server-message", raw);
+  node.textContent = serverMessageText(raw);
+}
+
+// Kick-off time. The time-zone policy is unchanged (the device's own); only the language of month and weekday names follows the page.
+function formatKickoff(iso) {
+  return new Date(iso).toLocaleString(UrbanoI18n.locale());
+}
+
 // The prize this qualification is for, resolved from the match's own
 // venue activations (no extra API call). null when it cannot be resolved.
 function prizeLabelForQualification(match, qualification) {
@@ -227,27 +564,33 @@ function prizeLabelForQualification(match, qualification) {
 
 // What the member is told about a prize. A result correction never hands a prize over twice: a prize an earlier handover already
 // satisfies says so, and a prize the venue is still reviewing (a correction changed an already-delivered prize) is not shown as
-// ready to collect.
-function prizeStatusText(qualification) {
-  if (qualification.supersededAt) return "(superseded by a result correction).";
-  if (qualification.redeemedAt) return "already redeemed.";
-  if (qualification.alreadyDelivered) return "already handed over earlier — the corrected result does not change it.";
-  if (qualification.underReview) return "being reviewed by the venue after a result correction — ask an URBANO host before collecting.";
-  return "not yet redeemed — see an URBANO host.";
+// ready to collect. Returns the language-table key of that sentence.
+function prizeStatusKey(qualification) {
+  if (qualification.supersededAt) return "pred.prize.superseded";
+  if (qualification.redeemedAt) return "pred.prize.redeemed";
+  if (qualification.alreadyDelivered) return "pred.prize.delivered";
+  if (qualification.underReview) return "pred.prize.review";
+  return "pred.prize.pending";
+}
+
+function i18nSpan(key) {
+  const span = document.createElement("span");
+  setText(span, key);
+  return span;
 }
 
 function buildPrizeQualifiedLine(match, qualification) {
   const label = prizeLabelForQualification(match, qualification);
   const line = document.createElement("p");
   line.className = qualification.underReview && !qualification.supersededAt && !qualification.redeemedAt ? "msg" : "msg success";
-  line.appendChild(document.createTextNode("Prize qualified: "));
+  line.appendChild(i18nSpan("pred.prize.qualified"));
   if (label) {
     const strong = document.createElement("strong");
     strong.textContent = label;
     line.appendChild(strong);
     line.appendChild(document.createTextNode(qualification.supersededAt ? " " : " — "));
   }
-  line.appendChild(document.createTextNode(prizeStatusText(qualification)));
+  line.appendChild(i18nSpan(prizeStatusKey(qualification)));
   return line;
 }
 
@@ -274,8 +617,9 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
 // form's own state and the finalized-result recap, so the two views
 // cannot semantically diverge. Regulation null means No Goal.
 // Stoppage is only ever non-null when regulation is 45 or 90.
+// Returns either the minute text or a { $t: key } marker that is translated when it is drawn.
 function formatGoalMinute(regulation, stoppage) {
-  if (regulation === null || regulation === undefined) return "No Goal";
+  if (regulation === null || regulation === undefined) return { $t: "pred.noGoal" };
   return stoppage ? `${regulation}+${stoppage}'` : `${regulation}'`;
 }
 
@@ -307,20 +651,21 @@ async function renderMatch(match) {
   const authState = await UrbanoAuth.getState();
   const kickoffPassed = new Date() >= new Date(match.kickoffAt);
 
-  const homeTeamName = esc(match.homeTeam ? match.homeTeam.name : "Home");
-  const awayTeamName = esc(match.awayTeam ? match.awayTeam.name : "Away");
+  // Team names are data. When a team is missing the page falls back to a generic label (translated), never to a guessed name.
+  const homeTeamName = esc(match.homeTeam ? match.homeTeam.name : t("pred.home"));
+  const awayTeamName = esc(match.awayTeam ? match.awayTeam.name : t("pred.away"));
 
   const card = el(`<div class="card accent" data-match-id="${esc(match.matchId)}">
-    <div class="match-teams"><span>${homeTeamName}</span><span class="match-vs">vs</span><span>${awayTeamName}</span></div>
-    <div class="match-meta"><span>${esc(match.competition)}</span><span>${new Date(match.kickoffAt).toLocaleString()}</span></div>
+    <div class="match-teams"><span>${homeTeamName}</span><span class="match-vs" ${ix("pred.vs")}>${tx("pred.vs")}</span><span>${awayTeamName}</span></div>
+    <div class="match-meta"><span>${esc(match.competition)}</span><span data-kickoff="${esc(match.kickoffAt)}">${esc(formatKickoff(match.kickoffAt))}</span></div>
     <div id="match-body-${match.matchId}"></div>
   </div>`);
   const body = card.querySelector(`#match-body-${match.matchId}`);
 
   if (match.finalized) {
-    body.appendChild(el(`<span class="status-pill">Result: ${match.finalResult.homeScore}–${match.finalResult.awayScore}</span>`));
+    body.appendChild(el(`<span class="status-pill" ${ix("pred.result", { home: match.finalResult.homeScore, away: match.finalResult.awayScore })}>${tx("pred.result", { home: match.finalResult.homeScore, away: match.finalResult.awayScore })}</span>`));
   } else if (kickoffPassed) {
-    body.appendChild(el(`<span class="status-pill bad">Locked — awaiting official result</span>`));
+    body.appendChild(el(`<span class="status-pill bad" ${ix("pred.locked")}>${tx("pred.locked")}</span>`));
   }
 
   if (authState.status !== "authenticated") {
@@ -328,8 +673,8 @@ async function renderMatch(match) {
     // logging in or creating an account the person lands back here, not on a generic page.
     const unfinished = authState.status === "profile_incomplete";
     const entry = el(`<div>
-      <p class="msg">${unfinished ? "One more step: choose a display name to finish creating your account, then make your prediction." : "Log in or create an account to make your prediction."}</p>
-      <button type="button" class="btn-primary" data-login-cta>${unfinished ? "Finish creating your account" : "Log in or create account"}</button>
+      <p class="msg" ${ix(unfinished ? "pred.login.unfinished" : "pred.login.prompt")}>${tx(unfinished ? "pred.login.unfinished" : "pred.login.prompt")}</p>
+      <button type="button" class="btn-primary" data-login-cta ${ix(unfinished ? "pred.login.finishBtn" : "pred.login.btn")}>${tx(unfinished ? "pred.login.finishBtn" : "pred.login.btn")}</button>
     </div>`);
     entry.querySelector("[data-login-cta]").addEventListener("click", () => openAccountEntry(match.matchId));
     body.appendChild(entry);
@@ -342,25 +687,33 @@ async function renderMatch(match) {
   if (match.finalized && mine.evaluation) {
     const ev = mine.evaluation;
     const pred = mine.prediction;
-    const scorerName = esc(findPlayerName(match, pred.predictedGoalscorerPlayerId) || "No Goalscorer");
-    const minuteLabel = formatGoalMinute(pred.predictedGoalMinuteRegulation, pred.predictedGoalMinuteStoppage);
-    const firstTeamLabel =
-      pred.predictedFirstTeamToScore === "HOME" ? homeTeamName :
-      pred.predictedFirstTeamToScore === "AWAY" ? awayTeamName : "No Goal";
+    const scorerName = findPlayerName(match, pred.predictedGoalscorerPlayerId);
+    const homeName = match.homeTeam ? match.homeTeam.name : null;
+    const awayName = match.awayTeam ? match.awayTeam.name : null;
+    const firstTeamVar =
+      pred.predictedFirstTeamToScore === "HOME" ? (homeName === null ? { $t: "pred.home" } : homeName) :
+      pred.predictedFirstTeamToScore === "AWAY" ? (awayName === null ? { $t: "pred.away" } : awayName) : { $t: "pred.noGoal" };
+    const yoursVars = {
+      home: pred.predictedHomeScore,
+      away: pred.predictedAwayScore,
+      scorer: scorerName || { $t: "pred.noGoalscorer" },
+      minute: formatGoalMinute(pred.predictedGoalMinuteRegulation, pred.predictedGoalMinuteStoppage),
+      first: firstTeamVar,
+    };
     // el() returns only firstElementChild — every sibling after the
     // dimension-grid div must live inside ONE wrapper, or it is
     // silently dropped rather than appended.
     body.appendChild(el(`
       <div>
         <div class="dimension-grid">
-          <div class="dimension-cell ${ev.scorelineCorrect ? "correct" : "incorrect"}"><div class="label">Scoreline</div><div class="mark">${ev.scorelineCorrect ? "✓" : "✗"}</div></div>
-          <div class="dimension-cell ${ev.goalscorerCorrect ? "correct" : "incorrect"}"><div class="label">Goalscorer</div><div class="mark">${ev.goalscorerCorrect ? "✓" : "✗"}</div></div>
-          <div class="dimension-cell ${ev.goalMinuteCorrect ? "correct" : "incorrect"}"><div class="label">Goal Minute</div><div class="mark">${ev.goalMinuteCorrect ? "✓" : "✗"}</div></div>
-          <div class="dimension-cell ${ev.firstTeamToScoreCorrect ? "correct" : "incorrect"}"><div class="label">First Scorer</div><div class="mark">${ev.firstTeamToScoreCorrect ? "✓" : "✗"}</div></div>
+          <div class="dimension-cell ${ev.scorelineCorrect ? "correct" : "incorrect"}"><div class="label" ${ix("pred.dim.scoreline")}>${tx("pred.dim.scoreline")}</div><div class="mark">${ev.scorelineCorrect ? "✓" : "✗"}</div></div>
+          <div class="dimension-cell ${ev.goalscorerCorrect ? "correct" : "incorrect"}"><div class="label" ${ix("pred.dim.goalscorer")}>${tx("pred.dim.goalscorer")}</div><div class="mark">${ev.goalscorerCorrect ? "✓" : "✗"}</div></div>
+          <div class="dimension-cell ${ev.goalMinuteCorrect ? "correct" : "incorrect"}"><div class="label" ${ix("pred.dim.goalMinute")}>${tx("pred.dim.goalMinute")}</div><div class="mark">${ev.goalMinuteCorrect ? "✓" : "✗"}</div></div>
+          <div class="dimension-cell ${ev.firstTeamToScoreCorrect ? "correct" : "incorrect"}"><div class="label" ${ix("pred.dim.firstScorer")}>${tx("pred.dim.firstScorer")}</div><div class="mark">${ev.firstTeamToScoreCorrect ? "✓" : "✗"}</div></div>
         </div>
-        <p class="msg success">${ev.correctDimensionCount} of 4 correct.</p>
+        <p class="msg success" ${ix("pred.correctCount", { n: ev.correctDimensionCount })}>${tx("pred.correctCount", { n: ev.correctDimensionCount })}</p>
         <div data-prize-slot></div>
-        <p class="msg">Your prediction: ${pred.predictedHomeScore}–${pred.predictedAwayScore}, ${scorerName}, ${minuteLabel}, first: ${firstTeamLabel}</p>
+        <p class="msg" ${ix("pred.yours.full", yoursVars)}>${tx("pred.yours.full", yoursVars)}</p>
       </div>
     `));
     if (mine.qualification) {
@@ -371,27 +724,28 @@ async function renderMatch(match) {
 
   if (kickoffPassed) {
     if (mine.prediction) {
-      body.appendChild(el(`<p class="msg">Your prediction: ${mine.prediction.predictedHomeScore}–${mine.prediction.predictedAwayScore}. Awaiting the official result.</p>`));
+      const vars = { home: mine.prediction.predictedHomeScore, away: mine.prediction.predictedAwayScore };
+      body.appendChild(el(`<p class="msg" ${ix("pred.yours.awaiting", vars)}>${tx("pred.yours.awaiting", vars)}</p>`));
     } else {
-      body.appendChild(el(`<p class="msg">You did not submit a prediction before kickoff.</p>`));
+      body.appendChild(el(`<p class="msg" ${ix("pred.missed")}>${tx("pred.missed")}</p>`));
     }
     return card;
   }
 
   const enabledActivations = match.venueActivations.filter((a) => a.enabled && a.venue && a.venue.active);
   if (enabledActivations.length === 0) {
-    body.appendChild(el(`<p class="msg">No venue is currently active for this match.</p>`));
+    body.appendChild(el(`<p class="msg" ${ix("pred.noVenue")}>${tx("pred.noVenue")}</p>`));
     return card;
   }
 
   const form = el(`<form>
     <div class="field">
-      <label>Venue</label>
+      <label ${ix("pred.f.venue")}>${tx("pred.f.venue")}</label>
       <select id="venue-select-${match.matchId}"></select>
     </div>
-    <p class="msg" id="geo-status-${match.matchId}">Checking your location…</p>
+    <p class="msg" id="geo-status-${match.matchId}" ${ix("pred.f.checking")}>${tx("pred.f.checking")}</p>
     <div class="field">
-      <label>Exact score</label>
+      <label ${ix("pred.f.exact")}>${tx("pred.f.exact")}</label>
       <div class="score-row">
         <input type="number" min="0" id="home-score-${match.matchId}" value="${mine.prediction ? mine.prediction.predictedHomeScore : 0}" />
         <span class="score-vs">–</span>
@@ -399,9 +753,9 @@ async function renderMatch(match) {
       </div>
     </div>
     <div class="field">
-      <label>Who will score?</label>
+      <label ${ix("pred.f.who")}>${tx("pred.f.who")}</label>
       <select id="goalscorer-select-${match.matchId}">
-        <option value="">No Goalscorer / No Goal</option>
+        <option value="" ${ix("pred.f.noScorerOpt")}>${tx("pred.f.noScorerOpt")}</option>
         <optgroup label="${homeTeamName}">
           ${(match.homeTeam ? match.homeTeam.players : []).map((p) => `<option value="${esc(p.playerId)}">${esc(p.name)}</option>`).join("")}
         </optgroup>
@@ -411,23 +765,23 @@ async function renderMatch(match) {
       </select>
     </div>
     <div class="field">
-      <label>At what minute will any goal be scored?</label>
+      <label ${ix("pred.f.minuteQ")}>${tx("pred.f.minuteQ")}</label>
       <div class="score-row">
-        <input type="number" min="1" max="90" id="goal-minute-regulation-${match.matchId}" placeholder="No Goal — leave blank" value="${mine.prediction && mine.prediction.predictedGoalMinuteRegulation !== null ? mine.prediction.predictedGoalMinuteRegulation : ""}" />
+        <input type="number" min="1" max="90" id="goal-minute-regulation-${match.matchId}" placeholder="${tx("pred.f.minutePlaceholder")}" data-i18n-attr="placeholder:pred.f.minutePlaceholder" value="${mine.prediction && mine.prediction.predictedGoalMinuteRegulation !== null ? mine.prediction.predictedGoalMinuteRegulation : ""}" />
         <span class="score-vs">+</span>
-        <input type="number" min="1" id="goal-minute-stoppage-${match.matchId}" placeholder="stoppage" value="${mine.prediction && mine.prediction.predictedGoalMinuteStoppage !== null && mine.prediction.predictedGoalMinuteStoppage !== undefined ? mine.prediction.predictedGoalMinuteStoppage : ""}" disabled />
+        <input type="number" min="1" id="goal-minute-stoppage-${match.matchId}" placeholder="${tx("pred.f.stoppagePlaceholder")}" data-i18n-attr="placeholder:pred.f.stoppagePlaceholder" value="${mine.prediction && mine.prediction.predictedGoalMinuteStoppage !== null && mine.prediction.predictedGoalMinuteStoppage !== undefined ? mine.prediction.predictedGoalMinuteStoppage : ""}" disabled />
       </div>
-      <p class="msg" id="goal-minute-hint-${match.matchId}">Stoppage time only applies at minute 45 or 90.</p>
+      <p class="msg" id="goal-minute-hint-${match.matchId}" ${ix("pred.f.minuteHint")}>${tx("pred.f.minuteHint")}</p>
     </div>
     <div class="field">
-      <label>Who scores first?</label>
+      <label ${ix("pred.f.firstQ")}>${tx("pred.f.firstQ")}</label>
       <div class="team-toggle-row" id="first-team-toggle-${match.matchId}">
         <button type="button" class="team-toggle" data-value="HOME">${homeTeamName}</button>
         <button type="button" class="team-toggle" data-value="AWAY">${awayTeamName}</button>
-        <button type="button" class="team-toggle" data-value="">No Goal</button>
+        <button type="button" class="team-toggle" data-value="" ${ix("pred.noGoal")}>${tx("pred.noGoal")}</button>
       </div>
     </div>
-    <button type="submit" class="btn-primary" id="submit-btn-${match.matchId}">${mine.prediction ? "Update Prediction" : "Submit Prediction"}</button>
+    <button type="submit" class="btn-primary" id="submit-btn-${match.matchId}" ${ix(mine.prediction ? "pred.f.update" : "pred.f.submit")}>${tx(mine.prediction ? "pred.f.update" : "pred.f.submit")}</button>
     <p class="msg" id="submit-msg-${match.matchId}"></p>
   </form>`);
   body.appendChild(form);
@@ -483,13 +837,13 @@ async function renderMatch(match) {
   const geoStatus = form.querySelector(`#geo-status-${match.matchId}`);
   const position = await getCurrentPosition();
   if (!position) {
-    geoStatus.textContent = "Location unavailable — enable location access to submit a prediction.";
+    setText(geoStatus, "pred.geo.unavailable");
     geoStatus.className = "msg error";
   } else {
     const selectedActivation = enabledActivations.find((a) => a.venueActivationId === select.value) || enabledActivations[0];
     const distance = haversineMeters(position.latitude, position.longitude, selectedActivation.venue.latitude, selectedActivation.venue.longitude);
     const eligible = distance <= selectedActivation.venue.radiusMeters;
-    geoStatus.textContent = eligible ? "You're within range of this venue." : "You appear to be outside this venue's range — submission may be rejected.";
+    setText(geoStatus, eligible ? "pred.geo.within" : "pred.geo.outside");
     geoStatus.className = eligible ? "msg success" : "msg error";
   }
 
@@ -499,12 +853,12 @@ async function renderMatch(match) {
     const submitBtn = form.querySelector(`#submit-btn-${match.matchId}`);
     submitBtn.disabled = true;
     submitMsg.className = "msg";
-    submitMsg.textContent = "Submitting…";
+    setText(submitMsg, "pred.submitting");
 
     const freshPosition = await getCurrentPosition();
     if (!freshPosition) {
       submitMsg.className = "msg error";
-      submitMsg.textContent = "Location is required to submit a prediction.";
+      setText(submitMsg, "pred.locationRequired");
       submitBtn.disabled = false;
       return;
     }
@@ -532,11 +886,12 @@ async function renderMatch(match) {
 
     if (result.status === 201) {
       submitMsg.className = "msg success";
-      submitMsg.textContent = "Prediction saved. You can edit it until kickoff.";
+      setText(submitMsg, "pred.saved");
       mine.prediction = result.json.prediction;
     } else {
       submitMsg.className = "msg error";
-      submitMsg.textContent = (result.json && result.json.error) || "Failed to submit prediction.";
+      if (result.json && result.json.error) setServerMessage(submitMsg, String(result.json.error));
+      else setText(submitMsg, "pred.failed");
     }
     submitBtn.disabled = false;
   });
@@ -556,8 +911,8 @@ function openAccountEntry(matchId) {
 // older build is dropped instead of being painted over the newer one (and never shows the previous person's prediction).
 let renderGeneration = 0;
 
-function emptyState(text) {
-  return el(`<div class="empty-state">${esc(text)}</div>`);
+function emptyState(key) {
+  return el(`<div class="empty-state" ${ix(key)}>${tx(key)}</div>`);
 }
 
 async function refresh() {
@@ -567,7 +922,7 @@ async function refresh() {
   if (generation !== renderGeneration) return false;
 
   if (!data.matches || data.matches.length === 0) {
-    content.replaceChildren(emptyState("No matches are open for prediction yet — check back soon."));
+    content.replaceChildren(emptyState("pred.empty"));
     return true;
   }
 
@@ -580,7 +935,7 @@ async function refresh() {
   }
   if (generation !== renderGeneration) return false;
 
-  if (cards.length === 0) content.replaceChildren(emptyState("No matches are open for prediction yet — check back soon."));
+  if (cards.length === 0) content.replaceChildren(emptyState("pred.empty"));
   else content.replaceChildren(...cards);
   return true;
 }
@@ -598,19 +953,19 @@ function resumeIntent(state) {
   const note = card.querySelector('[id^="submit-msg-"]');
   if (note) {
     note.className = "msg success";
-    note.textContent = "You're signed in. Make your prediction below.";
+    setText(note, "pred.signedInNote");
   }
 }
 
 // Signing in, signing out, or a different person: nothing that belonged to the previous identity stays on screen, and the list is
 // rebuilt for the new one without a page reload.
 async function onIdentityChanged(state) {
-  content.replaceChildren(emptyState("Updating…"));
+  content.replaceChildren(emptyState("pred.updating"));
   try {
     await refresh();
   } catch (err) {
     console.error("Soccer Predictions: refresh after sign-in change failed:", err);
-    content.replaceChildren(emptyState("Couldn't update the matches. Reload the page to try again."));
+    content.replaceChildren(emptyState("pred.err.refresh"));
     return;
   }
   resumeIntent(state);
@@ -618,11 +973,31 @@ async function onIdentityChanged(state) {
 
 refresh().catch((err) => {
   console.error("Soccer Predictions: failed to load matches:", err);
-  content.replaceChildren(emptyState("Couldn't load the matches. Reload the page to try again."));
+  content.replaceChildren(emptyState("pred.err.load"));
 });
+if (typeof UrbanoAuth.onIdentityReset === "function") {
+  // The signed-in person changed: nothing of the previous person (their predictions, their forms) stays on screen while the list is
+  // rebuilt for the new one, and a build still waiting on the network is dropped.
+  UrbanoAuth.onIdentityReset(() => {
+    renderGeneration += 1;
+    content.replaceChildren(emptyState("pred.updating"));
+  }).catch(() => {});
+}
 if (typeof UrbanoAuth.onIdentityChange === "function") {
   UrbanoAuth.onIdentityChange(onIdentityChanged).catch(() => {});
 }
+
+// A change of language: everything with data-i18n is re-translated in place by UrbanoI18n itself; what remains is the parts that are
+// not a plain table lookup — kick-off times (formatted in the chosen language) and server messages (known ones translate, unknown
+// ones follow the rule in serverMessageText).
+UrbanoI18n.onChange(() => {
+  for (const node of content.querySelectorAll("[data-kickoff]")) {
+    node.textContent = formatKickoff(node.getAttribute("data-kickoff"));
+  }
+  for (const node of content.querySelectorAll("[data-server-message]")) {
+    node.textContent = serverMessageText(node.getAttribute("data-server-message"));
+  }
+});
 </script>
 
 </body>

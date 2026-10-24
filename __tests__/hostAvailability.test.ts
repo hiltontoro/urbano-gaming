@@ -19,6 +19,9 @@ const INDEX_HTML = readFileSync(path.join(process.cwd(), "public/index.html"), "
 const ROUTE_SOURCE = readFileSync(path.join(process.cwd(), "app/api/gaming/host/availability/route.ts"), "utf8");
 // The ONE browser-side reader of the server's answer, shared by the landing card and the application page (UG-CR-GATE-091).
 const READER_SOURCE = readFileSync(path.join(process.cwd(), "public/hostAvailability.js"), "utf8");
+// The shared language module the landing page loads. Most tests in this file assert the English wording, so the page is loaded in English;
+// Spanish-by-default and the language switch are covered by __tests__/shellPublic.test.ts.
+const I18N_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoI18n.js"), "utf8");
 
 const HOST_FLAG = "BECOME_A_HOST_SCHEMA_READY";
 const AVAILABILITY_URL = "/api/gaming/host/availability";
@@ -75,7 +78,7 @@ async function realRouteReply(): Promise<Reply> {
 }
 
 /** `readerSource: null` models a page whose /hostAvailability.js failed to load. */
-async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compressTimeout?: boolean; html?: string; readerSource?: string | null } = {}) {
+async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compressTimeout?: boolean; html?: string; readerSource?: string | null; lang?: "es" | "en" } = {}) {
   const calls: FetchCall[] = [];
   const matchCalls: FetchCall[] = [];
   const dom = new JSDOM(opts.html ?? INDEX_HTML, {
@@ -85,6 +88,8 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
     beforeParse(window) {
       const w = window as unknown as Record<string, any>;
       w.UrbanoAuth = { attachSignInButton: () => {} };
+      window.localStorage.setItem("urbano.lang", opts.lang ?? "en");
+      window.eval(I18N_SOURCE); // jsdom does not load external scripts, so the REAL shipped module is evaluated, as the script tag would
       if (opts.compressTimeout) {
         const realSetTimeout = window.setTimeout.bind(window);
         // Only the page's own 4 s readiness timeout is compressed, so the timeout path can run in a few milliseconds.
@@ -119,7 +124,7 @@ async function loadLanding(reply: () => Reply | Promise<Reply>, opts: { compress
   });
   const win = dom.window as unknown as Window & Record<string, any>;
   const doc = win.document;
-  const card = () => Array.from(doc.querySelectorAll("#experiences-carousel .exp-card")).find((c) => (c.querySelector("h3")?.textContent ?? "") === "Become a Host") as HTMLElement | undefined;
+  const card = () => Array.from(doc.querySelectorAll("#organizers-grid .exp-card")).find((c) => (c.querySelector("h3")?.textContent ?? "") === "Become a Host") as HTMLElement | undefined;
   const settle = async (ms = 60) => { await new Promise((r) => setTimeout(r, ms)); };
   return {
     win, doc, calls, matchCalls, card, settle,
@@ -312,11 +317,11 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     // Usable: a real anchor, focusable, with the application page as its destination, in the same carousel as before.
     expect((card as HTMLAnchorElement).href).toBe(`http://localhost${BECOME_A_HOST_PAGE}`);
     expect(card!.getAttribute("tabindex")).not.toBe("-1");
-    expect(card!.closest("#experiences-carousel")).toBeTruthy();
+    expect(card!.closest("#organizers-grid")).toBeTruthy(); // the organizers' entries, last on the page
     expect(page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`).length).toBe(1);
     // The sibling cards are untouched.
-    const titles = Array.from(page.doc.querySelectorAll("#experiences-carousel h3")).map((h) => h.textContent);
-    expect(titles).toEqual(["Become a Host", "Community Voting", "Level 33"]);
+    const titles = Array.from(page.doc.querySelectorAll("#organizers-grid h3")).map((h) => h.textContent);
+    expect(titles).toEqual(["Become a Host", "URBANO Competitions"]);
   });
 
   it("[8] the readiness answer is acted on only once: after it resolves open the card is open, and an unrelated later event cannot make a closed card open", async () => {
@@ -446,18 +451,23 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     // Nothing hardcodes "open", reads storage or the URL to decide, or infers readiness from anything else.
     const script = INDEX_HTML.slice(INDEX_HTML.indexOf("const HOST_ENTRY_CLOSED"), INDEX_HTML.indexOf("</script>", INDEX_HTML.indexOf("const HOST_ENTRY_CLOSED")));
     expect(script).not.toMatch(/localStorage|sessionStorage|location\.(search|hash|href)|URLSearchParams|document\.cookie|NEXT_PUBLIC|hostOpen\s*=\s*true|=\s*true;\s*\/\/\s*open/);
-    expect(script).toMatch(/experiencesCatalog\(false\)/); // first paint is always the closed card
-    expect(script).toMatch(/if \(open === true\) renderCatalog\(experiencesCatalog\(true\)/);
+    expect(script).toMatch(/organizersCatalog\(false\)/); // first paint is always the closed card
+    expect(script).toMatch(/if \(open === true\) renderCatalog\(organizersCatalog\(true\)/);
   });
 
-  it("the rest of the landing page is unchanged: the skill-game cards and the other experience cards render exactly as before", async () => {
+  it("the rest of the landing page is as the Founder composed it: every other card keeps its access and its informational state; Host and Competitions are last and informational", async () => {
     const page = await loadLanding(() => "reject");
     await page.settle(30);
-    const games = Array.from(page.doc.querySelectorAll("#games-carousel h3")).map((h) => h.textContent);
-    expect(games).toEqual(["Poker", "Trivia", "Quiz", "Duel"]);
-    const experiences = Array.from(page.doc.querySelectorAll("#experiences-carousel h3")).map((h) => h.textContent);
-    expect(experiences).toEqual(["Become a Host", "Community Voting", "Level 33"]);
-    expect(page.doc.querySelectorAll("#experiences-carousel .exp-card.is-locked").length).toBe(3); // all three informational while closed
+    const titles = (selector: string) => Array.from(page.doc.querySelectorAll(selector)).map((h) => h.textContent);
+    // Order of the page: URBANO Poker and Halloween / Community (Experiences), Trivia, the Minigames, and last the organizers' entries.
+    expect(titles("#experiences-carousel h3")).toEqual(["URBANO Poker", "Halloween"]);
+    expect(titles("#games-carousel h3")).toEqual(["Trivia"]); // Quiz and Duel are not shown on the Home (their implementations are untouched)
+    expect(titles("#minigames-grid h3")).toEqual(["URBANO Rutas", "URBANO Towers"]);
+    expect(titles("#organizers-grid h3")).toEqual(["Become a Host", "URBANO Competitions"]);
+    expect(Array.from(page.doc.querySelectorAll(".exp-card h3")).map((h) => h.textContent)).toEqual(["URBANO Poker", "Halloween", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
+    expect(page.text().match(/Level\s*33|\bQuiz\b|\bDuel\b/i)?.[0] ?? null).toBeNull(); // (the Halloween card's own words may say "community voting")
+    expect(page.doc.querySelectorAll("#organizers-grid .exp-card.is-locked").length).toBe(2); // both informational while closed
+    expect(page.doc.querySelectorAll('a[href*="competitions"]').length).toBe(0); // URBANO Competitions activates no journey
   });
 });
 
@@ -483,7 +493,7 @@ describe("negative controls — removing any fail-closed protection makes the CT
   const actionable = (page: Awaited<ReturnType<typeof loadLanding>>) => page.doc.querySelectorAll(`a[href="${BECOME_A_HOST_PAGE}"]`).length > 0;
 
   it("control 1 — first paint rendered open: the CTA is actionable while the request is still pending", async () => {
-    const page = await loadLanding(() => "hang", { html: mutated('renderCatalog(experiencesCatalog(false), "experiences-carousel");', 'renderCatalog(experiencesCatalog(true), "experiences-carousel");') });
+    const page = await loadLanding(() => "hang", { html: mutated('renderCatalog(organizersCatalog(false), "organizers-grid");', 'renderCatalog(organizersCatalog(true), "organizers-grid");') });
     expect(actionable(page)).toBe(true); // the flash the real page prevents
   });
 
@@ -559,10 +569,19 @@ describe("landing header — the 320 px overflow fix is pinned", () => {
     expect(narrow).toMatch(/row-gap:\s*8px/);
   });
 
-  it("at 375 px and wider the header is NOT wrapping (that layout is unchanged), and no other width-specific wrap exists", () => {
-    expect(rule(".shell-header")).not.toMatch(/flex-wrap/);
-    expect((css.match(/flex-wrap:\s*wrap/g) ?? []).length).toBeGreaterThanOrEqual(1);
-    for (const query of ["max-width: 640px"]) expect(media(query)).not.toMatch(/\.shell-header\s*\{[^}]*flex-wrap/);
+  it("the header wraps BY DESIGN (it now holds the brand, the language selector and the account group): on phones row 1 is the brand and the selector, row 2 is the account group alone", () => {
+    // Before the shell work the header held two items and was pinned as never wrapping at 375 px and wider. It now holds more, so the wrap
+    // is part of the layout: it can never push the page sideways, and on a phone the account group takes its own full-width row so a real name has room.
+    expect(rule(".shell-header")).toMatch(/flex-wrap:\s*wrap/);
+    expect(media("max-width: 640px")).toMatch(/\.header-tools\s*\{[^}]*display:\s*contents/);
+    expect(media("max-width: 640px")).toMatch(/\.account-group\s*\{[^}]*flex:\s*1 1 100%/); // the account group takes the second row alone
+    expect(rule(".header-tools")).toMatch(/min-width:\s*0/);
+  });
+
+  it("the account group keeps name and Sign out together on the right, and only an extreme name is truncated (ellipsis), never wrapped", () => {
+    expect(rule(".account-group")).toMatch(/justify-content:\s*flex-end/);
+    expect(rule(".account-group .signin-btn")).toMatch(/min-width:\s*0/);
+    expect(rule(".account-group [data-urbano-signout]")).toMatch(/white-space:\s*nowrap/);
   });
 
   it("the sign-in control keeps its label on one line (never broken mid-word), keeps its natural width, and is never wider than the header", () => {

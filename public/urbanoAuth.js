@@ -37,6 +37,23 @@
 // use onIdentityChange; onAuthStateChange keeps its original meaning.
 //
 // Only the anon key is ever used in this file — never service_role.
+//
+// Language: every user-facing string goes through urbanoAuthText(key, englishFallback, vars). When a page loads /urbanoI18n.js the
+// text follows the page's chosen language (Spanish by default); on a page that does not load it (for example the administrative
+// portal) the English fallback below is used, exactly as before. Results returned to callers keep their English `message` meaning and
+// gain an additive `messageKey` (+ `messageVars`) so a caller can re-translate them.
+//
+// Sign-in link problems: when Auth sends a person back with an error (an invalid, used or expired link) the error is read from the
+// address bar ONCE, the Auth return data is removed from the bar, a clear message with an explicit "request a new code" action is
+// shown, and nothing is ever sent automatically. Only a sanitized error code is kept in memory; tokens are never read, stored or logged.
+
+function urbanoAuthText(key, fallback, vars) {
+  const i18n = typeof window !== "undefined" ? window.UrbanoI18n : undefined;
+  if (i18n && typeof i18n.has === "function" && i18n.has(key)) return i18n.t(key, vars);
+  return String(fallback).replace(/\{(\w+)\}/g, (whole, name) =>
+    vars && Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole
+  );
+}
 
 const UrbanoAuth = (() => {
   const SUPABASE_JS_CDN_URL =
@@ -46,17 +63,27 @@ const UrbanoAuth = (() => {
 
   let clientPromise = null;
 
-  // undefined = not yet resolved against the server this page load;
-  // null = resolved, no completed profile yet; object = resolved,
-  // complete. Invalidated (reset to undefined) on every Auth state
-  // change so a fresh sign-in / sign-out always re-resolves rather than
-  // serving a stale cached profile.
-  let cachedGamingMember = undefined;
+  // The Gaming Member of the person who is signed in NOW, and of nobody else. A lookup (finished or still in flight) belongs to ONE
+  // authenticated person for life: it is keyed by that person's Auth user id, it is created synchronously and never reassigned
+  // after an `await`, and a read only ever combines a session with the lookup made for that same user id. So an answer that arrives
+  // late (another person signed in meanwhile, or the session ended) can only settle the promise of the person it was asked for and
+  // can never be mistaken for the member of whoever is signed in now. { userId, promise, abort, settled } or null.
+  let memberEntry = null;
+  // Every lookup still in flight, wherever the stored entry points now, so work for a person who is gone can always be cancelled.
+  const memberLookups = new Set();
+  // A read that finds the signed-in person changed while it was waiting starts again; this bounds that (it only happens if the
+  // person changes again and again during every single attempt).
+  const MAX_IDENTITY_ATTEMPTS = 4;
 
   let authChangeCallbacks = [];
   let identityCallbacks = [];
+  let identityResetCallbacks = [];
   let lastIdentityKey = null;
   let publishSequence = 0;
+  // Who the pages were last told about (undefined until the first Auth event of the page load), and whether the pages have been told
+  // that the person changed and are still owed the new state (so a change that ends on the same person is still reported).
+  let announcedUserId;
+  let resetOwed = false;
 
   // Which entry methods the deployment DECLARES, as reported by
   // GET /api/gaming/auth-methods. A declaration is not evidence of delivery:
@@ -68,6 +95,87 @@ const UrbanoAuth = (() => {
   // Registered by the sign-in panel so a page can open it with an intent.
   let signInOpener = null;
   let memoryIntent = null;
+
+  // ---- sign-in link return data (address bar) -------------------------
+  // After a person opens the link in an email, Supabase Auth returns them to the site with either a session (implicit flow: tokens
+  // in the address-bar fragment, read by the Supabase client itself) or an error (an invalid, used or expired link). Both are
+  // Auth return data and none of it should stay in the address bar. Tokens are never read here: the client reads them, and this
+  // code only removes what is left once it has finished. Only an error code, sanitized to lowercase letters, digits and
+  // underscores, is ever kept (in memory, for the message).
+  const AUTH_RETURN_PARAMS = [
+    "access_token", "refresh_token", "expires_in", "expires_at", "token_type", "type",
+    "provider_token", "provider_refresh_token", "error", "error_code", "error_description", "sb",
+  ];
+  const AUTH_ERROR_PARAMS = ["error", "error_code", "error_description"];
+  let linkErrorRead = false;
+  let pendingLinkError = null; // { code } or null
+
+  function splitParams(text) {
+    return String(text || "").replace(/^[#?]/, "").split("&").filter((piece) => piece !== "");
+  }
+
+  function paramName(piece) {
+    const raw = piece.split("=")[0];
+    try {
+      return decodeURIComponent(raw.replace(/\+/g, " "));
+    } catch (err) {
+      return raw;
+    }
+  }
+
+  function paramValue(piece) {
+    const at = piece.indexOf("=");
+    if (at < 0) return "";
+    try {
+      return decodeURIComponent(piece.slice(at + 1).replace(/\+/g, " "));
+    } catch (err) {
+      return "";
+    }
+  }
+
+  // Removes the named parameters from the fragment (hashNames) and from the query string (queryNames), keeping every other character
+  // of the address (path, other query values, an in-page anchor such as #play) exactly as it was. The query list is deliberately
+  // short: a generic name such as "type" may belong to the page itself, so only Auth's own error parameters are removed there.
+  function stripAddressParams(hashNames, queryNames) {
+    try {
+      const loc = window.location;
+      const hashPieces = splitParams(loc.hash);
+      const searchPieces = splitParams(loc.search);
+      // Only an address that actually carries Auth return data is touched: a session (tokens) or an Auth error. A fragment or query that
+      // merely happens to contain one of these generic names is the page's own business and is left exactly as it is.
+      const hashIsAuthReturn = hashPieces.some((piece) => ["access_token", "refresh_token", "error", "error_code"].includes(paramName(piece)));
+      const queryIsAuthReturn = searchPieces.some((piece) => paramName(piece) === "error_code");
+      const keepHash = hashIsAuthReturn ? hashPieces.filter((piece) => !hashNames.includes(paramName(piece))) : hashPieces;
+      const keepSearch = queryIsAuthReturn ? searchPieces.filter((piece) => !queryNames.includes(paramName(piece))) : searchPieces;
+      if (keepHash.length === hashPieces.length && keepSearch.length === searchPieces.length) return;
+      const next = loc.pathname + (keepSearch.length ? "?" + keepSearch.join("&") : "") + (keepHash.length ? "#" + keepHash.join("&") : "");
+      window.history.replaceState(window.history.state, "", next);
+    } catch (err) {
+      /* history unavailable: leave the address as it is */
+    }
+  }
+
+  // Reads (once per page load) whether Auth sent the person back with an error, then removes the error data from the address bar.
+  function readLinkErrorOnce() {
+    if (linkErrorRead) return pendingLinkError;
+    linkErrorRead = true;
+    try {
+      const hashPieces = splitParams(window.location.hash);
+      const searchPieces = splitParams(window.location.search);
+      const hashHasError = hashPieces.some((piece) => ["error", "error_code"].includes(paramName(piece)));
+      const queryHasError = searchPieces.some((piece) => paramName(piece) === "error_code");
+      if (hashHasError || queryHasError) {
+        const source = hashHasError ? hashPieces : searchPieces;
+        const codePiece = source.find((piece) => paramName(piece) === "error_code");
+        const code = codePiece ? paramValue(codePiece).toLowerCase() : "";
+        pendingLinkError = { code: /^[a-z0-9_]{1,64}$/.test(code) ? code : "unknown" };
+        stripAddressParams(AUTH_ERROR_PARAMS, AUTH_ERROR_PARAMS);
+      }
+    } catch (err) {
+      pendingLinkError = null;
+    }
+    return pendingLinkError;
+  }
 
   function loadSupabaseScript() {
     if (window.supabase && window.supabase.createClient) {
@@ -135,8 +243,11 @@ const UrbanoAuth = (() => {
           }
         );
 
-        client.auth.onAuthStateChange((_event, _session) => {
-          cachedGamingMember = undefined;
+        client.auth.onAuthStateChange((_event, session) => {
+          // Every Auth event forgets the stored lookup (a fresh sign-in / sign-out always re-resolves). When the person is no longer
+          // the one the lookup was for (a different person, or nobody), the lookup still in flight is cancelled too.
+          dropMember(userIdOf(session));
+          announceIdentity(userIdOf(session));
           authChangeCallbacks.forEach((callback) => {
             try {
               callback();
@@ -152,19 +263,123 @@ const UrbanoAuth = (() => {
           publishIdentity();
         });
 
+        // By the time getSession() settles, the client has finished reading any sign-in return data from the address bar. Remove
+        // whatever Auth left there, so a person's tokens do not stay in the address bar, the history or a shared screenshot. This
+        // runs outside the listener above (no lock is held) and a failure here never affects sign-in.
+        if (client.auth && typeof client.auth.getSession === "function") {
+          Promise.resolve(client.auth.getSession())
+            .then(() => stripAddressParams(AUTH_RETURN_PARAMS, AUTH_ERROR_PARAMS))
+            .catch(() => {});
+        }
+
         return client;
       })();
     }
     return clientPromise;
   }
 
-  async function fetchGamingMemberProfile(accessToken) {
+  async function fetchGamingMemberProfile(accessToken, signal) {
     const response = await fetch("/api/gaming/member", {
       headers: { Authorization: `Bearer ${accessToken}` },
+      ...(signal ? { signal } : {}),
     });
     if (!response.ok) return null;
     const body = await response.json();
     return body.gamingMember ?? null;
+  }
+
+  // The Auth user id of a session, or null. A session with no user id has no identity a member can be bound to, so it is treated as
+  // no session at all (fail closed) rather than guessed at.
+  function userIdOf(session) {
+    const id = session && session.user && session.user.id;
+    return typeof id === "string" && id !== "" ? id : null;
+  }
+
+  // What an Auth event does to the stored lookups. A FINISHED lookup is forgotten (a fresh sign-in or sign-out always re-resolves, as
+  // before); one still in flight for the same person is kept, because asking again would only duplicate the request. Every lookup in
+  // flight for a person other than `currentUserId` (a different person, or null = nobody) is cancelled: its answer is no longer wanted.
+  function dropMember(currentUserId) {
+    if (memberEntry && (memberEntry.settled || memberEntry.userId !== currentUserId)) memberEntry = null;
+    memberLookups.forEach((lookup) => {
+      if (lookup.userId !== currentUserId && typeof lookup.abort === "function") lookup.abort();
+    });
+  }
+
+  // Tells pages, synchronously and before anything is looked up, that the signed-in person is no longer the one they were showing
+  // (a different person, or nobody): the moment to drop whatever belonged to the previous person. Token refreshes and repeated
+  // events for the same person are not changes.
+  function announceIdentity(userId) {
+    if (announcedUserId === undefined) {
+      announcedUserId = userId; // the first event of the page load: nothing was shown for anyone else yet
+      return;
+    }
+    if (userId === announcedUserId) return;
+    announcedUserId = userId;
+    resetOwed = true;
+    identityResetCallbacks.slice().forEach((callback) => {
+      try {
+        callback({ userId });
+      } catch (err) {
+        console.error("UrbanoAuth: onIdentityReset listener failed:", err);
+      }
+    });
+  }
+
+  // The member lookup for this session's person (see memberEntry). Never cached on failure.
+  function memberFor(session) {
+    const userId = userIdOf(session);
+    if (memberEntry && memberEntry.userId === userId) return memberEntry.promise;
+    if (memberEntry) dropMember(userId);
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const entry = { userId, promise: null, abort: controller ? () => controller.abort() : null, settled: false };
+    entry.promise = fetchGamingMemberProfile(session.access_token, controller ? controller.signal : undefined).then(
+      (member) => {
+        entry.settled = true;
+        memberLookups.delete(entry);
+        return member;
+      },
+      (err) => {
+        entry.settled = true;
+        memberLookups.delete(entry);
+        if (memberEntry === entry) memberEntry = null;
+        throw err;
+      }
+    );
+    entry.promise.catch(() => {}); // callers that are still waiting see the failure; one nobody waits for any more is not an unhandled error
+    memberEntry = entry;
+    memberLookups.add(entry);
+    return entry.promise;
+  }
+
+  // Is `userId` still the person the Auth client says is signed in? (The authoritative check after any wait.)
+  async function stillSignedInAs(client, userId) {
+    const { data } = await client.auth.getSession();
+    return userIdOf(data && data.session) === userId;
+  }
+
+  // ONE consistent read of "who is signed in and who is their member": { session, member } of the same person, or { session: null }.
+  // If the person changes while the member is being looked up (another person signed in, or the session ended) the answer is
+  // discarded and the read starts again for whoever is signed in now, so no caller is ever handed the previous person's data.
+  async function resolveIdentity() {
+    for (let attempt = 0; attempt < MAX_IDENTITY_ATTEMPTS; attempt += 1) {
+      const client = await getClient();
+      const { data } = await client.auth.getSession();
+      const session = data && data.session;
+      const userId = userIdOf(session);
+      if (announcedUserId === undefined) announcedUserId = userId; // what pages are about to be shown: the baseline a later change is measured against
+      if (!userId) return { session: null, member: null };
+      let member;
+      try {
+        member = await memberFor(session);
+      } catch (err) {
+        if (!(await stillSignedInAs(client, userId))) continue; // the lookup was cancelled or failed for a person who is gone
+        if (err && err.name === "AbortError") continue; // cancelled while the person changed and then changed back: ask again
+        throw err;
+      }
+      if (!(await stillSignedInAs(client, userId))) continue;
+      return { session, member };
+    }
+    throw new Error("The signed-in person kept changing; try again.");
   }
 
   function identityKey(state) {
@@ -186,7 +401,8 @@ const UrbanoAuth = (() => {
     }
     if (sequence !== publishSequence) return;
     const key = identityKey(state);
-    if (key === lastIdentityKey) return;
+    if (key === lastIdentityKey && !resetOwed) return;
+    resetOwed = false; // pages that were told the person changed are always told who is signed in now
     lastIdentityKey = key;
     identityCallbacks.slice().forEach((callback) => {
       try {
@@ -198,19 +414,13 @@ const UrbanoAuth = (() => {
   }
 
   async function resolveState() {
-    const client = await getClient();
-    const { data } = await client.auth.getSession();
-    const session = data && data.session;
+    const { session, member } = await resolveIdentity();
 
     if (!session) {
       return { status: "unauthenticated" };
     }
 
-    if (cachedGamingMember === undefined) {
-      cachedGamingMember = await fetchGamingMemberProfile(session.access_token);
-    }
-
-    if (!cachedGamingMember) {
+    if (!member) {
       return {
         status: "profile_incomplete",
         email: session.user.email,
@@ -222,8 +432,8 @@ const UrbanoAuth = (() => {
       status: "authenticated",
       email: session.user.email,
       authUserId: session.user.id,
-      gamingMemberId: cachedGamingMember.gamingMemberId,
-      displayName: cachedGamingMember.displayName,
+      gamingMemberId: member.gamingMemberId,
+      displayName: member.displayName,
     };
   }
 
@@ -237,14 +447,14 @@ const UrbanoAuth = (() => {
    */
   function normalizePhone(input) {
     let value = String(input === null || input === undefined ? "" : input).trim();
-    if (!value) return { ok: false, message: "Enter your phone number with its country code, for example +504 9999 9999." };
+    if (!value) return { ok: false, messageKey: "auth.msg.phoneEmpty", message: urbanoAuthText("auth.msg.phoneEmpty", "Enter your phone number with its country code, for example +504 9999 9999.") };
     value = value.replace(/[\s().-]/g, "");
     if (value.startsWith("00")) value = "+" + value.slice(2);
     if (!value.startsWith("+")) {
-      return { ok: false, message: "Start with the country code, for example +504 9999 9999 for Honduras." };
+      return { ok: false, messageKey: "auth.msg.phoneNoCountry", message: urbanoAuthText("auth.msg.phoneNoCountry", "Start with the country code, for example +504 9999 9999 for Honduras.") };
     }
     if (!/^\+[1-9]\d{6,14}$/.test(value)) {
-      return { ok: false, message: "That doesn't look like a valid phone number. Use the country code followed by the number, for example +504 9999 9999." };
+      return { ok: false, messageKey: "auth.msg.phoneInvalid", message: urbanoAuthText("auth.msg.phoneInvalid", "That doesn't look like a valid phone number. Use the country code followed by the number, for example +504 9999 9999.") };
     }
     return { ok: true, e164: value };
   }
@@ -274,18 +484,28 @@ const UrbanoAuth = (() => {
       text.includes("only request this after")
     ) {
       const seconds = retryMatch ? Number(retryMatch[1]) : 60;
-      return {
-        kind: "rate_limited",
-        retryAfterSeconds: seconds,
-        message: `Too many requests. Please wait ${seconds > 0 ? seconds : "a few"} seconds and try again.`,
-      };
+      return seconds > 0
+        ? {
+            kind: "rate_limited",
+            retryAfterSeconds: seconds,
+            messageKey: "auth.err.rateLimited",
+            messageVars: { seconds },
+            message: urbanoAuthText("auth.err.rateLimited", "Too many requests. Please wait {seconds} seconds and try again.", { seconds }),
+          }
+        : {
+            kind: "rate_limited",
+            retryAfterSeconds: seconds,
+            messageKey: "auth.err.rateLimitedFew",
+            message: urbanoAuthText("auth.err.rateLimitedFew", "Too many requests. Please wait a few seconds and try again."),
+          };
     }
 
     if (phase === "verify") {
       if (code === "otp_expired" || code === "otp_invalid" || status === 403 || status === 400 || text.includes("expired") || text.includes("invalid")) {
         return {
           kind: "code_invalid",
-          message: "That code isn't valid or has expired. Check the code, or send a new one.",
+          messageKey: "auth.err.codeInvalid",
+          message: urbanoAuthText("auth.err.codeInvalid", "That code isn't valid or has expired. Check the code, or send a new one."),
         };
       }
     }
@@ -300,16 +520,15 @@ const UrbanoAuth = (() => {
             message: `If an account exists for that ${noun}, a code is on its way. If nothing arrives, create an account instead.`,
           };
         }
-        return { kind: "signup_closed", message: "New accounts can't be created right now." };
+        return { kind: "signup_closed", messageKey: "auth.err.signupClosed", message: urbanoAuthText("auth.err.signupClosed", "New accounts can't be created right now.") };
       }
       if (channel === "phone" && (code.includes("sms") || code.includes("provider") || text.includes("sms") || text.includes("phone provider"))) {
-        return { kind: "unavailable", message: "Phone sign-in isn't available right now." };
+        return { kind: "unavailable", messageKey: "auth.err.phoneUnavailable", message: urbanoAuthText("auth.err.phoneUnavailable", "Phone sign-in isn't available right now.") };
       }
       if (code === "validation_failed" || code === "email_address_invalid" || code === "phone_number_invalid" || status === 400) {
-        return {
-          kind: "invalid_input",
-          message: channel === "phone" ? "That phone number can't be used." : "That email address can't be used.",
-        };
+        return channel === "phone"
+          ? { kind: "invalid_input", messageKey: "auth.err.invalidPhone", message: urbanoAuthText("auth.err.invalidPhone", "That phone number can't be used.") }
+          : { kind: "invalid_input", messageKey: "auth.err.invalidEmail", message: urbanoAuthText("auth.err.invalidEmail", "That email address can't be used.") };
       }
     }
 
@@ -320,10 +539,10 @@ const UrbanoAuth = (() => {
       text.includes("network request failed") ||
       text.includes("load failed")
     ) {
-      return { kind: "network", message: "Couldn't reach the server. Check your connection and try again." };
+      return { kind: "network", messageKey: "auth.err.network", message: urbanoAuthText("auth.err.network", "Couldn't reach the server. Check your connection and try again.") };
     }
 
-    return { kind: "unknown", message: "Something went wrong. Please try again." };
+    return { kind: "unknown", messageKey: "auth.err.unknown", message: urbanoAuthText("auth.err.unknown", "Something went wrong. Please try again.") };
   }
 
   // ---- intended action ---------------------------------------------------
@@ -365,6 +584,16 @@ const UrbanoAuth = (() => {
     }
   }
 
+  // What a call that was started for one person reports when a different person (or nobody) is signed in by the time it finishes.
+  function identityChangedResult() {
+    return {
+      status: "error",
+      kind: "identity_changed",
+      messageKey: "auth.err.identityChanged",
+      message: urbanoAuthText("auth.err.identityChanged", "Your session changed. Please try again."),
+    };
+  }
+
   const api = {
     /**
      * Resolves the current Gaming Auth state:
@@ -387,6 +616,37 @@ const UrbanoAuth = (() => {
     async getAuthMethods() {
       await getClient();
       return { email: authMethods.email, phone: authMethods.phone };
+    },
+
+    /**
+     * Read-only profile facts for the signed-in person, from what Auth and this app's own member route ALREADY return:
+     *   { status: "unauthenticated" }
+     *   { status: "profile_incomplete", email, emailVerified }
+     *   { status: "authenticated", email, emailVerified, displayName, gamingMemberId, memberSince }
+     * emailVerified is true only when Auth explicitly reports email_confirmed_at, false only when Auth explicitly reports it as
+     * null, and null when Auth does not say: having a session never counts as verification. memberSince is the Gaming Member's own
+     * createdAt when the member route returns it, otherwise null (it is never inferred from the Auth account).
+     */
+    async getProfile() {
+      // The session and the member come from the same single read (resolveIdentity): the email, the verification state, the name,
+      // the id and the date always belong to the same person, whatever happened to the Auth session while the lookup was running.
+      const { session, member } = await resolveIdentity();
+      if (!session) return { status: "unauthenticated" };
+      const user = session.user || {};
+      const confirmedAt = user.email_confirmed_at;
+      const emailVerified = typeof confirmedAt === "string" && confirmedAt !== "" ? true : confirmedAt === null ? false : null;
+      if (!member) {
+        return { status: "profile_incomplete", email: user.email || null, emailVerified };
+      }
+      const created = member.createdAt;
+      return {
+        status: "authenticated",
+        email: user.email || null,
+        emailVerified,
+        displayName: member.displayName,
+        gamingMemberId: member.gamingMemberId,
+        memberSince: typeof created === "string" && Number.isFinite(Date.parse(created)) ? created : null,
+      };
     },
 
     normalizePhone,
@@ -412,14 +672,14 @@ const UrbanoAuth = (() => {
         // Fail closed without calling the backend: never simulate a send.
         await getClient().catch(() => null);
         if (!authMethods.phone) {
-          return { status: "error", kind: "unavailable", message: "Phone sign-in isn't available yet." };
+          return { status: "error", kind: "unavailable", messageKey: "auth.err.phoneUnavailableYet", message: urbanoAuthText("auth.err.phoneUnavailableYet", "Phone sign-in isn't available yet.") };
         }
       }
       let client;
       try {
         client = await getClient();
       } catch (err) {
-        return { status: "error", kind: "network", message: "Couldn't reach the server. Check your connection and try again." };
+        return { status: "error", kind: "network", messageKey: "auth.err.network", message: urbanoAuthText("auth.err.network", "Couldn't reach the server. Check your connection and try again.") };
       }
       const requestOptions = { shouldCreateUser: mode !== "login" };
       const payload = channel === "phone"
@@ -457,7 +717,7 @@ const UrbanoAuth = (() => {
       try {
         client = await getClient();
       } catch (err) {
-        return { status: "error", kind: "network", message: "Couldn't reach the server. Check your connection and try again." };
+        return { status: "error", kind: "network", messageKey: "auth.err.network", message: urbanoAuthText("auth.err.network", "Couldn't reach the server. Check your connection and try again.") };
       }
       let outcome;
       try {
@@ -478,19 +738,26 @@ const UrbanoAuth = (() => {
         return Object.assign({ status: "error", detail: error ? error.message : "Verification failed." }, failure);
       }
 
-      cachedGamingMember = await fetchGamingMemberProfile(
-        data.session.access_token
-      );
+      // The lookup is made for the person this session belongs to, and is only reported if that person is still the one signed in.
+      const verifiedUserId = userIdOf(data.session);
+      let member;
+      try {
+        member = verifiedUserId ? await memberFor(data.session) : null;
+      } catch (err) {
+        if (!(await stillSignedInAs(client, verifiedUserId))) return identityChangedResult();
+        throw err;
+      }
+      if (!(await stillSignedInAs(client, verifiedUserId))) return identityChangedResult();
 
-      if (!cachedGamingMember) {
+      if (!member) {
         return { status: "profile_incomplete", email: identifier };
       }
 
       return {
         status: "authenticated",
         email: identifier,
-        gamingMemberId: cachedGamingMember.gamingMemberId,
-        displayName: cachedGamingMember.displayName,
+        gamingMemberId: member.gamingMemberId,
+        displayName: member.displayName,
       };
     },
 
@@ -523,7 +790,7 @@ const UrbanoAuth = (() => {
       const { data } = await client.auth.getSession();
       const session = data && data.session;
       if (!session) {
-        return { status: "error", message: "Not signed in." };
+        return { status: "error", messageKey: "auth.err.notSignedIn", message: urbanoAuthText("auth.err.notSignedIn", "Not signed in.") };
       }
 
       const response = await fetch("/api/gaming/member", {
@@ -539,11 +806,16 @@ const UrbanoAuth = (() => {
       if (!response.ok) {
         return {
           status: "error",
-          message: body.error || "Failed to complete profile.",
+          message: body.error || urbanoAuthText("auth.err.profileFailed", "Failed to complete profile."),
+          ...(body.error ? {} : { messageKey: "auth.err.profileFailed" }),
         };
       }
 
-      cachedGamingMember = body.gamingMember;
+      // The profile was saved for the person whose token was sent. It is only stored, and only reported, if that person is still the
+      // one signed in: otherwise the answer belongs to someone else and must not become the member of whoever is signed in now.
+      const userId = userIdOf(session);
+      if (!userId || !(await stillSignedInAs(client, userId))) return identityChangedResult();
+      memberEntry = { userId, promise: Promise.resolve(body.gamingMember), abort: null, settled: true };
       // The session did not change, so Supabase raises no event: tell
       // identity listeners that this person's account is now complete.
       publishIdentity();
@@ -558,7 +830,7 @@ const UrbanoAuth = (() => {
     async signOut() {
       const client = await getClient();
       await client.auth.signOut();
-      cachedGamingMember = undefined;
+      dropMember(null); // nobody is signed in: forget the lookup and cancel any still in flight
       removeIntent();
       return { status: "unauthenticated" };
     },
@@ -581,6 +853,20 @@ const UrbanoAuth = (() => {
         authChangeCallbacks = authChangeCallbacks.filter(
           (cb) => cb !== callback
         );
+      };
+    },
+
+    /**
+     * Registers a callback fired SYNCHRONOUSLY, before anything is looked up, the moment the signed-in person changes or signs out
+     * (never for a token refresh or a repeated event for the same person). It receives { userId } only (no personal data). Use it to
+     * drop whatever on screen belonged to the previous person at once; onIdentityChange follows with the new state. Returns an
+     * unsubscribe function.
+     */
+    async onIdentityReset(callback) {
+      await getClient();
+      identityResetCallbacks.push(callback);
+      return () => {
+        identityResetCallbacks = identityResetCallbacks.filter((cb) => cb !== callback);
       };
     },
 
@@ -635,12 +921,18 @@ const UrbanoAuth = (() => {
      * requiring each of the pages that call this to carry their
      * own sign-in markup — "use the existing shell seam," not a
      * redesign of any page.
+     *
+     * options (all optional; omitting them keeps the original behavior exactly):
+     *   accountLink  an <a hidden> the page owns. When a person is signed in it shows "Hi, {name}" (a real link, to the page's own
+     *                profile address) in place of the button; signed out, it is hidden again and the button returns.
      */
-    attachSignInButton(buttonEl, statusEl) {
+    attachSignInButton(buttonEl, statusEl, options) {
       if (!buttonEl) return;
+      // An invalid, used or expired sign-in link is read (and removed from the address bar) once per page load.
+      const linkError = readLinkErrorOnce();
       createSignInPanel(this, buttonEl, statusEl, (opener) => {
         signInOpener = opener;
-      });
+      }, options || {}, linkError);
     },
   };
 
@@ -656,7 +948,9 @@ const UrbanoAuth = (() => {
  * without polluting the public API surface. All user-supplied text is
  * placed with textContent, never parsed as HTML.
  */
-function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
+function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, linkError) {
+  const tr = urbanoAuthText;
+  const accountLink = (options && options.accountLink) || null;
   // The server will not send a second code to the same address inside its
   // per-user window (60 s on the production project as inspected on
   // 2026-10-22), so a shorter wait here would only turn a legitimate resend
@@ -669,6 +963,24 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
   const INPUT_STYLE =
     "width:100%;box-sizing:border-box;padding:8px;margin-bottom:8px;border:1px solid #ccc;border-radius:6px;";
   const LINK_STYLE = "font-size:12px;color:#111;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;";
+
+  // A panel message is either a plain string (already final text, for example a message a server sent) or a descriptor
+  // { key, fallback, vars } that is translated at the moment it is drawn, so changing language re-translates what is on screen.
+  const msg = (key, fallback, vars) => ({ key, fallback, vars });
+  function resolveMessage(message) {
+    return message && typeof message === "object" ? tr(message.key, message.fallback, message.vars) : message || "";
+  }
+  // A server message is translated only when it is an exact, known one (see UrbanoI18n.serverMessageKey); otherwise it is shown as received.
+  function serverMessage(text) {
+    const i18n = typeof window !== "undefined" ? window.UrbanoI18n : undefined;
+    const key = i18n && typeof i18n.serverMessageKey === "function" ? i18n.serverMessageKey(text) : null;
+    return key ? msg(key, text) : text;
+  }
+  // The message of a result returned by the shared component: its key when it carries one.
+  function resultMessage(result) {
+    if (result.messageKey) return msg(result.messageKey, result.message, result.messageVars);
+    return serverMessage(result.message);
+  }
 
   // Resolving the real Auth state takes two network round-trips
   // (GET /api/gaming/config, then loading the Supabase client from its
@@ -684,7 +996,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
   const panel = document.createElement("div");
   panel.setAttribute("data-urbano-signin-panel", "");
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", "Log in or create an account");
+  panel.setAttribute("aria-label", tr("auth.panel.aria", "Log in or create an account"));
   panel.style.cssText = [
     "display:none",
     "position:absolute",
@@ -734,7 +1046,9 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
   let busy = false; // one request at a time per panel: a double click is one request
   let resendReadyAt = 0;
   let resendTimer = null;
-  let lastMessage = { text: "", error: false };
+  let lastMessage = { message: "", error: false };
+  let shownDisplayName = ""; // the name the signed-in header shows (kept so a language change can redraw it)
+  let welcomeState = null; // what the "welcome back" screen shows (kept for the same reason)
   let shownStatus = "unauthenticated"; // what the header currently shows: unauthenticated | profile_incomplete | authenticated
   let justOpened = false; // the click that opened the panel must not also count as an outside click
 
@@ -775,16 +1089,16 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
       attrs: { "data-msg": "", role: "status", "aria-live": "polite" },
       style: "margin:8px 0 0;min-height:16px;",
     });
-    line.textContent = lastMessage.text;
+    line.textContent = resolveMessage(lastMessage.message);
     line.style.color = lastMessage.error ? "#b3261e" : "#555";
     return line;
   }
 
   function setPanelMessage(message, isError) {
-    lastMessage = { text: message || "", error: !!isError };
+    lastMessage = { message: message || "", error: !!isError };
     const el = panel.querySelector("[data-msg]");
     if (!el) return;
-    el.textContent = lastMessage.text;
+    el.textContent = resolveMessage(lastMessage.message);
     el.style.color = isError ? "#b3261e" : "#555";
   }
 
@@ -805,7 +1119,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
 
   function goTo(nextStep, message, isError) {
     step = nextStep;
-    lastMessage = { text: message || "", error: !!isError };
+    lastMessage = { message: message || "", error: !!isError };
     renderStep();
   }
 
@@ -819,7 +1133,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     panel.style.display = "block";
     const requestedMode = options && options.mode;
     if (incompleteProfile) {
-      goTo("displayName", "One last step to finish creating your account.");
+      goTo("displayName", msg("auth.msg.lastStep", "One last step to finish creating your account."));
       return;
     }
     if (requestedMode === "login" || requestedMode === "register") {
@@ -861,7 +1175,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     const resend = panel.querySelector("[data-resend]");
     if (!resend) return;
     const seconds = secondsUntilResend();
-    resend.textContent = seconds > 0 ? `Resend code in ${seconds}s` : "Resend code";
+    resend.textContent = seconds > 0 ? tr("auth.code.resendIn", "Resend code in {s}s", { s: seconds }) : tr("auth.code.resend", "Resend code");
     resend.disabled = busy || seconds > 0;
     resend.style.opacity = resend.disabled ? "0.5" : "1";
     resend.style.cursor = resend.disabled ? "default" : "pointer";
@@ -881,10 +1195,10 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
 
   function renderEntry() {
     panel.replaceChildren(
-      title("Enter URBANO"),
-      note("Log in to your account, or create one."),
-      button("Log in", "data-choose-login"),
-      button("Create account", "data-choose-register", true),
+      title(tr("auth.entry.title", "Enter URBANO")),
+      note(tr("auth.entry.note", "Log in to your account, or create one.")),
+      button(tr("auth.login", "Log in"), "data-choose-login"),
+      button(tr("auth.register", "Create account"), "data-choose-register", true),
       messageLine()
     );
     panel.querySelector("[data-choose-login]").addEventListener("click", () => {
@@ -902,41 +1216,41 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     const isLogin = mode === "login";
     const emailActive = channel === "email";
     const emailToggle = node("button", {
-      text: "Email",
+      text: tr("auth.method.email", "Email"),
       attrs: { type: "button", "data-method-email": "", "aria-pressed": String(emailActive) },
       style: `flex:1;padding:8px;border-radius:6px;border:1px solid #111;cursor:pointer;background:${emailActive ? "#111" : "#fff"};color:${emailActive ? "#fff" : "#111"};`,
     });
     const phoneActive = channel === "phone" && phoneAvailable;
     const phoneToggle = node("button", {
-      text: phoneAvailable ? "Phone" : "Phone — not available yet",
+      text: phoneAvailable ? tr("auth.method.phone", "Phone") : tr("auth.method.phoneSoon", "Phone — not available yet"),
       attrs: { type: "button", "data-method-phone": "", "aria-pressed": String(phoneActive) },
       style: `flex:1;padding:8px;border-radius:6px;border:1px solid ${phoneAvailable ? "#111" : "#bbb"};background:${phoneActive ? "#111" : "#fff"};color:${phoneActive ? "#fff" : phoneAvailable ? "#111" : "#888"};cursor:${phoneAvailable ? "pointer" : "not-allowed"};font-size:${phoneAvailable ? "13px" : "11px"};`,
     });
     if (!phoneAvailable) {
       phoneToggle.setAttribute("aria-disabled", "true");
-      phoneToggle.title = "Phone sign-in isn't available yet.";
+      phoneToggle.title = tr("auth.method.phoneSoonTitle", "Phone sign-in isn't available yet.");
     }
     const input = node("input", {
       attrs: emailActive
-        ? { "data-contact": "", type: "email", placeholder: "you@example.com", autocomplete: "email", "aria-label": "Email address" }
-        : { "data-contact": "", type: "tel", placeholder: "+504 9999 9999", autocomplete: "tel", "aria-label": "Phone number" },
+        ? { "data-contact": "", type: "email", placeholder: tr("auth.input.emailPlaceholder", "you@example.com"), autocomplete: "email", "aria-label": tr("auth.input.emailAria", "Email address") }
+        : { "data-contact": "", type: "tel", placeholder: "+504 9999 9999", autocomplete: "tel", "aria-label": tr("auth.input.phoneAria", "Phone number") },
       style: INPUT_STYLE,
     });
     input.value = typedIdentifier;
     const children = [
-      title(isLogin ? "Log in" : "Create account"),
-      note(isLogin ? "Choose how to get your code." : "We'll send a code to confirm it's really you."),
+      title(isLogin ? tr("auth.login", "Log in") : tr("auth.register", "Create account")),
+      note(isLogin ? tr("auth.method.loginNote", "Choose how to get your code.") : tr("auth.method.registerNote", "We'll send a code to confirm it's really you.")),
       node("div", { style: "display:flex;gap:6px;margin-bottom:8px;" }, [emailToggle, phoneToggle]),
       input,
-      button(isLogin ? "Send login code" : "Send verification code", "data-send"),
+      button(isLogin ? tr("auth.sendLogin", "Send login code") : tr("auth.sendVerification", "Send verification code"), "data-send"),
     ];
     if (!emailActive) {
-      children.push(note("Use the country code, for example +504 9999 9999."));
+      children.push(note(tr("auth.phoneHint", "Use the country code, for example +504 9999 9999.")));
     }
     children.push(messageLine());
     const switchRow = node("div", { style: "display:flex;justify-content:space-between;margin-top:4px;" });
-    switchRow.appendChild(linkButton("Back", "data-back"));
-    switchRow.appendChild(linkButton(isLogin ? "Create an account instead" : "I already have an account", "data-switch-mode"));
+    switchRow.appendChild(linkButton(tr("auth.back", "Back"), "data-back"));
+    switchRow.appendChild(linkButton(isLogin ? tr("auth.switch.toRegister", "Create an account instead") : tr("auth.switch.toLogin", "I already have an account"), "data-switch-mode"));
     children.push(switchRow);
     panel.replaceChildren.apply(panel, children);
 
@@ -948,7 +1262,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     });
     phoneToggle.addEventListener("click", () => {
       if (!phoneAvailable) {
-        setPanelMessage("Phone sign-in isn't available yet. Please use your email.", true);
+        setPanelMessage(msg("auth.method.phoneSoonMsg", "Phone sign-in isn't available yet. Please use your email."), true);
         return;
       }
       if (channel === "phone") return;
@@ -984,43 +1298,41 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     // so its wording is conditional and never claims a code was delivered.
     // The code length is the project's choice (8 digits in production, 6
     // locally): the screen never states it.
-    const where = channel === "phone" ? "text message" : "email";
-    const codeNoun = channel === "phone" ? "a text message with a code" : "a code";
-    const arrival =
-      channel === "phone"
-        ? "It can take a minute to arrive."
-        : "It can take a minute to arrive; check your spam folder if you don't see it.";
-    const intro =
-      mode === "login"
-        ? `If ${identifier} has an account, ${codeNoun} is on its way. ${arrival}`
-        : `We sent ${codeNoun} to ${identifier}. ${arrival}`;
+    const isPhone = channel === "phone";
+    const intro = mode === "login"
+      ? (isPhone
+          ? tr("auth.code.introLoginPhone", "If {id} has an account, a text message with a code is on its way. It can take a minute to arrive.", { id: identifier })
+          : tr("auth.code.introLoginEmail", "If {id} has an account, a code is on its way. It can take a minute to arrive; check your spam folder if you don't see it.", { id: identifier }))
+      : (isPhone
+          ? tr("auth.code.introRegisterPhone", "We sent a text message with a code to {id}. It can take a minute to arrive.", { id: identifier })
+          : tr("auth.code.introRegisterEmail", "We sent a code to {id}. It can take a minute to arrive; check your spam folder if you don't see it.", { id: identifier }));
     const input = node("input", {
       attrs: {
         "data-code": "", type: "text", inputmode: "numeric", autocomplete: "one-time-code",
-        placeholder: "Verification code", "aria-label": "Verification code",
+        placeholder: tr("auth.code.placeholder", "Verification code"), "aria-label": tr("auth.code.placeholder", "Verification code"),
       },
       style: INPUT_STYLE,
     });
     const resend = node("button", {
-      text: "Resend code",
+      text: tr("auth.code.resend", "Resend code"),
       attrs: { type: "button", "data-resend": "" },
       style: LINK_STYLE,
     });
     const children = [
-      title("Enter your code"),
+      title(tr("auth.code.title", "Enter your code")),
       note(intro),
       input,
-      button("Verify", "data-verify"),
+      button(tr("auth.code.verify", "Verify"), "data-verify"),
       node("div", { style: "display:flex;justify-content:space-between;margin-top:8px;" }, [
         resend,
-        linkButton(channel === "phone" ? "Use a different number" : "Use a different email", "data-change"),
+        linkButton(isPhone ? tr("auth.code.otherNumber", "Use a different number") : tr("auth.code.otherEmail", "Use a different email"), "data-change"),
       ]),
     ];
     if (mode === "login") {
       children.push(
         node("div", { style: "margin-top:8px;font-size:12px;" }, [
-          document.createTextNode(`No code from your ${where}? `),
-          linkButton("Create an account instead", "data-create-instead"),
+          document.createTextNode(isPhone ? tr("auth.code.noCodePhone", "No code from your text message? ") : tr("auth.code.noCodeEmail", "No code from your email? ")),
+          linkButton(tr("auth.switch.toRegister", "Create an account instead"), "data-create-instead"),
         ])
       );
     }
@@ -1059,14 +1371,14 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
 
   function renderDisplayName() {
     const input = node("input", {
-      attrs: { "data-display-name": "", type: "text", maxlength: "40", placeholder: "How you'll appear in games", "aria-label": "Display name" },
+      attrs: { "data-display-name": "", type: "text", maxlength: "40", placeholder: tr("auth.name.placeholder", "How you'll appear in games"), "aria-label": tr("auth.name.aria", "Display name") },
       style: INPUT_STYLE,
     });
     panel.replaceChildren(
-      title("Choose your display name"),
-      note("This is how you'll appear in games."),
+      title(tr("auth.name.title", "Choose your display name")),
+      note(tr("auth.name.note", "This is how you'll appear in games.")),
       input,
-      button("Continue", "data-continue"),
+      button(tr("auth.continue", "Continue"), "data-continue"),
       messageLine()
     );
     input.addEventListener("keydown", (event) => {
@@ -1080,10 +1392,15 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
   }
 
   function renderWelcomeBack(state) {
+    welcomeState = state;
     panel.replaceChildren(
-      title("Welcome back"),
-      note(`This ${channel === "phone" ? "phone number" : "email"} already has an account, so we signed you in as ${state.displayName}.`),
-      button("Continue", "data-welcome-continue")
+      title(tr("auth.welcome.title", "Welcome back")),
+      note(
+        channel === "phone"
+          ? tr("auth.welcome.phone", "This phone number already has an account, so we signed you in as {name}.", { name: state.displayName })
+          : tr("auth.welcome.email", "This email already has an account, so we signed you in as {name}.", { name: state.displayName })
+      ),
+      button(tr("auth.continue", "Continue"), "data-welcome-continue")
     );
     panel.querySelector("[data-welcome-continue]").addEventListener("click", () => {
       closePanel();
@@ -1107,29 +1424,29 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     if (channel === "phone") {
       const phone = auth.normalizePhone(raw);
       if (!phone.ok) {
-        setPanelMessage(phone.message, true);
+        setPanelMessage(resultMessage(phone), true);
         return;
       }
       target = phone.e164;
     } else {
       target = String(raw).trim();
       if (!target) {
-        setPanelMessage("Enter your email address.", true);
+        setPanelMessage(msg("auth.msg.emailEmpty", "Enter your email address."), true);
         return;
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
-        setPanelMessage("That doesn't look like an email address. Check it and try again.", true);
+        setPanelMessage(msg("auth.msg.emailInvalid", "That doesn't look like an email address. Check it and try again."), true);
         return;
       }
     }
     const myFlow = flowId;
     setBusy(true);
-    setPanelMessage(mode === "login" ? "Requesting your login code..." : "Sending your verification code...");
+    setPanelMessage(mode === "login" ? msg("auth.msg.requestingLogin", "Requesting your login code...") : msg("auth.msg.sendingVerification", "Sending your verification code..."));
     const result = await auth.requestCode({ channel, identifier: target, mode });
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
-      setPanelMessage(result.message, true);
+      setPanelMessage(resultMessage(result), true);
       if (result.kind === "rate_limited") startResendCountdown(result.retryAfterSeconds || 60);
       return;
     }
@@ -1142,20 +1459,20 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     if (busy || secondsUntilResend() > 0) return;
     const myFlow = flowId;
     setBusy(true);
-    setPanelMessage("Sending a new code...");
+    setPanelMessage(msg("auth.msg.sendingNew", "Sending a new code..."));
     const result = await auth.requestCode({ channel, identifier, mode });
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
-      setPanelMessage(result.message, true);
+      setPanelMessage(resultMessage(result), true);
       if (result.kind === "rate_limited") startResendCountdown(result.retryAfterSeconds || 60);
       return;
     }
     startResendCountdown(RESEND_COOLDOWN_SECONDS);
     setPanelMessage(
       mode === "login"
-        ? "If an account exists, a new code is on its way. Older codes no longer work."
-        : "A new code is on its way. Older codes no longer work."
+        ? msg("auth.msg.resentLogin", "If an account exists, a new code is on its way. Older codes no longer work.")
+        : msg("auth.msg.resentRegister", "A new code is on its way. Older codes no longer work.")
     );
   }
 
@@ -1164,17 +1481,17 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     const input = panel.querySelector("[data-code]");
     const code = ((input && input.value) || "").replace(/\s+/g, "");
     if (!code) {
-      setPanelMessage(channel === "phone" ? "Enter the code from your text message." : "Enter the code from your email.", true);
+      setPanelMessage(channel === "phone" ? msg("auth.msg.codeEmptyPhone", "Enter the code from your text message.") : msg("auth.msg.codeEmptyEmail", "Enter the code from your email."), true);
       return;
     }
     const myFlow = flowId;
     setBusy(true);
-    setPanelMessage("Verifying...");
+    setPanelMessage(msg("auth.msg.verifying", "Verifying..."));
     const result = await auth.verifyCode({ channel, identifier, code });
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
-      setPanelMessage(result.message, true);
+      setPanelMessage(resultMessage(result), true);
       if (result.kind === "code_invalid" && input) {
         input.value = "";
         input.focus();
@@ -1184,7 +1501,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     if (result.status === "profile_incomplete") {
       incompleteProfile = true;
       shownStatus = "profile_incomplete";
-      goTo("displayName", mode === "login" ? "We found your sign-in but no finished account. Choose a display name to finish." : "");
+      goTo("displayName", mode === "login" ? msg("auth.msg.incompleteLogin", "We found your sign-in but no finished account. Choose a display name to finish.") : "");
       return;
     }
     if (mode === "register") {
@@ -1204,17 +1521,17 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     if (busy) return;
     const name = input.value.trim();
     if (!name) {
-      setPanelMessage("Enter a display name.", true);
+      setPanelMessage(msg("auth.msg.nameEmpty", "Enter a display name."), true);
       return;
     }
     const myFlow = flowId;
     setBusy(true);
-    setPanelMessage("Saving...");
+    setPanelMessage(msg("auth.msg.saving", "Saving..."));
     const result = await auth.completeProfile(name);
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
-      setPanelMessage(result.message, true);
+      setPanelMessage(resultMessage(result), true);
       return;
     }
     incompleteProfile = false;
@@ -1224,10 +1541,24 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
 
   // ---- header ------------------------------------------------------------------
 
+  function paintSignedInLabel() {
+    const hi = tr("auth.btn.hi", "Hi, {name}", { name: shownDisplayName });
+    if (accountLink) {
+      // A real link to the page's own profile address replaces the button while someone is signed in.
+      accountLink.textContent = hi;
+      accountLink.setAttribute("title", tr("auth.profile.title", "View my profile"));
+      accountLink.hidden = false;
+      buttonEl.style.display = "none";
+    } else {
+      buttonEl.textContent = hi;
+    }
+    buttonEl.style.visibility = "";
+  }
+
   function renderSignedIn(state) {
     shownStatus = "authenticated";
-    buttonEl.textContent = `Hi, ${state.displayName}`;
-    buttonEl.style.visibility = "";
+    shownDisplayName = state.displayName;
+    paintSignedInLabel();
     buttonEl.onclick = null;
     let signOutLink = buttonEl.parentElement.querySelector(
       "[data-urbano-signout]"
@@ -1236,11 +1567,12 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
       signOutLink = document.createElement("a");
       signOutLink.setAttribute("data-urbano-signout", "");
       signOutLink.href = "#";
-      signOutLink.textContent = "Sign out";
+      signOutLink.textContent = tr("auth.signOut", "Sign out");
       signOutLink.style.cssText =
         "margin-left:8px;font-size:12px;color:inherit;";
       buttonEl.insertAdjacentElement("afterend", signOutLink);
     }
+    signOutLink.textContent = tr("auth.signOut", "Sign out");
     signOutLink.style.display = "inline";
     signOutLink.onclick = async (e) => {
       e.preventDefault();
@@ -1250,12 +1582,19 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     if (statusEl) {
       statusEl.style.display = "none";
     }
+    hideLinkError(); // a signed-in person has no use for a message about a link that did not work
   }
 
   function renderSignedOut(profileIncomplete) {
     shownStatus = profileIncomplete ? "profile_incomplete" : "unauthenticated";
     abandonFlow();
-    buttonEl.textContent = profileIncomplete ? "Finish creating your account" : "Log in / Create account";
+    if (accountLink) {
+      accountLink.hidden = true;
+      buttonEl.style.display = "";
+    }
+    buttonEl.textContent = profileIncomplete
+      ? tr("auth.btn.finish", "Finish creating your account")
+      : tr("auth.btn.signedOut", "Log in / Create account");
     buttonEl.style.visibility = "";
     const signOutLink = buttonEl.parentElement.querySelector(
       "[data-urbano-signout]"
@@ -1267,7 +1606,8 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     channel = "email";
     identifier = "";
     typedIdentifier = "";
-    lastMessage = { text: "", error: false };
+    lastMessage = { message: "", error: false };
+    welcomeState = null;
     if (panelOpen) renderStep();
   }
 
@@ -1288,7 +1628,8 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
     // from where the target is now.
     const path = typeof e.composedPath === "function" ? e.composedPath() : [];
     const inside = path.includes(panel) || panel.contains(e.target);
-    if (panelOpen && !inside && e.target !== buttonEl) {
+    const onLanguageSelector = !!(e.target && typeof e.target.closest === "function" && e.target.closest("[data-lang]"));
+    if (panelOpen && !inside && e.target !== buttonEl && !onLanguageSelector) {
       closePanel();
     }
   });
@@ -1296,6 +1637,81 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
   registerOpener((options) => {
     openPanel(options);
   });
+
+  // ---- a sign-in link that did not work ----------------------------------------
+  // Shown in the page's own status line (or, if the page has none, a line at the top of the page). It says what happened in plain
+  // words and offers ONE explicit action: open the log-in panel to request a new code. Nothing is sent until the person asks.
+  let linkErrorHost = null;
+  let linkErrorVisible = false;
+
+  function paintLinkError() {
+    if (!linkError) return;
+    if (!linkErrorHost) {
+      linkErrorHost = statusEl || document.createElement("p");
+      if (!statusEl) {
+        linkErrorHost.style.cssText = "margin:10px 20px 0;font-size:12.5px;line-height:1.5;";
+        document.body.insertBefore(linkErrorHost, document.body.firstChild);
+      }
+      linkErrorHost.setAttribute("role", "alert");
+      linkErrorHost.setAttribute("data-urbano-link-error", "");
+    }
+    const text = document.createElement("span");
+    text.setAttribute("data-link-error-text", "");
+    text.textContent = tr("auth.link.error", "This sign-in link isn't valid, was already used, or has expired. Request a new one to sign in.");
+    const retry = node("button", {
+      text: tr("auth.link.retry", "Request a new code"),
+      attrs: { type: "button", "data-link-error-retry": "" },
+      style: "font:inherit;color:inherit;cursor:pointer;text-decoration:underline;background:none;border:none;padding:10px 6px;margin-left:4px;",
+    });
+    retry.addEventListener("click", () => {
+      openPanel({ mode: "login" });
+    });
+    linkErrorHost.replaceChildren(text, retry);
+    linkErrorHost.style.display = "block";
+    linkErrorVisible = true;
+  }
+
+  function hideLinkError() {
+    if (linkErrorHost && linkErrorVisible) linkErrorHost.style.display = "none";
+    linkErrorVisible = false;
+  }
+
+  // ---- language change -----------------------------------------------------------
+  // Redraws what is on screen in the new language without losing what the person already typed or where they are in the journey.
+  function redrawPanel() {
+    const codeEl = panel.querySelector("[data-code]");
+    const nameEl = panel.querySelector("[data-display-name]");
+    const contactEl = panel.querySelector("[data-contact]");
+    const typed = { code: codeEl ? codeEl.value : "", name: nameEl ? nameEl.value : "" };
+    if (contactEl) typedIdentifier = contactEl.value;
+    if (step === "welcomeBack" && welcomeState) renderWelcomeBack(welcomeState);
+    else renderStep();
+    const codeNow = panel.querySelector("[data-code]");
+    if (codeNow && typed.code) codeNow.value = typed.code;
+    const nameNow = panel.querySelector("[data-display-name]");
+    if (nameNow && typed.name) nameNow.value = typed.name;
+    setBusy(busy);
+  }
+
+  function relabel() {
+    panel.setAttribute("aria-label", tr("auth.panel.aria", "Log in or create an account"));
+    if (shownStatus === "authenticated") {
+      paintSignedInLabel();
+      const signOutLink = buttonEl.parentElement.querySelector("[data-urbano-signout]");
+      if (signOutLink) signOutLink.textContent = tr("auth.signOut", "Sign out");
+    } else {
+      buttonEl.textContent = shownStatus === "profile_incomplete"
+        ? tr("auth.btn.finish", "Finish creating your account")
+        : tr("auth.btn.signedOut", "Log in / Create account");
+    }
+    if (panelOpen) redrawPanel();
+    if (linkErrorVisible) paintLinkError();
+  }
+
+  const pageI18n = typeof window !== "undefined" ? window.UrbanoI18n : undefined;
+  if (pageI18n && typeof pageI18n.onChange === "function") pageI18n.onChange(relabel);
+
+  if (linkError) paintLinkError();
 
   function applyState(state) {
     if (state.status === "authenticated") {
@@ -1324,19 +1740,43 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener) {
       renderSignedOut(false);
     });
 
-  // Keep the header truthful when the session changes elsewhere (another
-  // tab signs out, the session expires): signed out stays signed out.
-  auth.onAuthStateChange(() => {
+  // The signed-in person changed under a header that was naming someone (another tab signed in as somebody else, or the session
+  // ended): the old name must not stay on screen while the new person is resolved, and the resolved state is applied even if it is
+  // the same KIND of state (authenticated -> authenticated is a different person).
+  let identityChangedUnderHeader = false;
+  if (typeof auth.onIdentityReset === "function") {
     auth
-      .getState()
-      .then((state) => {
-        // Only a real transition resets the journey: an event that leaves
-        // the header unchanged (initial session, refocus) must never wipe a
-        // code the person is in the middle of entering.
-        if (state.status === shownStatus) return;
-        if (state.status === "unauthenticated") renderSignedOut(false);
-        else if (state.status === "profile_incomplete") renderSignedOut(true);
+      .onIdentityReset(() => {
+        if (shownStatus !== "authenticated") return;
+        identityChangedUnderHeader = true;
+        shownDisplayName = "…";
+        paintSignedInLabel();
       })
       .catch(() => {});
-  });
+  }
+
+  // Keep the header truthful when the session changes elsewhere (another
+  // tab signs out, the session expires): signed out stays signed out.
+  auth
+    .onAuthStateChange(() => {
+      auth
+        .getState()
+        .then((state) => {
+          if (identityChangedUnderHeader) {
+            identityChangedUnderHeader = false;
+            applyState(state);
+            return;
+          }
+          // Only a real transition resets the journey: an event that leaves
+          // the header unchanged (initial session, refocus) must never wipe a
+          // code the person is in the middle of entering.
+          if (state.status === shownStatus) return;
+          if (state.status === "unauthenticated") renderSignedOut(false);
+          else if (state.status === "profile_incomplete") renderSignedOut(true);
+        })
+        .catch(() => {});
+    })
+    // If the Auth client cannot be loaded at all (the library's CDN is unreachable), registering fails; the header already fails open
+    // to the signed-out control above, so this is not an error worth an unhandled rejection.
+    .catch(() => {});
 }

@@ -11,6 +11,9 @@ import path from "node:path";
  */
 
 const HTML = readFileSync(path.join(process.cwd(), "public/soccer-predictions.html"), "utf8");
+// The shared language module the page loads. This file asserts the English wording, so the page is loaded in English; Spanish by default, the
+// language switch and the Spanish journey are covered by __tests__/shellPublic.test.ts.
+const I18N_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoI18n.js"), "utf8");
 const API = "/api/gaming/predictions";
 const HOSTILE = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
 
@@ -75,6 +78,8 @@ async function loadPage(over: Overrides = {}) {
     pretendToBeVisual: true,
     beforeParse(window) {
       const w = window as unknown as Record<string, any>;
+      window.localStorage.setItem("urbano.lang", "en");
+      window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
       w.UrbanoAuth = {
         attachSignInButton: () => {},
         getState: async () => (over.authenticated === false ? { status: "unauthenticated" } : { status: "authenticated", email: "m@example.com", gamingMemberId: "member-1", displayName: "Member" }),
@@ -289,6 +294,8 @@ async function loadInteractive(mineByToken: Record<string, Record<string, unknow
     pretendToBeVisual: true,
     beforeParse(window) {
       const w = window as unknown as Record<string, any>;
+      window.localStorage.setItem("urbano.lang", "en");
+      window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
       w.UrbanoAuth = {
         attachSignInButton: () => {},
         getState: async () => (auth.identity.status === "authenticated" ? { status: "authenticated", gamingMemberId: "gm", displayName: auth.identity.name } : { status: auth.identity.status }),

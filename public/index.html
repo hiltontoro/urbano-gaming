@@ -1,9 +1,9 @@
 <!doctype html>
-<html>
+<html lang="es">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>URBANO Gaming</title>
+<title data-i18n="home.title">URBANO Gaming</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -33,7 +33,11 @@
     --exp-purple: #7c3aed;
     --exp-purple-glow: rgba(124, 58, 237, 0.45);
     --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --exp-purple-soft: #b57cff;
     --upcoming: #333333;
+    /* Dark scrim laid over the editorial photographs: strongest on the left, where the text sits, lighter over the picture's subject. */
+    --art-scrim: linear-gradient(90deg, rgba(10, 10, 10, 0.9), rgba(10, 10, 10, 0.53) 62%, rgba(10, 10, 10, 0.25)),
+                 linear-gradient(0deg, rgba(10, 10, 10, 0.85), transparent 70%);
   }
   * { box-sizing: border-box; }
   body {
@@ -48,10 +52,12 @@
   /* Header — same brand markup as host.html/participant.html, so the
      mark, wordmark, and Gaming badge read identically everywhere. */
   .shell-header {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
     max-width: 1080px; margin: 0 auto; padding: 20px 20px 0;
   }
-  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+  /* The URBANO mark and wordmark are one link to the parent site; the Gaming badge is a separate link back to this application's home. */
+  .brand-link { display: inline-flex; align-items: center; gap: 10px; border-radius: 6px; }
   /* Founder visual review: the mark previously used
      filter: drop-shadow(...) directly on the <img>. drop-shadow blurs
      the *alpha silhouette* of the image — since urbano-mark.svg is a
@@ -75,6 +81,22 @@
     text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
   }
 
+  /* Language selector and account controls sit together on the right. On a phone the header wraps to two rows: the brand on the
+     first, the language selector (left) and the account group (right) on the second, so nothing overflows at 375 px. */
+  .header-tools { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; max-width: 100%; }
+  .lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button {
+    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted);
+    background: transparent; border: none; padding: 9px 12px; min-height: 44px; min-width: 44px; cursor: pointer;
+  }
+  .lang-switch button[aria-pressed="true"] { color: var(--primary-ink); background: var(--primary-fill); }
+  .account-group { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; position: relative; }
+  .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
+  [hidden] { display: none !important; }
+  .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
+  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-history:focus-visible,
+  .exp-card.is-actionable:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
   .signin-btn {
     font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
     border-radius: 8px; border: 1px solid var(--ink); background: transparent;
@@ -85,6 +107,8 @@
     white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   }
   .signin-btn:hover { background: var(--surface-2); }
+  a.signin-btn { display: inline-block; text-align: center; }
+  .account-group .signin-btn { flex: 0 1 auto; min-width: 0; }
   .signin-status {
     display: none; max-width: 1080px; margin: 10px auto 0; padding: 10px 20px 0;
     font-size: 12.5px; color: var(--muted); line-height: 1.5;
@@ -142,68 +166,33 @@
   }
   .featured-card h2 { font-size: 24px; margin: 6px 0 0; font-weight: 800; }
 
-  /* Match module — structured as a single-item horizontal track so a
-     second/third upcoming fixture can be appended later without
-     redesigning this section. It shows the one soonest match that is
-     open for predictions, taken from the public matches list; there is
-     no hardcoded fixture. No slide controls are built since there's
-     nothing yet to navigate between. Original URBANO treatment (typography + gradients +
-     a subtle repeating diagonal texture evoking stadium light) —
-     deliberately no crests, no broadcast graphics, no third-party
-     marks; team names appear as plain text only. */
-  .match-track {
-    display: flex; gap: 14px; overflow-x: auto; -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory; margin: 16px 0 6px; padding-bottom: 2px;
-  }
-  .match-track::-webkit-scrollbar { display: none; }
-  .match-slide {
-    flex: 0 0 100%; scroll-snap-align: start;
-    border-radius: 14px; border: 1px solid rgba(124, 58, 237, 0.35);
-    background:
-      linear-gradient(135deg, rgba(124,58,237,0.18) 0%, transparent 55%),
-      repeating-linear-gradient(135deg, rgba(255,255,255,0.025) 0 2px, transparent 2px 16px),
-      var(--surface-2);
-    padding: 22px 20px;
-  }
-  .match-teams {
-    display: flex; align-items: center; justify-content: center; gap: 14px;
-    font-size: 21px; font-weight: 800; margin: 0 0 14px; flex-wrap: wrap; text-align: center;
-  }
-  .match-vs {
-    font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-  .match-meta {
-    display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center;
-    font-size: 12.5px; color: var(--muted);
-  }
   .featured-note { color: var(--muted); font-size: 13.5px; margin: 16px 0 20px; }
   .featured-card .status-pill { margin-bottom: 4px; }
   .featured-history { display: inline-block; margin-top: 4px; font-size: 13px; color: var(--muted); text-decoration: underline; }
-  #featured-action:not(:empty) { margin-bottom: 14px; }
-  .featured-cta {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--primary-fill); color: var(--primary-ink);
-    font-weight: 700; font-size: 14px; padding: 11px 20px; border-radius: 999px;
-  }
 
-  /* Explore carousels (Skill Games, Experiences) */
-  .carousel {
-    display: flex; gap: 14px; overflow-x: auto; padding: 4px 20px 14px;
-    margin: 0 -20px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
-  }
-  .carousel::-webkit-scrollbar { height: 6px; }
-  .carousel::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+  /* Card grids (Experiences, Skill Games, Minigames, Organizers). The element ids keep the historical "-carousel" name that the pages'
+     tests and evidence refer to; the cards are no longer a sideways-scrolling strip, so every card is visible without swiping. */
+  .card-grid { display: grid; gap: 14px; }
+  .games-grid { grid-template-columns: minmax(0, 1fr); }
+  .experiences-grid, .organizers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .minigames-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  /* Two cards side by side need about 760 px; narrower than that they stack, so the text never gets squeezed into a sliver. */
+  @media (max-width: 760px) { .experiences-grid, .organizers-grid { grid-template-columns: minmax(0, 1fr); } }
 
   .exp-card {
-    flex: 0 0 auto; width: 230px; scroll-snap-align: start;
+    min-width: 0;
     border: 1px solid var(--line); border-radius: 14px; background: var(--bg-card);
     padding: 18px 16px; display: flex; flex-direction: column; gap: 10px;
     min-height: 168px;
   }
   .exp-card.is-actionable { cursor: pointer; }
   .exp-card.is-actionable:active { background: var(--surface-2); }
-  .exp-card.is-locked { opacity: 0.55; cursor: default; }
+  /* An informational card is told apart by its pill, its words and a quieter border: never by fading its text (which left it below
+     the AA contrast ratio). Title, text and action keep at least 4.5:1 on the card. */
+  .exp-card.is-locked { cursor: default; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) { border-color: #232323; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) h3 { color: #d6d1c3; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) .exp-sub { color: #aaa597; }
 
   .status-pill {
     align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
@@ -211,7 +200,6 @@
   }
   .status-featured { background: var(--exp-purple-bg); color: var(--exp-purple); border: 1px solid var(--exp-purple); }
   .status-playtest { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
-  .status-building { background: rgba(245,241,232,0.05); color: var(--ink); border: 1px dashed var(--ink); }
   .status-soon { background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--line); }
 
   /* Icon + status pill share the card's top row so the semantic emoji
@@ -223,25 +211,102 @@
   .exp-card h3 { font-size: 16px; margin: 0; font-weight: 700; }
   .exp-card .exp-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; flex: 1; }
   .exp-card .exp-action { font-size: 12px; font-weight: 700; color: var(--ink); margin-top: auto; }
-  .exp-card.is-locked .exp-action { color: var(--muted); font-weight: 600; }
+  .exp-card.is-locked .exp-action { color: #aaa597; font-weight: 600; }
+
+  /* Art cards — the composition of the Founder Design Review mockup: a dark editorial photograph, a left-to-right dark scrim so the
+     text sits on the quiet side of the picture, clear ivory titles and purple accents. The photographs are small local WebP derivatives
+     (public/assets/home), purely decorative (empty alt text, never announced) and carry no availability, rule or reward: what a card
+     offers is its status pill and its words, exactly as before. */
+  .art-card { position: relative; isolation: isolate; overflow: hidden; background-color: var(--charcoal); justify-content: flex-end; }
+  .art-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% center; z-index: -2; opacity: 0.84; pointer-events: none; }
+  .art-scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+  .art-card .exp-card-top { margin-bottom: auto; }
+  .art-card .status-pill { background: rgba(10, 10, 10, 0.72); }
+  .art-card .status-featured { color: var(--exp-purple-soft); }
+  .art-kicker {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.7); padding: 4px 8px; border-radius: 5px;
+  }
+  .art-card h3 { font-size: 26px; line-height: 1.15; font-weight: 800; max-width: 16ch; }
+  .art-card .exp-sub { flex: none; max-width: 40ch; font-size: 14px; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .art-card .exp-action { align-self: flex-start; margin-top: 4px; }
+  .art-card.is-actionable .exp-action { background: var(--primary-fill); color: var(--primary-ink); padding: 11px 20px; border-radius: 999px; font-size: 14px; }
+  .art-card.is-actionable:hover { border-color: var(--exp-purple); }
+  .art-card.is-locked .exp-action { color: rgba(245, 241, 232, 0.86); }
+  .art-poker, .art-halloween { min-height: 300px; padding: 24px; }
+  /* Trivia: a card of its own, drawn in code (an original line motif, public/assets/home/trivia-card.svg), in the same dark / purple language. */
+  .art-trivia { min-height: 230px; padding: 24px; }
+  .art-trivia::before { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; background: url("/assets/home/trivia-card.svg") right center / auto 100% no-repeat; }
+  .art-trivia::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+
+  /* URBANO Score (historically "Soccer Predictions": the route, ids and code keep that name). The featured card is a static announcement:
+     every word in it is written here and translated by the language table; nothing in it comes from a server answer or from match
+     data. Its art is an original schematic pitch drawn in code (public/assets/home/urbano-score-pitch.svg), a CSS background, never an
+     element: no photograph, no crest, no mark of any club or competition. The team names are plain text. The art is soccer only. */
+  .featured-card.art-card {
+    background: var(--charcoal); min-height: 340px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
+  }
+  .featured-card.art-card::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+    background: url("/assets/home/urbano-score-pitch.svg") right center / auto 100% no-repeat;
+  }
+  .featured-card.art-card::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+  .featured-card.art-card .status-pill { margin-bottom: auto; background: rgba(10, 10, 10, 0.72); }
+  .featured-card.art-card h2 { font-size: 30px; line-height: 1.15; margin-top: 18px; }
+  .featured-descriptor { margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .featured-scope {
+    margin: 10px 0 0; display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.4;
+    color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.72); padding: 4px 10px; border-radius: 6px;
+  }
+  .featured-when { margin: 8px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .featured-when span { display: block; }
+  .featured-card.art-card .featured-note { max-width: 46ch; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .featured-card.art-card .featured-history { color: rgba(245, 241, 232, 0.86); }
+
+  /* Minigame tiles (Rutas, Towers): the mockup's compact game card — a tinted purple gradient, a line icon and a plain title. They are
+     informational: a status pill and words, no link and no action. */
+  .game-tile { position: relative; isolation: isolate; overflow: hidden; --tone: var(--exp-purple-soft); }
+  .game-tile::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(150deg, var(--tone), transparent 64%); opacity: 0.28; }
+  .game-tile .exp-card-top { flex-wrap: wrap; align-items: flex-start; }
+  .game-tile .status-pill { background: rgba(10, 10, 10, 0.55); }
+  .game-tile .tile-icon { width: 34px; height: 34px; flex: none; color: var(--tone); color: color-mix(in srgb, var(--tone) 72%, var(--ink)); }
+  .game-tile h3 { font-size: 18px; }
 
   footer {
     max-width: 1080px; margin: 48px auto 0; padding: 20px; text-align: center;
     color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
   }
+  footer p { margin: 0 0 6px; }
+  footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
 
   @media (max-width: 640px) {
     .shell-header { padding: 16px 16px 0; }
+    /* On a phone the tools are not one block: the header wraps into two rows. Row 1 is the brand and the language selector; row 2 is
+       the account group alone, the full width, right-aligned, so a real name has room before it is ever truncated. */
+    .header-tools { display: contents; }
+    .lang-switch { margin-left: auto; }
+    .account-group { flex: 1 1 100%; }
     .brand-word { font-size: 15px; }
     .signin-btn { font-size: 12px; padding: 9px 12px; min-height: 44px; }
     .primary-nav { padding: 0 16px 2px; }
     .hero { padding: 28px 16px 4px; }
     .section { padding: 0 16px; }
-    .carousel { padding: 4px 16px 14px; margin: 0 -16px; }
     .featured-card { padding: 22px 18px; }
     .featured-card h2 { font-size: 20px; }
-    .match-slide { padding: 18px 16px; }
-    .match-teams { font-size: 18px; }
+    /* Cards stack on a phone; the two minigame tiles stay side by side while each keeps at least 150 px. On a narrow card the text sits in
+       the lower part, so the scrim is darkest at the bottom and lets the photograph show above it. */
+    .minigames-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    :root { --art-scrim: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.86) 45%, rgba(10, 10, 10, 0.3) 78%, rgba(10, 10, 10, 0.12) 100%),
+                         linear-gradient(90deg, rgba(10, 10, 10, 0.5), rgba(10, 10, 10, 0.2)); }
+    .art-img { object-position: 68% center; }
+    .art-halloween .art-img { object-position: 84% center; }
+    .featured-card.art-card::before { background-position: 70% center; }
+    .art-poker, .art-halloween { min-height: 320px; padding: 20px 18px; }
+    .art-trivia { min-height: 250px; padding: 20px 18px; }
+    .art-card h3 { font-size: 24px; }
+    .featured-card.art-card { min-height: 360px; }
+    .featured-card.art-card h2 { font-size: 24px; }
+    .featured-descriptor { font-size: 15px; }
   }
 
   /* UG-CR-GATE-091 (320 px header). The wordmark, the Gaming badge and "Sign in with URBANO" need about 344 px side by side. At 375 px
@@ -255,77 +320,281 @@
 </head>
 <body>
 
-<div class="shell-header">
+<header class="shell-header">
   <div class="brand">
-    <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
-    <span class="brand-word">URBANO</span>
-    <span class="brand-badge">Gaming</span>
+    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+      <span class="brand-word">URBANO</span>
+    </a>
+    <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
   </div>
-  <button class="signin-btn" id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
-</div>
+  <div class="header-tools">
+    <div class="lang-switch" role="group" aria-label="Idioma" data-i18n-attr="aria-label:shell.lang.label">
+      <button type="button" data-lang="es" lang="es" aria-pressed="true" aria-label="Cambiar a español" data-i18n-attr="aria-label:shell.lang.es">ES</button>
+      <button type="button" data-lang="en" lang="en" aria-pressed="false" aria-label="Cambiar a inglés" data-i18n-attr="aria-label:shell.lang.en">EN</button>
+    </div>
+    <div class="account-group">
+      <a class="signin-btn" id="account-link" href="/profile.html" hidden></a>
+      <button class="signin-btn" id="btn-signin" style="visibility:hidden">Iniciar sesión / Crear cuenta</button>
+    </div>
+  </div>
+</header>
 <p class="signin-status" id="signin-status"></p>
 
-<nav class="primary-nav">
-  <a class="nav-link is-active" href="/">Home</a>
-  <a class="nav-link" href="/#play">Play</a>
-  <a class="nav-link" href="/#experiences">Experiences</a>
-  <a class="nav-link" href="/leaderboards.html">Leaderboards</a>
-  <a class="nav-link" href="/rewards.html">Rewards</a>
+<nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
+  <a class="nav-link is-active" href="/" aria-current="page" data-i18n="shell.nav.home">Inicio</a>
+  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
+  <a class="nav-link" href="/#experiences" data-i18n="shell.nav.experiences">Experiencias</a>
+  <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
+  <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
 </nav>
 
 <div class="hero">
-  <h1>Play, predict, and compete with your community.</h1>
-  <p>Trivia, predictions, competitive minigames, and live experiences — built for playing together.</p>
+  <h1 data-i18n="home.hero.title">Jugá, predecí y competí con tu comunidad.</h1>
+  <p data-i18n="home.hero.sub">Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.</p>
 </div>
 
 <div class="section">
-  <div class="section-label">Featured</div>
-  <!-- Soccer Predictions entry. First paint is always the unavailable state (no play button, no fixture): the card is upgraded only
-       when the public matches list shows a match that is actually open for predictions (see openMatchFrom below). -->
-  <div class="featured-card" id="featured-predictions">
-    <span class="status-pill status-soon" id="featured-status">Próximamente / Coming Soon</span>
-    <h2>Soccer Predictions</h2>
-    <div class="match-track" id="featured-match" hidden></div>
-    <p class="featured-note" id="featured-note">No match is open for predictions right now.</p>
-    <div id="featured-action"></div>
-    <a class="featured-history" id="featured-history" href="/soccer-predictions.html">View my predictions and results →</a>
+  <div class="section-label" data-i18n="home.featured.label">Destacado</div>
+  <!-- URBANO Score announcement (historically "Soccer Predictions": the route /soccer-predictions.html and every identifier keep that name).
+       Static and informational: it announces El Clásico at The Pub by Beer Box and says predictions are coming soon. It makes no request,
+       reads no match, offers no way to take part and never says that predictions are open: the page does not look at the public matches
+       list at all, so a past or test match in the database cannot turn this card into an opening. The only link is to the member's past
+       predictions and results, labelled as such. Date, time and who plays at home are as published by LaLiga and the two clubs.
+       Hiding the way in from this card is not a closure of the predictions service itself. -->
+  <div class="featured-card art-card" id="featured-predictions">
+    <span class="status-pill status-soon" id="featured-status" data-i18n="home.pred.soon">Próximamente</span>
+    <h2 id="featured-title">URBANO Score</h2>
+    <p class="featured-descriptor" data-i18n="home.score.clasico">El Clásico: Real Madrid vs. Barcelona</p>
+    <p class="featured-scope" data-i18n="home.score.venue">Vivilo en The Pub by Beer Box</p>
+    <p class="featured-when"><time datetime="2026-10-25T20:00:00Z" data-i18n="home.score.when">Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España</time><span data-i18n="home.score.sides">Barcelona es local · Real Madrid, visitante</span></p>
+    <p class="featured-note" id="featured-note" data-i18n="home.score.soon">Predicciones próximamente</p>
+    <a class="featured-history" id="featured-history" href="/soccer-predictions.html" data-i18n="home.pred.historyPast">Ver predicciones y resultados anteriores →</a>
   </div>
 </div>
 
-<div class="section" id="play">
-  <div class="section-label">Skill Games</div>
-  <div class="carousel" id="games-carousel"></div>
-  <p class="section-note">More competitive games are on the way.</p>
-</div>
-
 <div class="section" id="experiences">
-  <div class="section-label">Experiences</div>
-  <div class="carousel" id="experiences-carousel"></div>
+  <div class="section-label" data-i18n="home.exp.label">Experiencias</div>
+  <div class="card-grid experiences-grid" id="experiences-carousel"></div>
 </div>
 
-<footer>URBANO Gaming — part of URBANO</footer>
+<div class="section" id="play">
+  <div class="section-label" data-i18n="home.games.label">Juegos de habilidad</div>
+  <div class="card-grid games-grid" id="games-carousel"></div>
+</div>
 
+<div class="section" id="minigames">
+  <div class="section-label" data-i18n="home.minigames.label">Minijuegos</div>
+  <div class="card-grid minigames-grid" id="minigames-grid"></div>
+  <p class="section-note" data-i18n="home.games.note">Vienen más juegos competitivos en camino.</p>
+</div>
+
+<div class="section" id="organizers">
+  <div class="section-label" data-i18n="home.organizers.label">Para organizadores</div>
+  <div class="card-grid organizers-grid" id="organizers-grid"></div>
+</div>
+
+<footer>
+  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+</footer>
+
+<script src="/urbanoI18n.js"></script>
+<script id="i18n-fallback">
+/* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
+   If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
+   supplies the language table; nothing here decides what is available or allowed. There is no English without the module, so the
+   language selector is hidden instead of offering a control that does nothing. */
+(function (w) {
+  "use strict";
+  var m = w.UrbanoI18n;
+  if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
+  var ES = {
+    "shell.lang.label": "Idioma",
+    "shell.lang.es": "Cambiar a español",
+    "shell.lang.en": "Cambiar a inglés",
+    "shell.brand.urbano": "URBANO — ir a urbanohn.com",
+    "shell.brand.gaming": "URBANO Gaming — inicio",
+    "shell.nav.label": "Navegación principal",
+    "shell.nav.home": "Inicio",
+    "shell.nav.play": "Jugar",
+    "shell.nav.experiences": "Experiencias",
+    "shell.nav.leaderboards": "Clasificaciones",
+    "shell.nav.rewards": "Premios",
+    "shell.footer.part": "URBANO Gaming — parte de URBANO",
+    "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "home.title": "URBANO Gaming",
+    "home.hero.title": "Jugá, predecí y competí con tu comunidad.",
+    "home.hero.sub": "Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.",
+    "home.featured.label": "Destacado",
+    "home.pred.soon": "Próximamente",
+    "home.pred.historyPast": "Ver predicciones y resultados anteriores →",
+    "home.score.clasico": "El Clásico: Real Madrid vs. Barcelona",
+    "home.score.venue": "Vivilo en The Pub by Beer Box",
+    "home.score.when": "Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España",
+    "home.score.sides": "Barcelona es local · Real Madrid, visitante",
+    "home.score.soon": "Predicciones próximamente",
+    "home.games.label": "Juegos de habilidad",
+    "home.games.note": "Vienen más juegos competitivos en camino.",
+    "home.minigames.label": "Minijuegos",
+    "home.art.community": "Comunidad",
+    "home.exp.label": "Experiencias",
+    "home.organizers.label": "Para organizadores",
+    "home.competitions.sub": "Ligas y torneos de tu comunidad.",
+    "home.status.featured": "Destacado",
+    "home.status.playtest": "Playtest",
+    "home.status.soon": "Próximamente",
+    "home.locked.soon": "Próximamente",
+    "home.open": "Abrir →",
+    "home.poker.sub": "Organizá una mesa privada de No-Limit Hold'em para tu grupo.",
+    "home.poker.action": "Organizar →",
+    "home.trivia.sub": "Organizá o unite a una sesión en vivo — probá el playtest actual de Trivia.",
+    "home.rutas.sub": "Deslizá cada pieza hasta su salida. Elegí un escenario para empezar.",
+    "home.towers.sub": "Llevá toda la pila a la torre objetivo. Una pieza grande nunca queda sobre una más pequeña.",
+    "home.host.title": "Ser anfitrión",
+    "home.host.closed": "Las solicitudes para ser anfitrión todavía no están abiertas.",
+    "home.host.open": "Postulate para organizar un torneo privado, solo por invitación, en tu local, para adultos que conocés.",
+    "home.host.action": "Postularme →",
+    "home.halloween.sub": "Votación de la comunidad en vivo, pensada para Halloween.",
+    "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
+    "auth.btn.finish": "Terminá de crear tu cuenta",
+    "auth.btn.hi": "Hola, {name}",
+    "auth.profile.title": "Ver mi perfil",
+    "auth.signOut": "Cerrar sesión",
+    "auth.panel.aria": "Iniciar sesión o crear una cuenta",
+    "auth.entry.title": "Entrá a URBANO",
+    "auth.entry.note": "Iniciá sesión en tu cuenta o creá una.",
+    "auth.login": "Iniciar sesión",
+    "auth.register": "Crear cuenta",
+    "auth.method.loginNote": "Elegí cómo recibir tu código.",
+    "auth.method.registerNote": "Te enviaremos un código para confirmar que sos vos.",
+    "auth.method.email": "Correo",
+    "auth.method.phone": "Teléfono",
+    "auth.method.phoneSoon": "Teléfono — todavía no disponible",
+    "auth.method.phoneSoonTitle": "El acceso por teléfono todavía no está disponible.",
+    "auth.method.phoneSoonMsg": "El acceso por teléfono todavía no está disponible. Usá tu correo.",
+    "auth.input.emailPlaceholder": "tu@ejemplo.com",
+    "auth.input.emailAria": "Correo electrónico",
+    "auth.input.phoneAria": "Número de teléfono",
+    "auth.sendLogin": "Enviar código de acceso",
+    "auth.sendVerification": "Enviar código de verificación",
+    "auth.phoneHint": "Usá el código de país, por ejemplo +504 9999 9999.",
+    "auth.back": "Volver",
+    "auth.switch.toRegister": "Crear una cuenta en su lugar",
+    "auth.switch.toLogin": "Ya tengo una cuenta",
+    "auth.code.title": "Ingresá tu código",
+    "auth.code.introLoginEmail": "Si {id} tiene una cuenta, te llegará un código en breve. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introLoginPhone": "Si {id} tiene una cuenta, te llegará un mensaje de texto con un código. Puede tardar un minuto.",
+    "auth.code.introRegisterEmail": "Enviamos un código a {id}. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introRegisterPhone": "Enviamos un mensaje de texto con un código a {id}. Puede tardar un minuto.",
+    "auth.code.placeholder": "Código de verificación",
+    "auth.code.verify": "Verificar",
+    "auth.code.resend": "Reenviar código",
+    "auth.code.resendIn": "Reenviar código en {s} s",
+    "auth.code.otherNumber": "Usar otro número",
+    "auth.code.otherEmail": "Usar otro correo",
+    "auth.code.noCodeEmail": "¿No te llegó el código por correo? ",
+    "auth.code.noCodePhone": "¿No te llegó el código por mensaje de texto? ",
+    "auth.name.title": "Elegí tu nombre para mostrar",
+    "auth.name.note": "Así vas a aparecer en los juegos.",
+    "auth.name.placeholder": "Cómo vas a aparecer en los juegos",
+    "auth.name.aria": "Nombre para mostrar",
+    "auth.continue": "Continuar",
+    "auth.welcome.title": "Te damos la bienvenida de nuevo",
+    "auth.welcome.email": "Este correo ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.welcome.phone": "Este número de teléfono ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.msg.phoneEmpty": "Ingresá tu número de teléfono con el código de país, por ejemplo +504 9999 9999.",
+    "auth.msg.phoneNoCountry": "Empezá con el código de país, por ejemplo +504 9999 9999 para Honduras.",
+    "auth.msg.phoneInvalid": "Ese número de teléfono no parece válido. Usá el código de país seguido del número, por ejemplo +504 9999 9999.",
+    "auth.msg.emailEmpty": "Ingresá tu correo electrónico.",
+    "auth.msg.emailInvalid": "Eso no parece un correo electrónico. Revisalo e intentá de nuevo.",
+    "auth.msg.requestingLogin": "Solicitando tu código de acceso...",
+    "auth.msg.sendingVerification": "Enviando tu código de verificación...",
+    "auth.msg.sendingNew": "Enviando un código nuevo...",
+    "auth.msg.resentLogin": "Si existe una cuenta, te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.resentRegister": "Te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.codeEmptyPhone": "Ingresá el código de tu mensaje de texto.",
+    "auth.msg.codeEmptyEmail": "Ingresá el código de tu correo.",
+    "auth.msg.verifying": "Verificando...",
+    "auth.msg.incompleteLogin": "Encontramos tu acceso pero no una cuenta terminada. Elegí un nombre para mostrar para terminarla.",
+    "auth.msg.lastStep": "Un último paso para terminar de crear tu cuenta.",
+    "auth.msg.nameEmpty": "Ingresá un nombre para mostrar.",
+    "auth.msg.saving": "Guardando...",
+    "auth.err.rateLimited": "Demasiadas solicitudes. Esperá {seconds} segundos e intentá de nuevo.",
+    "auth.err.rateLimitedFew": "Demasiadas solicitudes. Esperá unos segundos e intentá de nuevo.",
+    "auth.err.codeInvalid": "Ese código no es válido o venció. Revisá el código o pedí uno nuevo.",
+    "auth.err.signupClosed": "Por ahora no se pueden crear cuentas nuevas.",
+    "auth.err.phoneUnavailable": "El acceso por teléfono no está disponible en este momento.",
+    "auth.err.phoneUnavailableYet": "El acceso por teléfono todavía no está disponible.",
+    "auth.err.invalidPhone": "Ese número de teléfono no se puede usar.",
+    "auth.err.invalidEmail": "Ese correo electrónico no se puede usar.",
+    "auth.err.network": "No pudimos conectarnos con el servidor. Revisá tu conexión e intentá de nuevo.",
+    "auth.err.unknown": "Algo salió mal. Intentá de nuevo.",
+    "auth.err.notSignedIn": "No iniciaste sesión.",
+    "auth.err.identityChanged": "Tu sesión cambió. Intentá de nuevo.",
+    "auth.err.profileFailed": "No se pudo completar el perfil.",
+    "auth.srv.nameEmpty": "El nombre para mostrar no puede estar vacío.",
+    "auth.srv.nameTooLong": "El nombre para mostrar no puede superar los 40 caracteres.",
+    "auth.link.error": "Este enlace de acceso no es válido, ya se usó o venció. Pedí uno nuevo para iniciar sesión.",
+    "auth.link.retry": "Pedir un código nuevo"
+  };
+  var SERVER = {};
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+  function t(key, vars) {
+    var template = own(ES, key) ? ES[key] : key;
+    return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
+      if (!vars || !own(vars, name)) return whole;
+      var value = vars[name];
+      if (value && typeof value === "object" && typeof value.$t === "string") return t(value.$t);
+      return value === null || value === undefined ? "" : String(value);
+    });
+  }
+  w.UrbanoI18n = {
+    fallback: true,
+    STORAGE_KEY: "urbano.lang",
+    DEFAULT_LANG: "es",
+    LANGS: ["es"],
+    getLang: function () { return "es"; },
+    setLang: function () { return false; },
+    t: t,
+    has: function (key) { return own(ES, key); },
+    locale: function () { return "es-HN"; },
+    serverMessageKey: function (message) { return own(SERVER, message) ? SERVER[message] : null; },
+    onChange: function () { return function () {}; },
+    apply: function () {},
+    dictionary: function () { return { es: ES, en: {} }; }
+  };
+  var groups = w.document.querySelectorAll(".lang-switch");
+  for (var i = 0; i < groups.length; i++) { groups[i].hidden = true; groups[i].style.display = "none"; }
+})(window);
+</script>
 <script src="/urbanoAuth.js"></script>
 <script src="/hostAvailability.js"></script>
 <script>
   UrbanoAuth.attachSignInButton(
     document.getElementById("btn-signin"),
-    document.getElementById("signin-status")
+    document.getElementById("signin-status"),
+    { accountLink: document.getElementById("account-link") }
   );
 
-  // Two separate, member-facing catalogs — Skill Games (short-form
-  // competitive play) vs. Experiences (broader social/participatory
-  // moments, including the future orchestrated Level 33). Neither is a
-  // rendering of the internal Interaction Engine Taxonomy — see
-  // APPLICATION_SHELL_IMPLEMENTATION_RECORD.md. Soccer Predictions is
-  // deliberately not duplicated into the Experiences carousel below —
-  // it's already the Featured module above, and repeating a full card
-  // for it here would be redundant, not additive.
-  const SKILL_GAMES_CATALOG = [
+  const t = (key, vars) => UrbanoI18n.t(key, vars);
+  const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // Member-facing catalogs, in the order the page shows them: Experiences (URBANO Poker, Halloween / Community), the Trivia skill game,
+  // the Minigames, and last the organizers' entries (Become a Host, URBANO Competitions). None is a rendering of the internal Interaction
+  // Engine Taxonomy — see APPLICATION_SHELL_IMPLEMENTATION_RECORD.md. URBANO Score is deliberately not repeated below: it is already the
+  // Featured module above. Quiz and Duel are not shown on the Home (their implementations are untouched).
+  //
+  // Honest availability: a card is actionable ONLY when its status is "playtest" and it has a destination. "soon" is informational — no
+  // link, no operational action. Halloween, Rutas, Towers, Become a Host and URBANO Competitions are informational ("Próximamente") here
+  // until their availability is established by functional evidence; a page merely answering is not that evidence. The "Level 33" card
+  // was retired from this page; its implementation and documentation are untouched.
+  const EXPERIENCES_CATALOG = [
     {
-      icon: "🃏",
-      title: "Poker",
-      sub: "Host a private No-Limit Hold'em table for your group.",
+      // Wide art card (the editorial photograph replaces the emoji). Destination and label are exactly as before.
+      art: { src: "/assets/home/urbano-poker.webp", className: "art-poker" },
+      title: "URBANO Poker",
+      subKey: "home.poker.sub",
       status: "playtest",
       // Host Unified Entry Slice 003 §18: converges on the canonical
       // picker shell with Poker preselected, replacing the standalone
@@ -333,27 +602,44 @@
       // indefinitely as a compatibility surface (§17/§19), it is just
       // no longer where this card sends a Host.
       href: "/host.html?experience=poker",
-      action: "Host →",
+      actionKey: "home.poker.action",
     },
     {
-      icon: "🧠",
+      // Informational art card ("Próximamente"): the photograph is decoration, there is no link and no action.
+      art: { src: "/assets/home/halloween-community.webp", className: "art-halloween", kickerKey: "home.art.community" },
+      title: "Halloween",
+      subKey: "home.halloween.sub",
+      status: "soon",
+    },
+  ];
+
+  // Trivia keeps its destination and Playtest label. Its card is a visual card of its own: an original line motif drawn in code (a CSS
+  // background, no photograph).
+  const SKILL_GAMES_CATALOG = [
+    {
+      art: { className: "art-trivia" },
       title: "Trivia",
-      sub: "Host or join a live session — try the current Trivia playtest.",
+      subKey: "home.trivia.sub",
       status: "playtest",
       href: "/trivia-playtest.html",
     },
+  ];
+
+  // Minigames. Both are informational tiles ("Próximamente"): no link, no action. The icons are static line drawings (decorative).
+  const TILE_ICON_ROUTE = '<svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8h10M3 2h4v4H3Zm14 16h4v4h-4Z"/></svg>';
+  const TILE_ICON_TOWERS = '<svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h18v18H3ZM3 9h18M9 9v12"/></svg>';
+  const MINIGAMES_CATALOG = [
     {
-      icon: "📝",
-      title: "Quiz",
-      sub: "Self-paced — everyone answers on their own time, results reveal together.",
-      status: "playtest",
-      href: "/quiz-playtest.html",
+      tileIcon: TILE_ICON_ROUTE,
+      title: "URBANO Rutas",
+      subKey: "home.rutas.sub",
+      status: "soon",
     },
     {
-      icon: "⚔️",
-      title: "Duel",
-      sub: "Head-to-head challenges between members — gameplay screen is in development.",
-      status: "building",
+      tileIcon: TILE_ICON_TOWERS,
+      title: "URBANO Towers",
+      subKey: "home.towers.sub",
+      status: "soon",
     },
   ];
 
@@ -363,45 +649,37 @@
   // closed — leaves the card as the informational "not open yet" card below. The browser never sees or decides readiness itself:
   // it only relays the server's bounded yes/no, read by the one reader the application page shares.
   const HOST_ENTRY_CLOSED = {
-    title: "Become a Host",
-    sub: "Host applications are not open yet.",
+    titleKey: "home.host.title",
+    subKey: "home.host.closed",
     status: "soon",
   };
   const HOST_ENTRY_OPEN = {
     // The public entry to the Become a Host application. Anyone may read the page; applying requires an URBANO sign-in.
-    title: "Become a Host",
-    sub: "Apply to run a private, invite-only tournament at your venue, for adults you know.",
+    titleKey: "home.host.title",
+    subKey: "home.host.open",
     status: "playtest",
     href: "/become-a-host.html",
-    action: "Apply →",
+    actionKey: "home.host.action",
   };
 
-  function experiencesCatalog(hostOpen) {
+  // The organizers' entries, last on the page. Become a Host keeps its server-gated behaviour; URBANO Competitions is informational
+  // ("Próximamente") with no link: it does not activate any journey.
+  function organizersCatalog(hostOpen) {
     return [
       hostOpen === true ? HOST_ENTRY_OPEN : HOST_ENTRY_CLOSED,
       {
-        title: "Community Voting",
-        sub: "Vote for your favorites in live moments.",
-        status: "soon",
-      },
-      {
-        title: "Level 33",
-        sub: "A new way to play together, coming to URBANO Gaming.",
+        title: "URBANO Competitions",
+        subKey: "home.competitions.sub",
         status: "soon",
       },
     ];
   }
 
-  // Status vocabulary, deliberately kept to the smallest necessary
-  // extension: "building" was added alongside the existing Featured/
-  // Playtest/Coming Soon set specifically for Duel — its backend is
-  // real and deployed (unlike Community Voting/Level 33), but no
-  // gameplay UI exists yet to open, so it cannot honestly be Playtest
-  // either. No other new status was introduced.
-  const STATUS_LABEL = { featured: "Featured", playtest: "Playtest", building: "In Development", soon: "Coming Soon" };
-  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", building: "status-building", soon: "status-soon" };
-  const NON_ACTIONABLE_STATUSES = new Set(["building", "soon"]);
-  const NON_ACTIONABLE_LABEL = { building: "In development", soon: "Coming soon" };
+  // Status vocabulary: Playtest (actionable) and Coming Soon (informational) are what this page shows.
+  const STATUS_KEY = { featured: "home.status.featured", playtest: "home.status.playtest", soon: "home.status.soon" };
+  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", soon: "status-soon" };
+  const NON_ACTIONABLE_STATUSES = new Set(["soon"]);
+  const NON_ACTIONABLE_KEY = { soon: "home.locked.soon" };
 
   function renderCatalog(items, targetId) {
     const el = document.getElementById(targetId);
@@ -409,16 +687,29 @@
       const locked = NON_ACTIONABLE_STATUSES.has(item.status);
       const tag = locked ? "div" : "a";
       const hrefAttr = locked ? "" : ` href="${item.href}"`;
-      const iconMarkup = item.icon ? `<span class="exp-icon">${item.icon}</span>` : "<span></span>";
-      const actionText = locked ? NON_ACTIONABLE_LABEL[item.status] : (item.action || "Open →");
-      return `<${tag} class="exp-card ${locked ? "is-locked" : "is-actionable"}"${hrefAttr}>
+      // The icon slot holds an emoji, a static tile drawing, or an art card's kicker. Every value comes from this page's own constants
+      // (never from a server answer), and the words are escaped regardless.
+      let iconMarkup = "<span></span>";
+      if (item.icon) iconMarkup = `<span class="exp-icon">${item.icon}</span>`;
+      else if (item.tileIcon) iconMarkup = item.tileIcon;
+      else if (item.art && item.art.kickerKey) iconMarkup = `<span class="art-kicker">${escapeHtml(t(item.art.kickerKey))}</span>`;
+      const title = item.titleKey ? t(item.titleKey) : item.title;
+      const actionText = locked ? t(NON_ACTIONABLE_KEY[item.status]) : (item.actionKey ? t(item.actionKey) : t("home.open"));
+      const variant = item.art ? ` art-card ${item.art.className}` : item.tileIcon ? " game-tile" : "";
+      // A photograph is decorative (empty alt), loaded lazily and sized, so it never delays the entries above it. A card whose art is a
+      // CSS background (Trivia) has no element at all.
+      const art = item.art && item.art.src
+        ? `<img class="art-img" src="${item.art.src}" alt="" width="1280" height="720" loading="lazy" decoding="async"><span class="art-scrim" aria-hidden="true"></span>`
+        : "";
+      return `<${tag} class="exp-card${variant} ${locked ? "is-locked" : "is-actionable"}"${hrefAttr}>
+        ${art}
         <div class="exp-card-top">
           ${iconMarkup}
-          <span class="status-pill ${STATUS_CLASS[item.status]}">${STATUS_LABEL[item.status]}</span>
+          <span class="status-pill ${STATUS_CLASS[item.status]}">${escapeHtml(t(STATUS_KEY[item.status]))}</span>
         </div>
-        <h3>${item.title}</h3>
-        <p class="exp-sub">${item.sub}</p>
-        <span class="exp-action">${actionText}</span>
+        <h3>${escapeHtml(title)}</h3>
+        <p class="exp-sub">${escapeHtml(t(item.subKey))}</p>
+        <span class="exp-action">${escapeHtml(actionText)}</span>
       </${tag}>`;
     }).join("");
   }
@@ -430,78 +721,26 @@
     return reader && typeof reader.resolve === "function" ? reader.resolve() : Promise.resolve(false);
   }
 
+  // What the server last said about Become a Host (false until it says yes). Kept only so a change of language redraws the same card.
+  let lastHostAnswer = false;
+  renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
   renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
+  renderCatalog(MINIGAMES_CATALOG, "minigames-grid");
   // First paint is always the closed card, so an actionable Become a Host card can never flash before readiness is known.
-  renderCatalog(experiencesCatalog(false), "experiences-carousel");
+  renderCatalog(organizersCatalog(false), "organizers-grid");
   resolveHostAvailability().then((open) => {
-    if (open === true) renderCatalog(experiencesCatalog(true), "experiences-carousel");
+    lastHostAnswer = open === true;
+    if (open === true) renderCatalog(organizersCatalog(true), "organizers-grid");
   });
 
-  // Soccer Predictions entry. Eligibility is read from the existing public matches list, using only the facts the server itself relies on
-  // before it accepts a prediction: the match is not cancelled, has no final result, has both teams, kicks off in the future, and has at
-  // least one ENABLED Venue Activation at an ACTIVE Venue. Anything else — a failed or slow read, a malformed answer, a missing field,
-  // no match, a disabled activation — leaves the entry as "Próximamente / Coming Soon" with no play button.
-  const MATCHES_URL = "/api/gaming/predictions/matches";
-  const MATCHES_TIMEOUT_MS = 6000;
-
-  function openMatchFrom(body, nowMs) {
-    if (!body || typeof body !== "object" || !Array.isArray(body.matches)) return null;
-    let best = null;
-    let bestKickoff = Infinity;
-    for (const match of body.matches) {
-      if (!match || typeof match !== "object") continue;
-      if (typeof match.matchId !== "string" || match.matchId === "") continue;
-      if (match.cancelledAt !== null || match.finalized !== false) continue;
-      if (typeof match.kickoffAt !== "string") continue;
-      const kickoff = Date.parse(match.kickoffAt);
-      if (!Number.isFinite(kickoff) || kickoff <= nowMs) continue;
-      const home = match.homeTeam && typeof match.homeTeam.name === "string" ? match.homeTeam.name.trim() : "";
-      const away = match.awayTeam && typeof match.awayTeam.name === "string" ? match.awayTeam.name.trim() : "";
-      if (home === "" || away === "") continue;
-      const activations = Array.isArray(match.venueActivations) ? match.venueActivations : [];
-      const hasOpenVenue = activations.some((a) => a && a.enabled === true && a.venue && typeof a.venue === "object" && a.venue.active === true);
-      if (!hasOpenVenue) continue;
-      if (kickoff < bestKickoff) { best = { home, away, competition: typeof match.competition === "string" ? match.competition.trim() : "", kickoff }; bestKickoff = kickoff; }
-    }
-    return best;
-  }
-
-  function showOpenPredictionsEntry(match) {
-    const card = document.getElementById("featured-predictions");
-    const status = document.getElementById("featured-status");
-    const track = document.getElementById("featured-match");
-    const note = document.getElementById("featured-note");
-    const action = document.getElementById("featured-action");
-    if (!card || !status || !track || !note || !action) return;
-    const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-    status.className = "status-pill status-featured";
-    status.textContent = "Open for predictions";
-    const teams = el("div", "match-teams");
-    teams.append(el("span", "", match.home), el("span", "match-vs", "vs"), el("span", "", match.away));
-    const meta = el("div", "match-meta");
-    if (match.competition) meta.append(el("span", "", match.competition));
-    meta.append(el("span", "", new Date(match.kickoff).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Tegucigalpa" }) + " · Tegucigalpa"));
-    const slide = el("div", "match-slide");
-    slide.append(teams, meta);
-    track.replaceChildren(slide);
-    track.hidden = false;
-    note.textContent = "Predictions are open until kickoff — sign in with URBANO to make yours.";
-    const cta = el("a", "featured-cta", "Enter Soccer Predictions →");
-    cta.href = "/soccer-predictions.html";
-    action.replaceChildren(cta);
-  }
-
-  function resolvePredictionsEntry() {
-    const controller = typeof AbortController === "function" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), MATCHES_TIMEOUT_MS) : null;
-    return fetch(MATCHES_URL, { method: "GET", credentials: "omit", cache: "no-store", signal: controller ? controller.signal : undefined })
-      .then((response) => (response && response.status === 200 ? response.json() : null))
-      .then((body) => openMatchFrom(body, Date.now()))
-      .catch(() => null)
-      .then((match) => { if (timer) clearTimeout(timer); return match; });
-  }
-
-  resolvePredictionsEntry().then((match) => { if (match) showOpenPredictionsEntry(match); });
+  // A change of language redraws what this page built in script (the cards); the static text, the Score announcement included, is
+  // handled by UrbanoI18n itself.
+  UrbanoI18n.onChange(() => {
+    renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
+    renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
+    renderCatalog(MINIGAMES_CATALOG, "minigames-grid");
+    renderCatalog(organizersCatalog(lastHostAnswer), "organizers-grid");
+  });
 </script>
 
 </body>

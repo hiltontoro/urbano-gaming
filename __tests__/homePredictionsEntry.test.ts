@@ -4,27 +4,32 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
- * The Home page's Soccer Predictions entry tells the truth about availability.
+ * The Home page's URBANO Score entry (historically "Soccer Predictions") is a STATIC ANNOUNCEMENT, and says only what is true.
  *
- * The shipped landing page (public/index.html) is parsed and run whole in jsdom. Its entry used to be a hardcoded historical fixture
- * ("Live now", a past LaLiga match, a play button). It now starts as "Próximamente / Coming Soon" with no play button and is upgraded
- * only when the EXISTING public matches list (GET /api/gaming/predictions/matches) shows a match that is open for predictions: not
- * cancelled, no final result, both teams present, kickoff in the future, and at least one enabled Venue Activation at an active Venue.
- * Anything else (no match, a missing field, a malformed answer, a failed or slow read) stays unavailable. A link to the member's
- * historical predictions and results is always present.
+ * The shipped landing page (public/index.html) is parsed and run whole in jsdom. The featured card announces El Clásico (Real Madrid and
+ * Barcelona) at The Pub by Beer Box and says that predictions are coming soon. It is informational: no match is created or read, no way
+ * to take part is offered, and it never says that predictions are open. In particular the page does NOT look at the public matches list
+ * (GET /api/gaming/predictions/matches) at all, so a past, test or open match in the database can never turn the announcement into an
+ * opening. The only link is to the member's past predictions and results, labelled as such.
+ *
+ * Limit, stated plainly: hiding the way in from this card is not a closure of the predictions service. The Predictions page and its API
+ * keep working for whatever the database holds; this test pins what the Home says and does, nothing more.
  */
 
 const INDEX_HTML = readFileSync(path.join(process.cwd(), "public/index.html"), "utf8");
+// The shared language module the Home page loads. Spanish is the default; the English wording is asserted by loading the page in English.
+const I18N_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoI18n.js"), "utf8");
 const MATCHES_URL = "/api/gaming/predictions/matches";
 const PREDICTIONS_PAGE = "/soccer-predictions.html";
+// The page without its explanatory comments (they may legitimately name the matches list to say it is not read).
+const CODE = INDEX_HTML.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\/\/.*$/gm, "");
 
-type Reply = { status: number; json?: unknown; jsonThrows?: boolean } | "reject" | "hang";
+type Reply = { status: number; json?: unknown } | "reject";
 
 interface Call { url: string; init: Record<string, any> }
 
-async function loadHome(reply: () => Reply, opts: { compressTimeout?: boolean } = {}) {
+async function loadHome(reply: () => Reply = () => ({ status: 200, json: { matches: [] } }), opts: { lang?: "es" | "en" } = {}) {
   const calls: Call[] = [];
-  let aborted = false;
   const dom = new JSDOM(INDEX_HTML, {
     url: "http://localhost/",
     runScripts: "dangerously",
@@ -32,49 +37,35 @@ async function loadHome(reply: () => Reply, opts: { compressTimeout?: boolean } 
     beforeParse(window) {
       const w = window as unknown as Record<string, any>;
       w.UrbanoAuth = { attachSignInButton: () => {} };
-      if (opts.compressTimeout) {
-        const realSetTimeout = window.setTimeout.bind(window);
-        // Only the page's own 6 s matches timeout is compressed, so the timeout path runs in milliseconds.
-        w.setTimeout = (fn: TimerHandler, ms?: number, ...rest: unknown[]) => realSetTimeout(fn, ms === 6000 ? 25 : ms, ...rest);
-      }
+      window.localStorage.setItem("urbano.lang", opts.lang ?? "en");
+      window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
       w.fetch = (url: string, init: Record<string, any> = {}) => {
         calls.push({ url: String(url), init });
         return (async () => {
           const out = reply();
           if (out === "reject") throw new TypeError("network failure");
-          if (out === "hang") {
-            return new Promise((_resolve, rejectPromise) => {
-              init.signal?.addEventListener("abort", () => { aborted = true; rejectPromise(new DOMException("aborted", "AbortError")); });
-            });
-          }
-          return {
-            status: out.status,
-            json: async () => {
-              if (out.jsonThrows || out.json === undefined) throw new SyntaxError("Unexpected token");
-              return out.json;
-            },
-          };
+          return { status: out.status, json: async () => out.json };
         })();
       };
     },
   });
   const doc = dom.window.document;
   const q = (sel: string) => doc.querySelector(sel) as HTMLElement | null;
+  const squash = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
   return {
     win: dom.window,
     doc,
     calls,
-    wasAborted: () => aborted,
     settle: async (ms = 60) => { await new Promise((r) => setTimeout(r, ms)); },
-    status: () => q("#featured-status")?.textContent ?? "",
-    note: () => q("#featured-note")?.textContent ?? "",
-    cta: () => q("#featured-action a") as HTMLAnchorElement | null,
+    status: () => squash(q("#featured-status")?.textContent),
+    note: () => squash(q("#featured-note")?.textContent),
     history: () => q("#featured-history") as HTMLAnchorElement | null,
-    matchHidden: () => (q("#featured-match") as HTMLElement).hidden,
-    cardText: () => (q("#featured-predictions")?.textContent ?? "").replace(/\s+/g, " "),
+    cardText: () => squash(q("#featured-predictions")?.textContent),
     card: () => q("#featured-predictions") as HTMLElement,
+    part: (sel: string) => squash(q(`#featured-predictions ${sel}`)?.textContent),
   };
 }
+type Home = Awaited<ReturnType<typeof loadHome>>;
 
 const HOUR = 3_600_000;
 function match(overrides: Record<string, unknown> = {}) {
@@ -93,182 +84,179 @@ function match(overrides: Record<string, unknown> = {}) {
 }
 const list = (...matches: unknown[]): Reply => ({ status: 200, json: { matches } });
 
-function expectUnavailable(page: Awaited<ReturnType<typeof loadHome>>) {
-  expect(page.status()).toBe("Próximamente / Coming Soon");
-  expect(page.cta()).toBeNull();
-  expect(page.cardText()).not.toMatch(/Enter Soccer Predictions|Live now|Open for predictions|Predictions are open/); // case-sensitive: the unavailable note itself says "No match is open for predictions"
-  expect(page.matchHidden()).toBe(true);
-  expect(page.history()?.getAttribute("href")).toBe(PREDICTIONS_PAGE); // historical predictions and results stay reachable
+// The announcement, word for word, in both languages (Spanish is the default).
+const COPY = {
+  es: {
+    pill: "Próximamente",
+    clasico: "El Clásico: Real Madrid vs. Barcelona",
+    venue: "Vivilo en The Pub by Beer Box",
+    when: "Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España",
+    sides: "Barcelona es local · Real Madrid, visitante",
+    soon: "Predicciones próximamente",
+    history: "Ver predicciones y resultados anteriores →",
+  },
+  en: {
+    pill: "Coming Soon",
+    clasico: "El Clásico: Real Madrid vs. Barcelona",
+    venue: "Watch it at The Pub by Beer Box",
+    when: "Sunday, October 25 · 2:00 p.m. (Honduras time) · 9:00 p.m. in Spain",
+    sides: "Barcelona is the home team · Real Madrid, the visitor",
+    soon: "Predictions coming soon",
+    history: "See past predictions and results →",
+  },
+} as const;
+
+/** Everything a person could read as "you can take part now", in either language. */
+const OPENING_LANGUAGE = /Entrar a|Enter URBANO|Enter Soccer|Abierto para|Open for predictions|Predictions are open|ya pod[ée]s predecir|you can (now )?predict|Hac[ée] tu predicci|Make your prediction|Live now|En vivo ahora|Predecí ahora|Predict now|Participá|Participate now/i;
+
+function announcement(page: Home) {
+  return {
+    pill: page.status(),
+    title: page.part("h2"),
+    clasico: page.part(".featured-descriptor"),
+    venue: page.part(".featured-scope"),
+    when: page.part(".featured-when time"),
+    sides: page.part(".featured-when span"),
+    soon: page.note(),
+    history: page.part("#featured-history"),
+  };
 }
 
-describe("first paint and static markup: no fixture, no Live now, no play button", () => {
-  it("is Próximamente / Coming Soon synchronously, before any request has answered, even for a server that will say a match is open", async () => {
-    const page = await loadHome(() => list(match()));
-    expectUnavailable(page); // before a single microtask
-    await page.settle();
+describe("the announcement: what the card says, in both languages", () => {
+  it.each(["es", "en"] as const)("%s: URBANO Score, El Clásico, The Pub by Beer Box, the verified date and sides, and predictions coming soon", async (lang) => {
+    const page = await loadHome(undefined, { lang });
+    const c = COPY[lang];
+    expect(announcement(page)).toEqual({ pill: c.pill, title: "URBANO Score", clasico: c.clasico, venue: c.venue, when: c.when, sides: c.sides, soon: c.soon, history: c.history });
   });
 
-  it("the markup itself carries no historical fixture, no Live now copy and no play button", () => {
+  it("is already complete before any script or request: the markup itself carries the Spanish announcement and the language keys", () => {
     const withoutScripts = INDEX_HTML.replace(/<script[\s\S]*?<\/script>/g, "");
-    expect(withoutScripts).not.toMatch(/Live now|Espanyol|Real Madrid|LaLiga|RCDE|Aug 22|Featured Match/i);
-    expect(withoutScripts).not.toContain("Enter Soccer Predictions");
-    expect(INDEX_HTML).not.toMatch(/Espanyol|Real Madrid|LaLiga|RCDE/);
-    expect(withoutScripts).toContain("Próximamente / Coming Soon");
+    const card = withoutScripts.slice(withoutScripts.indexOf('id="featured-predictions"'), withoutScripts.indexOf('<div class="section" id="experiences">'));
+    for (const text of [COPY.es.pill, "URBANO Score", COPY.es.clasico, COPY.es.venue, COPY.es.when, COPY.es.sides, COPY.es.soon, COPY.es.history]) expect(card).toContain(text);
+    for (const key of ["home.pred.soon", "home.score.clasico", "home.score.venue", "home.score.when", "home.score.sides", "home.score.soon", "home.pred.historyPast"]) expect(card).toContain(`data-i18n="${key}"`);
   });
 
-  it("always offers the member's history: one link to the Predictions page, labelled for predictions and results, never as a play button", async () => {
-    const page = await loadHome(() => list());
+  it("states the moment once, machine-readable, and the visible times are that same moment: 20:00 UTC is 21:00 in Spain and 2:00 p. m. in Honduras on 25 October", () => {
+    const iso = INDEX_HTML.match(/<time datetime="([^"]+)"/)![1];
+    expect(iso).toBe("2026-10-25T20:00:00Z");
+    const at = (timeZone: string) => new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
+    expect(at("Europe/Madrid")).toBe("25 October at 21:00"); // after the clocks go back that morning: CET, UTC+1
+    expect(at("America/Tegucigalpa")).toBe("25 October at 14:00"); // Honduras keeps UTC-6 all year
+    expect(COPY.es.when).toContain("2:00 p. m.");
+    expect(COPY.es.when).toContain("21:00");
+    expect(COPY.en.when).toContain("2:00 p.m.");
+    expect(COPY.en.when).toContain("9:00 p.m.");
+  });
+
+  it("names El Clásico's two sides as announced and nothing else: no other match, venue, sport, prize or sponsor", async () => {
+    for (const lang of ["es", "en"] as const) {
+      const page = await loadHome(undefined, { lang });
+      expect(page.cardText()).not.toMatch(/Finca|NFL|premio|prize|reward|patrocin|sponsor|gratis|free|L\.\s?\d|\$|HNL|USD|apuest|bet\b|wager/i);
+      expect(page.cardText().match(/Real Madrid/g)).toHaveLength(2); // the title line and the sides line
+      expect(page.cardText().match(/The Pub by Beer Box/g)).toHaveLength(1);
+    }
+  });
+
+  it("brings no club crest, photograph or player image: the card has no element image at all, its art is a CSS background", () => {
+    const card = INDEX_HTML.slice(INDEX_HTML.indexOf('id="featured-predictions"'), INDEX_HTML.indexOf('<div class="section" id="experiences">'));
+    expect(card).not.toMatch(/<img|<svg|<picture|<video|<canvas|<iframe|<object|<embed/i);
+  });
+});
+
+describe("it announces; it never opens", () => {
+  it.each(["es", "en"] as const)("%s: no way to take part, no opening language, no play button, one link only — to the past", async (lang) => {
+    const page = await loadHome(() => list(match()), { lang });
     await page.settle();
+    expect(page.card().querySelectorAll("a")).toHaveLength(1);
+    expect(page.card().querySelectorAll("button, form, input, select, textarea, [role=button], .featured-cta, #featured-action")).toHaveLength(0);
     const history = page.history()!;
     expect(history.getAttribute("href")).toBe(PREDICTIONS_PAGE);
-    expect(history.textContent).toMatch(/predictions and results/i);
     expect(history.className).not.toContain("featured-cta");
+    expect(history.textContent).toMatch(lang === "es" ? /anteriores/ : /past/); // identified as the past: never "my predictions", never "enter"
+    expect(page.cardText()).not.toMatch(OPENING_LANGUAGE);
+    expect(page.status()).toBe(COPY[lang].pill);
+    expect(page.status()).not.toMatch(/Abierto|Open|Playtest|Destacado|Featured/);
+  });
+
+  it("the pill and the line under it are both about 'soon': the card is in the same Próximamente state as the other informational cards", async () => {
+    const page = await loadHome(undefined, { lang: "es" });
+    const pill = page.doc.querySelector("#featured-status") as HTMLElement;
+    expect(pill.className).toContain("status-soon");
+    expect(pill.className).not.toContain("status-featured");
+    expect(pill.getAttribute("data-i18n")).toBe("home.pred.soon");
   });
 });
 
-describe("an open match upgrades the entry; nothing else does", () => {
-  it("shows the match and a play button only when the public list has a match open for predictions", async () => {
-    const page = await loadHome(() => list(match()));
-    await page.settle();
-    expect(page.status()).toBe("Open for predictions");
-    expect(page.cta()?.getAttribute("href")).toBe(PREDICTIONS_PAGE);
-    expect(page.cta()?.textContent).toBe("Enter Soccer Predictions →");
-    expect(page.matchHidden()).toBe(false);
-    expect(page.cardText()).toContain("Rojo FC");
-    expect(page.cardText()).toContain("Azul FC");
-    expect(page.cardText()).toContain("Copa Barrio");
-    expect(page.cardText()).toContain("Tegucigalpa");
-    expect(page.note()).toMatch(/open until kickoff/);
-    expect(page.cardText()).not.toMatch(/Live now/i);
-    expect(page.history()?.getAttribute("href")).toBe(PREDICTIONS_PAGE);
-  });
-
-  it("asks the existing endpoint exactly once: a credential-free GET that is never cached", async () => {
-    const page = await loadHome(() => list(match()));
-    await page.settle();
-    expect(page.calls).toHaveLength(1);
-    const [call] = page.calls;
-    expect(call.url).toBe(MATCHES_URL);
-    expect(call.init.method).toBe("GET");
-    expect(call.init.body).toBeUndefined();
-    expect(call.init.credentials).toBe("omit");
-    expect(call.init.cache).toBe("no-store");
-    expect(JSON.stringify(call.init.headers ?? {})).not.toMatch(/authorization|bearer|apikey/i);
-  });
-
-  it("features the soonest open match and ignores earlier matches that are not open", async () => {
-    const page = await loadHome(() => list(
-      match({ matchId: "past", homeTeam: { name: "Pasado Uno" }, awayTeam: { name: "Pasado Dos" }, kickoffAt: new Date(Date.now() - 2 * HOUR).toISOString() }),
-      match({ matchId: "later", homeTeam: { name: "Tarde Uno" }, awayTeam: { name: "Tarde Dos" }, kickoffAt: new Date(Date.now() + 72 * HOUR).toISOString() }),
-      match({ matchId: "cancelled-sooner", homeTeam: { name: "Cancelado Uno" }, awayTeam: { name: "Cancelado Dos" }, kickoffAt: new Date(Date.now() + 2 * HOUR).toISOString(), cancelledAt: new Date().toISOString() }),
-      match({ matchId: "soonest", homeTeam: { name: "Pronto Uno" }, awayTeam: { name: "Pronto Dos" }, kickoffAt: new Date(Date.now() + 6 * HOUR).toISOString() }),
-    ));
-    await page.settle();
-    expect(page.cardText()).toContain("Pronto Uno");
-    expect(page.cardText()).not.toMatch(/Pasado|Tarde|Cancelado/);
-  });
-});
-
-describe("missing or contrary eligibility evidence keeps the entry unavailable", () => {
-  const venue = { venueId: "v1", name: "Sede", latitude: 1, longitude: 1, radiusMeters: 100, active: true };
-  const activation = (o: Record<string, unknown> = {}) => ({ venueActivationId: "va", enabled: true, venue, prizeTiers: [], ...o });
-  const cases: Array<[string, Record<string, unknown>]> = [
-    ["cancelled", { cancelledAt: new Date().toISOString() }],
-    ["cancellation evidence missing", { cancelledAt: undefined }],
-    ["finalized", { finalized: true }],
-    ["finalized evidence missing", { finalized: undefined }],
-    ["kickoff in the past", { kickoffAt: new Date(Date.now() - HOUR).toISOString() }],
-    ["kickoff unparseable", { kickoffAt: "next weekend" }],
-    ["kickoff missing", { kickoffAt: undefined }],
-    ["kickoff not a string", { kickoffAt: 1893456000000 }],
-    ["no home team", { homeTeam: null }],
-    ["no away team", { awayTeam: null }],
-    ["blank team name", { awayTeam: { name: "   " } }],
-    ["team name not a string", { homeTeam: { name: 7 } }],
-    ["no activations", { venueActivations: [] }],
-    ["activations missing", { venueActivations: undefined }],
-    ["activations not an array", { venueActivations: { enabled: true } }],
-    ["activation disabled", { venueActivations: [activation({ enabled: false })] }],
-    ["activation enabled is not exactly true", { venueActivations: [activation({ enabled: "true" })] }],
-    ["activation without a venue", { venueActivations: [activation({ venue: null })] }],
-    ["venue inactive", { venueActivations: [activation({ venue: { ...venue, active: false } })] }],
-    ["venue active flag missing", { venueActivations: [activation({ venue: { name: "Sede" } })] }],
-    ["match id missing", { matchId: undefined }],
-    ["match id blank", { matchId: "" }],
-  ];
-  it.each(cases)("%s", async (_label, overrides) => {
-    const page = await loadHome(() => list(match(overrides)));
-    await page.settle();
-    expectUnavailable(page);
-  });
-
-  it("no matches, or a body that is not a matches list, stays unavailable", async () => {
-    for (const reply of [list(), { status: 200, json: { matches: "none" } }, { status: 200, json: {} }, { status: 200, json: null }, { status: 200, json: [match()] }, { status: 200, json: "ok" }, { status: 200, json: { available: true } }] as Reply[]) {
-      const page = await loadHome(() => reply);
-      await page.settle();
-      expectUnavailable(page);
+describe("the Home does not look at the matches list, so no database content can change the announcement", () => {
+  it("the page makes no request to the predictions API: not on first paint, not after, whatever the server would have said", async () => {
+    const replies: Reply[] = [
+      list(),
+      list(match()), // an open match
+      list(match({ matchId: "past", kickoffAt: new Date(Date.now() - 2 * HOUR).toISOString(), finalized: true })), // a past one
+      list(match({ homeTeam: { name: "Prueba Uno" }, awayTeam: { name: "Prueba Dos" }, competition: "Partido de prueba" })), // a test one
+      { status: 500, json: {} },
+      "reject",
+    ];
+    for (const reply of replies) {
+      const page = await loadHome(() => reply, { lang: "es" });
+      await page.settle(80);
+      expect(page.calls.filter((c) => c.url.includes("/api/gaming/predictions"))).toEqual([]);
+      expect(page.calls).toEqual([]); // and no other request either: the Home's only network use is the shared sign-in module and the host-availability reader, which jsdom does not load
       page.win.close();
     }
   });
 
-  it("one open match among unusable rows still opens the entry, and a null or non-object row cannot break the read", async () => {
-    const page = await loadHome(() => ({ status: 200, json: { matches: [null, 3, "x", match({ finalized: true }), match()] } }));
-    await page.settle();
-    expect(page.status()).toBe("Open for predictions");
+  it("the card is identical whatever the database holds: an open match, a historical one or none at all", async () => {
+    const empty = await loadHome(() => list(), { lang: "es" });
+    const open = await loadHome(() => list(match()), { lang: "es" });
+    const test = await loadHome(() => list(match({ homeTeam: { name: "Prueba Uno" }, awayTeam: { name: "Prueba Dos" }, competition: "Partido de prueba" })), { lang: "es" });
+    await Promise.all([empty.settle(80), open.settle(80), test.settle(80)]);
+    expect(open.card().outerHTML).toBe(empty.card().outerHTML);
+    expect(test.card().outerHTML).toBe(empty.card().outerHTML);
+    expect(open.cardText()).not.toMatch(/Rojo|Azul|Copa Barrio|Prueba/);
+    for (const page of [empty, open, test]) page.win.close();
+  });
+
+  it("the page source does not name the predictions API at all (the comments that say so are not code)", () => {
+    expect(CODE).not.toContain("/api/gaming/predictions");
+    expect(CODE).not.toMatch(/openMatchFrom|showOpenPredictionsEntry|resolvePredictionsEntry|MATCHES_URL|featured-match|featured-action|match-slide|match-track/);
+    expect(CODE).not.toMatch(/\.kickoffAt|venueActivations|cancelledAt|finalized/);
+  });
+
+  it("a change of language redraws the announcement in place without a second copy and without any request", async () => {
+    const page = await loadHome(() => list(match()), { lang: "es" });
+    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    expect(page.doc.querySelectorAll("#featured-predictions")).toHaveLength(1);
+    expect(announcement(page)).toEqual({ pill: COPY.en.pill, title: "URBANO Score", clasico: COPY.en.clasico, venue: COPY.en.venue, when: COPY.en.when, sides: COPY.en.sides, soon: COPY.en.soon, history: COPY.en.history });
+    (page.doc.querySelector('[data-lang="es"]') as HTMLElement).click();
+    expect(page.part(".featured-scope")).toBe(COPY.es.venue);
+    expect(page.calls).toEqual([]);
   });
 });
 
-describe("a failed or slow read fails closed", () => {
-  it("network failure, non-200 answers and unreadable JSON all stay unavailable", async () => {
-    const failures: Reply[] = ["reject", { status: 500, json: { matches: [match()] } }, { status: 503, json: { matches: [match()] } }, { status: 404, json: { matches: [match()] } }, { status: 401, json: { matches: [match()] } }, { status: 302, json: { matches: [match()] } }, { status: 200, jsonThrows: true }];
-    for (const failure of failures) {
-      const page = await loadHome(() => failure);
-      await page.settle(40);
-      expectUnavailable(page);
-      page.win.close();
-    }
-  });
-
-  it("a request that never answers times out, is aborted, and stays unavailable", async () => {
-    const page = await loadHome(() => "hang", { compressTimeout: true });
-    expectUnavailable(page);
-    await page.settle(150);
-    expect(page.wasAborted()).toBe(true);
-    expectUnavailable(page);
-  });
-});
-
-describe("team and competition names are text, never markup", () => {
-  it("renders hostile names inertly", async () => {
-    const hostile = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>';
-    const page = await loadHome(() => list(match({ homeTeam: { name: hostile }, awayTeam: { name: "Azul" }, competition: hostile })));
-    await page.settle();
-    expect(page.status()).toBe("Open for predictions");
-    expect(page.card().querySelectorAll("img, script, svg, iframe").length).toBe(0);
-    expect(page.cardText()).toContain("<img src=x");
-    expect((page.win as unknown as Record<string, unknown>).__pwned).toBeUndefined();
-  });
-});
-
-describe("the rest of Home is unchanged", () => {
-  it("keeps every other catalog entry exactly as it was, and Become a Host closed by default", async () => {
+describe("the rest of Home keeps its access and its states", () => {
+  it("keeps the access of every card that has one, every other card informational, and Become a Host closed by default", async () => {
     const page = await loadHome(() => list());
     await page.settle();
     const titles = Array.from(page.doc.querySelectorAll(".exp-card h3")).map((h) => h.textContent);
-    expect(titles).toEqual(["Poker", "Trivia", "Quiz", "Duel", "Become a Host", "Community Voting", "Level 33"]);
+    expect(titles).toEqual(["URBANO Poker", "Halloween", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
+    expect(Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i); // the retired card: its implementation and documentation are untouched, the Home card is gone
     const byTitle = (t: string) => Array.from(page.doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h3")?.textContent === t) as HTMLElement;
-    for (const [title, href] of [["Trivia", "/trivia-playtest.html"], ["Quiz", "/quiz-playtest.html"], ["Poker", "/host.html?experience=poker"]] as const) {
+    for (const [title, href] of [["Trivia", "/trivia-playtest.html"], ["URBANO Poker", "/host.html?experience=poker"]] as const) {
       expect(byTitle(title).getAttribute("href"), title).toBe(href);
       expect(byTitle(title).className).toContain("is-actionable");
     }
-    for (const title of ["Duel", "Become a Host", "Community Voting", "Level 33"]) expect(byTitle(title).className, title).toContain("is-locked");
-    expect(byTitle("Duel").textContent).toMatch(/In development/i);
+    for (const title of ["Halloween", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]) {
+      expect(byTitle(title).className, title).toContain("is-locked");
+      expect(byTitle(title).tagName, title).toBe("DIV"); // informational: no link, no operational action
+      expect(byTitle(title).getAttribute("href"), title).toBeNull();
+    }
     expect(page.doc.querySelector('a[href="/become-a-host.html"]')).toBeNull();
   });
 
   it("does not touch the entries of other products: no Race, Pulse, Competitions or Host request is made", async () => {
     const page = await loadHome(() => list(match()));
     await page.settle();
-    expect(page.calls.map((c) => c.url)).toEqual([MATCHES_URL]);
+    expect(page.calls.map((c) => c.url)).toEqual([]);
   });
 });
