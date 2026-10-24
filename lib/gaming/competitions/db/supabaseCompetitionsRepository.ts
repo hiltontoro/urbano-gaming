@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
@@ -8,9 +8,11 @@ import type {
   SoccerGoalEventRecord, SoccerAssistEventRecord, SoccerPenaltyShootoutRecord, CompetitionDisputeRecord,
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
   ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
-  RegistrationStatusRead, RegistrationFreezeRecord,
+  RegistrationStatusRead, RegistrationFreezeRecord, PlanAmendmentFacts, PlanAmendmentDecision, PlanAmendmentStatusRecord, ProposePlanAmendmentResult,
+  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult,
 } from "../types";
-import { PlanningIntentMismatchError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
+import { PlanningIntentMismatchError, PlanningValidationError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
+import { PlanAmendmentValidationError, planAmendmentErrorFromDatabase, planAmendmentRpcPayload, planAmendmentStatusFromDatabase } from "../planAmendment";
 import { registrationFreezeErrorFromDatabase, registrationOpeningErrorFromDatabase } from "../registrationFreeze";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
@@ -43,6 +45,18 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    // UG-CR-GATE-SSS-011: the plan-amendment refusals have their own typed errors (the shared status table does not know them; the three amendment routes
+    // answer for them). They come first, as the freeze entries did: a code is matched by containment, in this order.
+    ["PLAN_AMENDMENT_INVALID", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_NOT_AVAILABLE", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_WINDOW_CLOSED", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_LEAD_TIME", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_STALE", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_EXPIRED", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_NOT_PENDING", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_DECISION_CONFLICT", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_INTENT_MISMATCH", () => planAmendmentErrorFromDatabase(msg)!],
+    ["PLAN_AMENDMENT_FREEZE_INCONSISTENT", () => planAmendmentErrorFromDatabase(msg)!],
     // UG-CR-GATE-SSS-007: the opening and freeze refusals have their own typed errors (the shared status table does not know them; the two routes that
     // raise them answer for them). A deadline or freeze refusal of any OTHER write uses the existing TEAM_REGISTRATION_NOT_OPEN code below.
     ["REGISTRATION_OPENING_PLAN_MISSING", () => registrationOpeningErrorFromDatabase(msg)!],
@@ -121,6 +135,12 @@ export function translateError(error: { code?: string; message?: string }): Erro
   return new Error(msg || "Unknown Competitions repository error.");
 }
 
+/** The same translation for a plan-amendment call: the planning validator's own refusals (raised while the complete plan is judged) are the amendment's validation error. */
+function translateAmendmentError(error: { code?: string; message?: string }): Error {
+  const translated = translateError(error);
+  return translated instanceof PlanningValidationError ? new PlanAmendmentValidationError(translated.violations) : translated;
+}
+
 /** Everything one planning revision is made of, read in a single request so the answer is one consistent snapshot. */
 const PLANNING_REVISION_SELECT = [
   "planning_revision_id, competition_id, format_key, revision_number, supersedes_revision_id, authored_by_gaming_member_id, created_at",
@@ -170,7 +190,7 @@ function mapPlanningRevision(row: any): CompetitionPlanningRevisionRecord {
   };
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore {
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
@@ -248,6 +268,50 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository, C
       .eq("competition_id", competitionId).order("revision_number", { ascending: false }).limit(1);
     if (error) throw translateError(error);
     return data && data.length > 0 ? mapPlanningRevision(data[0]) : null;
+  }
+
+  async proposePlanAmendment(competitionId: string, organizerGamingMemberId: string, intentId: string, facts: PlanAmendmentFacts): Promise<ProposePlanAmendmentResult> {
+    const { data, error } = await this.client.rpc("propose_competition_plan_amendment_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_intent_id: intentId, p_amendment: planAmendmentRpcPayload(facts),
+    });
+    if (error) throw translateAmendmentError(error);
+    return {
+      digest: data.amendment_digest,
+      sequenceNumber: Number(data.sequence_number),
+      createdAt: new Date(data.created_at).toISOString(),
+      expiresAt: new Date(data.expires_at).toISOString(),
+      alreadyProposed: data.already_proposed === true,
+      supersededDigest: data.superseded_digest ?? null,
+    };
+  }
+
+  async decidePlanAmendment(competitionId: string, captainGamingMemberId: string, amendmentDigest: string, decision: PlanAmendmentDecision): Promise<DecidePlanAmendmentResult> {
+    const { data, error } = await this.client.rpc("decide_competition_plan_amendment_atomically", {
+      p_competition_id: competitionId, p_captain_gaming_member_id: captainGamingMemberId, p_amendment_digest: amendmentDigest, p_decision: decision,
+    });
+    if (error) throw translateAmendmentError(error);
+    return {
+      decision: data.decision,
+      status: data.status,
+      confirmedCount: Number(data.confirmed_count),
+      requiredCount: Number(data.required_count),
+      alreadyDecided: data.already_decided === true,
+      activatedRevisionNumber: data.activated_revision_number === null || data.activated_revision_number === undefined ? null : Number(data.activated_revision_number),
+    };
+  }
+
+  async withdrawPlanAmendment(competitionId: string, organizerGamingMemberId: string, amendmentDigest: string): Promise<WithdrawPlanAmendmentResult> {
+    const { data, error } = await this.client.rpc("withdraw_competition_plan_amendment_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_amendment_digest: amendmentDigest,
+    });
+    if (error) throw translateAmendmentError(error);
+    return { status: "WITHDRAWN", alreadyWithdrawn: data.already_withdrawn === true };
+  }
+
+  async getPlanAmendmentStatus(competitionId: string, callerGamingMemberId: string): Promise<PlanAmendmentStatusRecord | null> {
+    const { data, error } = await this.client.rpc("get_competition_plan_amendment_status", { p_competition_id: competitionId, p_caller_gaming_member_id: callerGamingMemberId });
+    if (error) throw translateAmendmentError(error);
+    return planAmendmentStatusFromDatabase(data);
   }
 
   async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {

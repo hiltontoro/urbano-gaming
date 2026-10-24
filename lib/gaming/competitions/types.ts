@@ -471,6 +471,12 @@ export interface CompetitionView {
   registrationReadiness: RegistrationReadiness | null;
   /** Organizer only, once frozen: team names and counts. null for everyone else. */
   registrationFreeze: RegistrationFreezeSummary | null;
+  /**
+   * UG-CR-GATE-SSS-011 — present ONLY while the competition is ready to publish with registration frozen, and only for the active organizer and the
+   * frozen captains: which of the two the caller is. The key is absent (not null) for everyone else, so the view of anyone unrelated is unchanged. It
+   * carries no proposal, no digest and no decision: the amendment route answers those, for these two roles alone.
+   */
+  planAmendment?: { organizer: boolean; captain: boolean };
 }
 
 export interface CompetitionFixtureViewEntry {
@@ -856,4 +862,80 @@ export interface RegistrationFreezeRecord {
     memberCount: number;
     memberGamingMemberIds: string[];
   }>;
+}
+
+// ---------------------------------------------------------------------
+// UG-CR-GATE-SSS-011 — Post-Freeze Plan Amendment backend foundation.
+//
+// After registration is frozen the organizer may PROPOSE a change to the venue's description, the pitches and the dates and windows; the four frozen
+// captains must all confirm it before it becomes the next immutable planning revision. These are plain data shapes only; the typed refusals, the digest,
+// the allowlist and the commands live in planAmendment.ts (an error exported from this file would have to be mapped in httpAuth.ts's status table, and an
+// amendment refusal is judged by the three amendment routes, which own their wording and status).
+// ---------------------------------------------------------------------
+
+/** The amendable facts of a plan, and nothing else: the venue's description, the pitches and the dates. Everything else is preserved from the current revision. */
+export interface PlanAmendmentFacts {
+  venue: { name: string; locationDescription: string; restrictionNotes: string; simultaneousMatchCapacity: number };
+  pitches: CompetitionPlanningPitch[];
+  dates: CompetitionPlanningDate[];
+}
+
+/** A proposal's status is DERIVED: its resolution, else EXPIRED by the database clock alone, else PENDING. */
+export type PlanAmendmentStatus = "PENDING" | "ACTIVATED" | "REJECTED" | "WITHDRAWN" | "SUPERSEDED" | "EXPIRED";
+export type PlanAmendmentDecision = "CONFIRMED" | "REJECTED";
+
+export interface ProposePlanAmendmentResult {
+  digest: string;
+  sequenceNumber: number;
+  createdAt: string;
+  expiresAt: string;
+  /** True for an exact replay of an earlier proposal: nothing new was written. */
+  alreadyProposed: boolean;
+  /** The digest of the proposal this one superseded, if one was still effective. */
+  supersededDigest: string | null;
+}
+
+export interface DecidePlanAmendmentResult {
+  decision: PlanAmendmentDecision;
+  status: PlanAmendmentStatus;
+  confirmedCount: number;
+  requiredCount: number;
+  /** True when this team had already given this very answer: nothing new was written. */
+  alreadyDecided: boolean;
+  /** The number of the planning revision this confirmation created, once the proposal is activated. */
+  activatedRevisionNumber: number | null;
+}
+
+export interface WithdrawPlanAmendmentResult {
+  status: "WITHDRAWN";
+  alreadyWithdrawn: boolean;
+}
+
+/** What the database tells ONE caller about the latest proposal (server shape; see publicPlanAmendmentStatus in planAmendment.ts for what a browser may see). */
+export interface PlanAmendmentStatusRecord {
+  role: { organizer: boolean; captain: boolean };
+  /** True while the amendment window is open: ready to publish, frozen, consistent, and nothing drawn, scheduled or played. */
+  windowOpen: boolean;
+  /** The caller's own frozen team's name, for a captain. */
+  myTeamName: string | null;
+  amendment: {
+    digest: string;
+    sequenceNumber: number;
+    status: PlanAmendmentStatus;
+    /** True only while the proposal is pending and the window is open. */
+    actionable: boolean;
+    createdAt: string;
+    expiresAt: string;
+    resolvedAt: string | null;
+    confirmedCount: number;
+    requiredCount: number;
+    /** One entry per frozen team, in frozen order; the decision is null until that team has answered. */
+    teams: Array<{ teamName: string; decision: PlanAmendmentDecision | null }>;
+    /** The caller's own team's answer, for a captain. */
+    myDecision: PlanAmendmentDecision | null;
+    proposed: PlanAmendmentFacts;
+    current: PlanAmendmentFacts;
+  } | null;
+  /** Organizer only: the most recent proposals, oldest first. null for a captain. */
+  history: Array<{ sequenceNumber: number; status: PlanAmendmentStatus; createdAt: string; resolvedAt: string | null }> | null;
 }

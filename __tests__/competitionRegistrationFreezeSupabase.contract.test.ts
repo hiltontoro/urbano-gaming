@@ -1219,19 +1219,44 @@ describe("[freeze] the close operation freezes registration atomically, once, an
     expect(JSON.stringify(await res.json())).not.toMatch(/deadline|roster|plan\b|freez|digest|snapshot|member count/i);
   }, 180000);
 
-  it("[29] the freeze moves the competition to READY_TO_PUBLISH and creates no fixture, pairing, schedule or planning change", async () => {
+  it("[29] executing the freeze changes only what the freeze accepts: the state moves to READY_TO_PUBLISH and one freeze (its four teams and every member) is recorded — no amendment proposal, decision or resolution, no fixture, draw, pairing, schedule, appeal or adjudication record, no further planning revision, and no other change to the competition", async () => {
     const ctx = await ready("FzNoFixtures");
     await passDeadline(ctx.competitionId);
-    const planningBefore = createHash("sha256").update(JSON.stringify(await rawQuery("select * from competition_planning_revisions where competition_id = $1 order by revision_number", [ctx.competitionId]))).digest("hex");
-    const tablesBefore = await rawQuery("select (select count(*)::int from competition_fixtures where competition_id = $1) fixtures, (select count(*)::int from competition_teams where competition_id = $1) teams, (select count(*)::int from competition_team_memberships where competition_id = $1) memberships", [ctx.competitionId]);
+    // Every public table that carries a competition_id, counted for THIS competition (names come from the catalog, never from the request), and the competition row itself.
+    const scanned = (await rawQuery<{ table_name: string }>(
+      `select c.table_name from information_schema.columns c join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name
+        where c.table_schema = 'public' and c.column_name = 'competition_id' and t.table_type = 'BASE TABLE' order by c.table_name`)).map((r) => r.table_name);
+    for (const name of scanned) expect(name).toMatch(/^[a-z0-9_]+$/);
+    const snapshot = async () => {
+      const counts: Record<string, number> = {};
+      for (const name of scanned) counts[name] = (await rawQuery<{ n: number }>(`select count(*)::int as n from "${name}" where competition_id = $1`, [ctx.competitionId]))[0].n;
+      const [competition] = await rawQuery("select * from competitions where competition_id = $1", [ctx.competitionId]);
+      const revisions = createHash("sha256").update(JSON.stringify(await rawQuery("select * from competition_planning_revisions where competition_id = $1 order by revision_number", [ctx.competitionId]))).digest("hex");
+      return { counts, competition, revisions };
+    };
+    const before = await snapshot();
     await close(ctx);
     expect(await stateOf(ctx.competitionId)).toBe("READY_TO_PUBLISH");
-    expect(await rawQuery("select (select count(*)::int from competition_fixtures where competition_id = $1) fixtures, (select count(*)::int from competition_teams where competition_id = $1) teams, (select count(*)::int from competition_team_memberships where competition_id = $1) memberships", [ctx.competitionId])).toEqual(tablesBefore);
-    expect(tablesBefore[0].fixtures).toBe(0);
-    expect(createHash("sha256").update(JSON.stringify(await rawQuery("select * from competition_planning_revisions where competition_id = $1 order by revision_number", [ctx.competitionId]))).digest("hex")).toBe(planningBefore);
-    // No table that could hold a draw, pairing, schedule, appeal or amendment was added.
-    const newTables = await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' order by relname");
-    expect(newTables).toEqual([]);
+    const after = await snapshot();
+
+    // The scan really sees these tables (so "unchanged" below is not vacuous), among them everything the later gates add that this freeze must not touch.
+    for (const name of ["competitions", "competition_fixtures", "competition_planning_revisions", "competition_registration_freezes", "competition_plan_change_proposals", "competition_plan_change_decisions", "competition_plan_change_resolutions"]) {
+      if (name !== "competitions") expect(scanned, name).toContain(name);
+    }
+    // The only row counts that change are the freeze's own: one freeze, its four teams, and one member row per membership the competition had.
+    const changed = Object.fromEntries(Object.keys(after.counts).filter((name) => after.counts[name] !== before.counts[name]).map((name) => [name, after.counts[name] - before.counts[name]]));
+    expect(changed).toEqual({
+      competition_registration_freezes: 1,
+      competition_registration_freeze_teams: 4,
+      competition_registration_freeze_members: before.counts.competition_team_memberships,
+    });
+    // No fixture, and no amendment proposal, decision or resolution, exists afterwards.
+    expect([after.counts.competition_fixtures, after.counts.competition_plan_change_proposals, after.counts.competition_plan_change_decisions, after.counts.competition_plan_change_resolutions]).toEqual([0, 0, 0, 0]);
+    // The planning history is exactly what it was, and the competition row differs in its state alone.
+    expect(after.revisions).toBe(before.revisions);
+    const differing = Object.keys(after.competition).filter((column) => JSON.stringify(after.competition[column]) !== JSON.stringify(before.competition[column]));
+    expect(differing).toEqual(["state"]);
+    expect([before.competition.state, after.competition.state]).toEqual(["TEAM_REGISTRATION_OPEN", "READY_TO_PUBLISH"]);
   }, 120000);
 
   it("[30] after the freeze nothing that changes membership works: registration, teams, proposals, join requests and approvals are all refused", async () => {

@@ -58,6 +58,7 @@ import {
   FixtureNotInEvidencePhaseError,
 } from "../lib/gaming/competitions/types";
 import { parsePlanningPlan, planToRpcPayload } from "../lib/gaming/competitions/planning";
+import { PlanAmendmentError } from "../lib/gaming/competitions/planAmendment";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1220,6 +1221,13 @@ const planningPlan = () => parsePlanningPlan({
   rules: { version: "matrix-1", snapshot: "Planning evidence for the organizer matrix." },
 }, "SOCCER_5V5");
 
+/** A valid set of amendable facts for the post-freeze plan change calls below. */
+const amendmentFacts = () => ({
+  venue: { name: `Matrix Amended Venue ${RUN}`, locationDescription: "A fictional venue used only by the local contract suite.", restrictionNotes: "", simultaneousMatchCapacity: 1 },
+  pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5" as const], restrictionNotes: "" }],
+  dates: [{ date: planLocal(PLAN_START_MS + 34 * 24 * 3600_000).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
+});
+
 async function publishBracket(competitionId: string, organizerId: string, labelPrefix: string) {
   const captains: Member[] = [];
   for (let i = 0; i < 4; i++) captains.push(await createMember(`${labelPrefix} Captain ${i}`));
@@ -1324,6 +1332,10 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // UG-CR-GATE-SSS-004: the Organizer Planning save. A published matrix competition is no longer a DRAFT, so for its OWN active organizer this reports the state
   // refusal (CompetitionNotDraftError) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
   { rpc: "save_competition_planning_revision_atomically", label: "save a draft planning revision", call: (c, a) => compRepo.savePlanningRevision(c.competitionId, a, randomUUID(), planningPlan()) },
+  // UG-CR-GATE-SSS-011: the post-freeze plan change. A published matrix competition is past the amendment window, so for its OWN active organizer these report the
+  // window refusal (PlanAmendmentWindowClosedError) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for them.
+  { rpc: "propose_competition_plan_amendment_atomically", label: "propose a post-freeze plan change", call: (c, a) => compRepo.proposePlanAmendment(c.competitionId, a, randomUUID(), amendmentFacts()) },
+  { rpc: "withdraw_competition_plan_amendment_atomically", label: "withdraw a post-freeze plan change", call: (c, a) => compRepo.withdrawPlanAmendment(c.competitionId, a, "0".repeat(64)) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
@@ -1509,7 +1521,9 @@ describe("[T14, T15, T16, T17] ownership and revocation hold on every organizer 
       if (outcome !== null) {
         expect(outcome, `${entry.label}: an active host must not be refused as a stranger or as revoked`).not.toBeInstanceOf(CompetitionAccessDeniedError);
         expect(outcome, `${entry.label}`).not.toBeInstanceOf(HostAccessRevokedError);
-        expect(statusForCompetitionsError(outcome), `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).not.toBeNull();
+        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change operations' own typed refusals (their routes answer for them).
+        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError;
+        expect(known, `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).toBe(true);
       }
     }
     const view = await getCompetitionView(compRepo, ctxHostActive.competitionId, ctxHostActive.organizerId);

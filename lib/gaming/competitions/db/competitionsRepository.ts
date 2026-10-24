@@ -46,6 +46,12 @@ import type {
   SavePlanningRevisionResult,
   RegistrationStatusRead,
   RegistrationFreezeRecord,
+  PlanAmendmentFacts,
+  PlanAmendmentDecision,
+  PlanAmendmentStatusRecord,
+  ProposePlanAmendmentResult,
+  DecidePlanAmendmentResult,
+  WithdrawPlanAmendmentResult,
 } from "../types";
 
 /**
@@ -197,4 +203,24 @@ export interface CompetitionPlanningStore {
   savePlanningRevision(competitionId: string, organizerGamingMemberId: string, intentId: string, plan: CompetitionPlanningPlan): Promise<SavePlanningRevisionResult>;
   /** The highest-numbered revision of this one competition, or null if none was ever saved. */
   getCurrentPlanningRevision(competitionId: string): Promise<CompetitionPlanningRevisionRecord | null>;
+}
+
+/**
+ * UG-CR-GATE-SSS-011 — the four operations Post-Freeze Plan Amendment is built on. Kept apart from {@link CompetitionsRepository} and
+ * {@link CompetitionPlanningStore} for the same reason as they are: an amendment is its own bounded surface, and it neither widens nor changes any existing read
+ * or command.
+ *
+ * Each write is ONE atomic database operation that makes every decision itself — the lock, who is acting (the organizer's exact ownership and the host-revocation
+ * guard, or a frozen captain from the registration-freeze snapshot), the amendment window, the digest, the expiry by the database clock and, for the fourth
+ * confirmation, the whole activation. None takes a time of any kind, and none relies on a caller having checked first.
+ */
+export interface CompetitionPlanAmendmentStore {
+  /** PROPOSE (organizer): only the amendable facts; every preserved fact is composed in the database from the current revision. */
+  proposePlanAmendment(competitionId: string, organizerGamingMemberId: string, intentId: string, facts: PlanAmendmentFacts): Promise<ProposePlanAmendmentResult>;
+  /** DECIDE (a frozen captain): CONFIRMED or REJECTED, bound to the proposal's exact digest. The fourth distinct confirmation activates it atomically. */
+  decidePlanAmendment(competitionId: string, captainGamingMemberId: string, amendmentDigest: string, decision: PlanAmendmentDecision): Promise<DecidePlanAmendmentResult>;
+  /** WITHDRAW (organizer): a pending, unexpired proposal, bound to its exact digest. */
+  withdrawPlanAmendment(competitionId: string, organizerGamingMemberId: string, amendmentDigest: string): Promise<WithdrawPlanAmendmentResult>;
+  /** The latest proposal as ONE caller may see it, or null for anyone but the active organizer and the four frozen captains (and for an unknown competition). */
+  getPlanAmendmentStatus(competitionId: string, callerGamingMemberId: string): Promise<PlanAmendmentStatusRecord | null>;
 }

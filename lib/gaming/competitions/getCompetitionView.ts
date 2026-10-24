@@ -98,6 +98,16 @@ export async function getCompetitionView(
     }
   }
 
+  // UG-CR-GATE-SSS-011 — the one bounded signal a later page gate can use: present only while registration is frozen and the competition is ready to publish,
+  // and only for the active organizer and for a captain of an accepted team (the same four captains the freeze recorded). It is built from what this view
+  // has already read, carries no proposal and no digest, and is ABSENT for everyone else, so an unrelated member's view is exactly what it was. The amendment
+  // routes and the database decide every right to act; this decides nothing.
+  const isAcceptedCaptain = acceptedTeams.some((t) => t.captainGamingMemberId === callerGamingMemberId);
+  const amendmentSignal =
+    competition.state === "READY_TO_PUBLISH" && registration?.frozen === true && (isOrganizer || isAcceptedCaptain)
+      ? { planAmendment: { organizer: isOrganizer, captain: isAcceptedCaptain } }
+      : {};
+
   const displayNames = await repo.getDisplayNames(Array.from(displayNameIds));
   const withCaptainName = (t: (typeof allTeams)[number]) => ({ ...t, captainDisplayName: displayNames[t.captainGamingMemberId] });
   const teams = acceptedTeams.map(withCaptainName);
@@ -195,5 +205,6 @@ export async function getCompetitionView(
     registration,
     registrationReadiness,
     registrationFreeze,
+    ...amendmentSignal,
   };
 }
