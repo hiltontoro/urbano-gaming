@@ -1341,6 +1341,7 @@ describe("administration: prizes by ladder level", () => {
           const call: Call = { url: String(url), method: (init.method || "GET").toUpperCase(), body: typeof init.body === "string" ? JSON.parse(init.body) : undefined };
           calls.push(call);
           const reply = (status: number, json: unknown) => ({ status, json: async () => JSON.parse(JSON.stringify(json)) });
+          if (call.method === "GET" && call.url === `${API}/admin/access`) return reply(200, { access: true, classes: ["OPERATIONAL", "CONSEQUENTIAL_FINALIZER", "PRODUCT_GOVERNANCE"] });
           if (call.method === "GET" && call.url === `${API}/admin/teams`) return reply(200, { teams: [{ teamId: "team-a", name: "Alpha FC" }, { teamId: "team-b", name: "Beta FC" }] });
           if (call.method === "GET" && call.url === `${API}/admin/matches`) return reply(200, { matches: MATCHES, teams: [{ teamId: "team-a", name: "Alpha FC" }, { teamId: "team-b", name: "Beta FC" }] });
           if (call.method === "GET" && call.url === `${API}/admin/venues`) return reply(200, { venues: [{ venueId: "v1", name: "Beer Box", latitude: 14, longitude: -87, radiusMeters: 150, active: true }] });

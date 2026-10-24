@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildPredictionsRepo } from "@/lib/gaming/predictions/httpAuth";
 import { selectPublicMatches } from "@/lib/gaming/predictions/publicMatchList";
+import { excludeFixtures } from "@/lib/gaming/predictions/fixtureExclusion";
 import { PROGRESSIVE_PREDICTION_CONTRACT, computeLadderOffer } from "@/lib/gaming/predictions/prizeLadder";
 
 // This route has no dynamic path segment and never reads the request
@@ -33,7 +34,14 @@ export async function GET() {
   }
 
   const repo = buildPredictionsRepo(credentials);
-  const matches = selectPublicMatches(await repo.listMatches());
+  // TEMPORARY, exact-id exclusion of the verified contract-test fixtures (see fixtureExclusionManifest.ts). It runs on the rows just read and
+  // before the per-match fan-out below, so an excluded match costs no team, roster, activation, venue, tier or result query. Nothing is
+  // deleted, and no match is ever excluded by name, date or age. Per-match routes (mine, predict, result) are not affected.
+  const matches = excludeFixtures(
+    selectPublicMatches(await repo.listMatches()),
+    "matches",
+    (match) => match.matchId
+  );
 
   const result = await Promise.all(
     matches.map(async (match) => {

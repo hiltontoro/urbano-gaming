@@ -6,6 +6,7 @@ import {
   requirePlatformAuthorityHttp,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createVenueActivation } from "@/lib/gaming/predictions/adminCatalog";
+import { visibleInAdminView } from "@/lib/gaming/predictions/fixtureExclusion";
 import { PROGRESSIVE_PREDICTION_CONTRACT, computeLadderOffer } from "@/lib/gaming/predictions/prizeLadder";
 
 /**
@@ -26,7 +27,9 @@ export async function GET(request: Request) {
   if ("errorResponse" in admin) return admin.errorResponse;
 
   const repo = buildPredictionsRepo(credentials);
-  const matches = await repo.listMatches();
+  // Default view: the matches of the temporary fixture manifest are left out BEFORE their activations, venues and tiers are read
+  // (?includeFixtures=1 brings the historical test data back). The activation ids of the manifest are left out as well.
+  const matches = visibleInAdminView(request, await repo.listMatches(), "matches", (match) => match.matchId);
   const perMatch = await Promise.all(
     matches.map(async (match) => {
       const activations = await repo.listVenueActivationsForMatch(match.matchId);
@@ -59,7 +62,8 @@ export async function GET(request: Request) {
       );
     })
   );
-  return NextResponse.json({ activations: perMatch.flat() });
+  const activations = visibleInAdminView(request, perMatch.flat(), "activations", (activation) => activation.venueActivationId);
+  return NextResponse.json({ activations });
 }
 
 export async function POST(request: Request) {

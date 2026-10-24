@@ -424,6 +424,10 @@
     "pred.login.prompt": "Iniciá sesión o creá una cuenta para hacer tu predicción.",
     "pred.login.finishBtn": "Terminá de crear tu cuenta",
     "pred.login.btn": "Iniciar sesión o crear cuenta",
+    "pred.login.promptClosed": "Iniciá sesión para consultar tu participación en este partido.",
+    "pred.login.promptFinal": "Iniciá sesión para consultar tus resultados en este partido.",
+    "pred.login.btnView": "Iniciar sesión",
+    "pred.login.unfinishedView": "Un paso más: elegí un nombre para mostrar y terminá de crear tu cuenta.",
     "pred.dim.scoreline": "Marcador",
     "pred.dim.goalscorer": "Goleador",
     "pred.dim.goalMinute": "Minuto del gol",
@@ -1667,13 +1671,20 @@ async function renderMatch(match) {
 
   if (authState.status !== "authenticated") {
     // Not signed in (or signed in but the account is not finished): one clear next step that remembers THIS match, so after
-    // logging in or creating an account the person lands back here, not on a generic page.
+    // logging in the person lands back here, not on a generic page. The words follow the state of the match: only an OPEN match
+    // invites a prediction. A closed match (kick-off passed) offers access to an existing participation, and a finalized one access to
+    // the results. This text changes nothing the server decides.
     const unfinished = authState.status === "profile_incomplete";
+    const phase = match.finalized ? "final" : kickoffPassed ? "closed" : "open";
+    const promptKey = phase === "open"
+      ? (unfinished ? "pred.login.unfinished" : "pred.login.prompt")
+      : (unfinished ? "pred.login.unfinishedView" : phase === "closed" ? "pred.login.promptClosed" : "pred.login.promptFinal");
+    const buttonKey = unfinished ? "pred.login.finishBtn" : phase === "open" ? "pred.login.btn" : "pred.login.btnView";
     const entry = el(`<div>
-      <p class="msg" ${ix(unfinished ? "pred.login.unfinished" : "pred.login.prompt")}>${tx(unfinished ? "pred.login.unfinished" : "pred.login.prompt")}</p>
-      <button type="button" class="btn-primary" data-login-cta ${ix(unfinished ? "pred.login.finishBtn" : "pred.login.btn")}>${tx(unfinished ? "pred.login.finishBtn" : "pred.login.btn")}</button>
+      <p class="msg" ${ix(promptKey)}>${tx(promptKey)}</p>
+      <button type="button" class="btn-primary" data-login-cta ${ix(buttonKey)}>${tx(buttonKey)}</button>
     </div>`);
-    entry.querySelector("[data-login-cta]").addEventListener("click", () => openAccountEntry(match.matchId));
+    entry.querySelector("[data-login-cta]").addEventListener("click", () => (phase === "open" ? openAccountEntry(match.matchId) : openAccountToView(match.matchId)));
     body.appendChild(entry);
     return card;
   }
@@ -1908,6 +1919,15 @@ function openAccountEntry(matchId) {
   if (header) header.click();
 }
 
+// A closed or finalized match: the person comes to consult, so the panel opens on logging in (it does not lead with creating an account)
+// and the intent is to VIEW, which only brings the card back into view after signing in.
+function openAccountToView(matchId) {
+  const intent = { kind: "view", matchId };
+  if (typeof UrbanoAuth.openSignIn === "function" && UrbanoAuth.openSignIn({ intent, mode: "login" })) return;
+  const header = document.getElementById("btn-signin");
+  if (header) header.click();
+}
+
 // Every build of the match list is numbered. When who is signed in changes while a build is still waiting on the network, the
 // older build is dropped instead of being painted over the newer one (and never shows the previous person's prediction).
 let renderGeneration = 0;
@@ -1956,10 +1976,11 @@ async function refresh() {
 function resumeIntent(state) {
   if (!state || state.status !== "authenticated" || typeof UrbanoAuth.consumeIntent !== "function") return;
   const intent = UrbanoAuth.consumeIntent();
-  if (!intent || intent.kind !== "predict") return;
+  if (!intent || (intent.kind !== "predict" && intent.kind !== "view")) return;
   const card = [...content.querySelectorAll("[data-match-id]")].find((c) => c.getAttribute("data-match-id") === String(intent.matchId));
   if (!card) return;
   if (typeof card.scrollIntoView === "function") card.scrollIntoView({ block: "center" });
+  if (intent.kind === "view") return; // consulting: no form to focus and no invitation to predict
   const firstInput = card.querySelector('input[type="number"]');
   if (firstInput) firstInput.focus();
   const note = card.querySelector('[id^="submit-msg-"]');

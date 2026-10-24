@@ -55,6 +55,20 @@ function urbanoAuthText(key, fallback, vars) {
   );
 }
 
+// ---- fixed sign-in return destinations ---------------------------------------------------------------------------------------------
+// The link in a sign-in email returns the person to the Auth service's Site URL (the Home page) unless the request names a destination.
+// A page may ask for one of these FIXED destinations by KEY. The address is never built from the address bar, from a query string such
+// as ?next=, or from any value a caller supplies, and the Site URL itself is not changed. Auth only honours a destination that is also
+// on the project's Redirect URLs list; otherwise it falls back to the Site URL, which is exactly what every page that asks for no
+// destination gets today. Only the Score administration portal asks for one.
+const SIGN_IN_RETURN_TARGETS = Object.freeze({
+  "score-admin": "https://gaming.urbanohn.com/predictions-admin.html",
+});
+
+function signInReturnUrl(key) {
+  return typeof key === "string" && Object.prototype.hasOwnProperty.call(SIGN_IN_RETURN_TARGETS, key) ? SIGN_IN_RETURN_TARGETS[key] : null;
+}
+
 const UrbanoAuth = (() => {
   const SUPABASE_JS_CDN_URL =
     "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js";
@@ -662,7 +676,8 @@ const UrbanoAuth = (() => {
      * delivered. mode "register" may create the auth identity, but no Gaming
      * Member exists until the code has been verified and the display name
      * chosen.
-     * { channel: "email" | "phone", identifier, mode }
+     * { channel: "email" | "phone", identifier, mode, returnTo }
+     * returnTo is a KEY into SIGN_IN_RETURN_TARGETS (never an address). It only shapes the email link; an unknown key is ignored.
      */
     async requestCode(options) {
       const channel = options && options.channel === "phone" ? "phone" : "email";
@@ -682,6 +697,8 @@ const UrbanoAuth = (() => {
         return { status: "error", kind: "network", messageKey: "auth.err.network", message: urbanoAuthText("auth.err.network", "Couldn't reach the server. Check your connection and try again.") };
       }
       const requestOptions = { shouldCreateUser: mode !== "login" };
+      const returnUrl = channel === "email" ? signInReturnUrl(options && options.returnTo) : null;
+      if (returnUrl) requestOptions.emailRedirectTo = returnUrl;
       const payload = channel === "phone"
         ? { phone: identifier, options: requestOptions }
         : { email: identifier, options: requestOptions };
@@ -951,6 +968,17 @@ const UrbanoAuth = (() => {
 function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, linkError) {
   const tr = urbanoAuthText;
   const accountLink = (options && options.accountLink) || null;
+  // Opt-in (the administration portal): this panel can only LOG IN. It never offers "Create account", never asks for a code in
+  // register mode (shouldCreateUser is always false) and never asks for a display name or creates a Gaming Member: an identity that
+  // has no finished profile simply stays signed out of anything administrative. Omitting the option keeps every other page exactly
+  // as it was. This shapes what THIS panel does; it is not a security boundary (the server checks authority on every request).
+  const loginOnly = !!(options && options.accountEntry === "login-only");
+  // Opt-in, independent of the entry mode: the KEY of a fixed return destination for the sign-in email link (see SIGN_IN_RETURN_TARGETS).
+  // The panel never interprets it; requestCode resolves it, and a key that is not in the table changes nothing.
+  const returnTo = options && typeof options.returnTo === "string" ? options.returnTo : null;
+  // The panel's own wording in this mode is plain English: the administration portal does not load the language module (see the header of
+  // urbanoI18n.js), and adding keys would change the generated Spanish blocks of the public pages.
+  const signedOutLabel = () => (loginOnly ? "Sign in" : tr("auth.btn.signedOut", "Log in / Create account"));
   // The server will not send a second code to the same address inside its
   // per-user window (60 s on the production project as inspected on
   // 2026-10-22), so a shorter wait here would only turn a legitimate resend
@@ -996,7 +1024,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
   const panel = document.createElement("div");
   panel.setAttribute("data-urbano-signin-panel", "");
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", tr("auth.panel.aria", "Log in or create an account"));
+  panel.setAttribute("aria-label", loginOnly ? "Sign in" : tr("auth.panel.aria", "Log in or create an account"));
   panel.style.cssText = [
     "display:none",
     "position:absolute",
@@ -1032,11 +1060,11 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     buttonEl.parentElement.style.position = "relative";
   }
 
-  let mode = null; // "login" | "register"
+  let mode = loginOnly ? "login" : null; // "login" | "register"
   let channel = "email"; // "email" | "phone"
   let identifier = ""; // the email address, or the E.164 number, a code was sent to
   let typedIdentifier = ""; // what the person typed (kept when they go back)
-  let step = "entry"; // entry | method | code | displayName | welcomeBack
+  let step = loginOnly ? "method" : "entry"; // entry | method | code | displayName | welcomeBack
   let panelOpen = false;
   let phoneAvailable = false;
   let incompleteProfile = false;
@@ -1137,7 +1165,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
       return;
     }
     if (requestedMode === "login" || requestedMode === "register") {
-      mode = requestedMode;
+      mode = loginOnly ? "login" : requestedMode;
       if (step === "entry") step = "method";
     }
     renderStep();
@@ -1238,7 +1266,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     });
     input.value = typedIdentifier;
     const children = [
-      title(isLogin ? tr("auth.login", "Log in") : tr("auth.register", "Create account")),
+      title(loginOnly ? "Sign in" : isLogin ? tr("auth.login", "Log in") : tr("auth.register", "Create account")),
       note(isLogin ? tr("auth.method.loginNote", "Choose how to get your code.") : tr("auth.method.registerNote", "We'll send a code to confirm it's really you.")),
       node("div", { style: "display:flex;gap:6px;margin-bottom:8px;" }, [emailToggle, phoneToggle]),
       input,
@@ -1249,8 +1277,10 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     }
     children.push(messageLine());
     const switchRow = node("div", { style: "display:flex;justify-content:space-between;margin-top:4px;" });
-    switchRow.appendChild(linkButton(tr("auth.back", "Back"), "data-back"));
-    switchRow.appendChild(linkButton(isLogin ? tr("auth.switch.toRegister", "Create an account instead") : tr("auth.switch.toLogin", "I already have an account"), "data-switch-mode"));
+    switchRow.appendChild(linkButton(loginOnly ? "Close" : tr("auth.back", "Back"), "data-back"));
+    if (!loginOnly) {
+      switchRow.appendChild(linkButton(isLogin ? tr("auth.switch.toRegister", "Create an account instead") : tr("auth.switch.toLogin", "I already have an account"), "data-switch-mode"));
+    }
     children.push(switchRow);
     panel.replaceChildren.apply(panel, children);
 
@@ -1282,14 +1312,21 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     panel.querySelector("[data-send]").addEventListener("click", sendCode);
     panel.querySelector("[data-back]").addEventListener("click", () => {
       abandonFlow();
+      if (loginOnly) {
+        closePanel();
+        return;
+      }
       mode = null;
       goTo("entry");
     });
-    panel.querySelector("[data-switch-mode]").addEventListener("click", () => {
-      abandonFlow();
-      mode = mode === "login" ? "register" : "login";
-      goTo("method");
-    });
+    const switchMode = panel.querySelector("[data-switch-mode]");
+    if (switchMode) {
+      switchMode.addEventListener("click", () => {
+        abandonFlow();
+        mode = mode === "login" ? "register" : "login";
+        goTo("method");
+      });
+    }
     input.focus();
   }
 
@@ -1328,7 +1365,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
         linkButton(isPhone ? tr("auth.code.otherNumber", "Use a different number") : tr("auth.code.otherEmail", "Use a different email"), "data-change"),
       ]),
     ];
-    if (mode === "login") {
+    if (mode === "login" && !loginOnly) {
       children.push(
         node("div", { style: "margin-top:8px;font-size:12px;" }, [
           document.createTextNode(isPhone ? tr("auth.code.noCodePhone", "No code from your text message? ") : tr("auth.code.noCodeEmail", "No code from your email? ")),
@@ -1408,6 +1445,10 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
   }
 
   function renderStep() {
+    if (loginOnly) {
+      mode = "login";
+      if (step === "entry" || step === "displayName") step = "method";
+    }
     if (step === "entry") renderEntry();
     else if (step === "method") renderMethod();
     else if (step === "code") renderCode();
@@ -1442,7 +1483,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     const myFlow = flowId;
     setBusy(true);
     setPanelMessage(mode === "login" ? msg("auth.msg.requestingLogin", "Requesting your login code...") : msg("auth.msg.sendingVerification", "Sending your verification code..."));
-    const result = await auth.requestCode({ channel, identifier: target, mode });
+    const result = await auth.requestCode({ channel, identifier: target, mode: loginOnly ? "login" : mode, returnTo });
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
@@ -1460,7 +1501,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
     const myFlow = flowId;
     setBusy(true);
     setPanelMessage(msg("auth.msg.sendingNew", "Sending a new code..."));
-    const result = await auth.requestCode({ channel, identifier, mode });
+    const result = await auth.requestCode({ channel, identifier, mode: loginOnly ? "login" : mode, returnTo });
     setBusy(false);
     if (myFlow !== flowId) return;
     if (result.status === "error") {
@@ -1498,6 +1539,12 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
       }
       return;
     }
+    if (result.status === "profile_incomplete" && loginOnly) {
+      // A verified identity with no Gaming Member. Nothing is created from here: the page decides what a session without a member may do.
+      closePanel();
+      renderSignedOut(true);
+      return;
+    }
     if (result.status === "profile_incomplete") {
       incompleteProfile = true;
       shownStatus = "profile_incomplete";
@@ -1518,7 +1565,7 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
   }
 
   async function saveDisplayName(input) {
-    if (busy) return;
+    if (busy || loginOnly) return;
     const name = input.value.trim();
     if (!name) {
       setPanelMessage(msg("auth.msg.nameEmpty", "Enter a display name."), true);
@@ -1592,17 +1639,17 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
       accountLink.hidden = true;
       buttonEl.style.display = "";
     }
-    buttonEl.textContent = profileIncomplete
+    buttonEl.textContent = profileIncomplete && !loginOnly
       ? tr("auth.btn.finish", "Finish creating your account")
-      : tr("auth.btn.signedOut", "Log in / Create account");
+      : signedOutLabel();
     buttonEl.style.visibility = "";
     const signOutLink = buttonEl.parentElement.querySelector(
       "[data-urbano-signout]"
     );
     if (signOutLink) signOutLink.style.display = "none";
-    incompleteProfile = !!profileIncomplete;
-    step = profileIncomplete ? "displayName" : "entry";
-    mode = null;
+    incompleteProfile = !!profileIncomplete && !loginOnly;
+    step = loginOnly ? "method" : profileIncomplete ? "displayName" : "entry";
+    mode = loginOnly ? "login" : null;
     channel = "email";
     identifier = "";
     typedIdentifier = "";
@@ -1694,15 +1741,15 @@ function createSignInPanel(auth, buttonEl, statusEl, registerOpener, options, li
   }
 
   function relabel() {
-    panel.setAttribute("aria-label", tr("auth.panel.aria", "Log in or create an account"));
+    panel.setAttribute("aria-label", loginOnly ? "Sign in" : tr("auth.panel.aria", "Log in or create an account"));
     if (shownStatus === "authenticated") {
       paintSignedInLabel();
       const signOutLink = buttonEl.parentElement.querySelector("[data-urbano-signout]");
       if (signOutLink) signOutLink.textContent = tr("auth.signOut", "Sign out");
     } else {
-      buttonEl.textContent = shownStatus === "profile_incomplete"
+      buttonEl.textContent = shownStatus === "profile_incomplete" && !loginOnly
         ? tr("auth.btn.finish", "Finish creating your account")
-        : tr("auth.btn.signedOut", "Log in / Create account");
+        : signedOutLabel();
     }
     if (panelOpen) redrawPanel();
     if (linkErrorVisible) paintLinkError();

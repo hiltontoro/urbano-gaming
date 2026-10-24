@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Soccer Predictions Admin — URBANO Gaming</title>
+<title>URBANO Score — Administración</title>
 <style>
   /*
    * Smallest founder/admin surface to run the Soccer Predictions
@@ -70,31 +70,59 @@
     #table-matches td.cell-action button { margin-top: 6px; }
     .class-cell { min-width: 0; }
   }
+  /* The gate and the effective authority. A control that needs a class this account does not hold is not drawn at all; the server still
+     refuses it on every request. body[data-op|fin] are set only after the server has confirmed the classes. */
+  #access-gate { max-width: 900px; }
+  #access-gate .msg { font-size: 15px; }
+  body[data-op="0"] [data-requires~="OPERATIONAL"],
+  body[data-fin="0"] [data-requires~="CONSEQUENTIAL_FINALIZER"] { display: none !important; }
+  [data-edit-requires][inert] { opacity: 0.65; }
+  #admin-sections[inert] { opacity: 0.55; }
 </style>
 </head>
 <body>
 
-<h1>Soccer Predictions — Admin</h1>
+<h1>URBANO Score — Administración</h1>
 <div class="row">
-  <button id="btn-signin" style="visibility:hidden">Sign in with URBANO</button>
-  <span class="msg" id="auth-status">Not signed in.</span>
+  <button id="btn-signin" style="visibility:hidden">Sign in</button>
+  <span class="msg" id="auth-status"></span>
 </div>
+
+<!-- Nothing administrative exists on this page until the server has confirmed, for THIS signed-in member, that an administrative
+     authority class is active. Until then (and whenever that cannot be confirmed) only this gate is shown. -->
+<section id="access-gate" aria-live="polite">
+  <p class="msg" id="gate-message" lang="es" role="status">Comprobando acceso…</p>
+  <p class="msg" id="gate-detail"></p>
+  <div class="row" id="gate-actions" hidden>
+    <button id="btn-gate-retry" type="button" lang="es" hidden>Reintentar</button>
+    <button id="btn-gate-signout" type="button" class="secondary" lang="es" hidden>Cerrar sesión</button>
+    <button id="btn-gate-switch" type="button" lang="es" hidden>Usar otra cuenta</button>
+  </div>
+</section>
 
 <section id="admin-sections" style="display:none;">
 
+  <p class="msg" id="authority-note"></p>
+
+  <!-- Operational view: the historical contract-test fixtures (an exact list of ids kept by the server) are not requested unless asked for. -->
+  <div class="row" id="fixture-view" lang="es">
+    <label><input type="checkbox" id="chk-fixtures" /> Mostrar datos de prueba históricos</label>
+    <span class="msg" id="fixture-view-note" role="status"></span>
+  </div>
+
   <h2>Teams &amp; Rosters</h2>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <input id="t-name" placeholder="Team name" />
     <button id="btn-create-team">Create Team</button>
   </div>
   <p class="msg" id="msg-team"></p>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <select id="p-team"></select>
     <input id="p-name" placeholder="Player name" />
     <button id="btn-create-player">Add Player</button>
   </div>
   <p class="msg" id="msg-player"></p>
-  <div class="roster-paste">
+  <div class="roster-paste" data-requires="OPERATIONAL">
     <label for="p-bulk">Add many players to the team selected above: one name per line. Shirt numbers such as "10." or "10 -" are removed. Up to 60 names per paste; names already on the roster are skipped.</label>
     <textarea id="p-bulk" placeholder="Lionel Messi&#10;10. Kylian Mbappé&#10;7 - Cristiano Ronaldo"></textarea>
     <div class="row">
@@ -105,7 +133,7 @@
   <div class="table-wrap"><table id="table-roster"><thead><tr><th>Team</th><th>Player</th><th>Active</th><th></th></tr></thead><tbody></tbody></table></div>
 
   <h2>Matches</h2>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <select id="m-home"></select>
     <select id="m-away"></select>
     <input id="m-competition" placeholder="Competition" />
@@ -117,7 +145,7 @@
   <div class="table-wrap"><table id="table-matches" class="stack"><thead><tr><th>Teams</th><th>Kickoff</th><th>Status</th><th>Classification</th><th></th></tr></thead><tbody></tbody></table></div>
 
   <h2>Venues</h2>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <input id="v-name" placeholder="Venue name" />
     <input id="v-lat" placeholder="Latitude" type="number" step="0.000001" />
     <input id="v-lng" placeholder="Longitude" type="number" step="0.000001" />
@@ -128,14 +156,14 @@
   <div class="table-wrap"><table id="table-venues"><thead><tr><th>Name</th><th>Lat/Lng</th><th>Radius</th></tr></thead><tbody></tbody></table></div>
 
   <h2>Venue Activations</h2>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <select id="a-match"></select>
     <select id="a-venue"></select>
     <button id="btn-create-activation">Activate</button>
   </div>
   <p class="msg" id="msg-activation"></p>
   <div class="table-wrap"><table id="table-activations"><thead><tr><th>Match</th><th>Venue</th><th>Enabled</th><th>Prize tiers</th><th></th></tr></thead><tbody></tbody></table></div>
-  <div class="row">
+  <div class="row" data-requires="OPERATIONAL">
     <select id="pt-activation"></select>
     <select id="pt-count"><option value="1">1/4</option><option value="2">2/4</option><option value="3">3/4</option><option value="4">4/4</option></select>
     <select id="pt-level" hidden><option value="1">Level 1 · Easy (scoreline)</option><option value="2">Level 2 · Medium (first team)</option><option value="3">Level 3 · Hard (goalscorer)</option><option value="4">Level 4 · Legendary (goal minute)</option></select>
@@ -151,6 +179,7 @@
     <button id="btn-load-result">Load</button>
   </div>
   <p class="msg" id="result-state" role="status"></p>
+  <div id="result-editor" data-edit-requires="OPERATIONAL">
   <div class="row">
     <input id="r-home" placeholder="Home score" type="number" min="0" />
     <input id="r-away" placeholder="Away score" type="number" min="0" />
@@ -164,9 +193,10 @@
   <div class="row">
     <input id="r-reason" type="text" maxlength="300" placeholder="Reason (needed for corrections)" aria-label="Reason for correcting a finalized result" />
   </div>
+  </div>
   <div class="row">
-    <button id="btn-save-draft">Save Draft</button>
-    <button id="btn-finalize" class="secondary">Finalize</button>
+    <button id="btn-save-draft" data-requires="OPERATIONAL">Save Draft</button>
+    <button id="btn-finalize" class="secondary" data-requires="CONSEQUENTIAL_FINALIZER">Finalize</button>
     <button id="btn-check-finalize" class="secondary" type="button" hidden>Check result status</button>
   </div>
   <p class="msg" id="msg-result"></p>
@@ -181,7 +211,7 @@
   <div class="row">
     <input id="q-filter" type="search" placeholder="Find a winner by name or member ID" aria-label="Find a winner by name or member ID" autocomplete="off" />
   </div>
-  <div class="row">
+  <div class="row" data-requires="CONSEQUENTIAL_FINALIZER">
     <input id="q-release-reason" type="text" maxlength="300" placeholder="Reason for releasing a prize on hold" aria-label="Reason for releasing a prize on hold" />
   </div>
   <p class="msg" id="msg-prizes" role="status"></p>
@@ -191,7 +221,9 @@
 
 <script src="/urbanoAuth.js"></script>
 <script>
-UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("auth-status"));
+// This portal only LETS AN EXISTING ACCOUNT IN. Its sign-in panel offers no way to open an account and never makes an account or a
+// Gaming Member; whether a signed-in member may do anything here is decided by the server (see the access gate below).
+UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("auth-status"), { accountEntry: "login-only", returnTo: "score-admin" });
 
 let cachedMatches = [];
 let cachedVenues = [];
@@ -207,6 +239,21 @@ let authEpoch = 0;
 let currentIdentity = null;
 let refreshSeq = 0;
 let activationsState = "unloaded"; // "unloaded" | "ok" | "failed"
+// Operational view: the lists are requested WITHOUT the historical test data unless the admin asks for it. This changes what the server
+// returns (an exact list of ids is left out there), so the roster requests below are only ever made for the teams that are shown.
+let showFixtures = false;
+const catalogQuery = () => (showFixtures ? "?includeFixtures=1" : "");
+function syncFixtureView() {
+  document.getElementById("chk-fixtures").checked = showFixtures;
+  document.getElementById("fixture-view-note").textContent = showFixtures
+    ? "Se muestran también los datos de prueba históricos: la carga es más lenta."
+    : "Vista operativa: los datos de prueba históricos están ocultos.";
+}
+// What this screen may show, decided by the server for the signed-in member and never by anything in this file:
+// CHECKING | SIGNED_OUT | NO_ACCESS | CHECK_FAILED | ADMIN. Everything starts, and falls back to, "no controls and no data".
+let accessState = "CHECKING";
+let effectiveClasses = [];
+let accessRecheckTimer = null;
 
 // Builds an element without ever parsing markup: every string goes in as
 // text or as an attribute value. Display names, player names, prize labels
@@ -292,6 +339,8 @@ async function authedFetch(path, options, timeoutMs) {
   try {
     const res = await fetch(path, Object.assign({}, options, { headers }, controller ? { signal: controller.signal } : {}));
     const json = await res.json().catch(() => null);
+    // The account may have lost its authority or its session. Ask the server again who this is; the request itself is NEVER repeated.
+    if (res.status === 401 || res.status === 403) recheckAccessSoon();
     return { status: res.status, json };
   } finally {
     if (timer !== null) clearTimeout(timer);
@@ -365,6 +414,7 @@ function clearAdminData() {
   teamsSeq += 1; matchesSeq += 1; venuesSeq += 1; activationsSeq += 1;
   cachedMatches = []; cachedVenues = []; cachedActivations = []; activationInfo = {}; cachedTeams = []; cachedRosters = {};
   activationsState = "unloaded";
+  showFixtures = false; syncFixtureView();
   for (const selector of ["#table-roster", "#table-matches", "#table-venues", "#table-activations", "#table-qualifications"]) {
     document.querySelector(selector + " tbody").innerHTML = "";
   }
@@ -383,37 +433,170 @@ function clearAdminData() {
   for (const id of ["btn-save-draft", "btn-finalize"]) document.getElementById(id).disabled = false;
 }
 
-async function refreshAuthState() {
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Access: who may use this screen. FAIL-CLOSED: nothing administrative is drawn, and no administrative request is made, until the
+// server has said — for the member that is signed in right now — that an administrative authority class is active. A session that
+// exists only because the person is signed in to the public site grants nothing here. Which controls appear follows the classes the
+// server reported; the server still checks the class again on every single request, so hiding a control is never what protects it.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const ACCESS_PROBE_PATH = "/api/gaming/predictions/admin/access";
+const ACCESS_PROBE_TIMEOUT_MS = 15000;
+const KNOWN_CLASSES = ["OPERATIONAL", "CONSEQUENTIAL_FINALIZER", "PRODUCT_GOVERNANCE"];
+
+function setGate(message, detail, actions) {
+  document.getElementById("gate-message").textContent = message;
+  document.getElementById("gate-detail").textContent = detail || "";
+  const wanted = new Set(actions || []);
+  for (const id of ["btn-gate-retry", "btn-gate-signout", "btn-gate-switch"]) document.getElementById(id).hidden = !wanted.has(id);
+  document.getElementById("gate-actions").hidden = wanted.size === 0;
+}
+
+function describeAuthority(classes) {
+  const held = classes.length ? classes.join(", ") : "none";
+  const notes = [];
+  if (!classes.includes("OPERATIONAL")) notes.push("Without OPERATIONAL authority the forms that create or change teams, matches, venues, activations, prize tiers and result drafts are hidden.");
+  if (!classes.includes("CONSEQUENTIAL_FINALIZER")) notes.push("Without CONSEQUENTIAL_FINALIZER authority classification, finalizing results, redeeming prizes and releasing holds are hidden.");
+  return "Authority on this account: " + held + "." + (notes.length ? " " + notes.join(" ") : "");
+}
+
+// The one place that decides what is on screen. Leaving ADMIN always clears first (callers do), so nothing of an earlier state survives.
+function renderAccessState(next, classes, options) {
+  accessState = next;
+  effectiveClasses = next === "ADMIN" ? (classes || []).filter((c) => KNOWN_CLASSES.includes(c)) : [];
+  const sections = document.getElementById("admin-sections");
+  const body = document.body;
+  // The authority flags are set BEFORE the sections become visible, so a control is never drawn for a class the account lacks.
+  body.dataset.op = effectiveClasses.includes("OPERATIONAL") ? "1" : "0";
+  body.dataset.fin = effectiveClasses.includes("CONSEQUENTIAL_FINALIZER") ? "1" : "0";
+  body.dataset.gov = effectiveClasses.includes("PRODUCT_GOVERNANCE") ? "1" : "0";
+  for (const editor of document.querySelectorAll("[data-edit-requires]")) {
+    if (effectiveClasses.includes(editor.getAttribute("data-edit-requires"))) editor.removeAttribute("inert");
+    else editor.setAttribute("inert", "");
+  }
+  const gate = document.getElementById("access-gate");
+  const stale = !!(options && options.stale); // the same, already-confirmed member, whose re-check failed: the screen stays but is switched off
+  if (next === "ADMIN") {
+    sections.style.display = "block";
+    if (stale) sections.setAttribute("inert", ""); else sections.removeAttribute("inert");
+    document.getElementById("authority-note").textContent = describeAuthority(effectiveClasses);
+    gate.hidden = !stale;
+    if (stale) setGate("No se pudo volver a comprobar el acceso. Los controles están desactivados.", "", ["btn-gate-retry"]);
+    return;
+  }
+  sections.style.display = "none";
+  sections.removeAttribute("inert");
+  document.getElementById("authority-note").textContent = "";
+  gate.hidden = false;
+  if (next === "CHECKING") setGate("Comprobando acceso…", "", []);
+  else if (next === "SIGNED_OUT") setGate("Inicia sesión con una cuenta administrativa.", "", []);
+  else if (next === "NO_ACCESS") setGate("Esta cuenta no tiene acceso administrativo", "This account does not have administrative access.", ["btn-gate-signout", "btn-gate-switch"]);
+  else setGate("No se pudo comprobar el acceso.", "No se muestra ningún dato ni control hasta confirmarlo.", ["btn-gate-retry", "btn-gate-signout"]);
+}
+
+// Everything that belongs to the previous state is dropped before a new one is drawn: the screen never shows one person's data under
+// another's authority, and a late answer for the old state is thrown away (clearAdminData starts a new epoch).
+function leaveAdmin() {
+  currentIdentity = null;
+  clearAdminData();
+}
+
+// Asks the server what the signed-in member may do. Plain fetch, not authedFetch: this must not trigger its own re-check.
+async function probeAccess() {
+  let token;
+  try {
+    token = await accessTokenWithTimeout();
+  } catch (err) {
+    return { kind: "failed" };
+  }
+  if (!token) return { kind: "signed-out" };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ACCESS_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(ACCESS_PROBE_PATH, { headers: { authorization: "Bearer " + token }, cache: "no-store", signal: controller.signal });
+    const json = await res.json().catch(() => null);
+    if (res.status === 200 && json && json.access === true && Array.isArray(json.classes)) {
+      const classes = json.classes.filter((c) => KNOWN_CLASSES.includes(c));
+      return classes.length ? { kind: "granted", classes } : { kind: "denied" };
+    }
+    if (res.status === 403) return { kind: "denied" };
+    if (res.status === 401) return { kind: "signed-out" };
+    return { kind: "failed" };
+  } catch (err) {
+    return { kind: "failed" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A 401/403 on an administrative request: check again who this is, once, without repeating the request and without reloading lists.
+function recheckAccessSoon() {
+  if (accessState !== "ADMIN" || accessRecheckTimer !== null) return;
+  accessRecheckTimer = setTimeout(() => {
+    accessRecheckTimer = null;
+    refreshAuthState({ reload: false });
+  }, 0);
+}
+
+async function refreshAuthState(options) {
+  const reload = !options || options.reload !== false;
   const seq = ++refreshSeq;
   const statusEl = document.getElementById("auth-status");
-  const sections = document.getElementById("admin-sections");
   let state;
   try {
     state = await UrbanoAuth.getState();
   } catch (err) {
     if (seq !== refreshSeq) return;
-    currentIdentity = null;
-    clearAdminData();
-    sections.style.display = "none";
+    leaveAdmin();
     statusEl.textContent = "Could not read the sign-in state. Reload the page.";
+    renderAccessState("CHECK_FAILED");
     return;
   }
   if (seq !== refreshSeq) return; // a newer sign-in event has already been handled
-  if (!state || state.status !== "authenticated") {
-    currentIdentity = null;
-    clearAdminData();
+  if (!state || state.status === "unauthenticated") {
+    leaveAdmin();
     statusEl.textContent = "Not signed in.";
-    sections.style.display = "none";
+    renderAccessState("SIGNED_OUT");
     return;
   }
-  const identity = String(state.gamingMemberId || state.email || state.displayName || "");
-  if (identity !== currentIdentity) {
-    clearAdminData();
-    currentIdentity = identity;
+  // A verified identity without a finished Gaming Member is never an administrator, and nothing here creates the member.
+  if (state.status !== "authenticated" || !state.gamingMemberId) {
+    leaveAdmin();
+    statusEl.textContent = "";
+    renderAccessState("NO_ACCESS");
+    return;
   }
-  statusEl.textContent = "Signed in as " + state.displayName + ".";
-  sections.style.display = "block";
-  await loadAll();
+  // The member id is the identity. An address is never compared, and neither is a name.
+  const identity = String(state.gamingMemberId);
+  const sameConfirmedMember = accessState === "ADMIN" && identity === currentIdentity;
+  if (!sameConfirmedMember) {
+    leaveAdmin();
+    currentIdentity = identity;
+    statusEl.textContent = "";
+    renderAccessState("CHECKING");
+  }
+  const probe = await probeAccess();
+  if (seq !== refreshSeq) return;
+  if (probe.kind === "granted") {
+    statusEl.textContent = "Signed in as " + state.displayName + ".";
+    renderAccessState("ADMIN", probe.classes);
+    if (!sameConfirmedMember || reload) await loadAll();
+  } else if (probe.kind === "denied") {
+    leaveAdmin();
+    statusEl.textContent = "";
+    renderAccessState("NO_ACCESS");
+  } else if (probe.kind === "signed-out") {
+    leaveAdmin();
+    statusEl.textContent = "Not signed in.";
+    renderAccessState("SIGNED_OUT");
+  } else if (sameConfirmedMember) {
+    // The same member, confirmed moments ago: keep what is on screen (it may hold the only mark of a redemption whose outcome is unknown),
+    // but switch every control off until the check can be repeated.
+    renderAccessState("ADMIN", effectiveClasses, { stale: true });
+  } else {
+    leaveAdmin();
+    renderAccessState("CHECK_FAILED");
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -447,7 +630,7 @@ async function loadTeams() {
 
   let res;
   try {
-    res = await authedFetch("/api/gaming/predictions/admin/teams");
+    res = await authedFetch("/api/gaming/predictions/admin/teams" + catalogQuery());
   } catch (err) {
     return fail("Could not load teams. " + describeRequestFailure(err).text);
   }
@@ -499,7 +682,7 @@ function renderTeams() {
       const toggle = h("button", {
         type: "button",
         text: p.active ? "Deactivate" : "Activate",
-        dataset: { togglePlayer: p.playerId, active: String(p.active) },
+        dataset: { togglePlayer: p.playerId, active: String(p.active), requires: "OPERATIONAL" },
       });
       toggle.addEventListener("click", () => guarded("player-toggle:" + p.playerId, toggle, async () => {
         const active = toggle.dataset.active === "true";
@@ -572,12 +755,12 @@ function buildClassificationCell(m) {
   const current = h("strong", { class: "class-current", text: classificationLabel(m.activityClassification) });
   const select = h(
     "select",
-    { "aria-label": "Match classification", dataset: { classificationFor: m.matchId } },
+    { "aria-label": "Match classification", dataset: { classificationFor: m.matchId, requires: "CONSEQUENTIAL_FINALIZER" } },
     h("option", { value: "OFFICIAL", text: "Official" }),
     h("option", { value: "TRAINING", text: "Trial / test run" })
   );
   select.value = m.activityClassification === "TRAINING" ? "TRAINING" : "OFFICIAL";
-  const save = h("button", { type: "button", class: "secondary", text: "Set", dataset: { classificationSave: m.matchId } });
+  const save = h("button", { type: "button", class: "secondary", text: "Set", dataset: { classificationSave: m.matchId, requires: "CONSEQUENTIAL_FINALIZER" } });
   const msg = h("div", { class: "msg", role: "status", dataset: { classificationMsg: m.matchId } });
 
   save.addEventListener("click", async () => {
@@ -616,7 +799,7 @@ async function loadMatches() {
   const stale = () => epoch !== authEpoch || seq !== matchesSeq;
   let res;
   try {
-    res = await authedFetch("/api/gaming/predictions/admin/matches");
+    res = await authedFetch("/api/gaming/predictions/admin/matches" + catalogQuery());
   } catch (err) {
     if (!stale()) setMsg("msg-match", "Could not load matches. " + describeRequestFailure(err).text + loadFailureNote(cachedMatches.length > 0), "error");
     return false;
@@ -635,7 +818,7 @@ async function loadMatches() {
   matchSelects.forEach((s) => (s.innerHTML = ""));
   for (const m of cachedMatches) {
     const label = `${teamNameById(m.homeTeamId)} vs ${teamNameById(m.awayTeamId)}`;
-    const cancelButton = m.cancelledAt ? null : h("button", { type: "button", text: "Cancel", dataset: { cancel: m.matchId } });
+    const cancelButton = m.cancelledAt ? null : h("button", { type: "button", text: "Cancel", dataset: { cancel: m.matchId, requires: "OPERATIONAL" } });
     const cancelMsg = cancelButton ? h("div", { class: "msg", role: "status" }) : null;
     if (cancelButton) {
       cancelButton.addEventListener("click", () => guarded("cancel-match:" + m.matchId, cancelButton, async () => {
@@ -680,7 +863,7 @@ async function loadVenues() {
   const stale = () => epoch !== authEpoch || seq !== venuesSeq;
   let res;
   try {
-    res = await authedFetch("/api/gaming/predictions/admin/venues");
+    res = await authedFetch("/api/gaming/predictions/admin/venues" + catalogQuery());
   } catch (err) {
     if (!stale()) setMsg("msg-venue", "Could not load venues. " + describeRequestFailure(err).text + loadFailureNote(cachedVenues.length > 0), "error");
     return false;
@@ -711,7 +894,7 @@ async function loadActivations() {
   const stale = () => epoch !== authEpoch || seq !== activationsSeq;
   let res;
   try {
-    res = await authedFetch("/api/gaming/predictions/admin/activations");
+    res = await authedFetch("/api/gaming/predictions/admin/activations" + catalogQuery());
   } catch (err) {
     if (stale()) return false;
     activationsState = "failed";
@@ -744,7 +927,7 @@ async function loadActivations() {
     const toggle = h("button", {
       type: "button",
       text: activation.enabled ? "Disable" : "Enable",
-      dataset: { toggle: activation.venueActivationId, enabled: String(activation.enabled) },
+      dataset: { toggle: activation.venueActivationId, enabled: String(activation.enabled), requires: "OPERATIONAL" },
     });
     toggle.addEventListener("click", () => guarded("activation-toggle:" + activation.venueActivationId, toggle, async () => {
       const enabled = toggle.dataset.enabled === "true";
@@ -801,6 +984,15 @@ function createFailureText(err, what) {
     ? `${failure.text} Check whether the ${what} was created before trying again.`
     : failure.text;
 }
+
+// The explicit way to bring the historical test data back (and to hide it again). Every list is requested again with the new choice;
+// the rosters are requested only for the teams the server returned.
+document.getElementById("chk-fixtures").addEventListener("change", (event) => guarded("fixture-view", event.currentTarget, async () => {
+  showFixtures = event.currentTarget.checked;
+  syncFixtureView();
+  await loadAll();
+}));
+syncFixtureView();
 
 document.getElementById("btn-create-team").addEventListener("click", (event) => guarded("create-team", event.currentTarget, async () => {
   const name = document.getElementById("t-name").value.trim();
@@ -2102,7 +2294,7 @@ async function releaseHold(q, prize, player) {
 
 function buildRedeemButton(q, prize, player) {
   const id = q.prizeQualificationId;
-  const redeem = h("button", { type: "button", text: "Mark Redeemed", disabled: redeemInFlight.has(id), dataset: { redeem: id } });
+  const redeem = h("button", { type: "button", text: "Mark Redeemed", disabled: redeemInFlight.has(id), dataset: { redeem: id, requires: "CONSEQUENTIAL_FINALIZER" } });
   redeem.addEventListener("click", () => redeemPrize(q, prize, player));
   return redeem;
 }
@@ -2115,7 +2307,7 @@ function buildCheckStatusButton(id) {
 
 function buildReleaseHoldButton(q, prize, player) {
   const id = q.prizeQualificationId;
-  const release = h("button", { type: "button", class: "secondary", text: "Release hold", disabled: releaseInFlight.has(id), dataset: { releaseHold: id } });
+  const release = h("button", { type: "button", class: "secondary", text: "Release hold", disabled: releaseInFlight.has(id), dataset: { releaseHold: id, requires: "CONSEQUENTIAL_FINALIZER" } });
   release.addEventListener("click", () => releaseHold(q, prize, player));
   return release;
 }
@@ -2331,7 +2523,17 @@ document.getElementById("q-activation").addEventListener("change", () => {
   document.getElementById("q-filter").value = "";
   clearQualifications();
 });
-UrbanoAuth.onAuthStateChange(refreshAuthState);
+document.getElementById("btn-gate-retry").addEventListener("click", () => refreshAuthState());
+document.getElementById("btn-gate-signout").addEventListener("click", async () => {
+  try { await UrbanoAuth.signOut(); } catch (err) { /* the state read below shows what is true */ }
+  await refreshAuthState();
+});
+document.getElementById("btn-gate-switch").addEventListener("click", async () => {
+  try { await UrbanoAuth.signOut(); } catch (err) { /* the state read below shows what is true */ }
+  await refreshAuthState();
+  if (typeof UrbanoAuth.openSignIn === "function") UrbanoAuth.openSignIn({ mode: "login" });
+});
+UrbanoAuth.onAuthStateChange(() => refreshAuthState());
 refreshAuthState();
 </script>
 

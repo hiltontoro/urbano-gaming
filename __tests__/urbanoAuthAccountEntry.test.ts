@@ -26,12 +26,14 @@ interface Options {
   existingUsers?: string[]; // identifiers that already have an Auth user
   session?: { identifier: string } | null; // already signed in when the page loads
   startWithMemberFor?: string[];
+  attach?: Record<string, unknown>; // options given to attachSignInButton (for example { accountEntry: "login-only" })
+  url?: string; // the address of the page (default http://localhost/)
 }
 
 function createHarness(options: Options = {}) {
   const dom = new JSDOM(
     `<!doctype html><html><body><header id="hdr"><button id="btn-signin">Sign in with URBANO</button><span id="signin-status">Not signed in.</span></header></body></html>`,
-    { url: "http://localhost/", runScripts: "outside-only", pretendToBeVisual: true }
+    { url: options.url ?? "http://localhost/", runScripts: "outside-only", pretendToBeVisual: true }
   );
   const win = dom.window as unknown as Window & Record<string, any>;
 
@@ -165,7 +167,7 @@ function createHarness(options: Options = {}) {
     input.dispatchEvent(new win.Event("input", { bubbles: true }));
   };
 
-  auth.attachSignInButton(header(), doc.getElementById("signin-status"));
+  auth.attachSignInButton(header(), doc.getElementById("signin-status"), options.attach);
   const identityEvents: Array<Record<string, any>> = [];
   const ready = (async () => {
     await flush();
@@ -750,5 +752,305 @@ describe("The original email-only calls keep their meaning for existing consumer
     const old = createHarness({ authMethods: null });
     expect(await old.auth.getAuthMethods()).toEqual({ email: true, phone: false });
     old.close();
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Login-only entry (attachSignInButton(..., { accountEntry: "login-only" })) — the Score administration portal.
+// The panel can only LOG IN: no account is created, no Gaming Member is created, and no choice to create either is offered. Every
+// other page keeps the panel exactly as before.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const LOGIN_ONLY = { accountEntry: "login-only" };
+
+async function openLoginOnly(h: Harness) {
+  await h.ready;
+  h.header().click();
+  await h.flush();
+}
+
+describe("login-only entry: no account and no member can be created from this panel", () => {
+  it("the header says Sign in, and the panel opens straight on the email screen with nothing to choose", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY });
+    await h.ready;
+    expect(h.header().textContent).toBe("Sign in");
+    h.header().click();
+    await h.flush();
+    expect(h.q("[data-choose-login]")).toBeNull();
+    expect(h.q("[data-choose-register]")).toBeNull();
+    expect(h.q("[data-contact]")).not.toBeNull();
+    expect(h.q("[data-send]")!.textContent).toBe("Send login code");
+    expect(h.panel().getAttribute("aria-label")).toBe("Sign in");
+    expect(h.state.otpCalls).toHaveLength(0);
+    h.close();
+  });
+
+  it("the words Create account appear nowhere: not in the header, the panel, or any screen of the journey", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"], members: { "boss@example.com": { gamingMemberId: "gm-boss", displayName: "Boss" } } });
+    const seen: string[] = [];
+    const record = () => seen.push(`${h.header().textContent} | ${h.panel().textContent}`);
+    await openLoginOnly(h);
+    record();
+    await sendEmail(h, "boss@example.com");
+    record();
+    for (const screen of seen) expect(screen).not.toMatch(/create (an )?account|I already have an account|Enter URBANO/i);
+    expect(h.q("[data-create-instead]")).toBeNull();
+    expect(h.q("[data-switch-mode]")).toBeNull();
+    h.close();
+  });
+
+  it("the code is requested with shouldCreateUser false, on the first send and on a resend", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(h);
+    await sendEmail(h, "boss@example.com");
+    expect(h.state.otpCalls).toHaveLength(1);
+    expect(h.state.otpCalls[0]!.options?.shouldCreateUser).toBe(false);
+    h.state.now += 61_000;
+    await new Promise((r) => setTimeout(r, 1100)); // the countdown ticks once a second
+    await h.click("[data-resend]");
+    expect(h.state.otpCalls).toHaveLength(2);
+    expect(h.state.otpCalls[1]!.options?.shouldCreateUser).toBe(false);
+    h.close();
+  });
+
+  it("an address nobody has an account for gets the same screen as a known one, and no Auth user is created", async () => {
+    const known = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(known);
+    await sendEmail(known, "boss@example.com");
+    const knownScreen = known.text();
+    known.close();
+
+    const unknown = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(unknown);
+    await sendEmail(unknown, "stranger@example.com");
+    expect(unknown.q("[data-code]")).not.toBeNull();
+    expect(unknown.text().replace("stranger@example.com", "boss@example.com")).toBe(knownScreen);
+    expect(unknown.state.createdUsers).toEqual([]);
+    expect(unknown.users.has("stranger@example.com")).toBe(false);
+    expect(unknown.state.codesSent).toEqual([]);
+    unknown.close();
+  });
+
+  it("a verified identity that has NO Gaming Member is not offered a name, and no member is created", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["ghost@example.com"] });
+    await openLoginOnly(h);
+    await sendEmail(h, "ghost@example.com");
+    await h.type("[data-code]", CODE);
+    await h.click("[data-verify]");
+    expect(h.q("[data-display-name]")).toBeNull();
+    expect(h.q("[data-continue]")).toBeNull();
+    expect(h.state.memberCreates).toEqual([]);
+    expect(h.panel().style.display).toBe("none");
+    expect(h.header().textContent).toBe("Sign in");
+    expect(await h.auth.getState()).toMatchObject({ status: "profile_incomplete" });
+    h.close();
+  });
+
+  it("a page that loads with a session that has no Gaming Member does not say Finish creating your account", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["ghost@example.com"], session: { identifier: "ghost@example.com" } });
+    await h.ready;
+    await h.flush();
+    expect(h.header().textContent).toBe("Sign in");
+    expect(h.header().textContent).not.toMatch(/finish creating/i);
+    h.header().click();
+    await h.flush();
+    expect(h.q("[data-display-name]")).toBeNull();
+    expect(h.state.memberCreates).toEqual([]);
+    h.close();
+  });
+
+  it("an existing member signs in and gets a normal signed-in header", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"], members: { "boss@example.com": { gamingMemberId: "gm-boss", displayName: "Boss" } } });
+    await openLoginOnly(h);
+    await sendEmail(h, "boss@example.com");
+    await h.type("[data-code]", CODE);
+    await h.click("[data-verify]");
+    expect(h.header().textContent).toBe("Hi, Boss");
+    expect(h.doc.querySelector("[data-urbano-signout]")).not.toBeNull();
+    expect(h.state.createdUsers).toEqual([]);
+    expect(h.state.memberCreates).toEqual([]);
+    h.close();
+  });
+
+  it("asking the page to open the panel in register mode still opens the login screen", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY });
+    await h.ready;
+    expect(h.auth.openSignIn({ mode: "register" })).toBe(true);
+    await h.flush();
+    expect(h.q("[data-send]")!.textContent).toBe("Send login code");
+    expect(h.q("[data-switch-mode]")).toBeNull();
+    h.close();
+  });
+
+  it("Close leaves the panel and sends nothing", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY });
+    await openLoginOnly(h);
+    await h.click("[data-back]");
+    expect(h.panel().style.display).toBe("none");
+    expect(h.state.otpCalls).toHaveLength(0);
+    h.close();
+  });
+
+  it("signing out returns to Sign in, still without a way to create an account", async () => {
+    const h = createHarness({ attach: LOGIN_ONLY, existingUsers: ["boss@example.com"], members: { "boss@example.com": { gamingMemberId: "gm-boss", displayName: "Boss" } }, session: { identifier: "boss@example.com" } });
+    await h.ready;
+    await h.flush();
+    expect(h.header().textContent).toBe("Hi, Boss");
+    (h.doc.querySelector("[data-urbano-signout]") as HTMLElement).click();
+    await h.flush();
+    expect(h.header().textContent).toBe("Sign in");
+    h.header().click();
+    await h.flush();
+    expect(h.q("[data-choose-register]")).toBeNull();
+    h.close();
+  });
+});
+
+describe("login-only entry leaves every other page alone", () => {
+  it("without the option, and with an option that is not login-only, the panel is the one it always was", async () => {
+    for (const attach of [undefined, {}, { accountEntry: "something-else" }, { accountEntry: "LOGIN-ONLY" }]) {
+      const h = createHarness({ attach });
+      await h.ready;
+      expect(h.header().textContent).toBe("Log in / Create account");
+      h.header().click();
+      await h.flush();
+      expect(h.q("[data-choose-login]")).not.toBeNull();
+      expect(h.q("[data-choose-register]")).not.toBeNull();
+      h.close();
+    }
+  });
+
+  it("public registration still creates the identity and the member, after the code is verified", async () => {
+    const h = createHarness();
+    await openToMethod(h, "register");
+    await sendEmail(h, "newcomer@example.com");
+    expect(h.state.otpCalls[0]!.options?.shouldCreateUser).toBe(true);
+    expect(h.state.createdUsers).toEqual(["newcomer@example.com"]);
+    await h.type("[data-code]", CODE);
+    await h.click("[data-verify]");
+    await h.type("[data-display-name]", "Newcomer");
+    await h.click("[data-continue]");
+    expect(h.state.memberCreates).toEqual(["newcomer@example.com"]);
+    expect(h.header().textContent).toBe("Hi, Newcomer");
+    h.close();
+  });
+
+  it("the original email-only calls keep their meaning (requestOtp registers), and the portal source never uses them", () => {
+    const portal = readFileSync(path.join(process.cwd(), "public/predictions-admin.html"), "utf8");
+    expect(portal).toContain('accountEntry: "login-only"');
+    expect(portal).not.toMatch(/requestOtp|completeProfile|requestCode\(|mode:\s*"register"/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The fixed administrative return. The email link of a sign-in requested from the Score portal comes back to the portal; every other
+// request names no destination at all. The address is a constant of the component, chosen by a KEY: it is never built from the address
+// bar, from ?next=, or from a value a caller supplies.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const SCORE_ADMIN_RETURN = "https://gaming.urbanohn.com/predictions-admin.html";
+const PORTAL_ENTRY = { accountEntry: "login-only", returnTo: "score-admin" };
+
+describe("returnTo: \"score-admin\" gives the sign-in email a fixed administrative destination", () => {
+  it("the first send and a resend both ask for exactly that address, and still never create a user", async () => {
+    const h = createHarness({ attach: PORTAL_ENTRY, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(h);
+    await sendEmail(h, "boss@example.com");
+    expect(h.state.otpCalls).toEqual([{ email: "boss@example.com", options: { shouldCreateUser: false, emailRedirectTo: SCORE_ADMIN_RETURN } }]);
+    h.state.now += 61_000;
+    await new Promise((r) => setTimeout(r, 1100));
+    await h.click("[data-resend]");
+    expect(h.state.otpCalls).toHaveLength(2);
+    expect(h.state.otpCalls[1]).toEqual({ email: "boss@example.com", options: { shouldCreateUser: false, emailRedirectTo: SCORE_ADMIN_RETURN } });
+    expect(h.state.createdUsers).toEqual([]);
+    h.close();
+  });
+
+  it("is independent of the entry mode: the key alone changes the destination and nothing else about the panel", async () => {
+    const h = createHarness({ attach: { returnTo: "score-admin" }, existingUsers: ["ana@example.com"] });
+    await h.ready;
+    expect(h.header().textContent).toBe("Log in / Create account"); // the default panel, with its chooser
+    await openToMethod(h, "login");
+    await sendEmail(h, "ana@example.com");
+    expect(h.state.otpCalls).toEqual([{ email: "ana@example.com", options: { shouldCreateUser: false, emailRedirectTo: SCORE_ADMIN_RETURN } }]);
+    h.close();
+  });
+
+  it("public pages are untouched: no destination is named, whether they log in or create an account", async () => {
+    for (const attach of [undefined, {}, { accountEntry: "login-only" }, { accountLink: "/profile.html" }]) {
+      const h = createHarness({ attach: attach as Record<string, unknown> | undefined, existingUsers: ["ana@example.com"] });
+      await h.ready;
+      h.header().click();
+      await h.flush();
+      if (h.q("[data-choose-login]")) await h.click("[data-choose-login]");
+      await sendEmail(h, "ana@example.com");
+      expect(h.state.otpCalls, JSON.stringify(attach)).toHaveLength(1);
+      expect(Object.keys(h.state.otpCalls[0]!.options), JSON.stringify(attach)).not.toContain("emailRedirectTo");
+      h.close();
+    }
+    const registering = createHarness();
+    await openToMethod(registering, "register");
+    await sendEmail(registering, "newcomer@example.com");
+    expect(registering.state.otpCalls).toEqual([{ email: "newcomer@example.com", options: { shouldCreateUser: true } }]);
+    registering.close();
+    const legacy = createHarness();
+    await legacy.ready;
+    await legacy.auth.requestOtp("ana@example.com");
+    expect(legacy.state.otpCalls).toEqual([{ email: "ana@example.com", options: { shouldCreateUser: true } }]);
+    legacy.close();
+  });
+
+  it("only the key table is honoured: other keys, addresses, paths and look-alikes change nothing", async () => {
+    const hostile: unknown[] = [
+      "https://evil.example/steal", "//evil.example", "/predictions-admin.html", "https://gaming.urbanohn.com/predictions-admin.html",
+      "SCORE-ADMIN", "score-admin ", " score-admin", "score_admin", "", "constructor", "__proto__", "toString", "hasOwnProperty", 42, true, {}, ["score-admin"], null,
+    ];
+    for (const returnTo of hostile) {
+      const h = createHarness({ attach: { accountEntry: "login-only", returnTo } as Record<string, unknown>, existingUsers: ["boss@example.com"] });
+      await openLoginOnly(h);
+      await sendEmail(h, "boss@example.com");
+      expect(h.state.otpCalls, JSON.stringify(returnTo)).toEqual([{ email: "boss@example.com", options: { shouldCreateUser: false } }]);
+      h.close();
+    }
+  });
+
+  it("the address bar decides nothing: ?next=, ?redirect_to= and a fragment are ignored, with or without the key", async () => {
+    const url = "http://localhost/predictions-admin.html?next=https://evil.example/x&redirect_to=https://evil.example/y&returnTo=https://evil.example/z#next=https://evil.example/w";
+    const without = createHarness({ url, attach: { accountEntry: "login-only" }, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(without);
+    await sendEmail(without, "boss@example.com");
+    expect(without.state.otpCalls).toEqual([{ email: "boss@example.com", options: { shouldCreateUser: false } }]);
+    without.close();
+    const withKey = createHarness({ url, attach: PORTAL_ENTRY, existingUsers: ["boss@example.com"] });
+    await openLoginOnly(withKey);
+    await sendEmail(withKey, "boss@example.com");
+    expect(withKey.state.otpCalls).toEqual([{ email: "boss@example.com", options: { shouldCreateUser: false, emailRedirectTo: SCORE_ADMIN_RETURN } }]);
+    expect(JSON.stringify(withKey.state.otpCalls)).not.toContain("evil.example");
+    withKey.close();
+  });
+
+  it("only an email link has a destination: a phone code never carries one", async () => {
+    const h = createHarness({ attach: PORTAL_ENTRY, authMethods: { email: true, phone: true } });
+    await h.ready;
+    await h.auth.requestCode({ channel: "phone", identifier: "+50499999999", mode: "login", returnTo: "score-admin" });
+    expect(h.state.otpCalls).toEqual([{ phone: "+50499999999", options: { shouldCreateUser: false } }]);
+    h.close();
+  });
+
+  it("the component source never reads the address bar for a destination, and holds the one address as a constant", () => {
+    const source = readFileSync(path.join(process.cwd(), "public/urbanoAuth.js"), "utf8");
+    const returnPart = source.slice(source.indexOf("SIGN_IN_RETURN_TARGETS = "), source.indexOf("const UrbanoAuth = (() => {"));
+    expect(returnPart).toContain(SCORE_ADMIN_RETURN);
+    expect(source.match(/emailRedirectTo/g)).toHaveLength(1); // one assignment, in requestCode, from the key table
+    expect(source).not.toMatch(/searchParams|URLSearchParams\([^)]*(next|redirect|return)/i);
+    expect(source.match(/https:\/\/gaming\.urbanohn\.com/g)).toHaveLength(1);
+    const portal = readFileSync(path.join(process.cwd(), "public/predictions-admin.html"), "utf8");
+    expect(portal).toContain('{ accountEntry: "login-only", returnTo: "score-admin" }');
+    expect(portal).not.toMatch(/gaming\.urbanohn\.com|emailRedirectTo|redirect_to/); // the portal names a key, never an address
+    for (const page of ["index.html", "soccer-predictions.html", "profile.html", "competitions.html", "become-a-host.html", "leaderboards.html", "rewards.html", "competitions-admin.html", "host-applications-admin.html"]) {
+      expect(readFileSync(path.join(process.cwd(), "public", page), "utf8"), page).not.toContain("returnTo");
+    }
   });
 });

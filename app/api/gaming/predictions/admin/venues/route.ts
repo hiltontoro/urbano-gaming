@@ -6,6 +6,7 @@ import {
   requirePlatformAuthorityHttp,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createVenue } from "@/lib/gaming/predictions/adminCatalog";
+import { visibleInAdminView } from "@/lib/gaming/predictions/fixtureExclusion";
 
 export async function GET(request: Request) {
   const credentials = getSupabaseCredentials();
@@ -19,7 +20,8 @@ export async function GET(request: Request) {
   if ("errorResponse" in admin) return admin.errorResponse;
 
   const repo = buildPredictionsRepo(credentials);
-  const venues = await repo.listVenues();
+  // Default view: the temporary fixture manifest is left out (?includeFixtures=1 brings the historical test data back).
+  const venues = visibleInAdminView(request, await repo.listVenues(), "venues", (venue) => venue.venueId);
   return NextResponse.json({ venues });
 }
 

@@ -76,9 +76,13 @@ const DEFAULT_QUALIFICATIONS = [
 
 function jsonReply(status: number, json?: unknown): Reply { return { status, json }; }
 
-function baseResponder(qualifications: unknown[]): Responder {
+const ALL_CLASSES = ["OPERATIONAL", "CONSEQUENTIAL_FINALIZER", "PRODUCT_GOVERNANCE"];
+
+function baseResponder(qualifications: unknown[], access: () => Reply | Promise<Reply>): Responder {
   return (call) => {
     const u = call.url;
+    // The access hint the page asks for before it draws anything administrative.
+    if (call.method === "GET" && u === `${API}/admin/access`) return access();
     if (call.method === "GET" && u === `${API}/admin/teams`) return jsonReply(200, { teams: TEAMS });
     const roster = u.match(/^\/api\/gaming\/predictions\/admin\/teams\/([^/]+)\/players$/);
     if (roster && call.method === "GET") return jsonReply(200, { players: ROSTERS[roster[1]] ?? [] });
@@ -92,15 +96,18 @@ function baseResponder(qualifications: unknown[]): Responder {
 
 const STAFF_STATE = { status: "authenticated", email: "staff@example.com", gamingMemberId: "staff-1", displayName: "Staff Member" };
 
-async function loadPage(opts: { respond?: Responder; qualifications?: unknown[]; confirm?: boolean; teams?: unknown[]; noActivations?: boolean; captureLongTimers?: boolean } = {}) {
+async function loadPage(opts: { noWait?: boolean; classes?: string[]; access?: Reply | Promise<Reply>; respond?: Responder; qualifications?: unknown[]; confirm?: boolean; teams?: unknown[]; noActivations?: boolean; captureLongTimers?: boolean } = {}) {
   const calls: Call[] = [];
   // The sign-in client is a real moving part: the page reloads on every sign-in event, and the signed-in admin can change or sign out.
   let authState: Record<string, unknown> = { ...STAFF_STATE };
+  let signOuts = 0;
+  const signInOpens: Array<Record<string, unknown>> = [];
   const authListeners: Array<() => void> = [];
   let responder: Responder | undefined = opts.respond;
   // With captureLongTimers the page's own timers of 5 s or more are held instead of scheduled, so a request timeout can be fired on demand.
   const longTimers = new Map<number, { ms: number; run: () => void }>();
-  const base = baseResponder(opts.qualifications ?? DEFAULT_QUALIFICATIONS);
+  let accessAnswer: Reply | Promise<Reply> = opts.access ?? jsonReply(200, { access: true, classes: opts.classes ?? ALL_CLASSES });
+  const base = baseResponder(opts.qualifications ?? DEFAULT_QUALIFICATIONS, () => accessAnswer);
   const confirm = vi.fn(() => opts.confirm ?? true);
   const dom = new JSDOM(HTML, {
     url: "http://localhost/predictions-admin.html",
@@ -114,6 +121,8 @@ async function loadPage(opts: { respond?: Responder; qualifications?: unknown[];
         getState: async () => authState,
         getAccessToken: async () => "stub-token",
         onAuthStateChange: async (callback: () => void) => { authListeners.push(callback); return () => {}; },
+        signOut: async () => { signOuts += 1; authState = { status: "unauthenticated" }; },
+        openSignIn: (options: Record<string, unknown>) => { signInOpens.push(options); return true; },
       };
       if (opts.captureLongTimers) {
         const realSet = w.setTimeout.bind(w);
@@ -165,7 +174,8 @@ async function loadPage(opts: { respond?: Responder; qualifications?: unknown[];
       if (Date.now() > deadline) throw new Error("timed out waiting for " + label);
     }
   };
-  await until(
+  if (opts.noWait) await new Promise((r) => setTimeout(r, 30));
+  else await until(
     () => doc.querySelectorAll("#table-matches tbody tr").length > 0 && (opts.noActivations ? calls.some((c) => c.url === `${API}/admin/activations`) : doc.querySelectorAll("#q-activation option").length > 0),
     "the admin sections to load"
   );
@@ -174,6 +184,9 @@ async function loadPage(opts: { respond?: Responder; qualifications?: unknown[];
   return {
     win, doc, calls, confirm, until, text, longTimers, close: () => dom.window.close(),
     setAuth: (state: Record<string, unknown>) => { authState = state; },
+    setAccess: (reply: Reply | Promise<Reply>) => { accessAnswer = reply; },
+    signOutCount: () => signOuts,
+    signInOpens,
     fireAuthEvent: () => { for (const listener of authListeners) listener(); },
     setResponder: (next: Responder) => { responder = next; },
   };
@@ -3918,5 +3931,477 @@ describe("F8. Classification wording", () => {
     expect(text).toContain("Not set - predictions are closed");
     expect(page.text("#classification-help")).toContain("This page sets only Official or Trial / test run");
     page.close();
+  });
+});
+
+// =================================================================================================================================
+// J. THE ACCESS GATE. The page decides nothing about who may use it: it asks the server, for the member signed in right now, and until
+//    the server says an administrative class is active it draws no controls, no data and makes no administrative request.
+// =================================================================================================================================
+
+const ACCESS_URL = `${API}/admin/access`;
+const adminGets = (page: Page) => page.calls.filter((c) => c.url.startsWith(`${API}/admin/`) && c.url !== ACCESS_URL);
+const sectionsVisible = (page: Page) => (page.doc.getElementById("admin-sections") as HTMLElement).style.display !== "none";
+const gateText = (page: Page) => page.text("#gate-message");
+// Drawn means the element, and every container it sits in, is not display:none (a hidden row hides the button inside it).
+const shown = (page: Page, selector: string) => {
+  const el = page.doc.querySelector(selector) as HTMLElement | null;
+  if (!el) return false;
+  for (let node: HTMLElement | null = el; node && node !== page.doc.documentElement; node = node.parentElement) {
+    if (page.win.getComputedStyle(node).display === "none") return false;
+  }
+  return true;
+};
+const tablesEmpty = (page: Page) => ["#table-roster", "#table-matches", "#table-venues", "#table-activations", "#table-qualifications"].every((t) => page.doc.querySelectorAll(`${t} tbody tr`).length === 0);
+const OTHER_MEMBER = { status: "authenticated", email: "other@example.com", gamingMemberId: "other-1", displayName: "Other Member" };
+const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
+
+describe("J. the page and its sign-in", () => {
+  it("is titled URBANO Score — Administración, in the tab and in the heading", async () => {
+    const page = await loadPage({});
+    expect(page.doc.title).toBe("URBANO Score — Administración");
+    expect(page.text("h1")).toBe("URBANO Score — Administración");
+    page.close();
+  });
+
+  it("asks the shared sign-in for the login-only entry, and never offers or uses account creation", () => {
+    expect(HTML).toContain('{ accountEntry: "login-only", returnTo: "score-admin" }');
+    expect(HTML).not.toMatch(/Create account|Crear cuenta|requestOtp|completeProfile|createGamingMember|\/api\/gaming\/member/i);
+  });
+
+  it("has no email address, domain or name in its source and takes no decision from one", () => {
+    expect(HTML).not.toMatch(/tecnomovi|hotmail|@[a-z0-9-]+\.(com|org|net|hn)\b/i);
+    expect(HTML).not.toMatch(/\.email\b|\.displayName\s*(===|==|!==|!=)/);
+  });
+});
+
+describe("J. nothing administrative exists until the server has confirmed the member", () => {
+  it("while the check is pending: no sections, no controls drawn, no data, no administrative request; only the gate", async () => {
+    const pending = deferred<Reply>();
+    const page = await loadPage({ access: pending.promise, noWait: true });
+    expect(gateText(page)).toBe("Comprobando acceso…");
+    expect(sectionsVisible(page)).toBe(false);
+    expect(tablesEmpty(page)).toBe(true);
+    expect(adminGets(page)).toEqual([]);
+    expect(page.calls.filter((c) => c.url === ACCESS_URL)).toHaveLength(1);
+    // and once it answers, only then does anything appear
+    pending.resolve(jsonReply(200, { access: true, classes: ALL_CLASSES }));
+    await page.until(() => sectionsVisible(page) && page.doc.querySelectorAll("#table-matches tbody tr").length > 0, "the sections after confirmation");
+    const firstAdminGet = page.calls.findIndex((c) => c.url !== ACCESS_URL && c.url.startsWith(`${API}/admin/`));
+    expect(page.calls.findIndex((c) => c.url === ACCESS_URL)).toBeLessThan(firstAdminGet);
+    page.close();
+  });
+
+  it("a signed-in member with NO administrative authority sees only: «Esta cuenta no tiene acceso administrativo», with sign out and use another account", async () => {
+    const page = await loadPage({ access: jsonReply(403, { error: "This account has no administrative access." }), noWait: true });
+    expect(gateText(page)).toBe("Esta cuenta no tiene acceso administrativo");
+    expect(page.text("#gate-detail")).toBe("This account does not have administrative access.");
+    expect(sectionsVisible(page)).toBe(false);
+    expect(tablesEmpty(page)).toBe(true);
+    expect((page.doc.getElementById("btn-gate-signout") as HTMLElement).hidden).toBe(false);
+    expect((page.doc.getElementById("btn-gate-switch") as HTMLElement).hidden).toBe(false);
+    expect((page.doc.getElementById("btn-gate-retry") as HTMLElement).hidden).toBe(true);
+    expect(adminGets(page)).toEqual([]); // not one administrative request was made for them
+    page.close();
+  });
+
+  it("the public site's session grants nothing here: a member who is signed in elsewhere gets the same refusal", async () => {
+    const page = await loadPage({ access: jsonReply(403, {}), noWait: true });
+    page.setAuth({ ...OTHER_MEMBER });
+    page.fireAuthEvent();
+    await settle(60);
+    expect(gateText(page)).toBe("Esta cuenta no tiene acceso administrativo");
+    expect(sectionsVisible(page)).toBe(false);
+    expect(adminGets(page)).toEqual([]);
+    page.close();
+  });
+
+  it("signed out: the gate asks to sign in, no probe and no administrative request is made", async () => {
+    const page = await loadPage({ noWait: true });
+    page.setAuth({ status: "unauthenticated" });
+    page.fireAuthEvent();
+    await settle(60);
+    expect(gateText(page)).toBe("Inicia sesión con una cuenta administrativa.");
+    expect(page.text("#auth-status")).toBe("Not signed in.");
+    expect(sectionsVisible(page)).toBe(false);
+    page.close();
+  });
+
+  it("an identity with no finished Gaming Member is not an administrator: refused without asking, and nothing creates the member", async () => {
+    const page = await loadPage({ noWait: true });
+    const probesBefore = page.calls.filter((c) => c.url === ACCESS_URL).length;
+    page.setAuth({ status: "profile_incomplete", email: "ghost@example.com" });
+    page.fireAuthEvent();
+    await settle(60);
+    expect(gateText(page)).toBe("Esta cuenta no tiene acceso administrativo");
+    expect(sectionsVisible(page)).toBe(false);
+    expect(page.calls.filter((c) => c.url === ACCESS_URL)).toHaveLength(probesBefore);
+    expect(page.calls.filter((c) => c.method === "POST")).toEqual([]);
+    page.close();
+  });
+
+  it("a token that is no longer valid (401) sends the person back to sign in; a check that cannot be made shows no controls and offers a retry", async () => {
+    const expired = await loadPage({ access: jsonReply(401, {}), noWait: true });
+    expect(gateText(expired)).toBe("Inicia sesión con una cuenta administrativa.");
+    expect(sectionsVisible(expired)).toBe(false);
+    expired.close();
+
+    for (const failure of [jsonReply(500, {}), jsonReply(200, { access: "yes" }), jsonReply(200, { access: true, classes: [] }), jsonReply(200, { access: true, classes: ["SUPERUSER"] }), "reject" as const]) {
+      const page = await loadPage({ access: failure as Reply, noWait: true });
+      const denied = failure !== "reject" && (failure as { json?: { classes?: unknown[] } }).json?.classes !== undefined;
+      expect(sectionsVisible(page)).toBe(false);
+      expect(tablesEmpty(page)).toBe(true);
+      expect(adminGets(page)).toEqual([]);
+      expect(gateText(page)).toBe(denied ? "Esta cuenta no tiene acceso administrativo" : "No se pudo comprobar el acceso.");
+      page.close();
+    }
+  });
+
+  it("Reintentar asks again and, once the server confirms, the screen loads", async () => {
+    const page = await loadPage({ access: jsonReply(500, {}), noWait: true });
+    expect(gateText(page)).toBe("No se pudo comprobar el acceso.");
+    page.setAccess(jsonReply(200, { access: true, classes: ALL_CLASSES }));
+    (page.doc.getElementById("btn-gate-retry") as HTMLButtonElement).click();
+    await page.until(() => sectionsVisible(page) && page.doc.querySelectorAll("#table-matches tbody tr").length > 0, "the screen after the retry");
+    page.close();
+  });
+});
+
+describe("J. what is drawn follows the classes the server reported", () => {
+  it("OPERATIONAL only: the catalog forms are there; classification, Finalize, Mark Redeemed and Release hold are not drawn", async () => {
+    const page = await loadPage({ classes: ["OPERATIONAL"] });
+    await loadQualifications(page);
+    expect(page.doc.body.dataset.op).toBe("1");
+    expect(page.doc.body.dataset.fin).toBe("0");
+    expect(shown(page, "#btn-create-team")).toBe(true);
+    expect(shown(page, "#btn-create-venue")).toBe(true);
+    expect(shown(page, "#btn-save-draft")).toBe(true);
+    expect(shown(page, "[data-toggle]")).toBe(true);
+    expect(shown(page, "[data-cancel]")).toBe(true);
+    expect(shown(page, "#btn-finalize")).toBe(false);
+    expect(shown(page, "[data-classification-for]")).toBe(false);
+    expect(shown(page, "[data-classification-save]")).toBe(false);
+    expect(shown(page, "[data-redeem]")).toBe(false);
+    expect(shown(page, "#q-release-reason")).toBe(false);
+    expect(page.text("#authority-note")).toContain("Authority on this account: OPERATIONAL.");
+    page.close();
+  });
+
+  it("CONSEQUENTIAL_FINALIZER only: classification, Finalize and the prize actions are there; every catalog form is not drawn and the draft editor is switched off", async () => {
+    const page = await loadPage({ classes: ["CONSEQUENTIAL_FINALIZER"] });
+    await loadQualifications(page);
+    expect(page.doc.body.dataset.op).toBe("0");
+    expect(page.doc.body.dataset.fin).toBe("1");
+    expect(shown(page, "#btn-finalize")).toBe(true);
+    expect(shown(page, "[data-classification-for]")).toBe(true);
+    expect(shown(page, "[data-redeem]")).toBe(true);
+    expect(shown(page, "#q-release-reason")).toBe(true);
+    for (const hidden of ["#btn-create-team", "#btn-create-player", "#btn-create-players", "#btn-create-match", "#btn-create-venue", "#btn-create-activation", "#btn-create-tier", "#btn-save-draft", "[data-toggle]", "[data-cancel]", "[data-toggle-player]"]) {
+      expect(shown(page, hidden), hidden).toBe(false);
+    }
+    expect(page.doc.getElementById("result-editor")!.hasAttribute("inert")).toBe(true);
+    // the evidence an operator prepared is still readable
+    expect(page.doc.querySelectorAll("#table-matches tbody tr").length).toBeGreaterThan(0);
+    page.close();
+  });
+
+  it("PRODUCT_GOVERNANCE alone can look and change nothing: every mutation control is gone, every list is readable", async () => {
+    const page = await loadPage({ classes: ["PRODUCT_GOVERNANCE"] });
+    await loadQualifications(page);
+    expect(page.doc.body.dataset.op).toBe("0");
+    expect(page.doc.body.dataset.fin).toBe("0");
+    expect(page.doc.body.dataset.gov).toBe("1");
+    for (const hidden of ["#btn-create-team", "#btn-create-match", "#btn-create-venue", "#btn-save-draft", "#btn-finalize", "[data-toggle]", "[data-cancel]", "[data-classification-save]", "[data-redeem]", "#q-release-reason"]) {
+      expect(shown(page, hidden), hidden).toBe(false);
+    }
+    expect(page.doc.querySelectorAll("#table-matches tbody tr").length).toBeGreaterThan(0);
+    page.close();
+  });
+
+  it("all three classes: every control is drawn", async () => {
+    const page = await loadPage({});
+    await loadQualifications(page);
+    for (const visible of ["#btn-create-team", "#btn-create-match", "#btn-create-venue", "#btn-create-activation", "#btn-save-draft", "#btn-finalize", "[data-toggle]", "[data-cancel]", "[data-classification-save]", "[data-redeem]", "#q-release-reason"]) {
+      expect(shown(page, visible), visible).toBe(true);
+    }
+    expect(page.doc.getElementById("result-editor")!.hasAttribute("inert")).toBe(false);
+    page.close();
+  });
+});
+
+describe("J. authority that disappears, and people who change", () => {
+  it("a 403 on an action is shown once and NEVER repeated; the page asks who the member is, and if the authority is gone the screen closes and empties", async () => {
+    const page = await loadPage({});
+    page.setResponder((call) => {
+      if (call.method === "POST" && call.url === `${API}/admin/teams`) return jsonReply(403, { error: "This action requires OPERATIONAL authority." });
+      return undefined;
+    });
+    page.setAccess(jsonReply(403, { error: "This account has no administrative access." }));
+    (page.doc.getElementById("t-name") as HTMLInputElement).value = "New FC";
+    (page.doc.getElementById("btn-create-team") as HTMLButtonElement).click();
+    await page.until(() => !sectionsVisible(page), "the screen closing");
+    await settle(80);
+    expect(posts(page, "/admin/teams")).toHaveLength(1); // the refused request was sent exactly once
+    expect(gateText(page)).toBe("Esta cuenta no tiene acceso administrativo");
+    expect(tablesEmpty(page)).toBe(true);
+    expect((page.doc.getElementById("t-name") as HTMLInputElement).value).toBe("");
+    page.close();
+  });
+
+  it("a 403 for one action while the member still holds other authority keeps the screen, and the refused action is not repeated", async () => {
+    const page = await loadPage({ classes: ["OPERATIONAL"] });
+    page.setResponder((call) => {
+      if (call.method === "POST" && call.url === `${API}/admin/venues`) return jsonReply(403, { error: "This action requires OPERATIONAL authority." });
+      return undefined;
+    });
+    for (const [id, value] of [["v-name", "Beer Box 2"], ["v-lat", "14.1"], ["v-lng", "-87.2"], ["v-radius", "100"]]) (page.doc.getElementById(id as string) as HTMLInputElement).value = value as string;
+    (page.doc.getElementById("btn-create-venue") as HTMLButtonElement).click();
+    await page.until(() => page.text("#msg-venue").length > 0, "the refusal message");
+    await settle(80);
+    expect(posts(page, "/admin/venues")).toHaveLength(1);
+    expect(sectionsVisible(page)).toBe(true);
+    page.close();
+  });
+
+  it("a revoked CLASS takes its controls away at the next check: OPERATIONAL withdrawn, the finalizer's controls stay", async () => {
+    const page = await loadPage({});
+    expect(shown(page, "#btn-create-team")).toBe(true);
+    page.setAccess(jsonReply(200, { access: true, classes: ["CONSEQUENTIAL_FINALIZER"] }));
+    page.fireAuthEvent();
+    await page.until(() => !shown(page, "#btn-create-team"), "the operational controls leaving");
+    expect(shown(page, "#btn-finalize")).toBe(true);
+    page.close();
+  });
+
+  it("administrator → another member: the controls and every list are gone at once, before the new answer; a late answer for the old person is thrown away", async () => {
+    const page = await loadPage({});
+    expect(sectionsVisible(page)).toBe(true);
+    const slowForOld = deferred<Reply>();
+    page.setAccess(slowForOld.promise); // the check for whoever is next is slow
+    page.setAuth({ ...OTHER_MEMBER });
+    page.fireAuthEvent();
+    await page.until(() => !sectionsVisible(page), "the screen closing at once");
+    expect(tablesEmpty(page)).toBe(true);
+    expect(gateText(page)).toBe("Comprobando acceso…");
+    // the new member turns out to hold nothing; then the OLD answer (an administrator's) arrives late
+    page.setAccess(jsonReply(403, {}));
+    page.setAuth({ ...OTHER_MEMBER, gamingMemberId: "other-2" });
+    page.fireAuthEvent();
+    await settle(60);
+    slowForOld.resolve(jsonReply(200, { access: true, classes: ALL_CLASSES }));
+    await settle(80);
+    expect(sectionsVisible(page)).toBe(false);
+    expect(tablesEmpty(page)).toBe(true);
+    expect(gateText(page)).toBe("Esta cuenta no tiene acceso administrativo");
+    page.close();
+  });
+
+  it("another member → the administrator: nothing appears until the server confirms, and then only their own data", async () => {
+    const page = await loadPage({ access: jsonReply(403, {}), noWait: true });
+    expect(sectionsVisible(page)).toBe(false);
+    const pending = deferred<Reply>();
+    page.setAccess(pending.promise);
+    page.setAuth({ ...STAFF_STATE, gamingMemberId: "staff-2" });
+    page.fireAuthEvent();
+    await settle(60);
+    expect(sectionsVisible(page)).toBe(false);
+    expect(adminGets(page)).toEqual([]);
+    pending.resolve(jsonReply(200, { access: true, classes: ALL_CLASSES }));
+    await page.until(() => sectionsVisible(page) && page.doc.querySelectorAll("#table-matches tbody tr").length > 0, "the administrator's screen");
+    page.close();
+  });
+
+  it("the same member signing in again keeps the screen while the check repeats; if that check cannot be made, every control is switched off but nothing is lost", async () => {
+    const page = await loadPage({});
+    await loadQualifications(page);
+    const rowsBefore = page.doc.querySelectorAll("#table-qualifications tbody tr").length;
+    const hold = deferred<Reply>();
+    page.setAccess(hold.promise);
+    page.fireAuthEvent();
+    await settle(40);
+    expect(sectionsVisible(page)).toBe(true); // same confirmed member: no flicker while the check repeats
+    hold.resolve("reject" as unknown as Reply);
+    await page.until(() => (page.doc.getElementById("admin-sections") as HTMLElement).hasAttribute("inert"), "the screen switching off");
+    expect(page.text("#gate-message")).toContain("No se pudo volver a comprobar el acceso");
+    expect(page.doc.querySelectorAll("#table-qualifications tbody tr").length).toBe(rowsBefore); // what was on screen is kept
+    expect((page.doc.getElementById("btn-gate-retry") as HTMLElement).hidden).toBe(false);
+    page.close();
+  });
+
+  it("«Cerrar sesión» signs out and returns to the sign-in request; «Usar otra cuenta» signs out and opens the login-only sign-in", async () => {
+    const out = await loadPage({ access: jsonReply(403, {}), noWait: true });
+    (out.doc.getElementById("btn-gate-signout") as HTMLButtonElement).click();
+    await settle(60);
+    expect(out.signOutCount()).toBe(1);
+    expect(gateText(out)).toBe("Inicia sesión con una cuenta administrativa.");
+    out.close();
+
+    const other = await loadPage({ access: jsonReply(403, {}), noWait: true });
+    (other.doc.getElementById("btn-gate-switch") as HTMLButtonElement).click();
+    await settle(60);
+    expect(other.signOutCount()).toBe(1);
+    expect(other.signInOpens).toEqual([{ mode: "login" }]);
+    expect(sectionsVisible(other)).toBe(false);
+    other.close();
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// K. The operational view. The historical contract-test data (an exact list of ids kept by the SERVER) is not requested unless the admin asks
+//    for it by name: the lists come back without it, so no roster is requested for a team that is not shown. Hiding rows in the page after
+//    loading them would not save the requests; these tests count the requests.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+import { TEMPORARY_FIXTURE_EXCLUSION as MANIFEST } from "@/lib/gaming/predictions/fixtureExclusionManifest";
+
+describe("K. Operational view and the historical test data", () => {
+  const FLAG = "?includeFixtures=1";
+  const OWN_TEAMS = [{ teamId: "e1000000-0000-4000-8000-000000000001", name: "Equipo A (ensayo)" }, { teamId: "e1000000-0000-4000-8000-000000000002", name: "Equipo B (ensayo)" }];
+  const OWN_MATCH = { matchId: "e3000000-0000-4000-8000-000000000001", homeTeamId: OWN_TEAMS[0]!.teamId, awayTeamId: OWN_TEAMS[1]!.teamId, competition: "Ensayo de ubicación — sin valor", kickoffAt: "2099-01-01T20:00:00.000Z", cancelledAt: null, activityClassification: null, xpEligible: null };
+  const FIXTURE_TEAMS = MANIFEST.teams.map((teamId, i) => ({ teamId, name: `${i % 2 ? "Barcelona" : "Real Madrid"} ${i}` }));
+  const FIXTURE_MATCHES = MANIFEST.matches.slice(0, 5).map((matchId, i) => ({ matchId, homeTeamId: FIXTURE_TEAMS[i * 2]!.teamId, awayTeamId: FIXTURE_TEAMS[i * 2 + 1]!.teamId, competition: "Contract Test", kickoffAt: "2026-08-25T18:00:00.000Z", cancelledAt: null, activityClassification: "RANKED", xpEligible: null }));
+
+  // What the server answers: the default view without the manifest, ?includeFixtures=1 with it (the server side is tested in
+  // predictionsAdminFixtureRoutes.test.ts and fixtureExclusion.test.ts).
+  const catalog: Responder = (call) => {
+    const [path0, query] = call.url.split("?");
+    const withHistory = query === "includeFixtures=1";
+    if (call.method !== "GET") return undefined;
+    if (path0 === `${API}/admin/teams`) return jsonReply(200, { teams: withHistory ? [...OWN_TEAMS, ...FIXTURE_TEAMS] : OWN_TEAMS });
+    const roster = path0!.match(/^\/api\/gaming\/predictions\/admin\/teams\/([^/]+)\/players$/);
+    if (roster) return jsonReply(200, { players: [] });
+    if (path0 === `${API}/admin/matches`) return jsonReply(200, { matches: withHistory ? [OWN_MATCH, ...FIXTURE_MATCHES] : [OWN_MATCH], teams: withHistory ? [...OWN_TEAMS, ...FIXTURE_TEAMS] : OWN_TEAMS });
+    if (path0 === `${API}/admin/venues`) return jsonReply(200, { venues: [{ venueId: "e4000000-0000-4000-8000-000000000001", name: "Sede de ensayo privado", latitude: 1, longitude: 1, radiusMeters: 100, active: true }] });
+    if (path0 === `${API}/admin/activations`) return jsonReply(200, { activations: [] });
+    return undefined;
+  };
+  const checkbox = (page: Page) => page.doc.getElementById("chk-fixtures") as HTMLInputElement;
+  const lists = (page: Page) => page.calls.filter((c) => c.method === "GET" && /\/admin\/(teams|matches|venues|activations)(\?|$)/.test(c.url));
+  const rosterCalls = (page: Page) => page.calls.filter((c) => /\/players$/.test(c.url));
+  const clear = (page: Page) => { page.calls.length = 0; };
+  const settleK = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+
+  it("loads the operational view: the lists without the history, and a roster request only for the teams that are shown", async () => {
+    const page = await loadPage({ respond: catalog, noActivations: true });
+    expect(lists(page).map((c) => c.url)).toEqual([`${API}/admin/teams`, `${API}/admin/matches`, `${API}/admin/venues`, `${API}/admin/activations`]);
+    expect(rosterCalls(page)).toHaveLength(OWN_TEAMS.length);
+    for (const call of page.calls) expect(call.url, "no fixture id is requested").not.toMatch(new RegExp(MANIFEST.teams.slice(0, 82).join("|")));
+    // access check + teams + 2 rosters + matches + venues + activations
+    expect(page.calls.filter((c) => c.method === "GET")).toHaveLength(1 + 1 + OWN_TEAMS.length + 3);
+    expect(page.doc.querySelectorAll("#p-team option")).toHaveLength(OWN_TEAMS.length);
+    page.close();
+  });
+
+  it("offers the history by name: «Mostrar datos de prueba históricos», off, with a note saying what is hidden", async () => {
+    const page = await loadPage({ respond: catalog, noActivations: true });
+    const label = checkbox(page).closest("label")!;
+    expect(label.textContent!.trim()).toBe("Mostrar datos de prueba históricos");
+    expect(checkbox(page).checked).toBe(false);
+    expect(page.text("#fixture-view-note")).toBe("Vista operativa: los datos de prueba históricos están ocultos.");
+    page.close();
+  });
+
+  it("turning it on asks the server for the history (all four lists with ?includeFixtures=1) and then reads every roster it was given", async () => {
+    const page = await loadPage({ respond: catalog, noActivations: true });
+    clear(page);
+    checkbox(page).checked = true;
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await page.until(() => page.doc.querySelectorAll("#p-team option").length === OWN_TEAMS.length + FIXTURE_TEAMS.length, "the historical teams");
+    expect(lists(page).map((c) => c.url)).toEqual([`${API}/admin/teams${FLAG}`, `${API}/admin/matches${FLAG}`, `${API}/admin/venues${FLAG}`, `${API}/admin/activations${FLAG}`]);
+    expect(rosterCalls(page)).toHaveLength(OWN_TEAMS.length + FIXTURE_TEAMS.length);
+    expect(page.doc.querySelectorAll("#table-matches tbody tr")).toHaveLength(1 + FIXTURE_MATCHES.length);
+    expect(page.text("#fixture-view-note")).toContain("Se muestran también los datos de prueba históricos");
+    page.close();
+  });
+
+  it("turning it off goes back to the operational view and asks for it again: the history leaves the screen and costs no roster", async () => {
+    const page = await loadPage({ respond: catalog, noActivations: true });
+    checkbox(page).checked = true;
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await page.until(() => page.doc.querySelectorAll("#p-team option").length > OWN_TEAMS.length, "the historical teams");
+    clear(page);
+    checkbox(page).checked = false;
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await page.until(() => page.doc.querySelectorAll("#p-team option").length === OWN_TEAMS.length, "the operational view");
+    expect(lists(page).map((c) => c.url)).toEqual([`${API}/admin/teams`, `${API}/admin/matches`, `${API}/admin/venues`, `${API}/admin/activations`]);
+    expect(rosterCalls(page)).toHaveLength(OWN_TEAMS.length);
+    expect(page.doc.querySelectorAll("#table-matches tbody tr")).toHaveLength(1);
+    expect(page.text("#fixture-view-note")).toBe("Vista operativa: los datos de prueba históricos están ocultos.");
+    page.close();
+  });
+
+  it("counts the requests: the operational view needs a handful where the historical view needs one per team (equivalent catalog of 82 fixture teams)", async () => {
+    const operational = await loadPage({ respond: catalog, noActivations: true });
+    const operationalGets = operational.calls.filter((c) => c.method === "GET").length;
+    clear(operational);
+    checkbox(operational).checked = true;
+    checkbox(operational).dispatchEvent(new operational.win.Event("change", { bubbles: true }));
+    await operational.until(() => operational.doc.querySelectorAll("#p-team option").length === OWN_TEAMS.length + FIXTURE_TEAMS.length, "the historical teams");
+    const historicalReload = operational.calls.filter((c) => c.method === "GET").length; // teams + rosters + matches + venues + activations
+    console.log("portal requests: operational load =", operationalGets, "| historical reload (without the access check) =", historicalReload);
+    expect(operationalGets).toBe(1 + 1 + OWN_TEAMS.length + 3);
+    expect(historicalReload).toBe(1 + OWN_TEAMS.length + FIXTURE_TEAMS.length + 3);
+    operational.close();
+  });
+
+  it("the switch is guarded: a second change while the reload runs sends nothing more", async () => {
+    let release: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const slow: Responder = async (call) => {
+      if (call.url === `${API}/admin/teams${FLAG}`) await held;
+      return catalog(call);
+    };
+    const page = await loadPage({ respond: slow, noActivations: true });
+    clear(page);
+    checkbox(page).checked = true;
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await settleK();
+    expect(checkbox(page).disabled).toBe(true);
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await settleK();
+    expect(page.calls.filter((c) => c.url === `${API}/admin/teams${FLAG}`)).toHaveLength(1);
+    release!();
+    await page.until(() => !checkbox(page).disabled, "the switch to be available again");
+    page.close();
+  });
+
+  it("another person, or signing out, always starts in the operational view", async () => {
+    const page = await loadPage({ respond: catalog, noActivations: true });
+    checkbox(page).checked = true;
+    checkbox(page).dispatchEvent(new page.win.Event("change", { bubbles: true }));
+    await page.until(() => page.doc.querySelectorAll("#p-team option").length > OWN_TEAMS.length, "the historical teams");
+    page.setAuth({ status: "authenticated", email: "other@example.com", gamingMemberId: "staff-2", displayName: "Other" });
+    clear(page);
+    page.fireAuthEvent();
+    await page.until(() => lists(page).length === 4 && page.doc.querySelectorAll("#p-team option").length === OWN_TEAMS.length, "the new person's operational view");
+    expect(checkbox(page).checked).toBe(false);
+    expect(lists(page).every((c) => !c.url.includes("includeFixtures"))).toBe(true);
+    page.close();
+  });
+
+  it("creating something is not affected: the create requests carry no history flag, and the next reload keeps the chosen view", async () => {
+    const page = await loadPage({ noActivations: true, respond: (call) => (call.method === "POST" && call.url === `${API}/admin/teams` ? jsonReply(201, { team: { teamId: "t-new", name: "New" } }) : catalog(call)) });
+    (page.doc.getElementById("t-name") as HTMLInputElement).value = "Equipo C (ensayo)";
+    clear(page);
+    (page.doc.getElementById("btn-create-team") as HTMLButtonElement).click();
+    await page.until(() => page.calls.some((c) => c.method === "GET" && c.url === `${API}/admin/teams`), "the reload after creating");
+    const post = page.calls.find((c) => c.method === "POST")!;
+    expect(post.url).toBe(`${API}/admin/teams`);
+    expect(page.calls.filter((c) => c.method === "GET" && c.url.includes("includeFixtures"))).toEqual([]);
+    page.close();
+  });
+
+  it("without the server's confirmation nothing is requested at all, with or without the history", async () => {
+    const page = await loadPage({ access: jsonReply(403, {}), noWait: true, respond: catalog });
+    expect(page.calls.filter((c) => /\/admin\/(teams|matches|venues|activations)/.test(c.url))).toEqual([]);
+    page.close();
+  });
+
+  it("the page names the history by its switch only: no id of the manifest, no name or prefix test, no filter applied after loading", () => {
+    expect(HTML).not.toMatch(/Contract Test|Real Madrid|Barcelona/);
+    expect(HTML).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    expect(HTML).toContain('"?includeFixtures=1"');
+    expect((HTML.match(/catalogQuery\(\)/g) ?? []).length).toBe(4); // the four list requests, and nothing else
   });
 });

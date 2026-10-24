@@ -21,6 +21,8 @@ interface Overrides {
   match?: Record<string, unknown>;
   qualification?: Record<string, unknown> | null;
   authenticated?: boolean;
+  /** What getState reports when authenticated is false: "unauthenticated" (default) or "profile_incomplete". */
+  authStatus?: string;
 }
 
 function buildMatch(over: Record<string, unknown> = {}) {
@@ -72,6 +74,7 @@ async function loadPage(over: Overrides = {}) {
   const match = buildMatch(over.match);
   const mine = { prediction: PREDICTION, evaluation: EVALUATION, qualification: over.qualification === undefined ? qualification() : over.qualification };
   const calls: string[] = [];
+  const signIns: Array<Record<string, any>> = [];
   const dom = new JSDOM(HTML, {
     url: "http://localhost/soccer-predictions.html",
     runScripts: "dangerously",
@@ -82,7 +85,10 @@ async function loadPage(over: Overrides = {}) {
       window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
       w.UrbanoAuth = {
         attachSignInButton: () => {},
-        getState: async () => (over.authenticated === false ? { status: "unauthenticated" } : { status: "authenticated", email: "m@example.com", gamingMemberId: "member-1", displayName: "Member" }),
+        getState: async () => (over.authenticated === false ? { status: over.authStatus ?? "unauthenticated" } : { status: "authenticated", email: "m@example.com", gamingMemberId: "member-1", displayName: "Member" }),
+        // The panel is not run here: what the page ASKS for is recorded, and the stored intent is what a test hands back.
+        openSignIn: (options: Record<string, any>) => { signIns.push(options); w.__intent = options && options.intent ? options.intent : null; return true; },
+        consumeIntent: () => { const intent = w.__intent || null; w.__intent = null; return intent; },
         getAccessToken: async () => "stub-token",
         onAuthStateChange: async () => () => {},
       };
@@ -102,7 +108,7 @@ async function loadPage(over: Overrides = {}) {
     if (Date.now() > deadline) throw new Error("page did not render");
   }
   const prizeLine = () => [...doc.querySelectorAll("p.msg")].find((p) => (p.textContent ?? "").startsWith("Prize qualified"));
-  return { win, doc, calls, prizeLine, card: () => doc.querySelector("#content .card") as HTMLElement | null, close: () => dom.window.close() };
+  return { win, doc, calls, signIns, prizeLine, card: () => doc.querySelector("#content .card") as HTMLElement | null, close: () => dom.window.close() };
 }
 
 describe("D. Prize qualified line names the prize", () => {
@@ -198,7 +204,9 @@ describe("D. Prize qualified line names the prize", () => {
 
     const signedOut = await loadPage({ authenticated: false });
     expect(signedOut.prizeLine()).toBeUndefined();
-    expect(signedOut.doc.body.textContent).toContain("Log in or create an account to make your prediction.");
+    // This match is finalized: signing in offers the results, never a prediction (see section H).
+    expect(signedOut.doc.body.textContent).toContain("Log in to see your results for this match.");
+    expect(signedOut.doc.body.textContent).not.toContain("make your prediction");
     none.close();
     signedOut.close();
   });
@@ -437,6 +445,103 @@ describe("Account entry on the member page", () => {
     const page = await loadPage({ authenticated: false });
     expect(page.card()).not.toBeNull();
     (page.doc.querySelector("[data-login-cta]") as HTMLElement).click(); // falls back to the header button; must not throw
+    page.close();
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// H. The words of the sign-in prompt follow the state of the match. Only an OPEN match invites a prediction. These texts decide nothing:
+//    the server still refuses a prediction on a closed or finalized match, and nothing here is sent.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+describe("H. Access wording follows the state of the match", () => {
+  const OPEN = { finalized: false, finalResult: null, kickoffAt: "2099-01-01T00:00:00.000Z" };
+  const CLOSED = { finalized: false, finalResult: null, kickoffAt: "2026-08-25T18:00:00.000Z" };
+  const FINAL = { finalized: true, kickoffAt: "2026-08-25T18:00:00.000Z" };
+  const body = (page: { doc: Document }) => (page.doc.querySelector("#content .card")?.textContent ?? "").replace(/\s+/g, " ");
+  const cta = (page: { doc: Document }) => page.doc.querySelector("[data-login-cta]") as HTMLButtonElement;
+
+  it("open: access to participate, with the original prompt and button", async () => {
+    const page = await loadPage({ authenticated: false, match: OPEN });
+    expect(body(page)).toContain("Log in or create an account to make your prediction.");
+    expect(cta(page).textContent).toBe("Log in or create account");
+    cta(page).click();
+    expect(page.signIns).toEqual([{ intent: { kind: "predict", matchId: "m1" } }]);
+    page.close();
+  });
+
+  it("closed (kick-off passed, no result yet): access to consult an existing participation, and no invitation to predict or to create an account", async () => {
+    const page = await loadPage({ authenticated: false, match: CLOSED });
+    expect(body(page)).toContain("Log in to view your participation in this match.");
+    expect(body(page)).not.toMatch(/make your prediction|create an account|create account|Create account/i);
+    expect(cta(page).textContent).toBe("Log in");
+    cta(page).click();
+    expect(page.signIns).toEqual([{ intent: { kind: "view", matchId: "m1" }, mode: "login" }]);
+    page.close();
+  });
+
+  it("finalized: access to consult results, and no invitation to predict or to create an account", async () => {
+    const page = await loadPage({ authenticated: false, match: FINAL });
+    expect(body(page)).toContain("Log in to see your results for this match.");
+    expect(body(page)).not.toMatch(/make your prediction|create an account|create account|Create account/i);
+    expect(cta(page).textContent).toBe("Log in");
+    cta(page).click();
+    expect(page.signIns).toEqual([{ intent: { kind: "view", matchId: "m1" }, mode: "login" }]);
+    page.close();
+  });
+
+  it("an unfinished account: open keeps its invitation; closed and finalized only ask to finish the account, never to predict", async () => {
+    const open = await loadPage({ authenticated: false, authStatus: "profile_incomplete", match: OPEN });
+    expect(body(open)).toContain("make your prediction");
+    expect(cta(open).textContent).toBe("Finish creating your account");
+    for (const state of [CLOSED, FINAL]) {
+      const page = await loadPage({ authenticated: false, authStatus: "profile_incomplete", match: state });
+      expect(body(page)).toContain("One more step: choose a display name to finish creating your account.");
+      expect(body(page)).not.toContain("make your prediction");
+      expect(cta(page).textContent).toBe("Finish creating your account");
+      page.close();
+    }
+    open.close();
+  });
+
+  it("the wording changes nothing the server decides: no prediction request is made by any prompt", async () => {
+    for (const state of [OPEN, CLOSED, FINAL]) {
+      const page = await loadPage({ authenticated: false, match: state });
+      cta(page).click();
+      expect(page.calls.filter((url) => url.endsWith("/predict"))).toEqual([]);
+      expect(page.calls).toEqual([`${API}/matches`]);
+      page.close();
+    }
+  });
+
+  it("coming back after logging in to VIEW only brings the card into view: no signed-in invitation, no form focus", async () => {
+    const page = await loadPage({ authenticated: false, match: CLOSED });
+    let scrolled = 0;
+    (page.win as any).Element.prototype.scrollIntoView = function () { scrolled += 1; };
+    cta(page).click(); // stores the intent to view
+    // a stand-in for the place where the signed-in note is written on an open match: a view must leave it empty
+    const holder = page.doc.createElement("div");
+    holder.id = "submit-msg-m1";
+    page.doc.querySelector("#content .card")!.appendChild(holder);
+    (page.win as any).eval("resumeIntent({ status: 'authenticated' })");
+    expect(scrolled).toBe(1);
+    expect(holder.textContent).toBe("");
+    expect(page.doc.body.textContent).not.toContain("You're signed in. Make your prediction below.");
+    page.close();
+  });
+
+  it("while the predict intent from an open match still brings the signed-in note, as before", async () => {
+    const page = await loadPage({ authenticated: false, match: OPEN });
+    (page.win as any).Element.prototype.scrollIntoView = function () {};
+    cta(page).click();
+    // an open match has the form once signed in; here only the note is checked, so a stand-in container is given to the card
+    const card = page.doc.querySelector("#content .card")!;
+    const holder = page.doc.createElement("div");
+    holder.id = "submit-msg-m1";
+    card.appendChild(holder);
+    (page.win as any).eval("resumeIntent({ status: 'authenticated' })");
+    expect(page.doc.body.textContent).toContain("You're signed in. Make your prediction below.");
     page.close();
   });
 });

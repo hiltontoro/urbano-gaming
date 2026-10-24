@@ -7,6 +7,7 @@ import {
   statusForPredictionsError,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createMatch } from "@/lib/gaming/predictions/adminCatalog";
+import { visibleInAdminView } from "@/lib/gaming/predictions/fixtureExclusion";
 import { PROGRESSIVE_PREDICTION_CONTRACT } from "@/lib/gaming/predictions/prizeLadder";
 import type { PredictionContract } from "@/lib/gaming/predictions/types";
 
@@ -22,8 +23,9 @@ export async function GET(request: Request) {
   if ("errorResponse" in admin) return admin.errorResponse;
 
   const repo = buildPredictionsRepo(credentials);
-  const matches = await repo.listMatches();
-  const teams = await repo.listTeams();
+  // Default view: the temporary fixture manifest is left out (?includeFixtures=1 brings the historical test data back).
+  const matches = visibleInAdminView(request, await repo.listMatches(), "matches", (match) => match.matchId);
+  const teams = visibleInAdminView(request, await repo.listTeams(), "teams", (team) => team.teamId);
   return NextResponse.json({ matches, teams });
 }
 

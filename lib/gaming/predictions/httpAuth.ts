@@ -232,6 +232,44 @@ export async function requireAnyAdminAuthority(
   return { gamingMemberId: authState.gamingMember.gamingMemberId };
 }
 
+/**
+ * What the Predictions admin portal may show this caller. A HINT FOR THE INTERFACE ONLY: it grants nothing, and no admin route
+ * consults it — every one of them keeps its own requirePlatformAuthorityHttp / requireAnyAdminAuthority check, fresh per call.
+ *
+ *   401  no valid token, or a verified identity that has no finished Gaming Member (this never creates one)
+ *   403  an authenticated Gaming Member holding none of the three platform classes
+ *   200  the active classes among those the admin surface understands, in a stable order
+ *
+ * No email, domain or display name is read anywhere: the only thing that matters is the grants of the resolved member.
+ */
+export async function resolveAdminAccessHttp(
+  request: Request,
+  credentials: { url: string; serviceKey: string }
+): Promise<{ gamingMemberId: string; classes: PlatformAuthorityClass[] } | { errorResponse: NextResponse }> {
+  const authState = await resolveRequestGamingAuth(request, credentials);
+
+  if (authState.status !== "authenticated") {
+    return {
+      errorResponse: NextResponse.json(
+        { error: "A valid Authorization header for an authenticated Gaming Member is required." },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const authorityRepo = new SupabaseAuthorityRepository(credentials.url, credentials.serviceKey);
+  const active = await authorityRepo.listActiveAuthorityClasses(authState.gamingMember.gamingMemberId);
+  const classes = ADMIN_READ_CLASSES.filter((authorityClass) => active.includes(authorityClass));
+
+  if (classes.length === 0) {
+    return {
+      errorResponse: NextResponse.json({ error: "This account has no administrative access." }, { status: 403 }),
+    };
+  }
+
+  return { gamingMemberId: authState.gamingMember.gamingMemberId, classes };
+}
+
 /** Resolves the caller as any authenticated Gaming Member (no admin requirement). */
 export async function requireGamingMember(
   request: Request,
