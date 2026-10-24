@@ -91,6 +91,28 @@
     .invite-actions { flex-direction: column; }
     .invite-actions button { width: 100%; }
   }
+  /* UG-CR-GATE-SSS-014: the captain's plan-change card (built only after the server confirms the captain role and a proposal). */
+  #plan-change-card [hidden] { display: none !important; }
+  #plan-change-card .msg, #plan-change-card li, #plan-change-card td { overflow-wrap: break-word; }
+  #plan-change-teams { list-style: none; margin: 8px 0; padding: 0; font-size: 14px; }
+  #plan-change-teams li { margin: 4px 0; }
+  table.plan-change-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; table-layout: fixed; }
+  table.plan-change-table th, table.plan-change-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.plan-change-table th:nth-child(1) { width: 30%; } table.plan-change-table th:nth-child(2), table.plan-change-table th:nth-child(3) { width: 35%; }
+  table.plan-change-table tr[data-changed="true"] td { background: var(--exp-purple-bg); }
+  table.plan-change-table tr[data-changed="false"] td { color: var(--muted); }
+  .plan-change-flag { display: block; margin-top: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  tr[data-changed="true"] .plan-change-flag { color: var(--gold); }
+  .plan-change-reject-panel { margin: 12px 0 4px; padding: 12px 14px; border: 1px solid var(--bad); border-radius: 10px; background: rgba(248, 113, 113, 0.06); }
+  #plan-change-card .btn-secondary { min-height: 44px; }
+  @media (max-width: 640px) {
+    table.plan-change-table, table.plan-change-table tbody, table.plan-change-table tr, table.plan-change-table td { display: block; }
+    table.plan-change-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    table.plan-change-table tr { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-card); padding: 6px 12px; margin: 0 0 10px; }
+    table.plan-change-table td { border-bottom: none; padding: 6px 0; font-size: 14px; }
+    table.plan-change-table td[data-label]::before { content: attr(data-label); content: attr(data-label) / ""; display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    #plan-change-card button { min-height: 44px; width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -379,6 +401,10 @@ async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
   headerCard.querySelector(".competition-title").textContent = competition.name;
   if (competition.cancelledReason) headerCard.querySelector(".cancelled-reason").textContent = competition.cancelledReason;
   wrap.appendChild(headerCard);
+
+  // --- Tournament plan change (UG-CR-GATE-SSS-014) — contextual to THIS one addressed competition. The card is asked for only when the server's view of this competition
+  // carries the exact captain signal, and it is built only after the amendment status has been read and judged; see mountPlanChangeCard. There is no card on the list. ---
+  mountPlanChangeCard(competitionId, view, headerCard);
 
   // --- Scorekeeper action (UG-CR-GATE-100) — contextual to THIS one competition. It is offered only when the server, having just loaded
   // this addressed competition for this signed-in member, says they are currently appointed to score at least one of its fixtures
@@ -863,6 +889,8 @@ async function renderInvitationPreview(competitionCode, teamCode) {
 
 async function renderApp() {
   const myGeneration = ++renderGeneration;
+  // UG-CR-GATE-SSS-014: any new render (another competition, the list, a session change) removes the captain's plan-change card in this very turn and invalidates its answers.
+  removePlanChangeCard();
   const authState = await UrbanoAuth.getState();
   if (myGeneration !== renderGeneration) return;
 
@@ -923,6 +951,361 @@ async function renderApp() {
   if (myGeneration !== renderGeneration) return;
   content.innerHTML = "";
   content.appendChild(rendered);
+}
+
+/* The same read-only helpers the organizer page uses for the plan-change surfaces (kept identical so both pages judge a status the same way). */
+
+const AMEND_STATUS_TEXT = {
+  PENDING: "Waiting for all four captains to confirm",
+  ACTIVATED: "Approved by all four captains — the plan was changed",
+  REJECTED: "Rejected by a captain — the plan was not changed",
+  WITHDRAWN: "Withdrawn by the organizer — the plan was not changed",
+  SUPERSEDED: "Replaced by a newer proposal — the plan was not changed",
+  EXPIRED: "Expired before all four captains confirmed — the plan was not changed",
+};
+const AMEND_DECISION_TEXT = { CONFIRMED: "Confirmed", REJECTED: "Rejected" };
+const AMEND_DIGEST = /^[0-9a-f]{64}$/;
+const amendIsObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const amendIsText = (v) => typeof v === "string";
+const amendIsCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+function amendValidFacts(f) {
+  return amendIsObject(f) && amendIsObject(f.venue) && amendIsText(f.venue.name) && amendIsText(f.venue.locationDescription) && amendIsText(f.venue.restrictionNotes)
+    && Number.isInteger(f.venue.simultaneousMatchCapacity)
+    && Array.isArray(f.pitches) && f.pitches.every((p) => amendIsObject(p) && amendIsText(p.label) && typeof p.usable === "boolean" && amendIsText(p.restrictionNotes) && Array.isArray(p.supportedFormats) && p.supportedFormats.every(amendIsText))
+    && Array.isArray(f.dates) && f.dates.every((d) => amendIsObject(d) && amendIsText(d.date) && Array.isArray(d.windows) && d.windows.every((w) => amendIsObject(w) && amendIsText(w.start) && amendIsText(w.end)));
+}
+
+function amendValidProposal(p) {
+  if (!amendIsObject(p) || !amendIsText(p.digest) || !AMEND_DIGEST.test(p.digest) || !Number.isInteger(p.sequenceNumber) || p.sequenceNumber < 1) return false;
+  if (!Object.prototype.hasOwnProperty.call(AMEND_STATUS_TEXT, p.status) || typeof p.actionable !== "boolean") return false;
+  if (!amendIsText(p.createdAt) || !amendIsText(p.expiresAt) || !(p.resolvedAt === null || amendIsText(p.resolvedAt))) return false;
+  if (p.requiredCount !== 4 || !amendIsCount(p.confirmedCount) || p.confirmedCount > 4) return false;
+  if (!Array.isArray(p.teams) || p.teams.length !== 4) return false;
+  if (!p.teams.every((t) => amendIsObject(t) && amendIsText(t.teamName) && (t.decision === null || t.decision === "CONFIRMED" || t.decision === "REJECTED"))) return false;
+  if (p.teams.filter((t) => t.decision === "CONFIRMED").length !== p.confirmedCount) return false;
+  if (!(p.myDecision === null || p.myDecision === "CONFIRMED" || p.myDecision === "REJECTED")) return false;
+  return amendValidFacts(p.proposed) && amendValidFacts(p.current);
+}
+
+function amendValidStatus(s) {
+  if (!amendIsObject(s) || !amendIsObject(s.role) || typeof s.role.organizer !== "boolean" || typeof s.role.captain !== "boolean" || typeof s.windowOpen !== "boolean") return false;
+  if (!(s.myTeamName === null || amendIsText(s.myTeamName))) return false;
+  if (s.amendment !== null && !amendValidProposal(s.amendment)) return false;
+  if (s.history !== null && !(Array.isArray(s.history) && s.history.every((h) => amendIsObject(h) && Number.isInteger(h.sequenceNumber) && Object.prototype.hasOwnProperty.call(AMEND_STATUS_TEXT, h.status) && amendIsText(h.createdAt) && (h.resolvedAt === null || amendIsText(h.resolvedAt))))) return false;
+  if (s.amendment !== null && s.amendment.actionable && (!s.windowOpen || s.amendment.status !== "PENDING")) return false;
+  return true;
+}
+
+function amendFormatUtc(iso) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})[^Z]*Z$/.exec(iso);
+  return m ? m[1] + " " + m[2] + " UTC" : iso;
+}
+
+function amendFormatLabel(key) {
+  const m = /^SOCCER_(\d)V(\d)$/.exec(key);
+  return m ? "Soccer " + m[1] + "v" + m[2] : key;
+}
+
+function planChangeRows(current, proposed) {
+  const rows = [];
+  const add = (label, was, now) => rows.push({ label, current: was, proposed: now, changed: was !== now });
+  add("Venue name", current.venue.name, proposed.venue.name);
+  add("Location", current.venue.locationDescription, proposed.venue.locationDescription);
+  add("Venue restrictions", current.venue.restrictionNotes || "None", proposed.venue.restrictionNotes || "None");
+  add("Matches at the same time", String(current.venue.simultaneousMatchCapacity), String(proposed.venue.simultaneousMatchCapacity));
+  const describePitch = (p) => (p.usable ? "Usable" : "Not usable") + "; suitable for " + (p.supportedFormats.length > 0 ? p.supportedFormats.map(amendFormatLabel).join(", ") : "no format") + (p.restrictionNotes ? "; " + p.restrictionNotes : "");
+  const key = (label) => label.toLowerCase();
+  const was = new Map(current.pitches.map((p) => [key(p.label), p]));
+  const now = new Map(proposed.pitches.map((p) => [key(p.label), p]));
+  for (const p of proposed.pitches) add("Pitch " + p.label, was.has(key(p.label)) ? describePitch(was.get(key(p.label))) : "Not in the current plan", describePitch(p));
+  for (const p of current.pitches) if (!now.has(key(p.label))) add("Pitch " + p.label, describePitch(p), "Removed");
+  const windows = (d) => d.windows.map((w) => w.start + "–" + w.end).join(", ");
+  const wasDates = new Map(current.dates.map((d) => [d.date, d]));
+  const nowDates = new Map(proposed.dates.map((d) => [d.date, d]));
+  for (const date of [...new Set([...wasDates.keys(), ...nowDates.keys()])].sort()) {
+    add("Date " + date, wasDates.has(date) ? windows(wasDates.get(date)) : "Not in the current plan", nowDates.has(date) ? windows(nowDates.get(date)) : "Removed");
+  }
+  return rows;
+}
+
+function makeRow() {
+  const tr = document.createElement("tr");
+  tr.setAttribute("role", "row");
+  return tr;
+}
+
+function makeCell(label, text) {
+  const td = document.createElement("td");
+  td.setAttribute("role", "cell");
+  td.dataset.label = label;
+  if (text !== undefined) td.textContent = text;
+  return td;
+}
+
+function renderPlanChangeComparison(current, proposed, inForce) {
+  // Once the change was approved the server's current plan IS the proposal, so a table of "Unchanged" rows would mislead: it then shows only the plan now in force.
+  const approved = inForce === true;
+  const table = document.createElement("table");
+  table.id = "plan-change-comparison";
+  table.className = "stack-table plan-change-table";
+  const head = document.createElement("thead");
+  head.appendChild(makeRow());
+  for (const label of approved ? ["What", "Plan now in force"] : ["What", "Current", "Proposed"]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.firstChild.appendChild(th);
+  }
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  for (const row of planChangeRows(current, proposed)) {
+    body.appendChild(makeRow());
+    const line = body.lastChild;
+    const what = makeCell("What", row.label);
+    if (!approved) {
+      line.dataset.changed = row.changed ? "true" : "false";
+      const flag = document.createElement("span");
+      flag.className = "plan-change-flag";
+      flag.textContent = row.changed ? "Changed" : "Unchanged";
+      what.appendChild(flag);
+    }
+    line.appendChild(what);
+    if (approved) line.appendChild(makeCell("Plan now in force", row.current));
+    else {
+      line.appendChild(makeCell("Current", row.current));
+      line.appendChild(makeCell("Proposed", row.proposed));
+    }
+  }
+  table.appendChild(body);
+  return table;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-014 — "Tournament plan change": the frozen captain's reconfirmation card, in the context of ONE addressed competition.
+//
+// After registration is frozen the organizer may propose a change to the venue's description, the pitches or the tournament dates, and each of the four frozen
+// captains must confirm it. Everything that matters is decided by the server: who the captains are, whether the window is open, whether a proposal is pending,
+// expired or resolved, who has answered, and what an answer would do. This card only SHOWS those answers and sends the captain's own answer to the accepted
+// route; it holds no authority of its own, and the server re-judges every answer.
+//
+// It exists only inside the addressed competition's own page, after the server has confirmed both things: the addressed view carries the exact signal
+// `planAmendment.captain === true`, and the amendment status for that competition came back well formed with the captain role and a proposal. There is no card
+// before then, none while the status is being read, none for a read that fails, is refused, is silent, cannot be understood or contradicts itself, and none on the
+// competition list. Whenever the page renders again (another competition, back to the list, a session change) the card is removed in the same turn and every
+// outstanding answer is ignored and its request aborted.
+//
+// The two actions appear only for a PENDING proposal that the server calls actionable, in an open window, when this captain's team has not yet answered. A
+// recorded answer, a closed window, a lost authority or any resolved or expired proposal shows the history only. A rejection needs a final confirmation, because
+// one rejection ends the proposal for everyone. After every answer — whatever it was — the status is read again from the server; this card never concludes
+// from an answer that a change happened. The proposal's digest is held in this script only, to bind the answer to the exact proposal on screen. Every value from
+// the server is placed with textContent, never parsed as markup.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// A plan-change request that neither answers nor fails within this time is treated as FAILED (and aborted).
+let AMENDMENT_TIMEOUT_MS = 20000;
+let planChangeState = null;
+
+function removePlanChangeCard() {
+  const state = planChangeState;
+  planChangeState = null;
+  if (state) for (const controller of state.controllers) { try { controller.abort(); } catch (err) { /* already finished */ } }
+  const existing = (state && state.card) || document.getElementById("plan-change-card");
+  if (existing) existing.remove();
+}
+
+/** A card is stale once the page has rendered again, the card was removed, or another card replaced it. */
+function planChangeStale(state) { return planChangeState !== state || renderGeneration !== state.generation; }
+
+/** One uncached, abortable request through the existing authenticated fetch, bounded by AMENDMENT_TIMEOUT_MS. */
+function planChangeFetch(state, method, suffix, body) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  if (controller) state.controllers.add(controller);
+  const path = "/api/gaming/competitions/" + encodeURIComponent(state.competitionId) + "/plan-amendment" + (suffix || "");
+  const options = { method, cache: "no-store" };
+  if (controller) options.signal = controller.signal;
+  if (body !== undefined) options.body = JSON.stringify(body);
+  let timer;
+  const timeout = new Promise((_resolve, reject) => { timer = setTimeout(() => { if (controller) { try { controller.abort(); } catch (err) { /* already finished */ } } reject(new Error("timeout")); }, AMENDMENT_TIMEOUT_MS); });
+  return Promise.race([authedFetch(path, options), timeout]).finally(() => { clearTimeout(timer); if (controller) state.controllers.delete(controller); });
+}
+
+/** Starts the card for the addressed competition when — and only when — its view carries the exact captain signal. The card itself appears only after the status is read. */
+function mountPlanChangeCard(competitionId, view, anchor) {
+  removePlanChangeCard();
+  if (!amendIsObject(view) || !amendIsObject(view.planAmendment) || view.planAmendment.captain !== true) return;
+  const state = { competitionId, anchor, generation: renderGeneration, controllers: new Set(), status: null, busy: false, card: null };
+  planChangeState = state;
+  refreshPlanChange(state, "", "", false);
+}
+
+/** Reads the status for this competition. Anything but a well-formed captain status with a proposal is a failure. */
+async function readPlanChange(state) {
+  let res;
+  try {
+    res = await planChangeFetch(state, "GET", "");
+  } catch (err) { return { ok: false }; }
+  if (planChangeStale(state)) return { ok: false };
+  const body = res.json;
+  if (res.status !== 200 || !amendIsObject(body) || !amendValidStatus(body.amendment)) return { ok: false };
+  if (body.amendment.role.captain !== true || body.amendment.amendment === null) return { ok: false };
+  return { ok: true, status: body.amendment };
+}
+
+/** Reads the server's state and (re)builds the card from it; anything but a good answer removes the card. */
+async function refreshPlanChange(state, message, kind, focusHeading) {
+  const result = await readPlanChange(state);
+  if (planChangeStale(state)) return;
+  if (!result.ok) { removePlanChangeCard(); return; }
+  state.status = result.status;
+  state.busy = false;
+  const built = buildPlanChangeCard(state);
+  if (state.card && state.card.parentNode) state.card.replaceWith(built);
+  else if (state.anchor && state.anchor.parentNode) state.anchor.after(built);
+  else return;
+  state.card = built;
+  setPlanChangeStatus(message, kind);
+  if (focusHeading) document.getElementById("plan-change-heading").focus();
+}
+
+function planChangeText(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+function setPlanChangeStatus(text, kind) {
+  const status = document.getElementById("plan-change-status");
+  if (!status) return;
+  status.className = "msg" + (kind ? " " + kind : "");
+  status.textContent = text;
+}
+
+/** While a request is out nothing on the card can start another. */
+function setPlanChangeBusy(busy) {
+  for (const button of document.querySelectorAll("#plan-change-card button")) button.disabled = busy;
+  const cardEl = document.getElementById("plan-change-card");
+  if (cardEl) { if (busy) cardEl.setAttribute("aria-busy", "true"); else cardEl.removeAttribute("aria-busy"); }
+}
+
+function buildPlanChangeCard(state) {
+  const status = state.status;
+  const a = status.amendment;
+  const cardEl = document.createElement("div");
+  cardEl.id = "plan-change-card";
+  cardEl.className = "card accent";
+  cardEl.setAttribute("role", "region");
+  cardEl.setAttribute("aria-labelledby", "plan-change-heading");
+
+  const heading = planChangeText("h2", "Tournament plan change");
+  heading.id = "plan-change-heading";
+  heading.tabIndex = -1;
+  cardEl.appendChild(heading);
+  cardEl.appendChild(planChangeText("p", "The organizer has proposed a change to the venue, the pitches or the tournament dates. It takes effect only if all four team captains confirm it. Dates and times are the venue's own, as the server gave them.", "msg"));
+  if (status.myTeamName) {
+    const team = planChangeText("p", "Your team: " + status.myTeamName, "msg");
+    team.id = "plan-change-team";
+    cardEl.appendChild(team);
+  }
+  const stateLine = planChangeText("p", AMEND_STATUS_TEXT[a.status], "msg");
+  stateLine.id = "plan-change-state";
+  cardEl.appendChild(stateLine);
+  if (a.status === "PENDING" || a.status === "EXPIRED") {
+    const expiry = planChangeText("p", (a.status === "PENDING" ? "Expires " : "Expired ") + amendFormatUtc(a.expiresAt), "msg");
+    expiry.id = "plan-change-expiry";
+    cardEl.appendChild(expiry);
+  }
+  const progress = planChangeText("p", a.confirmedCount + " of 4 captains have confirmed", "msg");
+  progress.id = "plan-change-progress";
+  cardEl.appendChild(progress);
+  const teams = document.createElement("ul");
+  teams.id = "plan-change-teams";
+  for (const t of a.teams) teams.appendChild(planChangeText("li", t.teamName + ": " + (t.decision ? AMEND_DECISION_TEXT[t.decision] : "No answer yet")));
+  cardEl.appendChild(teams);
+  cardEl.appendChild(renderPlanChangeComparison(a.current, a.proposed, a.status === "ACTIVATED"));
+
+  if (a.myDecision) {
+    const mine = planChangeText("p", a.myDecision === "CONFIRMED" ? "You confirmed this plan change." : "You rejected this plan change.", "msg");
+    mine.id = "plan-change-my-decision";
+    cardEl.appendChild(mine);
+  } else if (a.status === "PENDING" && !(a.actionable === true && status.windowOpen === true)) {
+    cardEl.appendChild(planChangeText("p", "This plan change can no longer be acted on.", "msg"));
+  }
+  if (a.status === "PENDING" && a.actionable === true && status.windowOpen === true && a.myDecision === null) cardEl.appendChild(buildPlanChangeActions(state));
+
+  const line = planChangeText("p", "", "msg");
+  line.id = "plan-change-status";
+  line.setAttribute("aria-live", "polite");
+  cardEl.appendChild(line);
+  return cardEl;
+}
+
+/** The two answers, and the final confirmation a rejection needs. */
+function buildPlanChangeActions(state) {
+  const wrap = document.createElement("div");
+  wrap.id = "plan-change-actions";
+  const row = document.createElement("div");
+  row.className = "invite-actions";
+  const confirm = document.createElement("button");
+  confirm.type = "button"; confirm.id = "plan-change-confirm"; confirm.className = "btn-primary"; confirm.textContent = "Confirm plan change";
+  const reject = document.createElement("button");
+  reject.type = "button"; reject.id = "plan-change-reject"; reject.className = "btn-secondary"; reject.textContent = "Reject plan change";
+  row.appendChild(confirm); row.appendChild(reject);
+  wrap.appendChild(row);
+
+  const panel = document.createElement("div");
+  panel.id = "plan-change-reject-panel";
+  panel.className = "plan-change-reject-panel";
+  panel.hidden = true;
+  panel.appendChild(planChangeText("p", "Rejecting ends this proposed change for everyone. It cannot be undone, and the organizer would have to propose a new change.", "msg"));
+  const yes = document.createElement("button");
+  yes.type = "button"; yes.id = "plan-change-reject-confirm"; yes.className = "btn-secondary"; yes.textContent = "Yes, reject the plan change";
+  const keep = document.createElement("button");
+  keep.type = "button"; keep.id = "plan-change-reject-keep"; keep.className = "btn-secondary"; keep.textContent = "Keep deciding";
+  const panelRow = document.createElement("div");
+  panelRow.className = "invite-actions";
+  panelRow.appendChild(yes); panelRow.appendChild(keep);
+  panel.appendChild(panelRow);
+  wrap.appendChild(panel);
+
+  const closePanel = () => { panel.hidden = true; row.hidden = false; reject.focus(); };
+  confirm.addEventListener("click", () => { decidePlanChange(state, "CONFIRMED"); });
+  reject.addEventListener("click", () => { if (state.busy) return; row.hidden = true; panel.hidden = false; keep.focus(); });
+  keep.addEventListener("click", () => { if (!state.busy) closePanel(); });
+  panel.addEventListener("keydown", (e) => { if (e.key === "Escape" && !state.busy) { e.preventDefault(); closePanel(); } });
+  yes.addEventListener("click", () => { decidePlanChange(state, "REJECTED"); });
+  return wrap;
+}
+
+async function decidePlanChange(state, decision) {
+  const a = state.status && state.status.amendment;
+  if (planChangeStale(state) || state.busy || !a || a.status !== "PENDING" || a.actionable !== true || state.status.windowOpen !== true || a.myDecision !== null) return;
+  state.busy = true;
+  setPlanChangeBusy(true);
+  setPlanChangeStatus("Sending…", "");
+  let res = null;
+  let lost = null;
+  try {
+    res = await planChangeFetch(state, "POST", "/decision", { amendmentDigest: a.digest, decision });
+  } catch (err) { lost = err; }
+  if (planChangeStale(state)) return;
+  let message;
+  let kind = "error";
+  if (lost) {
+    message = lost && lost.message === "timeout"
+      ? "The server did not answer in time. Your answer may not have been recorded — the status shown is what the server holds now."
+      : "Could not reach the server. Your answer was not confirmed as recorded — the status shown is what the server holds now.";
+  } else if (res.status === 200 && amendIsObject(res.json) && (res.json.decision === "CONFIRMED" || res.json.decision === "REJECTED")) {
+    message = res.json.decision === "CONFIRMED" ? "Your confirmation was sent. The status below is what the server holds now." : "Your rejection was sent. The status below is what the server holds now.";
+    kind = "success";
+  } else if (res.status === 200) {
+    message = "The server's answer could not be understood. The status shown is what the server holds now.";
+  } else if (res.status === 404) {
+    message = "Your answer could not be recorded. The status shown is what the server holds now.";
+  } else {
+    message = (amendIsObject(res.json) && amendIsText(res.json.error) && res.json.error) || "Your answer could not be recorded.";
+  }
+  // Whatever the answer was, what the card shows next is read from the server again; nothing is concluded here.
+  await refreshPlanChange(state, message, kind, true);
 }
 
 UrbanoAuth.onAuthStateChange(renderApp);

@@ -165,6 +165,37 @@
     .planning-card button { min-height: 44px; }
     .planning-row input[type="text"], .planning-row input[type="number"], .planning-row input[type="date"], .planning-row input[type="time"] { flex: 1 1 100%; }
   }
+  /* UG-CR-GATE-SSS-014: the post-freeze plan-change section (built only after the server confirms the organizer, the window and the plan). */
+  .plan-change-card h3 { margin-top: 0; }
+  .plan-change-card fieldset { margin: 14px 0; }
+  .plan-change-card .field { display: block; margin: 0 0 10px; }
+  .plan-change-card .field > label { display: block; margin-bottom: 3px; }
+  .plan-change-card input[type="text"], .plan-change-card input[type="number"], .plan-change-card input[type="date"], .plan-change-card input[type="time"], .plan-change-card textarea { width: 100%; max-width: 420px; }
+  .plan-change-card textarea { min-height: 56px; resize: vertical; }
+  .plan-change-card input[aria-invalid="true"], .plan-change-card textarea[aria-invalid="true"] { border-color: var(--bad); }
+  .plan-change-card .msg, .plan-change-card li, .plan-change-card td, .plan-change-card dd, .plan-change-card legend { overflow-wrap: break-word; }
+  .plan-change-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-card); }
+  .plan-change-row input[type="text"] { width: auto; flex: 1 1 140px; min-width: 0; }
+  .plan-change-row input[type="date"], .plan-change-row input[type="time"] { width: auto; flex: 0 1 150px; min-width: 0; }
+  .plan-change-windows { display: block; flex: 1 1 100%; }
+  .plan-change-window-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+  #plan-change-teams { list-style: none; margin: 8px 0; padding: 0; font-size: 14px; }
+  #plan-change-teams li { margin: 4px 0; }
+  #plan-change-history { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+  #plan-change-problems { margin: 6px 0 0; padding-left: 18px; color: var(--bad); font-size: 14px; }
+  table.plan-change-table tr[data-changed="true"] td { background: var(--exp-purple-bg); }
+  table.plan-change-table tr[data-changed="false"] td { color: var(--muted); }
+  .plan-change-flag { display: block; margin-top: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  tr[data-changed="true"] .plan-change-flag { color: var(--gold); }
+  @media (max-width: 720px) {
+    table.plan-change-table, table.plan-change-table tbody, table.plan-change-table tr, table.plan-change-table td { display: block; }
+    table.plan-change-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    table.plan-change-table tr { border: 1px solid var(--line); border-radius: 10px; background: var(--bg-card); padding: 6px 12px; margin: 0 0 10px; }
+    table.plan-change-table td { border-bottom: none; padding: 6px 0; font-size: 14px; }
+    table.plan-change-table td[data-label]::before { content: attr(data-label); content: attr(data-label) / ""; display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    .plan-change-card button { min-height: 44px; }
+    .plan-change-row input[type="text"], .plan-change-row input[type="date"], .plan-change-row input[type="time"] { flex: 1 1 100%; }
+  }
 </style>
 </head>
 <body>
@@ -394,6 +425,9 @@ function readAuthorization(path) {
 }
 
 async function refreshAuthState() {
+  // UG-CR-GATE-SSS-014: any authorization event removes the plan-change section in this very turn and invalidates its outstanding answers;
+  // it returns only when the server confirms everything again (see reestablishAmendment); unsent edits wait in memory for that, and no longer than that.
+  removeAmendmentSection(true);
   const state = await UrbanoAuth.getState();
   const statusEl = document.getElementById("auth-status");
   const sections = document.getElementById("admin-sections");
@@ -404,10 +438,11 @@ async function refreshAuthState() {
     // which lists only the competitions the caller actively organizes.
     const code = scorekeeperCodeFromUrl();
     if (code) await loadScorekeeperContext(code);
-    else await loadCompetitions();
+    else { await loadCompetitions(); reestablishAmendment(); }
   } else {
     statusEl.textContent = "Not signed in.";
     sections.style.display = "none";
+    amendDraft = null;
   }
 }
 
@@ -423,6 +458,7 @@ function closeAdministration(message, offerOtherEntries, operations) {
   currentView = null;
   currentAccess = null;
   removePlanningSection();
+  removeAmendmentSection(false);
   document.getElementById("select-section").hidden = true;
   document.getElementById("competition-detail").style.display = "none";
   document.getElementById("comp-select").innerHTML = "";
@@ -481,6 +517,7 @@ async function loadCompetitions() {
   }
   applyOperations(res.json.operations);
   cachedCompetitions = entries;
+  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) removeAmendmentSection(false);
   select.innerHTML = "";
   document.getElementById("admin-gate").hidden = true;
   document.getElementById("admin-gate").textContent = "";
@@ -560,7 +597,11 @@ document.getElementById("btn-create-competition").addEventListener("click", asyn
   } else setMsg("msg-competition", (res.json && res.json.error) || "Failed to create competition.", "error");
 });
 
+// UG-CR-GATE-SSS-014: changing the selection removes the plan-change section in the same turn (it is asked for again only when a competition is loaded).
+document.getElementById("comp-select").addEventListener("change", () => { removeAmendmentSection(false); });
+
 document.getElementById("btn-load-competition").addEventListener("click", async () => {
+  removeAmendmentSection(false);
   const competitionId = document.getElementById("comp-select").value;
   if (!competitionId) { setMsg("msg-load", "Select a competition.", "error"); return; }
   // Switching to a (possibly different) competition must never carry over
@@ -889,6 +930,10 @@ function renderCompetitionDetail() {
   // UG-CR-GATE-SSS-004: a DRAFT competition the organizer owns offers its draft plan; any other state offers none.
   if (competition.state === "DRAFT") ensurePlanning(competition.competitionId);
   else removePlanningSection();
+
+  // UG-CR-GATE-SSS-014: the post-freeze plan change is asked for only for an organizer view of a READY_TO_PUBLISH competition whose view carries the exact
+  // organizer signal; the section itself appears only after the server has answered both required reads.
+  ensureAmendment(competition, currentView);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -2035,6 +2080,679 @@ async function savePlanning() {
   markPlanningProblems(problems);
   if (problems.some((p) => p && PLANNING_OFFSET_CODES.indexOf(p.code) !== -1)) document.getElementById("planning-deadline-offset-row").hidden = false;
   finish((json && typeof json.error === "string" && json.error) || "Failed to save the plan.", "error");
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-014 — "Change venue or tournament dates": the organizer's post-freeze plan change.
+//
+// Once registration is frozen the organizer may PROPOSE a change to the venue's description, the pitches and the tournament dates and windows — and nothing
+// else — and the four frozen captains must all confirm it before it becomes the plan. Everything that matters is decided by the server: who the organizer is,
+// whether the window is open, whether a proposal is pending or expired, who has answered, and what an action would do. This section only SHOWS those answers
+// and sends the organizer's requests to the accepted routes; it holds no authority of its own, and the server re-judges every request.
+//
+// It exists only after the server has confirmed everything at once: the addressed competition view carries the exact signal `planAmendment.organizer === true`,
+// the competition is READY_TO_PUBLISH, the current plan was read through the organizer planning route, and the amendment status was read through the amendment
+// route and says: organizer role, window open, a well-formed (and non-contradictory) proposal or none. Until both reads have succeeded there is nothing on the page;
+// an error, a refusal, silence, an answer this page cannot read, or an answer that contradicts itself leaves nothing on the page. Whenever the selection, the
+// session, the authorization or the page context changes, the section is removed in the same turn and every outstanding answer is ignored (and its request aborted).
+//
+// What it never offers: a control for the format, the roster, the registration deadline, the venue's time zone, the rules, the teams, the captains or the members
+// (the time zone is shown as read-only context); the confirm and reject actions (those belong to each captain, on the addressed competition page); or the proposal's
+// digest, which is held in this script only, to bind a withdrawal to the exact proposal on screen. Every value from the server is placed with textContent or .value,
+// never parsed as markup.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// A plan-change request that neither answers nor fails within this time is treated as FAILED (and aborted).
+let AMENDMENT_TIMEOUT_MS = 20000;
+let amendState = null;
+// Unsent edits, kept in memory only, across the removal an authorization event causes: they come back only if the server confirms everything again for the same
+// competition and the plan they were made against has not changed. Any other removal (another selection, sign-out, a closed administration) discards them.
+let amendDraft = null;
+
+const AMEND_STATUS_TEXT = {
+  PENDING: "Waiting for all four captains to confirm",
+  ACTIVATED: "Approved by all four captains — the plan was changed",
+  REJECTED: "Rejected by a captain — the plan was not changed",
+  WITHDRAWN: "Withdrawn by the organizer — the plan was not changed",
+  SUPERSEDED: "Replaced by a newer proposal — the plan was not changed",
+  EXPIRED: "Expired before all four captains confirmed — the plan was not changed",
+};
+const AMEND_DECISION_TEXT = { CONFIRMED: "Confirmed", REJECTED: "Rejected" };
+const AMEND_DIGEST = /^[0-9a-f]{64}$/;
+const AMEND_NOT_NOTIFIED = "Captains are not notified automatically — ask them to open this competition's page to answer.";
+
+const amendIsObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const amendIsText = (v) => typeof v === "string";
+const amendIsCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+function amendValidFacts(f) {
+  return amendIsObject(f) && amendIsObject(f.venue) && amendIsText(f.venue.name) && amendIsText(f.venue.locationDescription) && amendIsText(f.venue.restrictionNotes)
+    && Number.isInteger(f.venue.simultaneousMatchCapacity)
+    && Array.isArray(f.pitches) && f.pitches.every((p) => amendIsObject(p) && amendIsText(p.label) && typeof p.usable === "boolean" && amendIsText(p.restrictionNotes) && Array.isArray(p.supportedFormats) && p.supportedFormats.every(amendIsText))
+    && Array.isArray(f.dates) && f.dates.every((d) => amendIsObject(d) && amendIsText(d.date) && Array.isArray(d.windows) && d.windows.every((w) => amendIsObject(w) && amendIsText(w.start) && amendIsText(w.end)));
+}
+
+/** The amendable facts in one fixed shape, so two of them can be compared exactly. */
+function amendNormalizeFacts(f) {
+  return {
+    venue: { name: f.venue.name, locationDescription: f.venue.locationDescription, restrictionNotes: f.venue.restrictionNotes, simultaneousMatchCapacity: f.venue.simultaneousMatchCapacity },
+    pitches: f.pitches.map((p) => ({ label: p.label, usable: p.usable, supportedFormats: [...p.supportedFormats].sort(), restrictionNotes: p.restrictionNotes })),
+    dates: f.dates.map((d) => ({ date: d.date, windows: d.windows.map((w) => ({ start: w.start, end: w.end })) })),
+  };
+}
+function amendSameFacts(a, b) { return JSON.stringify(amendNormalizeFacts(a)) === JSON.stringify(amendNormalizeFacts(b)); }
+
+/** The amendable facts of the current planning revision, or null when the revision cannot supply them. */
+function amendFactsOfRevision(r) {
+  if (!amendIsObject(r) || !amendIsObject(r.venue) || !Number.isInteger(r.venue.simultaneousMatchCapacity)) return null;
+  const facts = {
+    venue: { name: r.venue.name, locationDescription: r.venue.locationDescription, restrictionNotes: amendIsText(r.venue.restrictionNotes) ? r.venue.restrictionNotes : "", simultaneousMatchCapacity: r.venue.simultaneousMatchCapacity },
+    pitches: r.pitches.map((p) => ({ label: p.label, usable: p.usable === true, supportedFormats: p.supportedFormats.filter(amendIsText), restrictionNotes: amendIsText(p.restrictionNotes) ? p.restrictionNotes : "" })),
+    dates: r.dates.map((d) => ({ date: d.date, windows: d.windows.map((w) => ({ start: w.start, end: w.end })) })),
+  };
+  return amendValidFacts(facts) ? facts : null;
+}
+
+function amendValidProposal(p) {
+  if (!amendIsObject(p) || !amendIsText(p.digest) || !AMEND_DIGEST.test(p.digest) || !Number.isInteger(p.sequenceNumber) || p.sequenceNumber < 1) return false;
+  if (!Object.prototype.hasOwnProperty.call(AMEND_STATUS_TEXT, p.status) || typeof p.actionable !== "boolean") return false;
+  if (!amendIsText(p.createdAt) || !amendIsText(p.expiresAt) || !(p.resolvedAt === null || amendIsText(p.resolvedAt))) return false;
+  if (p.requiredCount !== 4 || !amendIsCount(p.confirmedCount) || p.confirmedCount > 4) return false;
+  if (!Array.isArray(p.teams) || p.teams.length !== 4) return false;
+  if (!p.teams.every((t) => amendIsObject(t) && amendIsText(t.teamName) && (t.decision === null || t.decision === "CONFIRMED" || t.decision === "REJECTED"))) return false;
+  if (p.teams.filter((t) => t.decision === "CONFIRMED").length !== p.confirmedCount) return false;
+  if (!(p.myDecision === null || p.myDecision === "CONFIRMED" || p.myDecision === "REJECTED")) return false;
+  return amendValidFacts(p.proposed) && amendValidFacts(p.current);
+}
+
+/** The amendment status exactly as the route states it. A contradiction inside it (an actionable proposal that is not pending, or in a closed window) is not a status. */
+function amendValidStatus(s) {
+  if (!amendIsObject(s) || !amendIsObject(s.role) || typeof s.role.organizer !== "boolean" || typeof s.role.captain !== "boolean" || typeof s.windowOpen !== "boolean") return false;
+  if (!(s.myTeamName === null || amendIsText(s.myTeamName))) return false;
+  if (s.amendment !== null && !amendValidProposal(s.amendment)) return false;
+  if (s.history !== null && !(Array.isArray(s.history) && s.history.every((h) => amendIsObject(h) && Number.isInteger(h.sequenceNumber) && Object.prototype.hasOwnProperty.call(AMEND_STATUS_TEXT, h.status) && amendIsText(h.createdAt) && (h.resolvedAt === null || amendIsText(h.resolvedAt))))) return false;
+  if (s.amendment !== null && s.amendment.actionable && (!s.windowOpen || s.amendment.status !== "PENDING")) return false;
+  return true;
+}
+
+/** An ISO instant as the text the server gave, labelled UTC; nothing is converted to any other time zone. */
+function amendFormatUtc(iso) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})[^Z]*Z$/.exec(iso);
+  return m ? m[1] + " " + m[2] + " UTC" : iso;
+}
+
+function amendFormatLabel(key) {
+  const m = /^SOCCER_(\d)V(\d)$/.exec(key);
+  return m ? "Soccer " + m[1] + "v" + m[2] : key;
+}
+
+/** The comparison rows of two sets of amendable facts: venue facts, pitches (matched by label) and dates (matched by date). */
+function planChangeRows(current, proposed) {
+  const rows = [];
+  const add = (label, was, now) => rows.push({ label, current: was, proposed: now, changed: was !== now });
+  add("Venue name", current.venue.name, proposed.venue.name);
+  add("Location", current.venue.locationDescription, proposed.venue.locationDescription);
+  add("Venue restrictions", current.venue.restrictionNotes || "None", proposed.venue.restrictionNotes || "None");
+  add("Matches at the same time", String(current.venue.simultaneousMatchCapacity), String(proposed.venue.simultaneousMatchCapacity));
+  const describePitch = (p) => (p.usable ? "Usable" : "Not usable") + "; suitable for " + (p.supportedFormats.length > 0 ? p.supportedFormats.map(amendFormatLabel).join(", ") : "no format") + (p.restrictionNotes ? "; " + p.restrictionNotes : "");
+  const key = (label) => label.toLowerCase();
+  const was = new Map(current.pitches.map((p) => [key(p.label), p]));
+  const now = new Map(proposed.pitches.map((p) => [key(p.label), p]));
+  for (const p of proposed.pitches) add("Pitch " + p.label, was.has(key(p.label)) ? describePitch(was.get(key(p.label))) : "Not in the current plan", describePitch(p));
+  for (const p of current.pitches) if (!now.has(key(p.label))) add("Pitch " + p.label, describePitch(p), "Removed");
+  const windows = (d) => d.windows.map((w) => w.start + "–" + w.end).join(", ");
+  const wasDates = new Map(current.dates.map((d) => [d.date, d]));
+  const nowDates = new Map(proposed.dates.map((d) => [d.date, d]));
+  for (const date of [...new Set([...wasDates.keys(), ...nowDates.keys()])].sort()) {
+    add("Date " + date, wasDates.has(date) ? windows(wasDates.get(date)) : "Not in the current plan", nowDates.has(date) ? windows(nowDates.get(date)) : "Removed");
+  }
+  return rows;
+}
+
+/** A table of what the proposal would change: changed rows are marked in words (not only by colour), unchanged ones stay compact. Every value is text. Rows and cells come from makeRow / makeCell, like every other table on the page. */
+function renderPlanChangeComparison(current, proposed, inForce) {
+  // Once the change was approved the server's current plan IS the proposal, so a table of "Unchanged" rows would mislead: it then shows only the plan now in force.
+  const approved = inForce === true;
+  const table = document.createElement("table");
+  table.id = "plan-change-comparison";
+  table.className = "stack-table plan-change-table";
+  const head = document.createElement("thead");
+  head.appendChild(makeRow());
+  for (const label of approved ? ["What", "Plan now in force"] : ["What", "Current", "Proposed"]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.firstChild.appendChild(th);
+  }
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  for (const row of planChangeRows(current, proposed)) {
+    body.appendChild(makeRow());
+    const line = body.lastChild;
+    const what = makeCell("What", row.label);
+    if (!approved) {
+      line.dataset.changed = row.changed ? "true" : "false";
+      const flag = document.createElement("span");
+      flag.className = "plan-change-flag";
+      flag.textContent = row.changed ? "Changed" : "Unchanged";
+      what.appendChild(flag);
+    }
+    line.appendChild(what);
+    if (approved) line.appendChild(makeCell("Plan now in force", row.current));
+    else {
+      line.appendChild(makeCell("Current", row.current));
+      line.appendChild(makeCell("Proposed", row.proposed));
+    }
+  }
+  table.appendChild(body);
+  return table;
+}
+
+function removeAmendmentSection(keepDraft) {
+  const state = amendState;
+  amendState = null;
+  const form = document.getElementById("plan-change-form");
+  if (keepDraft !== true) amendDraft = null;
+  // Several authorization events can arrive in a row: a later one, finding nothing on screen yet, leaves the draft the earlier one kept.
+  else if (state && state.facts && form && !state.busy) {
+    amendDraft = { competitionId: state.competitionId, baseJson: JSON.stringify(amendNormalizeFacts(state.facts)), replacing: state.replacing === true,
+      pendingDigest: state.status && state.status.amendment ? state.status.amendment.digest : null, payload: collectAmendmentPayload(form, state) };
+  }
+  if (state) for (const controller of state.controllers) { try { controller.abort(); } catch (err) { /* already finished */ } }
+  const existing = document.getElementById("plan-change-section");
+  if (existing) existing.remove();
+}
+
+/** The section may be considered only for an organizer view of a READY_TO_PUBLISH competition whose view carries the exact organizer signal. */
+function amendmentEligible(competition, view) {
+  return isOrganizerView() && !!competition && competition.state === "READY_TO_PUBLISH" && amendIsObject(view) && amendIsObject(view.planAmendment) && view.planAmendment.organizer === true;
+}
+
+/** Opens the section for this competition unless it is already open (or loading) for it, so a refresh after another action never discards unsent edits. */
+function ensureAmendment(competition, view) {
+  if (!amendmentEligible(competition, view)) { removeAmendmentSection(false); return; }
+  if (amendState && amendState.competitionId === competition.competitionId) return;
+  if (amendState) removeAmendmentSection(false);
+  loadAmendment(competition.competitionId);
+}
+
+/** After an authorization event the section is asked for again from the server's own answers; nothing returns unless both reads agree again. */
+function reestablishAmendment() {
+  if (currentView && isOrganizerView() && cachedCompetitions.some((c) => c.competitionId === currentAccess.competitionId)) ensureAmendment(currentView.competition, currentView);
+}
+
+/** One uncached, abortable request through the existing authenticated fetch, bounded by AMENDMENT_TIMEOUT_MS. `base` is "/planning" or "/plan-amendment". */
+function amendFetch(state, method, base, suffix, body) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  if (controller) state.controllers.add(controller);
+  const path = "/api/gaming/competitions/" + encodeURIComponent(state.competitionId) + base + (suffix || "");
+  const options = { method, cache: "no-store" };
+  if (controller) options.signal = controller.signal;
+  if (body !== undefined) options.body = JSON.stringify(body);
+  let timer;
+  const timeout = new Promise((_resolve, reject) => { timer = setTimeout(() => { if (controller) { try { controller.abort(); } catch (err) { /* already finished */ } } reject(new Error("timeout")); }, AMENDMENT_TIMEOUT_MS); });
+  return Promise.race([authedFetch(path, options), timeout]).finally(() => { clearTimeout(timer); if (controller) state.controllers.delete(controller); });
+}
+
+/** Both required reads. Anything but two well-formed, agreeing, organizer-confirmed answers with an open window is a failure. */
+async function readAmendment(state) {
+  let planning, status;
+  try {
+    [planning, status] = await Promise.all([amendFetch(state, "GET", "/planning"), amendFetch(state, "GET", "/plan-amendment")]);
+  } catch (err) { return { ok: false }; }
+  if (amendState !== state) return { ok: false };
+  const p = planning.json;
+  const s = status.json;
+  const okPlanning = planning.status === 200 && amendIsObject(p) && validPlanningContext(p.context) && p.revision !== null && validPlanningRevision(p.revision);
+  const facts = okPlanning ? amendFactsOfRevision(p.revision) : null;
+  const okStatus = status.status === 200 && amendIsObject(s) && amendValidStatus(s.amendment) && s.amendment.role.organizer === true && s.amendment.windowOpen === true;
+  if (!facts || !okStatus) return { ok: false };
+  const a = s.amendment.amendment;
+  if (a !== null && (!amendSameFacts(a.current, facts) || (a.status === "PENDING" && a.actionable !== true))) return { ok: false };
+  return { ok: true, context: p.context, revision: p.revision, status: s.amendment, facts };
+}
+
+async function loadAmendment(competitionId) {
+  const state = { competitionId, controllers: new Set(), context: null, revision: null, status: null, facts: null, busy: false, lastAttempt: null };
+  amendState = state;
+  await refreshAmendment(state, "", "", false);
+}
+
+/** Puts a good read on the page: the section is rebuilt from the server's own answers. */
+function applyAmendmentRead(state, result, message, kind, focusHeading) {
+  state.context = result.context; state.revision = result.revision; state.status = result.status; state.facts = result.facts;
+  state.busy = false;
+  state.replacing = false;
+  const built = buildAmendmentSection(state);
+  const existing = document.getElementById("plan-change-section");
+  if (existing) existing.replaceWith(built);
+  else document.getElementById("cancel-section").parentNode.insertBefore(built, document.getElementById("cancel-section"));
+  setAmendStatus(message, kind);
+  if (focusHeading) document.getElementById("plan-change-heading").focus();
+}
+
+/** Reads the server's state again and rebuilds the section from it; anything but a good answer removes the section. */
+async function refreshAmendment(state, message, kind, focusHeading) {
+  const result = await readAmendment(state);
+  if (amendState !== state) return;
+  if (!result.ok) { removeAmendmentSection(false); return; }
+  applyAmendmentRead(state, result, message, kind, focusHeading);
+}
+
+/** After an outcome that is not known (silence, a lost connection, an answer that cannot be read) the server is asked what it holds: the section is rebuilt only if
+ *  that differs from what is on screen — otherwise the form and its edits stay as they are — and it is removed if the server cannot confirm anything. */
+async function reconcileAmendment(state, message, kind) {
+  const before = JSON.stringify([state.status.amendment, state.facts]);
+  const result = await readAmendment(state);
+  if (amendState !== state) return;
+  if (!result.ok) { removeAmendmentSection(false); return; }
+  if (JSON.stringify([result.status.amendment, result.facts]) !== before) { applyAmendmentRead(state, result, message, kind, false); return; }
+  state.busy = false;
+  setAmendBusy(false);
+  setAmendStatus(message, kind);
+}
+
+function amendText(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text;
+  return node;
+}
+function amendButton(text, className, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "secondary";
+  if (id) button.id = id;
+  button.textContent = text;
+  return button;
+}
+function amendInput(id, type, field) {
+  const input = document.createElement("input");
+  if (id) input.id = id;
+  input.type = type;
+  if (field) input.dataset.field = field;
+  return input;
+}
+function amendField(labelText, control, id) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  if (id) label.htmlFor = id;
+  wrap.appendChild(label);
+  wrap.appendChild(control);
+  return wrap;
+}
+
+function setAmendStatus(text, kind) {
+  const status = document.getElementById("plan-change-status");
+  if (!status) return;
+  status.className = "msg" + (kind ? " " + kind : "");
+  status.textContent = text;
+}
+
+/** While a request is out nothing in the section can start another. */
+function setAmendBusy(busy) {
+  for (const button of document.querySelectorAll("#plan-change-section button")) button.disabled = busy;
+  const sectionEl = document.getElementById("plan-change-section");
+  if (sectionEl) { if (busy) sectionEl.setAttribute("aria-busy", "true"); else sectionEl.removeAttribute("aria-busy"); }
+}
+
+function buildAmendmentSection(state) {
+  const status = state.status;
+  const a = status.amendment;
+  const sectionEl = document.createElement("div");
+  sectionEl.id = "plan-change-section";
+  sectionEl.className = "card plan-change-card";
+  sectionEl.setAttribute("role", "region");
+  sectionEl.setAttribute("aria-labelledby", "plan-change-heading");
+
+  const heading = amendText("h3", "Change venue or tournament dates");
+  heading.id = "plan-change-heading";
+  heading.tabIndex = -1;
+  sectionEl.appendChild(heading);
+  sectionEl.appendChild(amendText("p", "Registration is frozen. Changing the venue, the pitches or the dates needs all four team captains to confirm the change. The format, the rosters, the registration deadline, the rules and the teams cannot be changed here. " + AMEND_NOT_NOTIFIED, "msg"));
+  const zone = amendText("p", "", "msg");
+  zone.id = "plan-change-timezone";
+  zone.appendChild(document.createTextNode("Dates and times are in the venue's time zone: "));
+  zone.appendChild(amendText("strong", state.revision.venue.timeZone));
+  zone.appendChild(document.createTextNode(". It cannot be changed here."));
+  sectionEl.appendChild(zone);
+
+  if (a) sectionEl.appendChild(buildAmendmentLatest(state, a));
+  else sectionEl.appendChild(amendText("p", "No change has been proposed.", "msg"));
+
+  const formHost = document.createElement("div");
+  formHost.id = "plan-change-form-host";
+  sectionEl.appendChild(formHost);
+  const draft = amendDraft && amendDraft.competitionId === state.competitionId && amendDraft.baseJson === JSON.stringify(amendNormalizeFacts(state.facts)) ? amendDraft : null;
+  amendDraft = null;
+  if (!a || a.status !== "PENDING") formHost.appendChild(buildAmendmentForm(state, draft && !draft.replacing ? draft.payload : state.facts, false));
+  else if (draft && draft.replacing && draft.pendingDigest === a.digest) formHost.appendChild(buildAmendmentForm(state, draft.payload, true));
+
+  if (Array.isArray(status.history) && status.history.length > 0) {
+    sectionEl.appendChild(amendText("h3", "Proposal history"));
+    const list = document.createElement("ul");
+    list.id = "plan-change-history";
+    for (const h of status.history) list.appendChild(amendText("li", "Proposal " + h.sequenceNumber + ": " + AMEND_STATUS_TEXT[h.status].split(" — ")[0] + " (proposed " + amendFormatUtc(h.createdAt) + ")"));
+    sectionEl.appendChild(list);
+  }
+
+  const line = amendText("p", "", "msg");
+  line.id = "plan-change-status";
+  line.setAttribute("aria-live", "polite");
+  sectionEl.appendChild(line);
+  return sectionEl;
+}
+
+/** The latest proposal: its truthful state, the expiry, the progress, the four teams' answers, what it changes — and, while it is pending, the two organizer actions. */
+function buildAmendmentLatest(state, a) {
+  const latest = document.createElement("div");
+  latest.id = "plan-change-latest";
+  const stateLine = amendText("p", AMEND_STATUS_TEXT[a.status], "msg");
+  stateLine.id = "plan-change-state";
+  latest.appendChild(stateLine);
+  if (a.status === "PENDING" || a.status === "EXPIRED") {
+    const expiry = amendText("p", (a.status === "PENDING" ? "Expires " : "Expired ") + amendFormatUtc(a.expiresAt), "msg");
+    expiry.id = "plan-change-expiry";
+    latest.appendChild(expiry);
+  }
+  const progress = amendText("p", a.confirmedCount + " of 4 captains have confirmed", "msg");
+  progress.id = "plan-change-progress";
+  latest.appendChild(progress);
+  const teams = document.createElement("ul");
+  teams.id = "plan-change-teams";
+  for (const t of a.teams) teams.appendChild(amendText("li", t.teamName + ": " + (t.decision ? AMEND_DECISION_TEXT[t.decision] : "No answer yet")));
+  latest.appendChild(teams);
+  latest.appendChild(renderPlanChangeComparison(a.current, a.proposed, a.status === "ACTIVATED"));
+  if (a.status === "PENDING" && a.actionable === true) {
+    const actions = document.createElement("div");
+    actions.className = "row";
+    const withdraw = amendButton("Withdraw proposed change", "danger", "plan-change-withdraw");
+    withdraw.addEventListener("click", () => { withdrawAmendment(state); });
+    const replace = amendButton("Replace with a revised proposal", "secondary", "plan-change-replace");
+    replace.addEventListener("click", () => { openRevisedProposal(state); });
+    actions.appendChild(withdraw);
+    actions.appendChild(replace);
+    latest.appendChild(actions);
+  }
+  return latest;
+}
+
+function openRevisedProposal(state) {
+  const host = document.getElementById("plan-change-form-host");
+  const a = state.status.amendment;
+  if (amendState !== state || !host || state.busy || !a || a.status !== "PENDING" || host.firstChild) return;
+  state.lastAttempt = null;
+  host.appendChild(buildAmendmentForm(state, a.proposed, true));
+  document.getElementById("plan-change-venue-name").focus();
+}
+
+function buildAmendmentForm(state, startFacts, replacing) {
+  state.replacing = replacing;
+  const form = document.createElement("form");
+  form.id = "plan-change-form";
+  form.noValidate = true;
+  form.addEventListener("submit", (e) => { e.preventDefault(); submitAmendment(state); });
+  form.appendChild(amendText("h3", replacing ? "Revised proposal" : "Propose a change"));
+  if (replacing) form.appendChild(amendText("p", "Submitting a revised proposal replaces the current proposal. Captains who confirmed it will need to confirm the new proposal. The form starts from the change currently proposed.", "msg"));
+  else form.appendChild(amendText("p", "The form starts from the current plan. Change only what needs to change.", "msg"));
+
+  const venue = document.createElement("fieldset");
+  venue.appendChild(amendText("legend", "Venue"));
+  const name = amendInput("plan-change-venue-name", "text", "venue.name"); name.maxLength = 120; name.value = startFacts.venue.name;
+  venue.appendChild(amendField("Venue name", name, "plan-change-venue-name"));
+  const location = document.createElement("textarea"); location.id = "plan-change-venue-location"; location.dataset.field = "venue.locationDescription"; location.maxLength = 300; location.value = startFacts.venue.locationDescription;
+  venue.appendChild(amendField("Where is it? (enough to find the venue)", location, "plan-change-venue-location"));
+  const capacity = amendInput("plan-change-venue-capacity", "number", "venue.simultaneousMatchCapacity"); capacity.min = "1"; capacity.max = String(state.context.limits.maxPitches); capacity.step = "1"; capacity.value = Number.isInteger(startFacts.venue.simultaneousMatchCapacity) ? String(startFacts.venue.simultaneousMatchCapacity) : "";
+  venue.appendChild(amendField("Matches that can be played at the same time", capacity, "plan-change-venue-capacity"));
+  const notes = document.createElement("textarea"); notes.id = "plan-change-venue-notes"; notes.dataset.field = "venue.restrictionNotes"; notes.maxLength = 500; notes.value = startFacts.venue.restrictionNotes;
+  venue.appendChild(amendField("Venue restrictions (optional)", notes, "plan-change-venue-notes"));
+  form.appendChild(venue);
+
+  const pitches = document.createElement("fieldset");
+  pitches.appendChild(amendText("legend", "Pitches"));
+  const pitchList = document.createElement("div"); pitchList.id = "plan-change-pitches";
+  pitches.appendChild(pitchList);
+  const addPitch = amendButton("Add pitch", "secondary plan-change-add-pitch", "plan-change-add-pitch");
+  addPitch.addEventListener("click", () => { addAmendPitchRow(state, { label: "", usable: true, suitable: true, notes: "", others: [] }); refreshAmendRows(state); });
+  pitches.appendChild(addPitch);
+  form.appendChild(pitches);
+
+  const dates = document.createElement("fieldset");
+  dates.appendChild(amendText("legend", "Tournament dates and operating windows"));
+  dates.appendChild(amendText("p", "One to " + state.context.limits.maxDates + " dates within " + state.context.limits.maxSpanDays + " days; each date has one or " + (state.context.limits.maxWindowsPerDate === 2 ? "two" : state.context.limits.maxWindowsPerDate) + " windows that do not overlap or cross midnight.", "msg"));
+  const dateList = document.createElement("div"); dateList.id = "plan-change-dates";
+  dates.appendChild(dateList);
+  const addDate = amendButton("Add date", "secondary plan-change-add-date", "plan-change-add-date");
+  addDate.addEventListener("click", () => { addAmendDateRow(state, { date: "", windows: [{ start: "", end: "" }] }); refreshAmendRows(state); });
+  dates.appendChild(addDate);
+  form.appendChild(dates);
+
+  const actions = document.createElement("div");
+  actions.className = "row";
+  const submit = amendButton(replacing ? "Submit revised proposal" : "Propose this change", "dominant plan-change-submit", "plan-change-submit");
+  submit.addEventListener("click", () => { submitAmendment(state); });
+  actions.appendChild(submit);
+  if (replacing) {
+    const keep = amendButton("Keep the current proposal", "secondary plan-change-form-cancel", "plan-change-form-cancel");
+    keep.addEventListener("click", () => { const host = document.getElementById("plan-change-form-host"); if (host && !state.busy) { host.innerHTML = ""; state.replacing = false; const replace = document.getElementById("plan-change-replace"); if (replace) replace.focus(); } });
+    actions.appendChild(keep);
+  }
+  form.appendChild(actions);
+  const problems = document.createElement("ul");
+  problems.id = "plan-change-problems";
+  form.appendChild(problems);
+
+  // The rows are built once the form is part of the page's tree, so their numbering and limits can be applied.
+  const startPitches = startFacts.pitches.length > 0 ? startFacts.pitches : [{ label: "", usable: true, supportedFormats: [state.context.formatKey], restrictionNotes: "" }];
+  for (const p of startPitches) {
+    const formats = p.supportedFormats.filter(amendIsText);
+    addAmendPitchRow(state, { label: p.label, usable: p.usable === true, suitable: formats.includes(state.context.formatKey), notes: p.restrictionNotes, others: formats.filter((f) => f !== state.context.formatKey) }, pitchList);
+  }
+  const startDates = startFacts.dates.length > 0 ? startFacts.dates : [{ date: "", windows: [{ start: "", end: "" }] }];
+  for (const d of startDates) addAmendDateRow(state, { date: d.date, windows: d.windows.length > 0 ? d.windows : [{ start: "", end: "" }] }, dateList);
+  refreshAmendRows(state, form);
+  return form;
+}
+
+function addAmendPitchRow(state, data, listEl) {
+  const list = listEl || document.getElementById("plan-change-pitches");
+  const row = document.createElement("div");
+  row.className = "plan-change-row plan-change-pitch-row";
+  row.dataset.others = JSON.stringify(data.others || []);
+  const label = amendInput("", "text", ""); label.className = "plan-change-pitch-label"; label.placeholder = "Pitch label"; label.maxLength = 40; label.value = data.label;
+  label.setAttribute("aria-label", "Pitch label");
+  const usableWrap = document.createElement("label");
+  const usable = amendInput("", "checkbox", ""); usable.className = "plan-change-pitch-usable"; usable.checked = data.usable;
+  usableWrap.appendChild(usable); usableWrap.appendChild(document.createTextNode(" Usable"));
+  const suitableWrap = document.createElement("label");
+  const suitable = amendInput("", "checkbox", ""); suitable.className = "plan-change-pitch-format"; suitable.checked = data.suitable;
+  suitableWrap.appendChild(suitable); suitableWrap.appendChild(document.createTextNode(" Suitable for " + state.context.formatLabel));
+  const notes = amendInput("", "text", ""); notes.className = "plan-change-pitch-notes"; notes.placeholder = "Restrictions (optional)"; notes.maxLength = 300; notes.value = data.notes;
+  notes.setAttribute("aria-label", "Pitch restrictions");
+  const remove = amendButton("Remove pitch", "secondary plan-change-pitch-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshAmendRows(state); });
+  row.appendChild(label); row.appendChild(usableWrap); row.appendChild(suitableWrap); row.appendChild(notes); row.appendChild(remove);
+  list.appendChild(row);
+}
+
+function addAmendWindowRow(state, windowsEl, data) {
+  const row = document.createElement("div");
+  row.className = "plan-change-window-row";
+  const start = amendInput("", "time", ""); start.className = "plan-change-window-start"; start.step = "60"; start.value = data.start; start.setAttribute("aria-label", "Window start");
+  const end = amendInput("", "time", ""); end.className = "plan-change-window-end"; end.step = "60"; end.value = data.end; end.setAttribute("aria-label", "Window end");
+  const remove = amendButton("Remove window", "secondary plan-change-window-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshAmendRows(state); });
+  row.appendChild(document.createTextNode("From "));
+  row.appendChild(start); row.appendChild(document.createTextNode(" to ")); row.appendChild(end); row.appendChild(remove);
+  windowsEl.appendChild(row);
+}
+
+function addAmendDateRow(state, data, listEl) {
+  const list = listEl || document.getElementById("plan-change-dates");
+  const row = document.createElement("div");
+  row.className = "plan-change-row plan-change-date-row";
+  const date = amendInput("", "date", ""); date.className = "plan-change-date-input"; date.value = data.date; date.setAttribute("aria-label", "Tournament date");
+  const remove = amendButton("Remove date", "secondary plan-change-date-remove");
+  remove.addEventListener("click", () => { row.remove(); refreshAmendRows(state); });
+  const windowsEl = document.createElement("div");
+  windowsEl.className = "plan-change-windows";
+  const addWindow = amendButton("Add window", "secondary plan-change-add-window");
+  addWindow.addEventListener("click", () => { addAmendWindowRow(state, windowsEl, { start: "", end: "" }); refreshAmendRows(state); });
+  row.appendChild(date); row.appendChild(remove); row.appendChild(windowsEl); row.appendChild(addWindow);
+  list.appendChild(row);
+  for (const w of data.windows) addAmendWindowRow(state, windowsEl, w);
+}
+
+/** Re-numbers the field paths the server's problems refer to, and shows only the add/remove controls the limits the server stated allow. */
+function refreshAmendRows(state, formEl) {
+  const root = formEl || document.getElementById("plan-change-form");
+  if (!root) return;
+  const limits = state.context.limits;
+  const pitchRows = [...root.querySelectorAll("#plan-change-pitches .plan-change-pitch-row")];
+  pitchRows.forEach((row, i) => {
+    row.querySelector(".plan-change-pitch-label").dataset.field = "pitches[" + i + "].label";
+    row.querySelector(".plan-change-pitch-usable").dataset.field = "pitches[" + i + "].usable";
+    row.querySelector(".plan-change-pitch-format").dataset.field = "pitches[" + i + "].supportedFormats";
+    row.querySelector(".plan-change-pitch-notes").dataset.field = "pitches[" + i + "].restrictionNotes";
+    row.querySelector(".plan-change-pitch-remove").hidden = pitchRows.length <= 1;
+  });
+  root.querySelector("#plan-change-add-pitch").hidden = pitchRows.length >= limits.maxPitches;
+  const dateRows = [...root.querySelectorAll("#plan-change-dates .plan-change-date-row")];
+  dateRows.forEach((row, i) => {
+    row.querySelector(".plan-change-date-input").dataset.field = "dates[" + i + "].date";
+    row.querySelector(".plan-change-date-remove").hidden = dateRows.length <= 1;
+    const windowRows = [...row.querySelectorAll(".plan-change-window-row")];
+    windowRows.forEach((w, j) => {
+      w.querySelector(".plan-change-window-start").dataset.field = "dates[" + i + "].windows[" + j + "].start";
+      w.querySelector(".plan-change-window-end").dataset.field = "dates[" + i + "].windows[" + j + "].end";
+      w.querySelector(".plan-change-window-remove").hidden = windowRows.length <= 1;
+    });
+    row.querySelector(".plan-change-add-window").hidden = windowRows.length >= limits.maxWindowsPerDate;
+  });
+  root.querySelector("#plan-change-add-date").hidden = dateRows.length >= limits.maxDates;
+}
+
+/** The amendable facts exactly as the form holds them. Nothing preserved — and no actor, state or digest — is ever part of it. */
+function collectAmendmentPayload(form, state) {
+  const value = (id) => form.querySelector("#" + id).value;
+  const capacityRaw = value("plan-change-venue-capacity").trim();
+  return {
+    venue: { name: value("plan-change-venue-name"), locationDescription: value("plan-change-venue-location"), restrictionNotes: value("plan-change-venue-notes"), simultaneousMatchCapacity: capacityRaw === "" ? null : Number(capacityRaw) },
+    pitches: [...form.querySelectorAll("#plan-change-pitches .plan-change-pitch-row")].map((row) => {
+      let others = [];
+      try { const parsed = JSON.parse(row.dataset.others || "[]"); if (Array.isArray(parsed)) others = parsed; } catch (err) { others = []; }
+      return {
+        label: row.querySelector(".plan-change-pitch-label").value,
+        usable: row.querySelector(".plan-change-pitch-usable").checked,
+        supportedFormats: (row.querySelector(".plan-change-pitch-format").checked ? [state.context.formatKey] : []).concat(others),
+        restrictionNotes: row.querySelector(".plan-change-pitch-notes").value,
+      };
+    }),
+    dates: [...form.querySelectorAll("#plan-change-dates .plan-change-date-row")].map((row) => ({
+      date: row.querySelector(".plan-change-date-input").value,
+      windows: [...row.querySelectorAll(".plan-change-window-row")].map((w) => ({ start: w.querySelector(".plan-change-window-start").value, end: w.querySelector(".plan-change-window-end").value })),
+    })),
+  };
+}
+
+function renderAmendProblems(problems) {
+  const list = document.getElementById("plan-change-problems");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!Array.isArray(problems)) return;
+  for (const problem of problems) {
+    if (!problem || typeof problem !== "object" || typeof problem.message !== "string") continue;
+    list.appendChild(amendText("li", problem.message));
+  }
+}
+
+function markAmendProblems(problems) {
+  for (const el of document.querySelectorAll("#plan-change-section [aria-invalid]")) el.removeAttribute("aria-invalid");
+  if (!Array.isArray(problems)) return;
+  for (const problem of problems) {
+    if (!problem || typeof problem.field !== "string") continue;
+    for (const el of document.querySelectorAll("#plan-change-section [data-field]")) {
+      const f = el.dataset.field;
+      if (f === problem.field || f.startsWith(problem.field + ".") || f.startsWith(problem.field + "[")) el.setAttribute("aria-invalid", "true");
+    }
+  }
+}
+
+async function submitAmendment(state) {
+  const form = document.getElementById("plan-change-form");
+  if (amendState !== state || !form || state.busy || !isOrganizerView()) return;
+  const payload = collectAmendmentPayload(form, state);
+  const payloadJson = JSON.stringify(payload);
+  // A retry of exactly what was just attempted, when its outcome is not known, keeps its save identifier (so a lost answer can never record a second proposal);
+  // any edit, and any attempt that ended in a definite answer, is a new one.
+  const intentId = state.lastAttempt && state.lastAttempt.payloadJson === payloadJson ? state.lastAttempt.intentId : newPlanningIntentId();
+  state.lastAttempt = { intentId, payloadJson };
+  state.busy = true;
+  setAmendBusy(true);
+  markAmendProblems([]);
+  renderAmendProblems([]);
+  setAmendStatus("Sending…", "");
+  const finish = (text, kind) => { if (amendState === state) { state.busy = false; setAmendBusy(false); setAmendStatus(text, kind); } };
+
+  let res;
+  try {
+    res = await amendFetch(state, "POST", "/plan-amendment", "", { intentId, amendment: payload });
+  } catch (err) {
+    if (amendState !== state) return;
+    await reconcileAmendment(state, err && err.message === "timeout"
+      ? "The server did not answer in time. Your change may not have been recorded — check the proposal above, then try again with the same values."
+      : "Could not reach the server. Your change was not confirmed as recorded — try again.", "error");
+    return;
+  }
+  if (amendState !== state) return;
+  const json = res.json;
+  if ((res.status === 200 || res.status === 201) && amendIsObject(json) && amendIsObject(json.amendment) && amendIsText(json.amendment.digest) && AMEND_DIGEST.test(json.amendment.digest)) {
+    state.lastAttempt = null;
+    await refreshAmendment(state, "Change proposed. " + AMEND_NOT_NOTIFIED, "success", true);
+    return;
+  }
+  if (res.status === 200 || res.status === 201) {
+    await reconcileAmendment(state, "The server's answer could not be understood. Your change was not confirmed as recorded — check the proposal above, then try again.", "error");
+    return;
+  }
+  if (res.status === 404) { removeAmendmentSection(false); return; }
+  state.lastAttempt = null;
+  if (res.status === 400) {
+    const problems = json && Array.isArray(json.problems) ? json.problems : [];
+    renderAmendProblems(problems);
+    markAmendProblems(problems);
+    finish((json && amendIsText(json.error) && json.error) || "The change is not valid.", "error");
+    return;
+  }
+  if (res.status === 409) {
+    await refreshAmendment(state, (json && amendIsText(json.error) && json.error) || "The change could not be recorded.", "error", false);
+    return;
+  }
+  finish((json && amendIsText(json.error) && json.error) || "Failed to propose the change.", "error");
+}
+
+async function withdrawAmendment(state) {
+  const a = state.status && state.status.amendment;
+  if (amendState !== state || state.busy || !a || a.status !== "PENDING" || !isOrganizerView()) return;
+  state.busy = true;
+  setAmendBusy(true);
+  setAmendStatus("Withdrawing…", "");
+  let res;
+  try {
+    res = await amendFetch(state, "POST", "/plan-amendment", "/withdraw", { amendmentDigest: a.digest });
+  } catch (err) {
+    if (amendState !== state) return;
+    await refreshAmendment(state, err && err.message === "timeout" ? "The server did not answer in time. The proposal below is what the server holds now." : "Could not reach the server. The proposal below is what the server holds now.", "error", false);
+    return;
+  }
+  if (amendState !== state) return;
+  const json = res.json;
+  if (res.status === 404) { removeAmendmentSection(false); return; }
+  if (res.status === 200 && amendIsObject(json) && json.status === "WITHDRAWN") {
+    await refreshAmendment(state, "The proposed change was withdrawn.", "success", true);
+    return;
+  }
+  await refreshAmendment(state, (json && amendIsText(json.error) && json.error) || "The proposed change could not be withdrawn.", "error", false);
 }
 
 UrbanoAuth.onAuthStateChange(refreshAuthState);

@@ -428,3 +428,83 @@ describe("UG-CR-GATE-SSS-004 — the draft planning editor's sinks (competitions
     expect(list.querySelectorAll("li")).toHaveLength(0);
   });
 });
+
+describe("UG-CR-GATE-SSS-014 — the plan-change comparison (both pages), the real shipped functions executed", () => {
+  const NAMES = ["makeRow", "makeCell", "amendFormatLabel", "planChangeRows", "renderPlanChangeComparison"];
+  const sources = (html: string) => NAMES.map((name) => extractFunction(html, name));
+  const hostileFacts = (value: string) => ({
+    venue: { name: value, locationDescription: value, restrictionNotes: value, simultaneousMatchCapacity: 1 },
+    pitches: [{ label: value, usable: true, supportedFormats: [value, "SOCCER_5V5"], restrictionNotes: value }],
+    dates: [{ date: value, windows: [{ start: value, end: value }] }],
+  });
+  const plainFacts = { venue: { name: "Plain", locationDescription: "Here", restrictionNotes: "", simultaneousMatchCapacity: 2 }, pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5"], restrictionNotes: "" }], dates: [{ date: "2026-11-07", windows: [{ start: "09:00", end: "13:00" }] }] };
+
+  it("the two pages carry the identical comparison code, so they judge and show a change the same way", () => {
+    expect(sources(adminHtml)).toEqual(sources(memberHtml));
+  });
+
+  for (const [label, html] of [["competitions-admin.html", adminHtml], ["competitions.html", memberHtml]] as const) {
+    for (const { label: payload, value } of HOSTILE_PAYLOADS) {
+      it(`${label}: a hostile value (${payload}) in the current plan, the proposal, a pitch label, a format or a date is shown as literal text, never as a live element`, () => {
+        const win = makeRealm(sources(html));
+        const table = win.renderPlanChangeComparison(plainFacts, hostileFacts(value));
+        win.document.body.appendChild(table);
+        assertNoLiveInjection(table);
+        expect(table.querySelectorAll("img, svg, b, script")).toHaveLength(0);
+        const text = table.textContent as string;
+        expect(text).toContain(value);
+        expect((win as any).__xss).toBeUndefined();
+        // And the other direction: a hostile current plan.
+        const reverse = win.renderPlanChangeComparison(hostileFacts(value), plainFacts);
+        win.document.body.appendChild(reverse);
+        assertNoLiveInjection(reverse);
+        expect(reverse.textContent).toContain(value);
+        // And an approved change, which shows only the plan now in force.
+        const inForce = win.renderPlanChangeComparison(hostileFacts(value), hostileFacts(value), true);
+        win.document.body.appendChild(inForce);
+        assertNoLiveInjection(inForce);
+        expect(inForce.textContent).toContain(value);
+        expect((win as any).__xss).toBeUndefined();
+      });
+    }
+
+    it(`${label}: an approved change shows only the plan now in force — one value column, no Changed/Unchanged flag — because the server's current plan then IS the proposal`, () => {
+      const win = makeRealm(sources(html));
+      const table = win.renderPlanChangeComparison(plainFacts, plainFacts, true);
+      expect((Array.from(table.querySelectorAll("th")) as HTMLElement[]).map((th) => th.textContent)).toEqual(["What", "Plan now in force"]);
+      expect(table.querySelectorAll("tr[data-changed], .plan-change-flag")).toHaveLength(0);
+      expect(table.textContent).not.toMatch(/Changed|Unchanged/);
+      const row = (Array.from(table.querySelectorAll("tbody tr")) as HTMLElement[]).find((r) => (r.querySelector("td")!.textContent ?? "").startsWith("Venue name"))!;
+      expect(row.querySelectorAll("td")).toHaveLength(2);
+      expect(row.querySelector('td[data-label="Plan now in force"]')!.textContent).toBe("Plain");
+    });
+
+    it(`${label}: changed and unchanged rows are told apart in words and in data-changed, and a pitch or date that is added or removed is labelled as such`, () => {
+      const win = makeRealm(sources(html));
+      const proposed = { ...plainFacts, venue: { ...plainFacts.venue, name: "Other" }, pitches: [{ label: "B", usable: false, supportedFormats: [], restrictionNotes: "wet" }], dates: [{ date: "2026-11-08", windows: [{ start: "10:00", end: "12:00" }] }] };
+      const table = win.renderPlanChangeComparison(plainFacts, proposed);
+      const rows = Array.from(table.querySelectorAll("tbody tr")) as HTMLElement[];
+      const byLabel = (prefix: string) => rows.find((r) => (r.querySelector("td")!.textContent ?? "").startsWith(prefix))!;
+      expect(byLabel("Venue name").dataset.changed).toBe("true");
+      expect(byLabel("Venue name").textContent).toContain("Changed");
+      expect(byLabel("Location").dataset.changed).toBe("false");
+      expect(byLabel("Location").textContent).toContain("Unchanged");
+      expect(byLabel("Pitch B").querySelector('td[data-label="Current"]')!.textContent).toBe("Not in the current plan");
+      expect(byLabel("Pitch B").querySelector('td[data-label="Proposed"]')!.textContent).toBe("Not usable; suitable for no format; wet");
+      expect(byLabel("Pitch A").querySelector('td[data-label="Proposed"]')!.textContent).toBe("Removed");
+      expect(byLabel("Date 2026-11-07").querySelector('td[data-label="Proposed"]')!.textContent).toBe("Removed");
+      expect(byLabel("Date 2026-11-08").querySelector('td[data-label="Current"]')!.textContent).toBe("Not in the current plan");
+    });
+
+    it(`${label}: no sink in the plan-change code parses server text as markup (innerHTML is only ever cleared; el(), insertAdjacentHTML, outerHTML and document.write are not used there)`, () => {
+      const start = html.indexOf("UG-CR-GATE-SSS-014 — \"");
+      expect(start, "the plan-change code block was found").toBeGreaterThan(-1);
+      const end = html.indexOf("UrbanoAuth.onAuthStateChange(", start);
+      const code = html.slice(start, end);
+      for (const match of code.matchAll(/innerHTML/g)) {
+        expect(code.slice(match.index!, match.index! + 16), "innerHTML is only ever cleared").toMatch(/^innerHTML\s*=\s*"";/);
+      }
+      expect(code).not.toMatch(/\bel\(|insertAdjacentHTML|outerHTML\s*=|document\.write|new Function|\beval\(/);
+    });
+  }
+});
