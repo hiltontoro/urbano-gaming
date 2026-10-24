@@ -83,6 +83,7 @@ const FUNCTIONS = [
   "set_match_activity_classification_atomically",
   "set_match_xp_eligibility_atomically",
   "upsert_prediction_atomically",
+  "upsert_progressive_prediction_atomically",
 ];
 const TABLES = ["matches", "predictions", "players", "teams", "venues", "venue_activations"];
 
@@ -133,6 +134,15 @@ function functionArgs(w: World, name: string, memberId: string): Record<string, 
   }
   if (name === "set_match_xp_eligibility_atomically") {
     return { p_match_id: w.match.matchId, p_xp_eligible: true, p_actor_gaming_member_id: w.finalizer.gamingMemberId, p_reason: "client attempt" };
+  }
+  if (name === "upsert_progressive_prediction_atomically") {
+    return {
+      p_match_id: w.match.matchId, p_gaming_member_id: memberId, p_venue_activation_id: w.activation.venueActivationId, p_attempted_level: 1,
+      p_predicted_home_score: 9, p_predicted_away_score: 9, p_first_team_state: "NOT_ATTEMPTED", p_first_team: null,
+      p_goalscorer_state: "NOT_ATTEMPTED", p_goalscorer_player_id: null, p_goal_minute_state: "NOT_ATTEMPTED",
+      p_goal_minute_regulation: null, p_goal_minute_stoppage: null, p_offer_digest: "client-attempt",
+      p_geo_verified_at: new Date().toISOString(), p_measured_distance_meters: 1, p_reported_accuracy_meters: 1, p_geo_eligible: true,
+    };
   }
   return {
     p_match_id: w.match.matchId, p_gaming_member_id: memberId, p_venue_activation_id: w.activation.venueActivationId,

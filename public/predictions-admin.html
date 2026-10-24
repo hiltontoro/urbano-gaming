@@ -138,10 +138,12 @@
   <div class="row">
     <select id="pt-activation"></select>
     <select id="pt-count"><option value="1">1/4</option><option value="2">2/4</option><option value="3">3/4</option><option value="4">4/4</option></select>
+    <select id="pt-level" hidden><option value="1">Level 1 · Easy (scoreline)</option><option value="2">Level 2 · Medium (first team)</option><option value="3">Level 3 · Hard (goalscorer)</option><option value="4">Level 4 · Legendary (goal minute)</option></select>
     <input id="pt-label" placeholder="Prize label" />
     <button id="btn-create-tier">Add Prize Tier</button>
   </div>
   <p class="msg" id="msg-tier"></p>
+  <p class="msg" id="note-tier" hidden>Progressive match: members attempt Easy first, then Medium, Hard and Legendary, and can send after completing any level. A venue offers a consecutive set of levels starting at Level 1 (Easy; Easy + Medium; Easy + Medium + Hard; or all four): with no prizes, or with a gap, it takes no participations. A member wins only the prize of the highest level reached. From the first prediction at a venue its levels, labels and highest level can no longer change.</p>
 
   <h2>Result</h2>
   <div class="row">
@@ -738,7 +740,7 @@ async function loadActivations() {
     const label = match ? matchLabel(match) : "Unknown match";
     const venueName = activation.venue ? activation.venue.name : "?";
     activationInfo[activation.venueActivationId] = { matchId: activation.matchId, venueName };
-    const tiers = (activation.prizeTiers || []).map((t) => t.correctDimensionCount + "/4: " + t.prizeLabel).join(", ") || "none";
+    const tiers = describePrizeTiers(activation);
     const toggle = h("button", {
       type: "button",
       text: activation.enabled ? "Disable" : "Enable",
@@ -769,6 +771,7 @@ async function loadActivations() {
     });
   }
   if (cachedActivations.some((a) => a.venueActivationId === previous[0])) ptSelect.value = previous[0];
+  syncTierKeyControls();
   if (cachedActivations.some((a) => a.venueActivationId === previous[1])) qSelect.value = previous[1];
   activationsState = "ok";
   clearLoadError("msg-activation");
@@ -1029,17 +1032,23 @@ document.getElementById("btn-create-activation").addEventListener("click", (even
   else setMsg("msg-activation", (res.json && res.json.error) || "Failed to create activation.", "error");
 }));
 
+document.getElementById("pt-activation").addEventListener("change", syncTierKeyControls);
+
 document.getElementById("btn-create-tier").addEventListener("click", (event) => guarded("create-tier", event.currentTarget, async () => {
   const venueActivationId = document.getElementById("pt-activation").value;
-  const correctDimensionCount = parseInt(document.getElementById("pt-count").value, 10);
+  const selected = cachedActivations.find((a) => a.venueActivationId === venueActivationId);
   const prizeLabel = document.getElementById("pt-label").value.trim();
   if (!venueActivationId || !prizeLabel) { setMsg("msg-tier", "Select an activation and enter a label.", "error"); return; }
+  // A progressive match's tier is keyed by the ladder level; a historical match's by the count of correct dimensions.
+  const key = isProgressive(selected)
+    ? { ladderLevel: parseInt(document.getElementById("pt-level").value, 10) }
+    : { correctDimensionCount: parseInt(document.getElementById("pt-count").value, 10) };
   setMsg("msg-tier", "", "");
   let res;
   try {
     res = await authedFetch(`/api/gaming/predictions/admin/activations/${venueActivationId}/prize-tiers`, {
       method: "POST",
-      body: JSON.stringify({ correctDimensionCount, prizeLabel }),
+      body: JSON.stringify({ ...key, prizeLabel }),
     });
   } catch (err) {
     setMsg("msg-tier", createFailureText(err, "prize tier"), "error");
@@ -1513,14 +1522,43 @@ document.getElementById("btn-save-draft").addEventListener("click", async () => 
   }
 });
 
+const LADDER_NAMES = { 1: "Easy", 2: "Medium", 3: "Hard", 4: "Legendary" };
+function isProgressive(activation) { return !!activation && activation.predictionContract === "PROGRESSIVE_LADDER_V1"; }
+// The tiers of an activation as text, and — for a progressive match — what the venue actually offers members.
+function describePrizeTiers(activation) {
+  const tiers = activation.prizeTiers || [];
+  if (!isProgressive(activation)) {
+    return tiers.map((t) => t.correctDimensionCount + "/4: " + t.prizeLabel).join(", ") || "none";
+  }
+  const ladder = tiers.filter((t) => t.ladderLevel !== null && t.ladderLevel !== undefined).sort((a, b) => a.ladderLevel - b.ladderLevel);
+  const levels = ladder.map((t) => `L${t.ladderLevel} ${LADDER_NAMES[t.ladderLevel]}: ${t.prizeLabel}`).join(", ") || "none";
+  const offer = activation.offer;
+  let status;
+  if (offer && offer.available) status = `takes participations up to level ${offer.maxLevel}`;
+  else if (offer && offer.problem === "GAP") status = "NOT OFFERED: the levels have a gap, so it takes no participations";
+  else status = "NOT OFFERED: no prizes set, so it takes no participations";
+  const inert = tiers.filter((t) => t.ladderLevel === null || t.ladderLevel === undefined).length;
+  return levels + " — " + status + (inert > 0 ? ` (${inert} old count tier${inert === 1 ? "" : "s"} ignored)` : "");
+}
+// Shows the key that fits the contract of the selected activation: a ladder level for a progressive match, a count for a historical one.
+function syncTierKeyControls() {
+  const selected = cachedActivations.find((a) => a.venueActivationId === document.getElementById("pt-activation").value);
+  const progressive = isProgressive(selected);
+  document.getElementById("pt-level").hidden = !progressive;
+  document.getElementById("pt-count").hidden = progressive;
+  document.getElementById("note-tier").hidden = !progressive;
+}
+
 function prizeTierWarning(matchId) {
   const activations = cachedActivations.filter((a) => a.matchId === matchId);
   if (activations.length === 0) {
     return "WARNING: this match has no venue activation, so nobody can win a prize.\n\n";
   }
   const bare = activations.filter((a) => (a.prizeTiers || []).length === 0).map((a) => (a.venue ? a.venue.name : "?"));
-  if (bare.length === 0) return "";
-  return "WARNING: no prize tiers are set for " + bare.join(", ") + ". Winners are created only for tiers that exist when you finalize, so there would be NO winners. Press Cancel, add the prize tiers, then finalize.\n\n";
+  const notOffered = activations.filter((a) => isProgressive(a) && a.offer && !a.offer.available && (a.prizeTiers || []).length > 0).map((a) => (a.venue ? a.venue.name : "?"));
+  const notOfferedNote = notOffered.length === 0 ? "" : "NOTE: " + notOffered.join(", ") + (notOffered.length === 1 ? " has" : " have") + " prize levels that do not form a consecutive set from Level 1, so no participation could be taken there.\n\n";
+  if (bare.length === 0) return notOfferedNote;
+  return notOfferedNote + "WARNING: no prize tiers are set for " + bare.join(", ") + ". Winners are created only for tiers that exist when you finalize, so there would be NO winners. Press Cancel, add the prize tiers, then finalize.\n\n";
 }
 
 function isFinalizeConfirmation(res, matchResultId) {

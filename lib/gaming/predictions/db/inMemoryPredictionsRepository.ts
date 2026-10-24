@@ -17,7 +17,20 @@ import type {
   PrizeQualificationRecord,
   PrizeQualificationDetailRecord,
   LeaderboardEntry,
+  PredictionContract,
 } from "../types";
+import {
+  LEGACY_PREDICTION_CONTRACT,
+  PROGRESSIVE_PREDICTION_CONTRACT,
+  attemptedLevelOf,
+  categoryOutcome,
+  computeLadderOffer,
+  hitCountOf,
+  parseProgressiveAnswers,
+  progressiveColumnsOf,
+  wonLevelOf,
+  type ProgressiveAnswers,
+} from "../prizeLadder";
 import { attachQualificationDetails } from "../qualificationDetails";
 import {
   assertPrizeQualificationShape,
@@ -60,6 +73,16 @@ import {
   PrizeQualificationHeldError,
   PrizeAlreadyFulfilledError,
   PrizeQualificationNotHeldError,
+  ContractMismatchError,
+  ContractFrozenError,
+  LevelNotOfferedError,
+  OfferNotAvailableError,
+  OfferChangedError,
+  OfferDigestRequiredError,
+  OfferFrozenError,
+  ResultAlreadyFinalizedError,
+  TierKeyContractMismatchError,
+  InvalidPrizeTierLadderLevelError,
 } from "../types";
 import {
   assertMatchResultIntegrity,
@@ -163,6 +186,9 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   setPrizeLabelForTests(prizeTierId: string, prizeLabel: string): void {
     const tier = this.prizeTiers.get(prizeTierId);
     if (!tier) throw new Error(`No prize tier ${prizeTierId}`);
+    // The database refuses the same edit once participants have accepted
+    // a progressive offer (prize_tiers_offer_guard).
+    this.assertOfferNotFrozen(tier.venueActivationId);
     this.prizeTiers.set(prizeTierId, { ...tier, prizeLabel });
   }
 
@@ -230,6 +256,7 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     awayTeamId: string;
     competition: string;
     kickoffAt: string;
+    predictionContract?: PredictionContract;
   }): Promise<MatchRecord> {
     const record: MatchRecord = {
       matchId: randomUUID(),
@@ -240,10 +267,30 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
       cancelledAt: null,
       activityClassification: null,
       xpEligible: null,
+      predictionContract: input.predictionContract ?? LEGACY_PREDICTION_CONTRACT,
       createdAt: new Date().toISOString(),
     };
     this.matches.set(record.matchId, record);
     return record;
+  }
+
+  /**
+   * The database's matches_contract_freeze trigger: the contract is frozen
+   * from the first prediction or the first result (draft or finalized).
+   */
+  async setMatchPredictionContract(
+    matchId: string,
+    predictionContract: PredictionContract
+  ): Promise<MatchRecord> {
+    const existing = this.matches.get(matchId);
+    if (!existing) throw new MatchNotFoundError();
+    if (existing.predictionContract === predictionContract) return existing;
+    const hasPrediction = [...this.predictions.values()].some((p) => p.matchId === matchId);
+    const hasResult = [...this.matchResults.values()].some((r) => r.matchId === matchId);
+    if (hasPrediction || hasResult) throw new ContractFrozenError();
+    const updated = { ...existing, predictionContract };
+    this.matches.set(matchId, updated);
+    return updated;
   }
 
   async editMatch(
@@ -438,15 +485,61 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     correctDimensionCount: number;
     prizeLabel: string;
   }): Promise<PrizeTierRecord> {
+    // A count-keyed tier belongs to a COMPLETE_COUNT_V1 Match only.
+    if (this.contractOfActivation(input.venueActivationId) === PROGRESSIVE_PREDICTION_CONTRACT) {
+      throw new TierKeyContractMismatchError();
+    }
     const record: PrizeTierRecord = {
       prizeTierId: randomUUID(),
       venueActivationId: input.venueActivationId,
       correctDimensionCount: input.correctDimensionCount,
+      ladderLevel: null,
       prizeLabel: input.prizeLabel,
       createdAt: new Date().toISOString(),
     };
     this.prizeTiers.set(record.prizeTierId, record);
     return record;
+  }
+
+  async createLadderPrizeTier(input: {
+    venueActivationId: string;
+    ladderLevel: number;
+    prizeLabel: string;
+  }): Promise<PrizeTierRecord> {
+    if (!Number.isInteger(input.ladderLevel) || input.ladderLevel < 1 || input.ladderLevel > 4) {
+      throw new InvalidPrizeTierLadderLevelError();
+    }
+    if (this.contractOfActivation(input.venueActivationId) !== PROGRESSIVE_PREDICTION_CONTRACT) {
+      throw new TierKeyContractMismatchError();
+    }
+    this.assertOfferNotFrozen(input.venueActivationId);
+    const clash = [...this.prizeTiers.values()].some(
+      (t) => t.venueActivationId === input.venueActivationId && t.ladderLevel === input.ladderLevel
+    );
+    if (clash) throw new Error("prize_tiers_activation_ladder_level_key violated");
+    const record: PrizeTierRecord = {
+      prizeTierId: randomUUID(),
+      venueActivationId: input.venueActivationId,
+      correctDimensionCount: null,
+      ladderLevel: input.ladderLevel,
+      prizeLabel: input.prizeLabel,
+      createdAt: new Date().toISOString(),
+    };
+    this.prizeTiers.set(record.prizeTierId, record);
+    return record;
+  }
+
+  private contractOfActivation(venueActivationId: string): PredictionContract | null {
+    const activation = this.activations.get(venueActivationId);
+    if (!activation) return null;
+    return this.matches.get(activation.matchId)?.predictionContract ?? null;
+  }
+
+  /** prize_tiers_offer_guard: a progressive offer cannot change once any prediction exists for the activation. */
+  private assertOfferNotFrozen(venueActivationId: string): void {
+    if (this.contractOfActivation(venueActivationId) !== PROGRESSIVE_PREDICTION_CONTRACT) return;
+    const accepted = [...this.predictions.values()].some((p) => p.venueActivationId === venueActivationId);
+    if (accepted) throw new OfferFrozenError();
   }
 
   async listPrizeTiersForActivation(venueActivationId: string): Promise<PrizeTierRecord[]> {
@@ -472,6 +565,9 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
   }): Promise<PredictionRecord> {
     const match = this.matches.get(input.matchId);
     if (!match) throw new MatchNotFoundError();
+    // The historical write path writes the historical contract only: a progressive Match is refused first, whether the call would
+    // create a prediction or edit one (upsert_prediction_atomically, which the database function now does in the same place).
+    if (match.predictionContract !== LEGACY_PREDICTION_CONTRACT) throw new ContractMismatchError();
     if (match.cancelledAt) throw new MatchCancelledError();
     if (match.activityClassification === null) throw new MatchNotClassifiedError();
     if (new Date() >= new Date(match.kickoffAt)) throw new KickoffPassedError();
@@ -531,6 +627,11 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
       throw new VenueActivationImmutableError();
     }
 
+    // The database's predictions_guard trigger, which also covers this
+    // historical path: no prediction is created or edited once a result
+    // is finalized (the contract was already checked above).
+    this.assertNoFinalizedResult(input.matchId);
+
     const now = new Date().toISOString();
     const record: PredictionRecord = {
       predictionId: existing?.predictionId ?? randomUUID(),
@@ -543,6 +644,149 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
       predictedGoalMinuteRegulation: input.predictedGoalMinuteRegulation,
       predictedGoalMinuteStoppage: input.predictedGoalMinuteStoppage,
       predictedFirstTeamToScore: input.predictedFirstTeamToScore,
+      predictionContract: LEGACY_PREDICTION_CONTRACT,
+      firstTeamState: null,
+      goalscorerState: null,
+      goalMinuteState: null,
+      attemptedLevel: null,
+      acceptedOfferDigest: null,
+      acceptedOfferMaxLevel: null,
+      geoVerifiedAt: input.geoVerifiedAt,
+      measuredDistanceMeters: input.measuredDistanceMeters,
+      reportedAccuracyMeters: input.reportedAccuracyMeters,
+      geoEligible: input.geoEligible,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.predictions.set(record.predictionId, record);
+    return record;
+  }
+
+  private assertNoFinalizedResult(matchId: string): void {
+    const finalized = [...this.matchResults.values()].some(
+      (r) => r.matchId === matchId && r.finalizedAt !== null
+    );
+    if (finalized) throw new ResultAlreadyFinalizedError();
+  }
+
+  /**
+   * The request already accepted for this member and match, if this call is exactly it: same venue activation, same answers (every
+   * category's state and value) and the same offer fingerprint. Geolocation is not part of it. A request that cannot be parsed is not
+   * a replay (it falls through to the checks that refuse it).
+   */
+  private findExactReplay(input: { matchId: string; gamingMemberId: string; venueActivationId: string; answers: ProgressiveAnswers; offerDigest: string | null }): PredictionRecord | null {
+    const existing = [...this.predictions.values()].find((p) => p.matchId === input.matchId && p.gamingMemberId === input.gamingMemberId);
+    if (!existing || existing.predictionContract !== PROGRESSIVE_PREDICTION_CONTRACT) return null;
+    if (existing.venueActivationId !== input.venueActivationId) return null;
+    if (typeof input.offerDigest !== "string" || input.offerDigest.length === 0 || existing.acceptedOfferDigest !== input.offerDigest) return null;
+    let answers: ProgressiveAnswers;
+    try {
+      answers = parseProgressiveAnswers(input.answers);
+    } catch {
+      return null;
+    }
+    const columns = progressiveColumnsOf(answers);
+    const same =
+      existing.attemptedLevel === answers.attemptedLevel &&
+      existing.predictedHomeScore === answers.scoreline.home &&
+      existing.predictedAwayScore === answers.scoreline.away &&
+      existing.firstTeamState === columns.firstTeamState &&
+      existing.predictedFirstTeamToScore === columns.firstTeam &&
+      existing.goalscorerState === columns.goalscorerState &&
+      existing.predictedGoalscorerPlayerId === columns.goalscorerPlayerId &&
+      existing.goalMinuteState === columns.goalMinuteState &&
+      existing.predictedGoalMinuteRegulation === columns.goalMinuteRegulation &&
+      existing.predictedGoalMinuteStoppage === columns.goalMinuteStoppage;
+    return same ? existing : null;
+  }
+
+  /**
+   * upsert_progressive_prediction_atomically. Validation order is the
+   * function's: match exists, contract, then an exact replay of the
+   * accepted request (returned as stored, nothing written), then match
+   * state (cancelled, kickoff), finalized result, activation,
+   * geolocation, shape, offer, roster, and last the stored row —
+   * replaced whole, so a lower attempted level leaves no higher answer
+   * behind.
+   */
+  async upsertProgressivePrediction(input: {
+    matchId: string;
+    gamingMemberId: string;
+    venueActivationId: string;
+    answers: ProgressiveAnswers;
+    offerDigest: string | null;
+    geoVerifiedAt: string;
+    measuredDistanceMeters: number;
+    reportedAccuracyMeters: number | null;
+    geoEligible: boolean;
+  }): Promise<PredictionRecord> {
+    const match = this.matches.get(input.matchId);
+    if (!match) throw new MatchNotFoundError();
+    if (match.predictionContract !== PROGRESSIVE_PREDICTION_CONTRACT) throw new ContractMismatchError();
+    // An exact replay of the accepted request changes nothing, so it is returned as stored (no new updatedAt, no new geolocation
+    // evidence) before the checks that close a match: nothing that happened since can refuse it. Anything different is an edit.
+    const replay = this.findExactReplay(input);
+    if (replay) return replay;
+    if (match.cancelledAt) throw new MatchCancelledError();
+    if (match.activityClassification === null) throw new MatchNotClassifiedError();
+    if (new Date() >= new Date(match.kickoffAt)) throw new KickoffPassedError();
+    this.assertNoFinalizedResult(input.matchId);
+
+    const activation = this.activations.get(input.venueActivationId);
+    if (!activation) throw new VenueActivationNotFoundError();
+    if (activation.matchId !== input.matchId) throw new VenueActivationMatchMismatchError();
+    if (!activation.enabled) throw new VenueActivationDisabledError();
+
+    if (!input.geoEligible) throw new GeoNotEligibleError();
+
+    // Re-validated here, not trusted from the caller: this is the layer
+    // the SQL function mirrors.
+    const answers = parseProgressiveAnswers(input.answers);
+
+    const offer = computeLadderOffer(
+      [...this.prizeTiers.values()].filter((t) => t.venueActivationId === input.venueActivationId)
+    );
+    if (!offer.available) throw new OfferNotAvailableError();
+    if (answers.attemptedLevel > offer.maxLevel) throw new LevelNotOfferedError();
+    if (typeof input.offerDigest !== "string" || input.offerDigest.length === 0) throw new OfferDigestRequiredError();
+    if (input.offerDigest !== offer.digest) throw new OfferChangedError();
+
+    if (answers.goalscorer !== undefined && answers.goalscorer.kind === "PICKED") {
+      const player = this.players.get(answers.goalscorer.playerId);
+      if (!player) throw new InvalidGoalscorerSelectionError();
+      if (player.teamId !== match.homeTeamId && player.teamId !== match.awayTeamId) {
+        throw new InvalidGoalscorerSelectionError();
+      }
+      if (!player.active) throw new InvalidGoalscorerSelectionError();
+    }
+
+    const existing = [...this.predictions.values()].find(
+      (p) => p.matchId === input.matchId && p.gamingMemberId === input.gamingMemberId
+    );
+    if (existing && existing.venueActivationId !== input.venueActivationId) {
+      throw new VenueActivationImmutableError();
+    }
+
+    const columns = progressiveColumnsOf(answers);
+    const now = new Date().toISOString();
+    const record: PredictionRecord = {
+      predictionId: existing?.predictionId ?? randomUUID(),
+      matchId: input.matchId,
+      gamingMemberId: input.gamingMemberId,
+      venueActivationId: input.venueActivationId,
+      predictedHomeScore: answers.scoreline.home,
+      predictedAwayScore: answers.scoreline.away,
+      predictedGoalscorerPlayerId: columns.goalscorerPlayerId,
+      predictedGoalMinuteRegulation: columns.goalMinuteRegulation,
+      predictedGoalMinuteStoppage: columns.goalMinuteStoppage,
+      predictedFirstTeamToScore: columns.firstTeam,
+      predictionContract: PROGRESSIVE_PREDICTION_CONTRACT,
+      firstTeamState: columns.firstTeamState,
+      goalscorerState: columns.goalscorerState,
+      goalMinuteState: columns.goalMinuteState,
+      attemptedLevel: attemptedLevelOf(columns),
+      acceptedOfferDigest: offer.digest,
+      acceptedOfferMaxLevel: offer.maxLevel,
       geoVerifiedAt: input.geoVerifiedAt,
       measuredDistanceMeters: input.measuredDistanceMeters,
       reportedAccuracyMeters: input.reportedAccuracyMeters,
@@ -777,18 +1021,72 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     facts: { goalCount: number; firstTeam: "HOME" | "AWAY" | "NO_GOAL" },
     matchResultId: string
   ): {
+    predictionContract: PredictionContract;
     scorelineCorrect: boolean;
-    goalscorerCorrect: boolean;
-    goalMinuteCorrect: boolean;
-    firstTeamToScoreCorrect: boolean;
+    goalscorerCorrect: boolean | null;
+    goalMinuteCorrect: boolean | null;
+    firstTeamToScoreCorrect: boolean | null;
     correctDimensionCount: number;
     correctDimensionKeys: string[];
+    attemptedLevel: number | null;
+    ladderLevel: number | null;
   } {
     const events = this.regulationTimeEligibleGoalEvents(matchResultId);
 
     const scorelineCorrect =
       prediction.predictedHomeScore === result.homeScore &&
       prediction.predictedAwayScore === result.awayScore;
+
+    if (prediction.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT) {
+      // A category that was NOT attempted has no outcome (null) and stops
+      // the ladder; NONE is an answer, correct exactly when there were no
+      // regulation goals; PICKED is compared. State is read, never a null.
+      const goalscorerCorrect = categoryOutcome(
+        prediction.goalscorerState!,
+        events.some((e) => e.scorerPlayerId === prediction.predictedGoalscorerPlayerId && !e.isOwnGoal),
+        facts.goalCount
+      );
+      const goalMinuteCorrect = categoryOutcome(
+        prediction.goalMinuteState!,
+        events.some(
+          (e) =>
+            e.minuteRegulation === prediction.predictedGoalMinuteRegulation &&
+            (e.minuteStoppage ?? null) === (prediction.predictedGoalMinuteStoppage ?? null)
+        ),
+        facts.goalCount
+      );
+      const firstTeamToScoreCorrect =
+        prediction.firstTeamState === "NOT_ATTEMPTED"
+          ? null
+          : prediction.firstTeamState === "NONE"
+            ? facts.firstTeam === "NO_GOAL"
+            : prediction.predictedFirstTeamToScore === facts.firstTeam;
+      const outcomes = {
+        scoreline: scorelineCorrect,
+        firstTeam: firstTeamToScoreCorrect,
+        goalscorer: goalscorerCorrect,
+        goalMinute: goalMinuteCorrect,
+      };
+      const flags: Record<string, boolean | null> = {
+        scorelineCorrect,
+        goalscorerCorrect,
+        goalMinuteCorrect,
+        firstTeamToScoreCorrect,
+      };
+      return {
+        predictionContract: PROGRESSIVE_PREDICTION_CONTRACT,
+        scorelineCorrect,
+        goalscorerCorrect,
+        goalMinuteCorrect,
+        firstTeamToScoreCorrect,
+        correctDimensionCount: hitCountOf(outcomes),
+        correctDimensionKeys: InMemoryPredictionsRepository.DIMENSION_KEY_ORDER.filter(([flag]) => flags[flag] === true).map(
+          ([, key]) => key
+        ),
+        attemptedLevel: prediction.attemptedLevel,
+        ladderLevel: wonLevelOf(outcomes),
+      };
+    }
 
     // Own goal does NOT satisfy Any Goalscorer for the player who committed it.
     const goalscorerCorrect =
@@ -830,13 +1128,39 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     ).map(([, key]) => key);
 
     return {
+      predictionContract: LEGACY_PREDICTION_CONTRACT,
       scorelineCorrect,
       goalscorerCorrect,
       goalMinuteCorrect,
       firstTeamToScoreCorrect,
       correctDimensionCount,
       correctDimensionKeys,
+      attemptedLevel: null,
+      ladderLevel: null,
     };
+  }
+
+  /**
+   * The prize tier an evaluation maps to. COMPLETE_COUNT_V1: equality on
+   * the number of correct dimensions. PROGRESSIVE_LADDER_V1: the tier of
+   * the WON level — a level with no tier (including level 0) has no prize,
+   * and there is never a descent to another level's prize.
+   */
+  private findPrizeTier(
+    prediction: PredictionRecord,
+    evaluated: { correctDimensionCount: number; ladderLevel: number | null }
+  ): PrizeTierRecord | undefined {
+    if (prediction.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT) {
+      if (evaluated.ladderLevel === null || evaluated.ladderLevel < 1) return undefined;
+      return [...this.prizeTiers.values()].find(
+        (t) => t.venueActivationId === prediction.venueActivationId && t.ladderLevel === evaluated.ladderLevel
+      );
+    }
+    return [...this.prizeTiers.values()].find(
+      (t) =>
+        t.venueActivationId === prediction.venueActivationId &&
+        t.correctDimensionCount === evaluated.correctDimensionCount
+    );
   }
 
   private awardProgressionEvent(
@@ -981,11 +1305,7 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
         });
         await this.metagame.processExperienceSummaryConsequences(experienceSummaryId);
 
-        const tier = [...this.prizeTiers.values()].find(
-          (t) =>
-            t.venueActivationId === prediction.venueActivationId &&
-            t.correctDimensionCount === evaluated.correctDimensionCount
-        );
+        const tier = this.findPrizeTier(prediction, evaluated);
         if (tier) {
           this.storeNewQualification(
             this.newQualification({
@@ -1234,11 +1554,7 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
           });
         }
 
-        const newTier = [...this.prizeTiers.values()].find(
-          (t) =>
-            t.venueActivationId === prediction.venueActivationId &&
-            t.correctDimensionCount === evaluated.correctDimensionCount
-        );
+        const newTier = this.findPrizeTier(prediction, evaluated);
         if (!newTier) continue; // no longer qualifies: history kept, no clawback
 
         const delivered: DeliveredEntitlement[] = [...this.qualifications.values()]
@@ -1255,7 +1571,10 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
             basis: q.redeemedPrizeLabelBasis!,
             redeemedPrizeLabel: q.redeemedPrizeLabel,
             legacyObservedPrizeLabel: q.legacyObservedPrizeLabel,
-            tierDimensionCount: this.prizeTiers.get(q.prizeTierId)?.correctDimensionCount ?? null,
+            tierDimensionCount:
+              prediction.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT
+                ? (this.prizeTiers.get(q.prizeTierId)?.ladderLevel ?? null)
+                : (this.prizeTiers.get(q.prizeTierId)?.correctDimensionCount ?? null),
           }));
 
         // The rules live in deliveryPolicy.ts, shared with the SQL contract
@@ -1265,7 +1584,11 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
           correctionLineage,
           newTierId: newTier.prizeTierId,
           newTierLabel: newTier.prizeLabel,
-          newDimensionCount: evaluated.correctDimensionCount,
+          newDimensionCount:
+            prediction.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT
+              ? (evaluated.ladderLevel as number)
+              : evaluated.correctDimensionCount,
+          scale: prediction.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT ? "LADDER" : "COUNT",
         });
 
         const base = {

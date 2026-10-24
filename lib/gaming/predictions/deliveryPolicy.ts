@@ -59,8 +59,23 @@ export interface DeliveredEntitlement {
   redeemedPrizeLabel: string | null;
   /** Present only for basis OBSERVED_AT_MIGRATION. */
   legacyObservedPrizeLabel: string | null;
-  /** The delivered tier's correct-dimension count today, if the tier still exists. */
+  /**
+   * The delivered tier's key today, if the tier still exists: its
+   * correct-dimension count (scale COUNT) or its ladder level (scale
+   * LADDER). Only used to word the hold reason.
+   */
   tierDimensionCount: number | null;
+}
+
+/**
+ * How a tier's key is worded: COUNT is the historical "N of 4 correct";
+ * LADDER is the won level, "level N of 4". The decision itself never
+ * depends on this — only the text.
+ */
+export type TierScale = "COUNT" | "LADDER";
+
+function describeTierKey(scale: TierScale, value: number | string): string {
+  return scale === "LADDER" ? `level ${value} of 4` : `${value} of 4 correct`;
 }
 
 export interface CorrectionPrizeInput {
@@ -70,7 +85,10 @@ export interface CorrectionPrizeInput {
   correctionLineage: number | null;
   newTierId: string;
   newTierLabel: string;
+  /** The new tier's key: the correct-dimension count (COUNT) or the won level (LADDER). */
   newDimensionCount: number;
+  /** Defaults to COUNT, the historical wording. */
+  scale?: TierScale;
 }
 
 export type CorrectionPrizeDecision =
@@ -85,6 +103,7 @@ export type CorrectionPrizeDecision =
 
 export function decideCorrectionPrize(input: CorrectionPrizeInput): CorrectionPrizeDecision {
   const { delivered, correctionLineage, newTierId, newTierLabel, newDimensionCount } = input;
+  const scale: TierScale = input.scale ?? "COUNT";
   if (delivered.length === 0) return { kind: "REPLACE_UNREDEEMED" };
 
   const ordered = delivered.filter((d) => d.lineageOrdinal !== null);
@@ -101,7 +120,7 @@ export function decideCorrectionPrize(input: CorrectionPrizeInput): CorrectionPr
       holdPriorPrizeQualificationId: null,
       reason:
         `A correction affected a prize for a member who already has a delivery, but the order of this member's deliveries and replacements could not be established from the records. ` +
-        `Now entitled to: "${newTierLabel}" (${newDimensionCount} of 4 correct). ` +
+        `Now entitled to: "${newTierLabel}" (${describeTierKey(scale, newDimensionCount)}). ` +
         `A Consequential Finalizer must reconcile this with the venue, with a reason, before any further delivery.`,
     };
   }
@@ -124,8 +143,8 @@ export function decideCorrectionPrize(input: CorrectionPrizeInput): CorrectionPr
       basis: "DELIVERED_PRIZE_CHANGED",
       holdPriorPrizeQualificationId: latest.prizeQualificationId,
       reason:
-        `A correction changed a prize that was already delivered. Delivered: "${latest.redeemedPrizeLabel}" (${dimension} of 4 correct). ` +
-        `Now entitled to: "${newTierLabel}" (${newDimensionCount} of 4 correct). ` +
+        `A correction changed a prize that was already delivered. Delivered: "${latest.redeemedPrizeLabel}" (${describeTierKey(scale, dimension)}). ` +
+        `Now entitled to: "${newTierLabel}" (${describeTierKey(scale, newDimensionCount)}). ` +
         `No further delivery is authorized until a Consequential Finalizer releases this hold with a reason.`,
     };
   }
@@ -138,8 +157,8 @@ export function decideCorrectionPrize(input: CorrectionPrizeInput): CorrectionPr
     holdPriorPrizeQualificationId: latest.prizeQualificationId,
     reason:
       `A correction affected a prize that was already delivered, but that delivery was recorded before delivery-time prize labels were kept, so it cannot be shown to be the same prize. ` +
-      `The earlier delivery is defined today as "${latest.legacyObservedPrizeLabel ?? "(no definition found)"}" (${dimension} of 4 correct), which may differ from what was handed over; ` +
-      `this correction entitles the member to "${newTierLabel}" (${newDimensionCount} of 4 correct). ` +
+      `The earlier delivery is defined today as "${latest.legacyObservedPrizeLabel ?? "(no definition found)"}" (${describeTierKey(scale, dimension)}), which may differ from what was handed over; ` +
+      `this correction entitles the member to "${newTierLabel}" (${describeTierKey(scale, newDimensionCount)}). ` +
       `A Consequential Finalizer must reconcile this with the venue, with a reason, before any further delivery.`,
   };
 }

@@ -4,8 +4,11 @@ import {
   buildPredictionsRepo,
   requireAnyAdminAuthority,
   requirePlatformAuthorityHttp,
+  statusForPredictionsError,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createMatch } from "@/lib/gaming/predictions/adminCatalog";
+import { PROGRESSIVE_PREDICTION_CONTRACT } from "@/lib/gaming/predictions/prizeLadder";
+import type { PredictionContract } from "@/lib/gaming/predictions/types";
 
 export async function GET(request: Request) {
   const credentials = getSupabaseCredentials();
@@ -52,7 +55,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid match payload." }, { status: 400 });
   }
 
+  // New matches are created under the progressive contract unless the
+  // request names the historical one. The contract is frozen from the
+  // match's first prediction or result.
+  const requested = body.predictionContract;
+  if (requested !== undefined && requested !== "COMPLETE_COUNT_V1" && requested !== "PROGRESSIVE_LADDER_V1") {
+    return NextResponse.json({ error: "Unknown prediction contract." }, { status: 400 });
+  }
+  const predictionContract: PredictionContract = requested ?? PROGRESSIVE_PREDICTION_CONTRACT;
+
   const repo = buildPredictionsRepo(credentials);
-  const match = await createMatch(repo, { homeTeamId, awayTeamId, competition, kickoffAt });
-  return NextResponse.json({ match }, { status: 201 });
+  try {
+    const match = await createMatch(repo, { homeTeamId, awayTeamId, competition, kickoffAt, predictionContract });
+    return NextResponse.json({ match }, { status: 201 });
+  } catch (err) {
+    const status = statusForPredictionsError(err);
+    if (status) return NextResponse.json({ error: (err as Error).message }, { status });
+    throw err;
+  }
 }

@@ -19,7 +19,10 @@ import type {
   PrizeQualificationRecord,
   PrizeQualificationDetailRecord,
   LeaderboardEntry,
+  PredictionContract,
 } from "../types";
+import type { ProgressiveAnswers } from "../prizeLadder";
+import { progressiveColumnsOf } from "../prizeLadder";
 import {
   MatchNotFoundError,
   MatchCancelledError,
@@ -56,6 +59,16 @@ import {
   PrizeQualificationHeldError,
   PrizeAlreadyFulfilledError,
   PrizeQualificationNotHeldError,
+  ContractMismatchError,
+  ContractFrozenError,
+  InvalidAttemptShapeError,
+  LevelNotOfferedError,
+  OfferNotAvailableError,
+  OfferChangedError,
+  OfferDigestRequiredError,
+  OfferFrozenError,
+  ResultAlreadyFinalizedError,
+  TierKeyContractMismatchError,
 } from "../types";
 import { InsufficientPlatformAuthorityError, ReasonRequiredError } from "../../authority/types";
 import { attachQualificationDetails, chunk } from "../qualificationDetails";
@@ -93,6 +106,8 @@ function mapMatch(row: any): MatchRecord {
     cancelledAt: row.cancelled_at,
     activityClassification: row.activity_classification,
     xpEligible: row.xp_eligible,
+    // A row that has no contract column at all (a database that has not been migrated yet) is historical by definition.
+    predictionContract: row.prediction_contract ?? "COMPLETE_COUNT_V1",
     createdAt: row.created_at,
   };
 }
@@ -124,6 +139,7 @@ function mapPrizeTier(row: any): PrizeTierRecord {
     prizeTierId: row.prize_tier_id,
     venueActivationId: row.venue_activation_id,
     correctDimensionCount: row.correct_dimension_count,
+    ladderLevel: row.ladder_level ?? null,
     prizeLabel: row.prize_label,
     createdAt: row.created_at,
   };
@@ -141,6 +157,13 @@ function mapPrediction(row: any): PredictionRecord {
     predictedGoalMinuteRegulation: row.predicted_goal_minute_regulation,
     predictedGoalMinuteStoppage: row.predicted_goal_minute_stoppage,
     predictedFirstTeamToScore: row.predicted_first_team_to_score,
+    predictionContract: row.prediction_contract ?? "COMPLETE_COUNT_V1",
+    firstTeamState: row.first_team_state ?? null,
+    goalscorerState: row.goalscorer_state ?? null,
+    goalMinuteState: row.goal_minute_state ?? null,
+    attemptedLevel: row.attempted_level ?? null,
+    acceptedOfferDigest: row.accepted_offer_digest ?? null,
+    acceptedOfferMaxLevel: row.accepted_offer_max_level ?? null,
     geoVerifiedAt: row.geo_verified_at,
     measuredDistanceMeters: Number(row.measured_distance_meters),
     reportedAccuracyMeters:
@@ -182,11 +205,14 @@ function mapEvaluation(row: any): EvaluationRecord {
     evaluationId: row.evaluation_id,
     predictionId: row.prediction_id,
     matchResultId: row.match_result_id,
+    predictionContract: row.prediction_contract ?? "COMPLETE_COUNT_V1",
     scorelineCorrect: row.scoreline_correct,
     goalscorerCorrect: row.goalscorer_correct,
     goalMinuteCorrect: row.goal_minute_correct,
     firstTeamToScoreCorrect: row.first_team_to_score_correct,
     correctDimensionCount: row.correct_dimension_count,
+    attemptedLevel: row.attempted_level ?? null,
+    ladderLevel: row.ladder_level ?? null,
     evaluatedAt: row.evaluated_at,
   };
 }
@@ -262,6 +288,16 @@ function translateNamedError(error: { code?: string; message?: string }): Error 
     ["PRIZE_QUALIFICATION_NOT_HELD", () => new PrizeQualificationNotHeldError()],
     ["PRIZE_QUALIFICATION_HELD", () => new PrizeQualificationHeldError()],
     ["PRIZE_ALREADY_FULFILLED", () => new PrizeAlreadyFulfilledError()],
+    ["TIER_KEY_CONTRACT_MISMATCH", () => new TierKeyContractMismatchError()],
+    ["CONTRACT_MISMATCH", (detail) => new ContractMismatchError(detail)],
+    ["CONTRACT_FROZEN", () => new ContractFrozenError()],
+    ["INVALID_ATTEMPT_SHAPE", (detail) => new InvalidAttemptShapeError(detail)],
+    ["LEVEL_NOT_OFFERED", () => new LevelNotOfferedError()],
+    ["OFFER_NOT_AVAILABLE", () => new OfferNotAvailableError()],
+    ["OFFER_DIGEST_REQUIRED", () => new OfferDigestRequiredError()],
+    ["OFFER_CHANGED", () => new OfferChangedError()],
+    ["OFFER_FROZEN", () => new OfferFrozenError()],
+    ["RESULT_ALREADY_FINALIZED", () => new ResultAlreadyFinalizedError()],
     ["MATCH_NOT_FOUND", () => new MatchNotFoundError()],
     ["MATCH_CANCELLED", () => new MatchCancelledError()],
     ["MATCH_NOT_CLASSIFIED", () => new MatchNotClassifiedError()],
@@ -402,6 +438,7 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
     awayTeamId: string;
     competition: string;
     kickoffAt: string;
+    predictionContract?: PredictionContract;
   }): Promise<MatchRecord> {
     const { data, error } = await this.client
       .from("matches")
@@ -410,10 +447,31 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
         away_team_id: input.awayTeamId,
         competition: input.competition,
         kickoff_at: input.kickoffAt,
+        // Omitted, the column default (the historical contract) applies.
+        ...(input.predictionContract ? { prediction_contract: input.predictionContract } : {}),
       })
       .select()
       .single();
     if (error) throw error;
+    return mapMatch(data);
+  }
+
+  async setMatchPredictionContract(
+    matchId: string,
+    predictionContract: PredictionContract
+  ): Promise<MatchRecord> {
+    const { data, error } = await this.client
+      .from("matches")
+      .update({ prediction_contract: predictionContract })
+      .eq("match_id", matchId)
+      .select()
+      .maybeSingle();
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
+    if (!data) throw new MatchNotFoundError();
     return mapMatch(data);
   }
 
@@ -630,7 +688,33 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
+    return mapPrizeTier(data);
+  }
+
+  async createLadderPrizeTier(input: {
+    venueActivationId: string;
+    ladderLevel: number;
+    prizeLabel: string;
+  }): Promise<PrizeTierRecord> {
+    const { data, error } = await this.client
+      .from("prize_tiers")
+      .insert({
+        venue_activation_id: input.venueActivationId,
+        ladder_level: input.ladderLevel,
+        prize_label: input.prizeLabel,
+      })
+      .select()
+      .single();
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
     return mapPrizeTier(data);
   }
 
@@ -638,10 +722,12 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
     const { data, error } = await this.client
       .from("prize_tiers")
       .select("*")
-      .eq("venue_activation_id", venueActivationId)
-      .order("correct_dimension_count");
+      .eq("venue_activation_id", venueActivationId);
     if (error) throw error;
-    return (data ?? []).map(mapPrizeTier);
+    // Ordered here, not in the query, so that listing never names a column an unmigrated database does not have.
+    return (data ?? [])
+      .map(mapPrizeTier)
+      .sort((a, b) => (a.correctDimensionCount ?? 0) - (b.correctDimensionCount ?? 0) || (a.ladderLevel ?? 0) - (b.ladderLevel ?? 0));
   }
 
   async upsertPrediction(input: {
@@ -669,6 +755,51 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       p_predicted_goal_minute_regulation: input.predictedGoalMinuteRegulation,
       p_predicted_goal_minute_stoppage: input.predictedGoalMinuteStoppage,
       p_predicted_first_team_to_score: input.predictedFirstTeamToScore,
+      p_geo_verified_at: input.geoVerifiedAt,
+      p_measured_distance_meters: input.measuredDistanceMeters,
+      p_reported_accuracy_meters: input.reportedAccuracyMeters,
+      p_geo_eligible: input.geoEligible,
+    });
+
+    if (error) {
+      const translated = translateNamedError(error);
+      if (translated) throw translated;
+      throw error;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    return mapPrediction(row);
+  }
+
+  async upsertProgressivePrediction(input: {
+    matchId: string;
+    gamingMemberId: string;
+    venueActivationId: string;
+    answers: ProgressiveAnswers;
+    offerDigest: string | null;
+    geoVerifiedAt: string;
+    measuredDistanceMeters: number;
+    reportedAccuracyMeters: number | null;
+    geoEligible: boolean;
+  }): Promise<PredictionRecord> {
+    // The states are sent explicitly: a missing category is NOT_ATTEMPTED,
+    // never a null the function would have to interpret.
+    const columns = progressiveColumnsOf(input.answers);
+    const { data, error } = await this.client.rpc("upsert_progressive_prediction_atomically", {
+      p_match_id: input.matchId,
+      p_gaming_member_id: input.gamingMemberId,
+      p_venue_activation_id: input.venueActivationId,
+      p_attempted_level: input.answers.attemptedLevel,
+      p_predicted_home_score: input.answers.scoreline.home,
+      p_predicted_away_score: input.answers.scoreline.away,
+      p_first_team_state: columns.firstTeamState,
+      p_first_team: columns.firstTeam,
+      p_goalscorer_state: columns.goalscorerState,
+      p_goalscorer_player_id: columns.goalscorerPlayerId,
+      p_goal_minute_state: columns.goalMinuteState,
+      p_goal_minute_regulation: columns.goalMinuteRegulation,
+      p_goal_minute_stoppage: columns.goalMinuteStoppage,
+      p_offer_digest: input.offerDigest,
       p_geo_verified_at: input.geoVerifiedAt,
       p_measured_distance_meters: input.measuredDistanceMeters,
       p_reported_accuracy_meters: input.reportedAccuracyMeters,

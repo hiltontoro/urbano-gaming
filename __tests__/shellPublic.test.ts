@@ -645,9 +645,27 @@ describe("Predictions — results, prizes and times", () => {
     expect(PRED_HTML).not.toMatch(/timeZone/); // Predictions never forced a zone, and still does not
   });
 
-  it("the page script does not read storage itself, so only the shared module owns the saved choice", () => {
+  it("the page script keeps the shared module as the only owner of the saved choice, and touches browser storage for one purpose only: the unsent progressive draft, in session storage, in one marked region, with no credentials", () => {
     const script = PRED_HTML.slice(PRED_HTML.lastIndexOf("<script>"));
-    expect(script).not.toMatch(/localStorage|sessionStorage/);
+    // No persistent storage of any kind, and no cookie, from the page script.
+    expect(script).not.toMatch(/localStorage|indexedDB|document\.cookie|caches\.|openDatabase/);
+    // Session storage is reached from the marked region and nowhere else.
+    const beginMarker = "// ==== local draft storage (sessionStorage) — begin ====";
+    const endMarker = "// ==== local draft storage (sessionStorage) — end ====";
+    const begin = script.indexOf(beginMarker);
+    const end = script.indexOf(endMarker);
+    expect(begin).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(begin);
+    expect(script.indexOf(beginMarker, begin + 1)).toBe(-1);
+    expect(script.indexOf(endMarker, end + 1)).toBe(-1);
+    expect(script.slice(0, begin) + script.slice(end + endMarker.length)).not.toMatch(/sessionStorage/);
+    // What the region stores carries no credential, token, e-mail or personal profile field (comments aside).
+    const code = script.slice(begin, end).split("\n").map((line) => line.replace(/\/\/.*$/, "")).join("\n");
+    expect(code).toMatch(/sessionStorage/);
+    expect(code).not.toMatch(/token|password|secret|apikey|api_key|authorization|bearer|email|displayName|authUserId|getAccessToken|UrbanoAuth/i);
+    // The key is namespaced, and the only identity in it is the Gaming member id the page was already given.
+    expect(code).toContain('"urbano.score.draft."');
+    // The other pages still own no storage of their own.
     expect(INDEX_HTML.slice(INDEX_HTML.lastIndexOf("<script>"))).not.toMatch(/localStorage|sessionStorage/);
   });
 });

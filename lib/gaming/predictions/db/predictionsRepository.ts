@@ -15,7 +15,9 @@ import type {
   PrizeQualificationRecord,
   PrizeQualificationDetailRecord,
   LeaderboardEntry,
+  PredictionContract,
 } from "../types";
+import type { ProgressiveAnswers } from "../prizeLadder";
 
 /**
  * Soccer Predictions persistence boundary — its own interface, parallel
@@ -41,7 +43,15 @@ export interface PredictionsRepository {
     awayTeamId: string;
     competition: string;
     kickoffAt: string;
+    /** Defaults to COMPLETE_COUNT_V1 — the historical contract. */
+    predictionContract?: PredictionContract;
   }): Promise<MatchRecord>;
+  /**
+   * Changes a Match's prediction contract. Refused (ContractFrozenError)
+   * once the Match has any prediction or any result: the contract is
+   * frozen from the first of either.
+   */
+  setMatchPredictionContract(matchId: string, predictionContract: PredictionContract): Promise<MatchRecord>;
   editMatch(
     matchId: string,
     input: {
@@ -106,6 +116,17 @@ export interface PredictionsRepository {
     correctDimensionCount: number;
     prizeLabel: string;
   }): Promise<PrizeTierRecord>;
+  /**
+   * Adds a ladder tier (level 1 to 4) to an activation of a
+   * PROGRESSIVE_LADDER_V1 Match. Refused (OfferFrozenError) once any
+   * prediction exists for the activation: from the first prediction the
+   * offered levels, their labels and the highest level offered cannot change.
+   */
+  createLadderPrizeTier(input: {
+    venueActivationId: string;
+    ladderLevel: number;
+    prizeLabel: string;
+  }): Promise<PrizeTierRecord>;
   listPrizeTiersForActivation(
     venueActivationId: string
   ): Promise<PrizeTierRecord[]>;
@@ -121,6 +142,24 @@ export interface PredictionsRepository {
     predictedGoalMinuteRegulation: number | null;
     predictedGoalMinuteStoppage: number | null;
     predictedFirstTeamToScore: "HOME" | "AWAY" | null;
+    geoVerifiedAt: string;
+    measuredDistanceMeters: number;
+    reportedAccuracyMeters: number | null;
+    geoEligible: boolean;
+  }): Promise<PredictionRecord>;
+  /**
+   * The single write path for a prediction under PROGRESSIVE_LADDER_V1,
+   * first submission and every revision before kickoff. The whole row is
+   * replaced each time: a lower attempted level clears every higher
+   * category. offerDigest is the fingerprint of the prize offer the
+   * member saw; a different current offer is refused (OfferChangedError).
+   */
+  upsertProgressivePrediction(input: {
+    matchId: string;
+    gamingMemberId: string;
+    venueActivationId: string;
+    answers: ProgressiveAnswers;
+    offerDigest: string | null;
     geoVerifiedAt: string;
     measuredDistanceMeters: number;
     reportedAccuracyMeters: number | null;

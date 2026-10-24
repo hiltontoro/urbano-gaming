@@ -12,6 +12,30 @@
  * for the full history of that correction.
  */
 
+/**
+ * How a Match's predictions are shaped, evaluated and rewarded. Versioned
+ * per Match and frozen from the Match's first prediction or result.
+ *   - COMPLETE_COUNT_V1: the historical contract. Every dimension is
+ *     answered; null means "No Goal" for that dimension; the prize is the
+ *     tier whose correct_dimension_count equals the number of correct
+ *     dimensions. Nothing about it changes.
+ *   - PROGRESSIVE_LADDER_V1: a consecutive prefix of categories (Easy
+ *     scoreline, Medium first team, Hard any goalscorer, Legendary any
+ *     goal minute) with an explicit state per category; the prize is the
+ *     tier of the WON level (the consecutive correct prefix), and only
+ *     levels the activation offers can be attempted.
+ */
+export type PredictionContract = "COMPLETE_COUNT_V1" | "PROGRESSIVE_LADDER_V1";
+
+/**
+ * State of one optional category in a progressive prediction. Distinct
+ * on purpose: NOT_ATTEMPTED is a category the member did not reach (it is
+ * never evaluated); NONE is the deliberate "no team / no player / no
+ * minute" answer (correct exactly when there were no regulation goals);
+ * PICKED is a concrete selection.
+ */
+export type CategoryState = "NOT_ATTEMPTED" | "NONE" | "PICKED";
+
 export interface TeamRecord {
   teamId: string;
   name: string;
@@ -52,6 +76,12 @@ export interface MatchRecord {
    * set_match_xp_eligibility_atomically (0102).
    */
   xpEligible: boolean | null;
+  /**
+   * The Match's prediction contract. Defaults to COMPLETE_COUNT_V1 so
+   * everything that existed keeps its meaning. Frozen from the first
+   * prediction or result (the database enforces it).
+   */
+  predictionContract: PredictionContract;
   createdAt: string;
 }
 
@@ -73,10 +103,18 @@ export interface VenueActivationRecord {
   createdAt: string;
 }
 
+/**
+ * Exactly one of the two keys is set. correctDimensionCount keys a tier of
+ * a COMPLETE_COUNT_V1 Match (the number of correct dimensions);
+ * ladderLevel (1 to 4) keys a tier of a PROGRESSIVE_LADDER_V1 Match (the
+ * level won). The two are never converted into each other: a historical
+ * count tier is inert on a progressive Match.
+ */
 export interface PrizeTierRecord {
   prizeTierId: string;
   venueActivationId: string;
-  correctDimensionCount: number;
+  correctDimensionCount: number | null;
+  ladderLevel: number | null;
   prizeLabel: string;
   createdAt: string;
 }
@@ -115,6 +153,23 @@ export interface PredictionRecord {
   predictedGoalMinuteRegulation: number | null;
   predictedGoalMinuteStoppage: number | null;
   predictedFirstTeamToScore: "HOME" | "AWAY" | null;
+  /**
+   * Contract of the Match this prediction was made under. For
+   * COMPLETE_COUNT_V1 the three states and the accepted offer are null
+   * and a null predicted_* above means "No Goal". For PROGRESSIVE_LADDER_V1
+   * the states are explicit and a predicted_* is null whenever its state
+   * is not PICKED — read the state, never the null.
+   */
+  predictionContract: PredictionContract;
+  firstTeamState: CategoryState | null;
+  goalscorerState: CategoryState | null;
+  goalMinuteState: CategoryState | null;
+  /** 1 + the optional categories attempted; null for COMPLETE_COUNT_V1. */
+  attemptedLevel: number | null;
+  /** Fingerprint of the prize offer the member accepted when sending; null for COMPLETE_COUNT_V1. */
+  acceptedOfferDigest: string | null;
+  /** Highest level the accepted offer allowed; null for COMPLETE_COUNT_V1. */
+  acceptedOfferMaxLevel: number | null;
   geoVerifiedAt: string;
   measuredDistanceMeters: number;
   reportedAccuracyMeters: number | null;
@@ -182,15 +237,26 @@ export interface OfficialGoalEventInput {
   isOwnGoal?: boolean;
 }
 
+/**
+ * One evaluation per prediction and result version. Under
+ * PROGRESSIVE_LADDER_V1 an outcome is null for a category that was not
+ * attempted (never true, never false); attemptedLevel and ladderLevel
+ * (the won level, at most attemptedLevel) are set. Under
+ * COMPLETE_COUNT_V1 all four outcomes are booleans and both levels are
+ * null. correctDimensionCount is always the number of true outcomes.
+ */
 export interface EvaluationRecord {
   evaluationId: string;
   predictionId: string;
   matchResultId: string;
+  predictionContract: PredictionContract;
   scorelineCorrect: boolean;
-  goalscorerCorrect: boolean;
-  goalMinuteCorrect: boolean;
-  firstTeamToScoreCorrect: boolean;
+  goalscorerCorrect: boolean | null;
+  goalMinuteCorrect: boolean | null;
+  firstTeamToScoreCorrect: boolean | null;
   correctDimensionCount: number;
+  attemptedLevel: number | null;
+  ladderLevel: number | null;
   evaluatedAt: string;
 }
 
@@ -591,5 +657,84 @@ export class PrizeQualificationNotHeldError extends Error {
   constructor() {
     super("This prize is not on hold.");
     this.name = "PrizeQualificationNotHeldError";
+  }
+}
+
+// --- Progressive contract errors ----------------------------------------
+
+export class ContractMismatchError extends Error {
+  constructor(detail?: string) {
+    super(detail || "This match uses a different prediction contract than the one in the request.");
+    this.name = "ContractMismatchError";
+  }
+}
+
+export class ContractFrozenError extends Error {
+  constructor() {
+    super("This match already has a prediction or a result, so its prediction contract can no longer change.");
+    this.name = "ContractFrozenError";
+  }
+}
+
+export class InvalidAttemptShapeError extends Error {
+  constructor(detail?: string) {
+    super(detail || "The prediction does not have a valid shape.");
+    this.name = "InvalidAttemptShapeError";
+  }
+}
+
+export class LevelNotOfferedError extends Error {
+  constructor() {
+    super("That level is not offered at this venue.");
+    this.name = "LevelNotOfferedError";
+  }
+}
+
+export class OfferNotAvailableError extends Error {
+  constructor() {
+    super("This venue has no valid prize offer for this match, so it cannot take new predictions.");
+    this.name = "OfferNotAvailableError";
+  }
+}
+
+export class OfferChangedError extends Error {
+  constructor() {
+    super("The prizes offered at this venue changed since you loaded the page. Reload to see the current offer.");
+    this.name = "OfferChangedError";
+  }
+}
+
+export class OfferDigestRequiredError extends Error {
+  constructor() {
+    super("The fingerprint of the prize offer you saw is required to send a prediction.");
+    this.name = "OfferDigestRequiredError";
+  }
+}
+
+export class OfferFrozenError extends Error {
+  constructor() {
+    super("This venue's prizes can no longer change: participants have already accepted this offer.");
+    this.name = "OfferFrozenError";
+  }
+}
+
+export class ResultAlreadyFinalizedError extends Error {
+  constructor() {
+    super("This match already has a finalized result, so predictions can no longer be created or edited.");
+    this.name = "ResultAlreadyFinalizedError";
+  }
+}
+
+export class TierKeyContractMismatchError extends Error {
+  constructor() {
+    super("A prize tier of this match must use the key its prediction contract defines.");
+    this.name = "TierKeyContractMismatchError";
+  }
+}
+
+export class InvalidPrizeTierLadderLevelError extends Error {
+  constructor() {
+    super("Prize tier ladder level must be a whole number from 1 to 4.");
+    this.name = "InvalidPrizeTierLadderLevelError";
   }
 }

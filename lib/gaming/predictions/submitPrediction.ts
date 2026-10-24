@@ -2,6 +2,7 @@ import type { PredictionsRepository } from "./db/predictionsRepository";
 import type { PredictionRecord, GeoSubmission } from "./types";
 import { VenueActivationNotFoundError, GeoUnavailableError } from "./types";
 import { evaluateGeoEligibility } from "./geolocation";
+import { parseProgressiveAnswers } from "./prizeLadder";
 
 /**
  * SUBMIT_PREDICTION — the single write path for both a first-time
@@ -72,6 +73,66 @@ export async function submitPrediction(
     predictedGoalMinuteRegulation: input.predictedGoalMinuteRegulation,
     predictedGoalMinuteStoppage: input.predictedGoalMinuteStoppage,
     predictedFirstTeamToScore: input.predictedFirstTeamToScore,
+    geoVerifiedAt: new Date().toISOString(),
+    measuredDistanceMeters: geoResult.measuredDistanceMeters,
+    reportedAccuracyMeters: input.geo.accuracyMeters,
+    geoEligible: geoResult.eligible,
+  });
+}
+
+/**
+ * SUBMIT_PREDICTION for a Match under the progressive contract — the
+ * single write path for a first submission and every revision before
+ * kickoff. Same geolocation rule as the historical path (recomputed on
+ * every call from the venue's own coordinates, no fallback), then the
+ * answers are validated here — gaps, categories above the declared level,
+ * bare nulls, NONE carrying a value, PICKED carrying none are refused —
+ * and again by the atomic function and the table's own constraints.
+ *
+ * offerDigest is the fingerprint of the prize offer the member saw. If the
+ * offer has since changed the submission is refused, so an accepted offer
+ * can never change silently underneath a prediction.
+ */
+export async function submitProgressivePrediction(
+  repo: PredictionsRepository,
+  input: {
+    matchId: string;
+    gamingMemberId: string;
+    venueActivationId: string;
+    answers: unknown;
+    offerDigest: string | null;
+    geo: GeoSubmission | null;
+  }
+): Promise<PredictionRecord> {
+  if (!input.geo) {
+    throw new GeoUnavailableError();
+  }
+
+  const answers = parseProgressiveAnswers(input.answers);
+
+  const activation = await repo.getVenueActivationById(input.venueActivationId);
+  if (!activation) {
+    throw new VenueActivationNotFoundError();
+  }
+  const venue = await repo.getVenueById(activation.venueId);
+  if (!venue) {
+    throw new VenueActivationNotFoundError();
+  }
+
+  const geoResult = evaluateGeoEligibility(
+    input.geo.latitude,
+    input.geo.longitude,
+    venue.latitude,
+    venue.longitude,
+    venue.radiusMeters
+  );
+
+  return repo.upsertProgressivePrediction({
+    matchId: input.matchId,
+    gamingMemberId: input.gamingMemberId,
+    venueActivationId: input.venueActivationId,
+    answers,
+    offerDigest: input.offerDigest,
     geoVerifiedAt: new Date().toISOString(),
     measuredDistanceMeters: geoResult.measuredDistanceMeters,
     reportedAccuracyMeters: input.geo.accuracyMeters,

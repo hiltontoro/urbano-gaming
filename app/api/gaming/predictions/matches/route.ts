@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseCredentials, buildPredictionsRepo } from "@/lib/gaming/predictions/httpAuth";
 import { selectPublicMatches } from "@/lib/gaming/predictions/publicMatchList";
+import { PROGRESSIVE_PREDICTION_CONTRACT, computeLadderOffer } from "@/lib/gaming/predictions/prizeLadder";
 
 // This route has no dynamic path segment and never reads the request
 // object, so Next.js would otherwise treat it as statically
@@ -14,7 +15,11 @@ export const dynamic = "force-dynamic";
  * member-facing Goalscorer picker — grouped by Team, no free text),
  * its Venue Activations (with Venue coordinates/radius for client-side
  * distance display), configured Prize Tiers, and the current finalized
- * result if one exists. No Guest/member distinction — browsing is
+ * result if one exists. Under the progressive contract each activation also
+ * carries its prize offer: the levels that can be attempted (a consecutive
+ * prefix starting at Easy), their labels, the highest level, and the
+ * fingerprint a member's submission must echo back. An activation whose
+ * offer is not available (no prizes, or a gap) takes no new predictions. No Guest/member distinction — browsing is
  * open; submitting a Prediction (matches/[matchId]/predict) requires
  * authentication.
  */
@@ -61,8 +66,13 @@ export async function GET() {
             prizeTiers: prizeTiers.map((tier) => ({
               prizeTierId: tier.prizeTierId,
               correctDimensionCount: tier.correctDimensionCount,
+              ladderLevel: tier.ladderLevel,
               prizeLabel: tier.prizeLabel,
             })),
+            offer:
+              match.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT
+                ? computeLadderOffer(prizeTiers)
+                : null,
           };
         })
       );
@@ -92,6 +102,7 @@ export async function GET() {
         competition: match.competition,
         kickoffAt: match.kickoffAt,
         cancelledAt: match.cancelledAt,
+        predictionContract: match.predictionContract,
         finalized: currentResult !== null,
         finalResult: currentResult
           ? { homeScore: currentResult.homeScore, awayScore: currentResult.awayScore }

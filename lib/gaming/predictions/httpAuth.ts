@@ -50,6 +50,17 @@ import {
   PrizeQualificationHeldError,
   PrizeAlreadyFulfilledError,
   PrizeQualificationNotHeldError,
+  ContractMismatchError,
+  ContractFrozenError,
+  InvalidAttemptShapeError,
+  LevelNotOfferedError,
+  OfferNotAvailableError,
+  OfferChangedError,
+  OfferDigestRequiredError,
+  OfferFrozenError,
+  ResultAlreadyFinalizedError,
+  TierKeyContractMismatchError,
+  InvalidPrizeTierLadderLevelError,
 } from "./types";
 import { ResultChangedWhileLoadingError } from "./resultView";
 
@@ -85,6 +96,12 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof PrizeQualificationHeldError ||
     err instanceof PrizeAlreadyFulfilledError ||
     err instanceof PrizeQualificationNotHeldError ||
+    err instanceof ContractMismatchError ||
+    err instanceof ContractFrozenError ||
+    err instanceof OfferNotAvailableError ||
+    err instanceof OfferChangedError ||
+    err instanceof OfferFrozenError ||
+    err instanceof ResultAlreadyFinalizedError ||
     err instanceof ResultChangedWhileLoadingError
   ) {
     return 409;
@@ -98,6 +115,11 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof InvalidFirstTeamError ||
     err instanceof InvalidGoalscorerSelectionError ||
     err instanceof InvalidPrizeTierDimensionCountError ||
+    err instanceof InvalidAttemptShapeError ||
+    err instanceof LevelNotOfferedError ||
+    err instanceof OfferDigestRequiredError ||
+    err instanceof TierKeyContractMismatchError ||
+    err instanceof InvalidPrizeTierLadderLevelError ||
     err instanceof ReasonRequiredError ||
     err instanceof MatchResultDigestRequiredError ||
     err instanceof MatchResultBaseRequiredError ||

@@ -9,7 +9,8 @@ import type {
   SavedMatchResult,
   OfficialGoalEventInput,
 } from "./types";
-import { InvalidPrizeTierDimensionCountError } from "./types";
+import { InvalidPrizeTierDimensionCountError, InvalidPrizeTierLadderLevelError } from "./types";
+import type { PredictionContract } from "./types";
 import { validateGoalEventInputs, validateResultScores } from "./resultIntegrity";
 
 /**
@@ -76,13 +77,21 @@ export async function listPlayersForTeam(
 
 export async function createMatch(
   repo: PredictionsRepository,
-  input: { homeTeamId: string; awayTeamId: string; competition: string; kickoffAt: string }
+  input: {
+    homeTeamId: string;
+    awayTeamId: string;
+    competition: string;
+    kickoffAt: string;
+    /** Defaults to the historical contract; the admin route creates new matches progressive. */
+    predictionContract?: PredictionContract;
+  }
 ): Promise<MatchRecord> {
   return repo.createMatch({
     homeTeamId: input.homeTeamId,
     awayTeamId: input.awayTeamId,
     competition: input.competition.trim(),
     kickoffAt: input.kickoffAt,
+    ...(input.predictionContract ? { predictionContract: input.predictionContract } : {}),
   });
 }
 
@@ -213,6 +222,23 @@ export async function createPrizeTier(
     throw new InvalidPrizeTierDimensionCountError();
   }
   return repo.createPrizeTier({ ...input, prizeLabel: input.prizeLabel.trim() });
+}
+
+/**
+ * Adds a prize tier keyed by ladder level to an activation of a
+ * progressive Match. Levels 1 to 4 are Easy, Medium, Hard and Legendary;
+ * an activation is offered up to the consecutive prefix that is
+ * configured, so Easy comes first and there are no gaps. Once any
+ * prediction exists for the activation its tiers are frozen.
+ */
+export async function createLadderPrizeTier(
+  repo: PredictionsRepository,
+  input: { venueActivationId: string; ladderLevel: number; prizeLabel: string }
+): Promise<PrizeTierRecord> {
+  if (!Number.isInteger(input.ladderLevel) || input.ladderLevel < 1 || input.ladderLevel > 4) {
+    throw new InvalidPrizeTierLadderLevelError();
+  }
+  return repo.createLadderPrizeTier({ ...input, prizeLabel: input.prizeLabel.trim() });
 }
 
 /**

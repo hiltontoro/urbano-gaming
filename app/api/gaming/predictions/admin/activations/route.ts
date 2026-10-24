@@ -6,6 +6,7 @@ import {
   requirePlatformAuthorityHttp,
 } from "@/lib/gaming/predictions/httpAuth";
 import { createVenueActivation } from "@/lib/gaming/predictions/adminCatalog";
+import { PROGRESSIVE_PREDICTION_CONTRACT, computeLadderOffer } from "@/lib/gaming/predictions/prizeLadder";
 
 /**
  * GET: every Venue Activation of every Match, cancelled Matches included,
@@ -37,14 +38,22 @@ export async function GET(request: Request) {
           ]);
           return {
             matchId: match.matchId,
+            predictionContract: match.predictionContract,
             venueActivationId: activation.venueActivationId,
             enabled: activation.enabled,
             venue: venue ? { venueId: venue.venueId, name: venue.name } : null,
             prizeTiers: prizeTiers.map((tier) => ({
               prizeTierId: tier.prizeTierId,
               correctDimensionCount: tier.correctDimensionCount,
+              ladderLevel: tier.ladderLevel,
               prizeLabel: tier.prizeLabel,
             })),
+            // What this activation offers members under the progressive
+            // contract, so the admin sees whether it takes participations.
+            offer:
+              match.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT
+                ? computeLadderOffer(prizeTiers)
+                : null,
           };
         })
       );

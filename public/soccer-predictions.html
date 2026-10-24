@@ -174,6 +174,57 @@
   .dimension-cell .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .dimension-cell .mark { font-size: 20px; margin-top: 4px; }
 
+  /* URBANO Score — the progressive prediction (a stepper over the ladder). */
+  .ladder-rules { margin: 0 0 12px; font-size: 13.5px; color: var(--ink); line-height: 1.5; border-left: 3px solid var(--exp-purple); padding: 2px 0 2px 12px; }
+  .ladder-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 12px 0; }
+  .ladder-step-btn {
+    font-family: inherit; font-size: 12px; font-weight: 700; padding: 8px 10px; min-height: 44px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg-card); color: var(--muted); cursor: pointer;
+  }
+  .ladder-step-btn.is-done { border-color: var(--good); color: var(--ink); }
+  .ladder-step-btn.is-current { border-color: var(--exp-purple); color: var(--ink); background: var(--exp-purple-bg); }
+  .ladder-step-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .ladder-body h3 { font-size: 17px; font-weight: 800; margin: 14px 0 6px; outline: none; }
+  .ladder-hint { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+  .score-stepper-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .score-stepper { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--bg-card); text-align: center; }
+  .score-stepper .team-name { font-size: 13px; font-weight: 700; margin: 0 0 8px; overflow-wrap: anywhere; }
+  .stepper-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .stepper-controls button {
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+    font-size: 20px; font-family: inherit; cursor: pointer;
+  }
+  .stepper-controls input {
+    width: 56px; min-height: 44px; text-align: center; font-size: 22px; font-weight: 800; font-family: inherit;
+    border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); padding: 4px;
+  }
+  .ladder-none { margin-top: 10px; }
+  .team-toggle[aria-pressed="true"] { border-color: var(--gold); background: var(--gold-bg); color: var(--gold); }
+  .team-toggle-row.is-wrap { flex-wrap: wrap; }
+  .ladder-status { margin: 0 0 10px; padding: 7px 10px; border-radius: 8px; border: 1px dashed var(--line); font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+  .ladder-status.is-draft { border-color: var(--gold); color: var(--gold); }
+  .ladder-status.is-saved { border-color: var(--good); color: var(--good); }
+  .ladder-conflict { border: 1px solid var(--gold); border-radius: 12px; padding: 14px; margin: 6px 0 14px; }
+  .ladder-conflict h3 { margin: 0 0 8px; font-size: 16px; }
+  .ladder-conflict p, .ladder-conflict li { font-size: 13.5px; line-height: 1.55; }
+  .ladder-panel { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 14px 0; background: var(--bg-card); }
+  .ladder-panel p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+  .ladder-panel .ladder-current { font-weight: 800; }
+  .ladder-offers-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 10px 0 4px; }
+  .ladder-offers { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink); line-height: 1.6; }
+  .ladder-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .ladder-actions button { flex: 1 1 170px; min-height: 46px; }
+  .btn-secondary {
+    font-family: inherit; font-size: 14px; font-weight: 700; padding: 13px 18px; border-radius: 10px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer;
+  }
+  .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ladder-review { border: 1px dashed var(--exp-purple); border-radius: 12px; padding: 14px; margin: 14px 0; }
+  .ladder-review h3 { margin-top: 0; }
+  .ladder-review ul { margin: 8px 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  .dimension-cell.not-attempted { border-style: dashed; background: transparent; }
+  .dimension-cell.not-attempted .mark { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .dimension-cell .state-text { font-size: 12.5px; margin-top: 6px; }
   .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
@@ -404,6 +455,84 @@
     "pred.saved": "Predicción guardada. Podés editarla hasta el inicio del partido.",
     "pred.failed": "No se pudo enviar la predicción.",
     "pred.signedInNote": "Ya iniciaste sesión. Hacé tu predicción abajo.",
+    "pred.ladder.rules": "Cada nivel requiere acertar todos los anteriores. Podés enviar al completar un nivel o continuar para intentar uno mayor. Recibís únicamente el premio del nivel más alto que acertés.",
+    "pred.ladder.name.1": "Fácil",
+    "pred.ladder.name.2": "Mediana",
+    "pred.ladder.name.3": "Difícil",
+    "pred.ladder.name.4": "Legendaria",
+    "pred.ladder.level.1": "Nivel 1 · Fácil",
+    "pred.ladder.level.2": "Nivel 2 · Mediana",
+    "pred.ladder.level.3": "Nivel 3 · Difícil",
+    "pred.ladder.level.4": "Nivel 4 · Legendaria",
+    "pred.ladder.steps": "Niveles de esta sede",
+    "pred.ladder.dim.1": "Marcador exacto",
+    "pred.ladder.dim.2": "Primer equipo en anotar",
+    "pred.ladder.dim.3": "Cualquier goleador",
+    "pred.ladder.dim.4": "Cualquier minuto de gol",
+    "pred.ladder.q.1": "¿Cuál será el marcador final?",
+    "pred.ladder.q.2": "¿Qué equipo anotará primero?",
+    "pred.ladder.q.3": "¿Quién marcará un gol?",
+    "pred.ladder.q.4": "¿En qué minuto caerá un gol?",
+    "pred.ladder.hint.1": "Elegí los dos marcadores: no hay un valor por defecto.",
+    "pred.ladder.hint.2": "Elegí un equipo, o la opción de que ningún equipo anotará.",
+    "pred.ladder.hint.3": "Sirve cualquier jugador que marque un gol en tiempo reglamentario. El goleador y el minuto no tienen que ser del mismo gol.",
+    "pred.ladder.hint.4": "Sirve cualquier gol del partido en tiempo reglamentario; no tiene que ser el gol del goleador que elegiste.",
+    "pred.ladder.none.first": "Ningún equipo anotará",
+    "pred.ladder.none.scorer": "Ningún jugador marcará",
+    "pred.ladder.none.minute": "No habrá goles en tiempo reglamentario",
+    "pred.ladder.noneNote": "Elegir esta opción es una respuesta: es correcta solo si el partido termina sin goles en tiempo reglamentario. No responder es distinto: ese nivel no se evalúa.",
+    "pred.ladder.homeScore": "Goles de {team}",
+    "pred.ladder.scoreDec": "Restar un gol a {team}",
+    "pred.ladder.scoreInc": "Sumar un gol a {team}",
+    "pred.ladder.scorerPlaceholder": "Elegí un jugador",
+    "pred.ladder.minuteLabel": "Minuto (tiempo reglamentario)",
+    "pred.ladder.minutePlaceholder": "Ej. 23",
+    "pred.ladder.current": "Nivel actual: {level}",
+    "pred.ladder.max": "Con este nivel, el premio máximo posible en esta sede es: {prize}. Solo lo recibís si acertás {condition}.",
+    "pred.ladder.cond.1": "el marcador exacto",
+    "pred.ladder.cond.2": "el marcador exacto y el primer equipo en anotar",
+    "pred.ladder.cond.3": "el marcador exacto, el primer equipo y un goleador",
+    "pred.ladder.cond.4": "el marcador exacto, el primer equipo, un goleador y un minuto de gol",
+    "pred.ladder.noClaim": "Completar un nivel no da un premio por sí solo: depende de que aciertes.",
+    "pred.ladder.needAnswer": "Respondé el nivel 1 para poder continuar o enviar.",
+    "pred.ladder.needThis": "Respondé este nivel para poder continuar o enviar.",
+    "pred.ladder.offers": "Premios de esta sede",
+    "pred.ladder.offerRow": "Nivel {n} · {name}: {prize}",
+    "pred.ladder.btn.continue": "Continuar al nivel {n}",
+    "pred.ladder.btn.send": "Enviar con nivel {n}",
+    "pred.ladder.btn.save": "Guardar con nivel {n}",
+    "pred.ladder.btn.back": "Volver",
+    "pred.ladder.btn.confirm": "Confirmar y enviar",
+    "pred.ladder.btn.edit": "Volver a editar",
+    "pred.ladder.review.title": "Revisá tu participación",
+    "pred.ladder.review.level": "Vas a enviar hasta el nivel {n} ({name}).",
+    "pred.ladder.review.notSent": "Los niveles siguientes no se envían ni se evalúan.",
+    "pred.ladder.review.editable": "Podés cambiarla hasta el inicio del partido.",
+    "pred.ladder.reduceWarning": "Tu participación guardada llega hasta el nivel {saved}. Si la enviás con el nivel {n}, se borran tus respuestas de los niveles siguientes.",
+    "pred.ladder.ans.score": "Marcador: {home}–{away}",
+    "pred.ladder.ans.first": "Primer equipo: {value}",
+    "pred.ladder.ans.scorer": "Goleador: {value}",
+    "pred.ladder.ans.minute": "Minuto: {value}",
+    "pred.ladder.saved": "Participación guardada hasta el nivel {n} ({name}). Podés editarla hasta el inicio del partido.",
+    "pred.ladder.noOffer": "Por ahora ninguna sede tiene premios configurados para este partido, así que todavía no recibe participaciones.",
+    "pred.ladder.awaiting": "Tu participación llega hasta el nivel {n} ({name}). Esperando el resultado oficial.",
+    "pred.ladder.result.won": "Nivel intentado: {attempted}. Nivel ganado: {won}.",
+    "pred.ladder.result.none": "Nivel intentado: {attempted}. No ganaste ningún nivel.",
+    "pred.ladder.state.correct": "Acertó",
+    "pred.ladder.state.wrong": "Falló",
+    "pred.ladder.state.notAttempted": "No intentada",
+    "pred.ladder.draftRestored": "Recuperamos tus respuestas sin enviar de este navegador. Todavía no están guardadas: enviá tu participación para guardarlas.",
+    "pred.ladder.draftRestoredOverSaved": "Recuperamos cambios sin enviar de este navegador sobre tu participación guardada. Lo guardado no cambia hasta que la envíes.",
+    "pred.ladder.draftDiscardedOffer": "No recuperamos tus respuestas sin enviar porque los premios o el lugar cambiaron desde que las escribiste. Revisá la oferta actual y volvé a responder.",
+    "pred.ladder.status.draft": "Borrador en este navegador: todavía no está enviado ni guardado.",
+    "pred.ladder.status.saved": "Guardado en tu cuenta: participación hasta el nivel {n} ({name}).",
+    "pred.ladder.status.savedDraft": "Guardado en tu cuenta: hasta el nivel {n} ({name}). Tenés cambios sin enviar en este navegador: todavía no están guardados.",
+    "pred.ladder.conflict.title": "Tu participación guardada no coincide con este borrador",
+    "pred.ladder.conflict.text": "Hay una participación guardada que no parte de este borrador (por ejemplo, se guardó desde otro dispositivo u otra pestaña). No la vamos a pisar sin que lo decidas.",
+    "pred.ladder.conflict.savedLine": "Guardado en tu cuenta: hasta el nivel {n} ({name}), marcador {score}.",
+    "pred.ladder.conflict.draftLine": "Borrador de este navegador, sin enviar: hasta el nivel {n} ({name}), marcador {score}.",
+    "pred.ladder.conflict.keep": "Mantener lo guardado y descartar el borrador",
+    "pred.ladder.conflict.use": "Seguir con el borrador (sigue sin enviar)",
     "pred.prize.qualified": "Premio obtenido: ",
     "pred.prize.superseded": "(reemplazado por una corrección del resultado).",
     "pred.prize.redeemed": "ya canjeado.",
@@ -427,7 +556,13 @@
     "pred.srv.invalidJson": "El cuerpo de la solicitud debe ser un JSON válido.",
     "pred.srv.invalidPayload": "La predicción enviada no es válida.",
     "pred.srv.authRequired": "Necesitás iniciar sesión como miembro de URBANO Gaming para hacer esto.",
-    "pred.srv.generic": "No pudimos guardar tu predicción. Intentá de nuevo."
+    "pred.srv.generic": "No pudimos guardar tu predicción. Intentá de nuevo.",
+    "pred.srv.offerChanged": "Los premios de esta sede cambiaron desde que cargaste la página. Recargá para ver la oferta actual.",
+    "pred.srv.offerNotAvailable": "Esta sede no tiene una oferta de premios válida para este partido, así que no recibe participaciones.",
+    "pred.srv.levelNotOffered": "Ese nivel no se ofrece en esta sede.",
+    "pred.srv.offerDigestRequired": "Hace falta la huella de la oferta de premios que viste para enviar una participación.",
+    "pred.srv.resultFinalized": "Este partido ya tiene un resultado finalizado: ya no se pueden crear ni editar predicciones.",
+    "pred.srv.contractMismatch": "Este partido usa otro tipo de predicción que el de la solicitud."
   };
   var SERVER = {
     "No match exists for this id.": "pred.srv.matchNotFound",
@@ -448,6 +583,14 @@
     "Invalid prediction payload.": "pred.srv.invalidPayload",
     "A valid Authorization header for an authenticated Gaming Member is required.": "pred.srv.authRequired",
     "Failed to submit prediction.": "pred.srv.generic",
+    "The prizes offered at this venue changed since you loaded the page. Reload to see the current offer.": "pred.srv.offerChanged",
+    "This venue has no valid prize offer for this match, so it cannot take new predictions.": "pred.srv.offerNotAvailable",
+    "That level is not offered at this venue.": "pred.srv.levelNotOffered",
+    "The fingerprint of the prize offer you saw is required to send a prediction.": "pred.srv.offerDigestRequired",
+    "This match already has a finalized result, so predictions can no longer be created or edited.": "pred.srv.resultFinalized",
+    "This match uses a different prediction contract than the one in the request.": "pred.srv.contractMismatch",
+    "This match takes the historical prediction; the request used the progressive shape.": "pred.srv.contractMismatch",
+    "This match takes the progressive prediction; the request used the historical shape.": "pred.srv.contractMismatch",
     "Display name cannot be empty.": "auth.srv.nameEmpty",
     "Display name cannot exceed 40 characters.": "auth.srv.nameTooLong",
     "Failed to create Gaming Member.": "auth.err.profileFailed"
@@ -647,6 +790,860 @@ function getCurrentPosition() {
   });
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// URBANO Score — the progressive prediction (PROGRESSIVE_LADDER_V1): a stepper over the ladder.
+//
+//   1 Easy: exact scoreline · 2 Medium: first team to score · 3 Hard: any goalscorer · 4 Legendary: any goal minute.
+//
+// A person completes the levels in order, can send after completing any of them, and can go back and edit. The stepper ends at the
+// highest level this venue OFFERS (the server and the database enforce the same limit; hiding steps is only the display). What is
+// sent is exactly the levels up to the one chosen at the moment of sending: answers above it never leave the browser and are
+// cleared once the choice is saved. A level that was not reached is not an answer; "no team / no player / no minute" is an answer.
+// Nothing here says a prize was won: the panel only describes what is possible.
+// ---------------------------------------------------------------------------------------------------------------------
+const LADDER_LEVELS = [1, 2, 3, 4];
+
+// A refusal the person must still see after the list is rebuilt (for example "the prizes changed"): kept by match until it is shown once.
+const ladderNotices = new Map();
+
+// ==== local draft storage (sessionStorage) — begin ====
+// Unsent answers survive a reload of THIS TAB in the browser's session storage, and nowhere else: never persistent storage, never a server,
+// never a token, a credential or an e-mail address. A draft holds only the person's own answers plus what it must be bound to: the
+// member, the match, the venue activation, the contract and the fingerprint of the prize offer the answers were given under. It is
+// restored only when ALL of those still hold (see judgeLadderDraft); restoring puts answers back in the form and nothing more — it
+// never sends and never saves a prediction. A draft that cannot be read, or does not have exactly the expected shape, is dropped.
+// If the browser refuses to store anything, the page works the same and asks before it is left with answers that exist nowhere else.
+const LADDER_DRAFT_PREFIX = "urbano.score.draft.";
+const LADDER_DRAFT_VERSION = 1;
+function ladderDraftKey(memberId, matchId) { return LADDER_DRAFT_PREFIX + memberId + "." + matchId; }
+function ladderSessionStorage() { try { return window.sessionStorage || null; } catch (err) { return null; } }
+function removeLadderDraft(key) {
+  const storage = ladderSessionStorage();
+  if (!storage) return;
+  try { storage.removeItem(key); } catch (err) { /* nothing to remove */ }
+}
+// The draft stored under `key`, rebuilt from only the fields it may carry, or null (and removed) when it is corrupt or not this member's.
+function readLadderDraft(key, memberId, matchId) {
+  const storage = ladderSessionStorage();
+  if (!storage) return null;
+  let raw;
+  try { raw = storage.getItem(key); } catch (err) { return null; }
+  if (raw === null || raw === undefined) return null;
+  const drop = () => { removeLadderDraft(key); return null; };
+  if (typeof raw !== "string" || raw.length > 4000) return drop();
+  let d;
+  try { d = JSON.parse(raw); } catch (err) { return drop(); }
+  if (!d || typeof d !== "object" || Array.isArray(d)) return drop();
+  const a = d.a;
+  const digits = (v) => typeof v === "string" && /^\d{0,9}$/.test(v);
+  const ok =
+    d.v === LADDER_DRAFT_VERSION && d.memberId === memberId && d.matchId === matchId && d.contract === "PROGRESSIVE_LADDER_V1" &&
+    typeof d.activationId === "string" && d.activationId.length > 0 && d.activationId.length <= 64 &&
+    typeof d.offerDigest === "string" && /^[0-9a-f]{64}$/.test(d.offerDigest) &&
+    Number.isInteger(d.step) && d.step >= 1 && d.step <= 4 &&
+    (d.baseUpdatedAt === null || (typeof d.baseUpdatedAt === "string" && d.baseUpdatedAt.length <= 64)) &&
+    a && typeof a === "object" && !Array.isArray(a) &&
+    digits(a.home) && digits(a.away) && digits(a.minute) && digits(a.stoppage) &&
+    (a.first === "" || a.first === "HOME" || a.first === "AWAY" || a.first === "NONE") &&
+    typeof a.scorer === "string" && (a.scorer === "" || a.scorer === "NONE" || /^[A-Za-z0-9_-]{1,64}$/.test(a.scorer)) &&
+    typeof a.minuteNone === "boolean";
+  if (!ok) return drop();
+  return {
+    activationId: d.activationId, offerDigest: d.offerDigest, step: d.step, baseUpdatedAt: d.baseUpdatedAt,
+    a: { home: a.home, away: a.away, first: a.first, scorer: a.scorer, minuteNone: a.minuteNone, minute: a.minute, stoppage: a.stoppage },
+  };
+}
+// true when the draft was stored, false when the browser would not (or could not) keep it.
+function writeLadderDraft(key, memberId, matchId, draft) {
+  const storage = ladderSessionStorage();
+  if (!storage) return false;
+  try {
+    storage.setItem(key, JSON.stringify({
+      v: LADDER_DRAFT_VERSION, memberId, matchId, contract: "PROGRESSIVE_LADDER_V1",
+      activationId: draft.activationId, offerDigest: draft.offerDigest, step: draft.step, baseUpdatedAt: draft.baseUpdatedAt,
+      a: draft.a, savedAt: new Date().toISOString(),
+    }));
+    return true;
+  } catch (err) { return false; }
+}
+// Removes the drafts this page stored: all of them (keepMemberId null: nobody is signed in, or the person changed or signed out), or
+// every draft that is not this member's, or this member's draft of a match that is no longer open (keepMatchIds given).
+function purgeLadderDrafts(keepMemberId, keepMatchIds) {
+  const storage = ladderSessionStorage();
+  if (!storage) return;
+  try {
+    const keys = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (typeof key === "string" && key.indexOf(LADDER_DRAFT_PREFIX) === 0) keys.push(key);
+    }
+    for (const key of keys) {
+      const [member, match] = key.slice(LADDER_DRAFT_PREFIX.length).split(".");
+      const keep = keepMemberId !== null && member === keepMemberId && (!keepMatchIds || keepMatchIds.has(match));
+      if (!keep) storage.removeItem(key);
+    }
+  } catch (err) { /* nothing more can be done */ }
+}
+// ==== local draft storage (sessionStorage) — end ====
+
+// What to do with a stored draft, given the venues now on offer and what the server has saved:
+//   "none"     no draft
+//   "restore"  every binding still holds: put the answers back (nothing is sent or saved)
+//   "offer"    the venue or the prize offer is not the one the answers were given under: drop it and say so
+//   "conflict" a prediction is saved and the draft does not start from it (for example it was saved from another device): do not
+//              apply it over what is saved without the person's explicit choice
+//   "invalid"  a draft that claims to start from a saved prediction that does not exist
+function judgeLadderDraft(draft, activations, saved) {
+  if (!draft) return "none";
+  const activation = activations.find((x) => x.venueActivationId === draft.activationId);
+  if (!activation || activation.offer.digest !== draft.offerDigest) return "offer";
+  if (saved) {
+    if (saved.venueActivationId !== draft.activationId) return "offer"; // answered for another venue than the one the entry is saved at
+    return draft.baseUpdatedAt === saved.updatedAt ? "restore" : "conflict";
+  }
+  return draft.baseUpdatedAt === null ? "restore" : "invalid";
+}
+// Forms whose answers exist only in this page (the browser would not store the draft). Leaving the page asks for confirmation while any.
+const ladderUnsent = new Set();
+window.addEventListener("beforeunload", (event) => {
+  if (ladderUnsent.size === 0) return undefined;
+  event.preventDefault();
+  event.returnValue = "";
+  return "";
+});
+
+// Answers above the highest level a venue offers belong to no participation there, so a draft never carries them back.
+function ladderTrimToOffer(a, maxLevel) {
+  if (maxLevel < 2) a.first = "";
+  if (maxLevel < 3) a.scorer = "";
+  if (maxLevel < 4) { a.minute = ""; a.stoppage = ""; a.minuteNone = false; }
+}
+function blankLadderAnswers() {
+  return { home: "", away: "", first: "", scorer: "", minuteNone: false, minute: "", stoppage: "" };
+}
+function wholeNumberOrNull(value) {
+  const text = String(value === null || value === undefined ? "" : value).trim();
+  return /^\d{1,9}$/.test(text) ? parseInt(text, 10) : null;
+}
+function ladderStepComplete(a, level) {
+  if (level === 1) return wholeNumberOrNull(a.home) !== null && wholeNumberOrNull(a.away) !== null;
+  if (level === 2) return a.first === "HOME" || a.first === "AWAY" || a.first === "NONE";
+  if (level === 3) return a.scorer === "NONE" || (typeof a.scorer === "string" && a.scorer.length > 0);
+  if (level === 4) {
+    if (a.minuteNone) return true;
+    const minute = wholeNumberOrNull(a.minute);
+    if (minute === null || minute < 1 || minute > 90) return false;
+    if (String(a.stoppage).trim() === "") return true;
+    const stoppage = wholeNumberOrNull(a.stoppage);
+    return stoppage !== null && stoppage >= 1 && (minute === 45 || minute === 90);
+  }
+  return false;
+}
+// How many levels, in order from the first, are complete (never more than the venue offers).
+function ladderCompletedLevel(a, maxLevel) {
+  let level = 0;
+  while (level < maxLevel && ladderStepComplete(a, level + 1)) level += 1;
+  return level;
+}
+// The request for exactly the levels up to `level`. A category above it is absent, never null.
+function ladderPayload(a, level) {
+  const body = { attemptedLevel: level, scoreline: { home: wholeNumberOrNull(a.home), away: wholeNumberOrNull(a.away) } };
+  if (level >= 2) body.firstTeam = a.first === "NONE" ? { kind: "NONE" } : { kind: "PICKED", team: a.first };
+  if (level >= 3) body.goalscorer = a.scorer === "NONE" ? { kind: "NONE" } : { kind: "PICKED", playerId: a.scorer };
+  if (level >= 4) {
+    body.goalMinute = a.minuteNone
+      ? { kind: "NONE" }
+      : { kind: "PICKED", regulation: wholeNumberOrNull(a.minute), stoppage: String(a.stoppage).trim() === "" ? null : wholeNumberOrNull(a.stoppage) };
+  }
+  return body;
+}
+// Answers a saved prediction (explicit form from the server) back into the form's own state.
+function ladderAnswersFromSaved(view) {
+  const a = blankLadderAnswers();
+  a.home = String(view.scoreline.home);
+  a.away = String(view.scoreline.away);
+  if (view.firstTeam) a.first = view.firstTeam.kind === "NONE" ? "NONE" : view.firstTeam.team;
+  if (view.goalscorer) a.scorer = view.goalscorer.kind === "NONE" ? "NONE" : view.goalscorer.playerId;
+  if (view.goalMinute) {
+    if (view.goalMinute.kind === "NONE") a.minuteNone = true;
+    else { a.minute = String(view.goalMinute.regulation); a.stoppage = view.goalMinute.stoppage ? String(view.goalMinute.stoppage) : ""; }
+  }
+  return a;
+}
+// What was answered at a level, as text or a { $t } marker translated when drawn. Team and player names are data.
+function ladderAnswerValue(match, answer, level) {
+  const homeName = match.homeTeam ? match.homeTeam.name : null;
+  const awayName = match.awayTeam ? match.awayTeam.name : null;
+  if (level === 2) {
+    if (answer.first === "NONE") return { $t: "pred.ladder.none.first" };
+    if (answer.first === "HOME") return homeName === null ? { $t: "pred.home" } : homeName;
+    return awayName === null ? { $t: "pred.away" } : awayName;
+  }
+  if (level === 3) {
+    if (answer.scorer === "NONE") return { $t: "pred.ladder.none.scorer" };
+    return findPlayerName(match, answer.scorer) || "?";
+  }
+  if (answer.minuteNone) return { $t: "pred.ladder.none.minute" };
+  const minute = wholeNumberOrNull(answer.minute);
+  const stoppage = wholeNumberOrNull(answer.stoppage);
+  return stoppage ? `${minute}+${stoppage}'` : `${minute}'`;
+}
+// Saved explicit view -> the same shape ladderAnswerValue reads.
+function ladderAnswerFromView(view) { return ladderAnswersFromSaved(view); }
+
+function ladderRowVars(match, a, level) {
+  if (level === 1) return { home: wholeNumberOrNull(a.home), away: wholeNumberOrNull(a.away) };
+  return { value: ladderAnswerValue(match, a, level) };
+}
+const LADDER_ANSWER_KEYS = { 1: "pred.ladder.ans.score", 2: "pred.ladder.ans.first", 3: "pred.ladder.ans.scorer", 4: "pred.ladder.ans.minute" };
+
+function ladderSelectedOffer(activations, activationId) {
+  const found = activations.find((a) => a.venueActivationId === activationId) || activations[0];
+  return found;
+}
+
+function buildLadderForm(match, mine, authState, activations, options) {
+  const matchId = match.matchId;
+  const memberId = authState.gamingMemberId;
+  const saved = mine.prediction && mine.prediction.predictionContract === "PROGRESSIVE_LADDER_V1" ? mine.prediction : null;
+  const draftKey = ladderDraftKey(memberId, matchId);
+  const homeName = match.homeTeam ? match.homeTeam.name : null;
+  const awayName = match.awayTeam ? match.awayTeam.name : null;
+  const homeLabel = homeName === null ? t("pred.home") : homeName;
+  const awayLabel = awayName === null ? t("pred.away") : awayName;
+
+  const st = {
+    activationId: saved ? saved.venueActivationId : activations[0].venueActivationId,
+    step: 1,
+    view: "edit",
+    declared: 1,
+    busy: false,
+    a: saved ? ladderAnswersFromSaved(saved) : blankLadderAnswers(),
+    saved,
+  };
+  // --- a local draft: restored only when everything it was bound to still holds; it never sends or saves anything ---
+  const choice = options && options.conflictChoice;
+  const stored = readLadderDraft(draftKey, memberId, matchId);
+  const verdict = judgeLadderDraft(stored, activations, saved);
+  if (verdict === "conflict" && choice === undefined) return buildLadderConflict(match, mine, authState, activations, stored, saved);
+  let restored = null;
+  let discardedByOffer = false;
+  if (verdict === "restore" || (verdict === "conflict" && choice === "use")) {
+    Object.assign(st.a, blankLadderAnswers(), stored.a);
+    if (!saved) st.activationId = stored.activationId;
+    ladderTrimToOffer(st.a, ladderSelectedOffer(activations, st.activationId).offer.maxLevel);
+    st.step = stored.step;
+    restored = saved ? "overSaved" : "draft";
+  } else {
+    if (verdict !== "none") removeLadderDraft(draftKey); // dropped: changed offer, declined conflict, or an impossible draft
+    discardedByOffer = verdict === "offer";
+    if (saved) st.step = saved.attemptedLevel;
+  }
+  const activationNow = () => ladderSelectedOffer(activations, st.activationId);
+  const maxLevel = () => activationNow().offer.maxLevel;
+  const clampStep = () => {
+    const allowed = Math.min(maxLevel(), ladderCompletedLevel(st.a, maxLevel()) + 1);
+    st.step = Math.max(1, Math.min(st.step, allowed));
+  };
+  clampStep();
+
+  const form = el(`<form data-ladder="true" novalidate>
+    <div class="field">
+      <label ${ix("pred.f.venue")}>${tx("pred.f.venue")}</label>
+      <select id="venue-select-${esc(matchId)}"></select>
+    </div>
+    <p class="msg" id="geo-status-${esc(matchId)}" ${ix("pred.f.checking")}>${tx("pred.f.checking")}</p>
+    <p class="ladder-rules" ${ix("pred.ladder.rules")}>${tx("pred.ladder.rules")}</p>
+    <p class="ladder-status" data-ladder-status hidden aria-live="polite"></p>
+    <ol class="ladder-steps" data-ladder-steps aria-label="${tx("pred.ladder.steps")}" data-i18n-attr="aria-label:pred.ladder.steps"></ol>
+    <div class="ladder-body" data-ladder-body></div>
+    <div class="ladder-panel" data-ladder-panel></div>
+    <div data-ladder-review hidden></div>
+    <div class="ladder-actions" data-ladder-actions></div>
+    <p class="msg" id="submit-msg-${esc(matchId)}" aria-live="polite"></p>
+  </form>`);
+  form.addEventListener("submit", (event) => event.preventDefault());
+  const stepsHost = form.querySelector("[data-ladder-steps]");
+  const bodyHost = form.querySelector("[data-ladder-body]");
+  const panelHost = form.querySelector("[data-ladder-panel]");
+  const reviewHost = form.querySelector("[data-ladder-review]");
+  const actionsHost = form.querySelector("[data-ladder-actions]");
+  const msgNode = form.querySelector(`#submit-msg-${matchId}`);
+  const statusNode = form.querySelector("[data-ladder-status]");
+
+  // --- venue and position ---
+  const select = form.querySelector(`#venue-select-${matchId}`);
+  for (const activation of activations) {
+    const opt = document.createElement("option");
+    opt.value = activation.venueActivationId;
+    opt.textContent = activation.venue.name;
+    if (activation.venueActivationId === st.activationId) opt.selected = true;
+    select.appendChild(opt);
+  }
+  if (saved) select.disabled = true;
+  const geoStatus = form.querySelector(`#geo-status-${matchId}`);
+  let lastPosition = null;
+  function showGeo() {
+    if (!lastPosition) { setText(geoStatus, "pred.geo.unavailable"); geoStatus.className = "msg error"; return; }
+    const venue = activationNow().venue;
+    const distance = haversineMeters(lastPosition.latitude, lastPosition.longitude, venue.latitude, venue.longitude);
+    const eligible = distance <= venue.radiusMeters;
+    setText(geoStatus, eligible ? "pred.geo.within" : "pred.geo.outside");
+    geoStatus.className = eligible ? "msg success" : "msg error";
+  }
+  getCurrentPosition().then((position) => { lastPosition = position; showGeo(); });
+  select.addEventListener("change", () => {
+    st.activationId = select.value;
+    clampStep();
+    persist();
+    showGeo();
+    renderAll();
+  });
+
+  // Unsent when nothing is saved yet and something is answered, or when the answers differ from what is saved.
+  function isUnsent() {
+    if (!st.saved) return ladderCompletedLevel(st.a, 4) >= 1 || ["home", "away", "first", "scorer", "minute", "stoppage"].some((k) => String(st.a[k]).trim() !== "") || st.a.minuteNone;
+    return JSON.stringify(st.a) !== JSON.stringify(ladderAnswersFromSaved(st.saved));
+  }
+  // Keeps the draft in step with the form: stored while there is something unsent, removed when there is not. A draft is bound to the
+  // venue and to the fingerprint of the offer it was answered under, and to the saved version it starts from.
+  function persist() {
+    if (!isUnsent()) { removeLadderDraft(draftKey); ladderUnsent.delete(draftKey); return; }
+    const stored = writeLadderDraft(draftKey, memberId, matchId, {
+      activationId: st.activationId,
+      offerDigest: activationNow().offer.digest,
+      step: st.step,
+      baseUpdatedAt: st.saved ? st.saved.updatedAt : null,
+      a: Object.assign({}, st.a),
+    });
+    if (stored) ladderUnsent.delete(draftKey); else ladderUnsent.add(draftKey);
+  }
+  // What the person is looking at: what the server confirmed, a local draft (not sent), or both.
+  function renderStatus() {
+    const unsent = isUnsent();
+    if (!st.saved && !unsent) {
+      statusNode.hidden = true;
+      statusNode.className = "ladder-status";
+      statusNode.removeAttribute("data-i18n");
+      statusNode.removeAttribute("data-i18n-vars");
+      statusNode.textContent = "";
+      return;
+    }
+    statusNode.hidden = false;
+    if (st.saved) {
+      const vars = { n: st.saved.attemptedLevel, name: { $t: "pred.ladder.name." + st.saved.attemptedLevel } };
+      setText(statusNode, unsent ? "pred.ladder.status.savedDraft" : "pred.ladder.status.saved", vars);
+    } else {
+      setText(statusNode, "pred.ladder.status.draft");
+    }
+    statusNode.className = "ladder-status " + (unsent ? "is-draft" : "is-saved");
+  }
+  function setMessage(key, vars, kind) {
+    msgNode.className = "msg" + (kind ? " " + kind : "");
+    if (key === null) { msgNode.removeAttribute("data-i18n"); msgNode.removeAttribute("data-i18n-vars"); msgNode.textContent = ""; return; }
+    setText(msgNode, key, vars);
+  }
+
+  // --- the steps ---
+  function renderSteps() {
+    const done = ladderCompletedLevel(st.a, maxLevel());
+    stepsHost.replaceChildren();
+    for (let level = 1; level <= maxLevel(); level++) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ladder-step-btn" + (level === st.step && st.view === "edit" ? " is-current" : "") + (level <= done ? " is-done" : "");
+      button.disabled = st.busy || level > done + 1;
+      if (level === st.step && st.view === "edit") button.setAttribute("aria-current", "step");
+      setText(button, "pred.ladder.level." + level);
+      button.addEventListener("click", () => { st.view = "edit"; st.step = level; renderAll(); });
+      item.appendChild(button);
+      stepsHost.appendChild(item);
+    }
+  }
+
+  function scoreStepper(side, teamLabel) {
+    const box = document.createElement("div");
+    box.className = "score-stepper";
+    const name = document.createElement("p");
+    name.className = "team-name";
+    name.textContent = teamLabel;
+    const controls = document.createElement("div");
+    controls.className = "stepper-controls";
+    const dec = document.createElement("button");
+    dec.type = "button";
+    dec.textContent = "−";
+    dec.setAttribute("data-i18n-attr", "aria-label:pred.ladder.scoreDec");
+    dec.setAttribute("data-i18n-vars", JSON.stringify({ team: teamLabel }));
+    dec.setAttribute("aria-label", t("pred.ladder.scoreDec", { team: teamLabel }));
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.inputMode = "numeric";
+    input.placeholder = "–";
+    input.id = `ladder-${side}-${matchId}`;
+    input.value = st.a[side];
+    input.setAttribute("aria-label", t("pred.ladder.homeScore", { team: teamLabel }));
+    const inc = document.createElement("button");
+    inc.type = "button";
+    inc.textContent = "+";
+    inc.setAttribute("data-i18n-attr", "aria-label:pred.ladder.scoreInc");
+    inc.setAttribute("data-i18n-vars", JSON.stringify({ team: teamLabel }));
+    inc.setAttribute("aria-label", t("pred.ladder.scoreInc", { team: teamLabel }));
+    const setValue = (next) => { st.a[side] = next === null ? "" : String(next); input.value = st.a[side]; afterEdit(); };
+    // An empty score is "not answered", never 0: the first tap of either button sets 0, and only a tap does.
+    dec.addEventListener("click", () => { const now = wholeNumberOrNull(input.value); setValue(now === null ? 0 : Math.max(0, now - 1)); });
+    inc.addEventListener("click", () => { const now = wholeNumberOrNull(input.value); setValue(now === null ? 0 : now + 1); });
+    input.addEventListener("input", () => { st.a[side] = input.value; afterEdit(); });
+    controls.append(dec, input, inc);
+    box.append(name, controls);
+    return box;
+  }
+
+  function renderBody() {
+    bodyHost.replaceChildren();
+    const level = st.step;
+    const title = document.createElement("h3");
+    title.tabIndex = -1;
+    title.setAttribute("data-ladder-title", String(level));
+    setText(title, "pred.ladder.q." + level);
+    const hint = document.createElement("p");
+    hint.className = "ladder-hint";
+    setText(hint, "pred.ladder.hint." + level);
+    bodyHost.append(title, hint);
+
+    if (level === 1) {
+      const row = document.createElement("div");
+      row.className = "score-stepper-row";
+      row.append(scoreStepper("home", homeLabel), scoreStepper("away", awayLabel));
+      bodyHost.appendChild(row);
+      return;
+    }
+
+    if (level === 2) {
+      const row = document.createElement("div");
+      row.className = "team-toggle-row is-wrap";
+      row.setAttribute("role", "group");
+      const options = [["HOME", homeLabel, null], ["AWAY", awayLabel, null], ["NONE", null, "pred.ladder.none.first"]];
+      for (const [value, label, key] of options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "team-toggle";
+        button.setAttribute("data-value", value);
+        button.setAttribute("aria-pressed", st.a.first === value ? "true" : "false");
+        if (key) setText(button, key); else button.textContent = label;
+        button.addEventListener("click", () => {
+          st.a.first = value;
+          for (const other of row.querySelectorAll(".team-toggle")) other.setAttribute("aria-pressed", other.getAttribute("data-value") === value ? "true" : "false");
+          afterEdit();
+        });
+        row.appendChild(button);
+      }
+      bodyHost.appendChild(row);
+      const note = document.createElement("p");
+      note.className = "ladder-hint ladder-none";
+      setText(note, "pred.ladder.noneNote");
+      bodyHost.appendChild(note);
+      return;
+    }
+
+    if (level === 3) {
+      const field = document.createElement("div");
+      field.className = "field";
+      const scorerSelect = document.createElement("select");
+      scorerSelect.id = `ladder-scorer-${matchId}`;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      setText(placeholder, "pred.ladder.scorerPlaceholder");
+      scorerSelect.appendChild(placeholder);
+      const none = document.createElement("option");
+      none.value = "NONE";
+      setText(none, "pred.ladder.none.scorer");
+      scorerSelect.appendChild(none);
+      for (const [teamLabel, players] of [[homeLabel, match.homeTeam ? match.homeTeam.players : []], [awayLabel, match.awayTeam ? match.awayTeam.players : []]]) {
+        const group = document.createElement("optgroup");
+        group.label = teamLabel;
+        for (const player of players) {
+          const option = document.createElement("option");
+          option.value = player.playerId;
+          option.textContent = player.name;
+          group.appendChild(option);
+        }
+        scorerSelect.appendChild(group);
+      }
+      scorerSelect.value = st.a.scorer;
+      if (scorerSelect.value !== st.a.scorer) { st.a.scorer = ""; scorerSelect.value = ""; }
+      scorerSelect.addEventListener("change", () => { st.a.scorer = scorerSelect.value; afterEdit(); });
+      field.appendChild(scorerSelect);
+      bodyHost.appendChild(field);
+      const note = document.createElement("p");
+      note.className = "ladder-hint ladder-none";
+      setText(note, "pred.ladder.noneNote");
+      bodyHost.appendChild(note);
+      return;
+    }
+
+    // level 4: a minute, or the explicit "no goals" answer
+    const field = document.createElement("div");
+    field.className = "field";
+    const label = document.createElement("label");
+    setText(label, "pred.ladder.minuteLabel");
+    const row = document.createElement("div");
+    row.className = "score-row";
+    const minute = document.createElement("input");
+    minute.type = "number"; minute.min = "1"; minute.max = "90"; minute.inputMode = "numeric";
+    minute.id = `ladder-minute-${matchId}`;
+    minute.setAttribute("data-i18n-attr", "placeholder:pred.ladder.minutePlaceholder");
+    minute.placeholder = t("pred.ladder.minutePlaceholder");
+    minute.value = st.a.minute;
+    const plus = document.createElement("span");
+    plus.className = "score-vs";
+    plus.textContent = "+";
+    const stoppage = document.createElement("input");
+    stoppage.type = "number"; stoppage.min = "1"; stoppage.inputMode = "numeric";
+    stoppage.id = `ladder-stoppage-${matchId}`;
+    stoppage.setAttribute("data-i18n-attr", "placeholder:pred.f.stoppagePlaceholder");
+    stoppage.placeholder = t("pred.f.stoppagePlaceholder");
+    stoppage.value = st.a.stoppage;
+    const noneButton = document.createElement("button");
+    noneButton.type = "button";
+    noneButton.className = "team-toggle ladder-none";
+    noneButton.setAttribute("aria-pressed", st.a.minuteNone ? "true" : "false");
+    setText(noneButton, "pred.ladder.none.minute");
+    function syncMinuteControls() {
+      const m = wholeNumberOrNull(minute.value);
+      const boundary = m === 45 || m === 90;
+      stoppage.disabled = st.a.minuteNone || !boundary;
+      if (stoppage.disabled && !st.a.minuteNone) { stoppage.value = ""; st.a.stoppage = ""; }
+      minute.disabled = st.a.minuteNone;
+      noneButton.setAttribute("aria-pressed", st.a.minuteNone ? "true" : "false");
+    }
+    minute.addEventListener("input", () => { st.a.minute = minute.value; st.a.minuteNone = false; syncMinuteControls(); afterEdit(); });
+    stoppage.addEventListener("input", () => { st.a.stoppage = stoppage.value; afterEdit(); });
+    noneButton.addEventListener("click", () => {
+      st.a.minuteNone = !st.a.minuteNone;
+      if (st.a.minuteNone) { st.a.minute = ""; st.a.stoppage = ""; minute.value = ""; stoppage.value = ""; }
+      syncMinuteControls();
+      afterEdit();
+    });
+    syncMinuteControls();
+    row.append(minute, plus, stoppage);
+    const stoppageHint = document.createElement("p");
+    stoppageHint.className = "msg";
+    setText(stoppageHint, "pred.f.minuteHint");
+    const note = document.createElement("p");
+    note.className = "ladder-hint ladder-none";
+    setText(note, "pred.ladder.noneNote");
+    field.append(label, row, stoppageHint);
+    bodyHost.append(field, noneButton, note);
+  }
+
+  // --- the panel: what is possible, never what was won ---
+  function renderPanel() {
+    const offer = activationNow().offer;
+    const completed = ladderCompletedLevel(st.a, offer.maxLevel);
+    panelHost.replaceChildren();
+    const current = document.createElement("p");
+    current.className = "ladder-current";
+    setText(current, "pred.ladder.current", { level: { $t: "pred.ladder.level." + st.step } });
+    panelHost.appendChild(current);
+    const max = document.createElement("p");
+    // The prize described is that of the level this step would send with: the step's own level once it is answered, otherwise the
+    // last level that is complete. It is the highest prize that attempt can reach — never a prize already won.
+    const sendLevel = Math.min(st.step, completed);
+    if (sendLevel >= 1) {
+      setText(max, "pred.ladder.max", { prize: offer.levels[sendLevel - 1].label, condition: { $t: "pred.ladder.cond." + sendLevel } });
+    } else {
+      setText(max, "pred.ladder.needAnswer");
+    }
+    panelHost.appendChild(max);
+    const claim = document.createElement("p");
+    claim.className = "ladder-hint";
+    setText(claim, "pred.ladder.noClaim");
+    panelHost.appendChild(claim);
+    const title = document.createElement("p");
+    title.className = "ladder-offers-title";
+    setText(title, "pred.ladder.offers");
+    const list = document.createElement("ul");
+    list.className = "ladder-offers";
+    for (const entry of offer.levels) {
+      const item = document.createElement("li");
+      setText(item, "pred.ladder.offerRow", { n: entry.level, name: { $t: "pred.ladder.name." + entry.level }, prize: entry.label });
+      list.appendChild(item);
+    }
+    panelHost.append(title, list);
+  }
+
+  // --- actions and review ---
+  function button(kind, key, vars, onClick, disabled) {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = kind;
+    node.disabled = !!disabled;
+    setText(node, key, vars);
+    node.addEventListener("click", onClick);
+    return node;
+  }
+
+  function renderActions() {
+    actionsHost.replaceChildren();
+    const offer = activationNow().offer;
+    const completed = ladderCompletedLevel(st.a, offer.maxLevel);
+    if (st.view === "review") {
+      actionsHost.append(
+        button("btn-secondary", "pred.ladder.btn.edit", null, () => { st.view = "edit"; st.step = st.declared; renderAll(); }, st.busy),
+        button("btn-primary", "pred.ladder.btn.confirm", null, confirmSend, st.busy)
+      );
+      return;
+    }
+    const complete = completed >= st.step;
+    if (st.step > 1) actionsHost.appendChild(button("btn-secondary", "pred.ladder.btn.back", null, () => { st.step -= 1; renderAll(); }, st.busy));
+    if (st.step < offer.maxLevel) {
+      actionsHost.appendChild(button("btn-secondary", "pred.ladder.btn.continue", { n: st.step + 1 }, () => { st.step += 1; renderAll(); }, st.busy || !complete));
+    }
+    actionsHost.appendChild(
+      button("btn-primary", st.saved ? "pred.ladder.btn.save" : "pred.ladder.btn.send", { n: st.step }, () => { st.declared = st.step; st.view = "review"; renderAll(); }, st.busy || !complete)
+    );
+    if (!complete) {
+      const need = document.createElement("p");
+      need.className = "msg";
+      setText(need, st.step === 1 ? "pred.ladder.needAnswer" : "pred.ladder.needThis");
+      actionsHost.appendChild(need);
+    }
+  }
+
+  function renderReview() {
+    if (st.view !== "review") { reviewHost.hidden = true; reviewHost.replaceChildren(); return; }
+    const offer = activationNow().offer;
+    reviewHost.hidden = false;
+    reviewHost.className = "ladder-review";
+    reviewHost.replaceChildren();
+    const title = document.createElement("h3");
+    setText(title, "pred.ladder.review.title");
+    const level = document.createElement("p");
+    setText(level, "pred.ladder.review.level", { n: st.declared, name: { $t: "pred.ladder.name." + st.declared } });
+    const list = document.createElement("ul");
+    for (let n = 1; n <= st.declared; n++) {
+      const item = document.createElement("li");
+      setText(item, LADDER_ANSWER_KEYS[n], ladderRowVars(match, st.a, n));
+      list.appendChild(item);
+    }
+    reviewHost.append(title, level, list);
+    const prize = document.createElement("p");
+    setText(prize, "pred.ladder.max", { prize: offer.levels[st.declared - 1].label, condition: { $t: "pred.ladder.cond." + st.declared } });
+    reviewHost.appendChild(prize);
+    if (st.declared < offer.maxLevel) {
+      const notSent = document.createElement("p");
+      setText(notSent, "pred.ladder.review.notSent");
+      reviewHost.appendChild(notSent);
+    }
+    if (st.saved && st.saved.attemptedLevel > st.declared) {
+      const warn = document.createElement("p");
+      warn.className = "msg error";
+      setText(warn, "pred.ladder.reduceWarning", { saved: st.saved.attemptedLevel, n: st.declared });
+      reviewHost.appendChild(warn);
+    }
+    const editable = document.createElement("p");
+    editable.className = "ladder-hint";
+    setText(editable, "pred.ladder.review.editable");
+    reviewHost.appendChild(editable);
+  }
+
+  function renderAll() {
+    clampStep();
+    renderStatus();
+    renderSteps();
+    const editing = st.view === "edit";
+    bodyHost.hidden = !editing;
+    panelHost.hidden = false;
+    if (editing) renderBody(); else bodyHost.replaceChildren();
+    renderPanel();
+    renderReview();
+    renderActions();
+  }
+  function afterEdit() {
+    persist();
+    renderStatus();
+    renderSteps();
+    renderPanel();
+    renderActions();
+    setMessage(null);
+  }
+
+  // --- sending ---
+  async function confirmSend() {
+    if (st.busy) return;
+    st.busy = true;
+    renderAll();
+    setMessage("pred.submitting");
+    const declared = st.declared;
+    try {
+      const position = await getCurrentPosition();
+      if (!position) { setMessage("pred.locationRequired", null, "error"); return; }
+      lastPosition = position;
+      showGeo();
+      const offer = activationNow().offer;
+      const body = Object.assign(ladderPayload(st.a, declared), {
+        venueActivationId: st.activationId,
+        offerDigest: offer.digest,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracyMeters: position.accuracyMeters,
+      });
+      const result = await authedFetch(`/api/gaming/predictions/matches/${matchId}/predict`, { method: "POST", body: JSON.stringify(body) });
+      if (result.status === 201 && result.json && result.json.prediction) {
+        st.saved = result.json.prediction;
+        select.disabled = true;
+        // What was not sent does not stay behind: the answers above the chosen level are cleared here as they are on the server.
+        const kept = blankLadderAnswers();
+        const fromServer = ladderAnswersFromSaved(st.saved);
+        Object.assign(kept, fromServer);
+        st.a = kept;
+        st.view = "edit";
+        st.step = declared;
+        removeLadderDraft(draftKey); // saved: nothing is left unsent, and nothing above the chosen level is kept anywhere
+        ladderUnsent.delete(draftKey);
+        setMessage("pred.ladder.saved", { n: declared, name: { $t: "pred.ladder.name." + declared } }, "success");
+      } else {
+        persist();
+        const raw = result.json && result.json.error ? String(result.json.error) : null;
+        if (raw) { msgNode.className = "msg error"; setServerMessage(msgNode, raw); } else setMessage("pred.failed", null, "error");
+        if (result.status === 409 && raw && UrbanoI18n.serverMessageKey(raw) === "pred.srv.offerChanged") {
+          // The offer changed since the page loaded: show the current one on the rebuilt form and say so. The draft was answered under
+          // the old offer, so it is not restored there.
+          ladderNotices.set(matchId, raw);
+          refresh().catch(() => {});
+        }
+        // The review stays open: a retry is one tap, and "back to editing" is one tap.
+      }
+    } catch (err) {
+      persist();
+      setMessage("pred.failed", null, "error");
+    } finally {
+      st.busy = false;
+      renderAll();
+    }
+  }
+
+  renderAll();
+  if (restored === "draft") setMessage("pred.ladder.draftRestored", null, null);
+  else if (restored === "overSaved") setMessage("pred.ladder.draftRestoredOverSaved", null, null);
+  const offerNotice = ladderNotices.get(matchId);
+  ladderNotices.delete(matchId);
+  if (offerNotice) {
+    msgNode.className = "msg error";
+    setServerMessage(msgNode, offerNotice);
+  }
+  if (discardedByOffer) {
+    const discarded = document.createElement("p");
+    discarded.className = "msg";
+    discarded.setAttribute("data-ladder-discarded", "true");
+    setText(discarded, "pred.ladder.draftDiscardedOffer");
+    msgNode.insertAdjacentElement("afterend", discarded);
+  }
+  if (restored) persist();
+  return form;
+}
+
+// A local draft that does not start from the prediction now saved on the server. Nothing is applied and nothing is sent: the person
+// chooses between keeping what is saved (the draft is discarded) and working from the draft (still unsent until they confirm).
+function buildLadderConflict(match, mine, authState, activations, stored, saved) {
+  const draftLevel = Math.max(1, ladderCompletedLevel(stored.a, 4));
+  // Both lines carry the scoreline, so the person can tell the two versions apart even when they reach the same level.
+  const savedVars = { n: saved.attemptedLevel, name: { $t: "pred.ladder.name." + saved.attemptedLevel }, score: saved.scoreline.home + "–" + saved.scoreline.away };
+  const draftVars = { n: draftLevel, name: { $t: "pred.ladder.name." + draftLevel }, score: (stored.a.home || "?") + "–" + (stored.a.away || "?") };
+  const panel = el(`<div class="ladder-conflict" data-ladder-conflict>
+    <h3 ${ix("pred.ladder.conflict.title")}>${tx("pred.ladder.conflict.title")}</h3>
+    <p ${ix("pred.ladder.conflict.text")}>${tx("pred.ladder.conflict.text")}</p>
+    <ul>
+      <li ${ix("pred.ladder.conflict.savedLine", savedVars)}>${tx("pred.ladder.conflict.savedLine", savedVars)}</li>
+      <li ${ix("pred.ladder.conflict.draftLine", draftVars)}>${tx("pred.ladder.conflict.draftLine", draftVars)}</li>
+    </ul>
+    <div class="ladder-actions">
+      <button type="button" class="btn-secondary" data-conflict-keep ${ix("pred.ladder.conflict.keep")}>${tx("pred.ladder.conflict.keep")}</button>
+      <button type="button" class="btn-secondary" data-conflict-use ${ix("pred.ladder.conflict.use")}>${tx("pred.ladder.conflict.use")}</button>
+    </div>
+  </div>`);
+  const resolve = (conflictChoice) => panel.replaceWith(buildLadderForm(match, mine, authState, activations, { conflictChoice }));
+  panel.querySelector("[data-conflict-keep]").addEventListener("click", () => resolve("keep"));
+  panel.querySelector("[data-conflict-use]").addEventListener("click", () => resolve("use"));
+  return panel;
+}
+
+// The finalized result of a progressive prediction: the level attempted, the level won (never above it), one outcome per category in
+// the ladder's order — right, missed, or NOT attempted, which is none of the first two — and the single prize of the won level.
+function buildLadderResult(match, mine) {
+  const ev = mine.evaluation;
+  const pred = mine.prediction;
+  const attempted = ev.attemptedLevel;
+  const won = ev.ladderLevel;
+  const outcomes = [ev.scorelineCorrect, ev.firstTeamToScoreCorrect, ev.goalscorerCorrect, ev.goalMinuteCorrect];
+  const wrap = document.createElement("div");
+  const summary = document.createElement("p");
+  summary.className = won >= 1 ? "msg success" : "msg";
+  if (won >= 1) setText(summary, "pred.ladder.result.won", { attempted: { $t: "pred.ladder.level." + attempted }, won: { $t: "pred.ladder.level." + won } });
+  else setText(summary, "pred.ladder.result.none", { attempted: { $t: "pred.ladder.level." + attempted } });
+  const grid = document.createElement("div");
+  grid.className = "dimension-grid";
+  outcomes.forEach((outcome, index) => {
+    const level = index + 1;
+    const cell = document.createElement("div");
+    cell.className = "dimension-cell " + (outcome === true ? "correct" : outcome === false ? "incorrect" : "not-attempted");
+    const label = document.createElement("div");
+    label.className = "label";
+    setText(label, "pred.ladder.dim." + level);
+    const mark = document.createElement("div");
+    mark.className = "mark";
+    mark.textContent = outcome === true ? "✓" : outcome === false ? "✗" : "–";
+    const state = document.createElement("div");
+    state.className = "state-text";
+    setText(state, outcome === true ? "pred.ladder.state.correct" : outcome === false ? "pred.ladder.state.wrong" : "pred.ladder.state.notAttempted");
+    cell.append(label, mark, state);
+    grid.appendChild(cell);
+  });
+  const list = document.createElement("ul");
+  list.className = "ladder-offers";
+  const answers = ladderAnswersFromSaved(pred);
+  for (let n = 1; n <= attempted; n++) {
+    const item = document.createElement("li");
+    setText(item, LADDER_ANSWER_KEYS[n], ladderRowVars(match, answers, n));
+    list.appendChild(item);
+  }
+  const prizeSlot = document.createElement("div");
+  prizeSlot.setAttribute("data-prize-slot", "");
+  if (mine.qualification) prizeSlot.appendChild(buildPrizeQualifiedLine(match, mine.qualification));
+  wrap.append(summary, grid, prizeSlot, list);
+  return wrap;
+}
+
+function renderProgressive(card, body, match, mine, authState, kickoffPassed) {
+  // Once the match is closed (kick-off passed or a result exists) an unsent draft can no longer become a prediction: it is dropped.
+  if (kickoffPassed || match.finalized) removeLadderDraft(ladderDraftKey(authState.gamingMemberId, match.matchId));
+  if (match.finalized && mine.evaluation && mine.prediction) {
+    body.appendChild(buildLadderResult(match, mine));
+    return card;
+  }
+  if (kickoffPassed || match.finalized) {
+    if (mine.prediction) {
+      const vars = { n: mine.prediction.attemptedLevel, name: { $t: "pred.ladder.name." + mine.prediction.attemptedLevel } };
+      body.appendChild(el(`<p class="msg" ${ix("pred.ladder.awaiting", vars)}>${tx("pred.ladder.awaiting", vars)}</p>`));
+    } else {
+      body.appendChild(el(`<p class="msg" ${ix("pred.missed")}>${tx("pred.missed")}</p>`));
+    }
+    return card;
+  }
+  // Only an activation whose offer is valid (a consecutive prefix of prizes starting at Easy) takes participations.
+  const activations = (match.venueActivations || []).filter((a) => a.enabled && a.venue && a.venue.active && a.offer && a.offer.available);
+  if (activations.length === 0) {
+    removeLadderDraft(ladderDraftKey(authState.gamingMemberId, match.matchId));
+    body.appendChild(el(`<p class="msg" ${ix("pred.ladder.noOffer")}>${tx("pred.ladder.noOffer")}</p>`));
+    return card;
+  }
+  body.appendChild(buildLadderForm(match, mine, authState, activations));
+  return card;
+}
+
 async function renderMatch(match) {
   const authState = await UrbanoAuth.getState();
   const kickoffPassed = new Date() >= new Date(match.kickoffAt);
@@ -683,6 +1680,10 @@ async function renderMatch(match) {
 
   const mineRes = await authedFetch(`/api/gaming/predictions/matches/${match.matchId}/mine`);
   const mine = mineRes.json || {};
+
+  if (match.predictionContract === "PROGRESSIVE_LADDER_V1") {
+    return renderProgressive(card, body, match, mine, authState, kickoffPassed);
+  }
 
   if (match.finalized && mine.evaluation) {
     const ev = mine.evaluation;
@@ -921,6 +1922,17 @@ async function refresh() {
   const data = await res.json();
   if (generation !== renderGeneration) return false;
 
+  // Local drafts belong to the signed-in member only: nobody signed in (or a profile not finished) leaves none, and another person's
+  // are removed. A draft for a match that is no longer open is removed as well.
+  const identity = await UrbanoAuth.getState();
+  const draftMember = identity && identity.status === "authenticated" && identity.gamingMemberId ? identity.gamingMemberId : null;
+  const openMatchIds = new Set(
+    (data.matches || [])
+      .filter((m) => !m.cancelledAt && m.predictionContract === "PROGRESSIVE_LADDER_V1" && !m.finalized && new Date() < new Date(m.kickoffAt))
+      .map((m) => m.matchId)
+  );
+  purgeLadderDrafts(draftMember, openMatchIds);
+
   if (!data.matches || data.matches.length === 0) {
     content.replaceChildren(emptyState("pred.empty"));
     return true;
@@ -979,6 +1991,9 @@ if (typeof UrbanoAuth.onIdentityReset === "function") {
   // The signed-in person changed: nothing of the previous person (their predictions, their forms) stays on screen while the list is
   // rebuilt for the new one, and a build still waiting on the network is dropped.
   UrbanoAuth.onIdentityReset(() => {
+    purgeLadderDrafts(null); // who is signed in changed, or nobody is: no draft survives for anyone
+    ladderUnsent.clear();
+    ladderNotices.clear();
     renderGeneration += 1;
     content.replaceChildren(emptyState("pred.updating"));
   }).catch(() => {});
