@@ -105,13 +105,14 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.text(".hero h1")).toBe("Jugá, predecí y competí con tu comunidad.");
     expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
     expect(Array.from(page.doc.querySelectorAll(".section-label")).map((e) => e.textContent)).toEqual(["Destacado", "Experiencias", "Juegos de habilidad", "Minijuegos", "Para organizadores"]);
-    expect(page.text("#featured-status")).toBe("Próximamente");
+    expect(page.text("#featured-status")).toBe("Próximo partido");
     expect(page.text("#featured-title")).toBe("URBANO Score");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: Real Madrid vs. Barcelona");
+    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
     expect(page.text(".featured-scope")).toBe("Vivilo en The Pub by Beer Box");
-    expect(page.text(".featured-when")).toBe("Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en EspañaBarcelona es local · Real Madrid, visitante");
-    expect(page.text("#featured-note")).toBe("Predicciones próximamente");
-    expect(page.text("#featured-history")).toBe("Ver predicciones y resultados anteriores →");
+    expect(page.text(".featured-when")).toBe("Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.Estadio: Spotify Camp Nou");
+    expect(page.text("#featured-play")).toBe("Jugar ahora");
+    expect(page.doc.querySelector("#featured-note")).toBeNull(); // no "predictions coming soon" line
+    expect(page.doc.querySelector("#featured-history")).toBeNull(); // history has its own access (My profile)
     expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
   });
 
@@ -141,14 +142,14 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.win.localStorage.getItem("urbano.lang")).toBe("en");
     expect(page.text(".hero h1")).toBe("Play, predict, and compete with your community.");
     expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
-    expect(page.text("#featured-status")).toBe("Coming Soon");
+    expect(page.text("#featured-status")).toBe("Next match");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
     expect(page.card("Halloween")!.textContent).toContain("Coming Soon");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: Real Madrid vs. Barcelona");
+    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
     expect(page.text(".featured-scope")).toBe("Watch it at The Pub by Beer Box");
-    expect(page.text("#featured-note")).toBe("Predictions coming soon");
-    expect(page.text("#featured-history")).toBe("See past predictions and results →");
+    expect(page.text("#featured-play")).toBe("Play now");
+    expect(page.text(".featured-when")).toContain("Stadium: Spotify Camp Nou");
     expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
   });
 
@@ -260,10 +261,10 @@ describe("Home — honest cards", () => {
 
   it("the Predictions entry is an announcement in both languages and stays one even when the database holds an eligible match: no opening, no play button, no request", async () => {
     const page = await loadHome({ matches: [hostileSafeMatch()] });
-    for (const [lang, pill, note] of [["es", "Próximamente", "Predicciones próximamente"], ["en", "Coming Soon", "Predictions coming soon"]] as const) {
+    for (const [lang, pill, play] of [["es", "Próximo partido", "Jugar ahora"], ["en", "Next match", "Play now"]] as const) {
       if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
       expect(page.text("#featured-status"), lang).toBe(pill);
-      expect(page.text("#featured-note"), lang).toBe(note);
+      expect(page.text("#featured-play"), lang).toBe(play);
       expect(page.doc.querySelector("#featured-action"), lang).toBeNull();
       expect(page.doc.querySelector("#featured-match"), lang).toBeNull();
       expect(page.doc.querySelectorAll("#featured-predictions a"), lang).toHaveLength(1);
@@ -273,10 +274,10 @@ describe("Home — honest cards", () => {
 
   it("no eligible match keeps the entry unavailable in both languages", async () => {
     const page = await loadHome({ matches: [hostileSafeMatch({ finalized: true }), hostileSafeMatch({ cancelledAt: "2026-10-01T00:00:00Z" })] });
-    expect(page.text("#featured-status")).toBe("Próximamente");
+    expect(page.text("#featured-status")).toBe("Próximo partido");
     expect(page.doc.querySelector("#featured-action a")).toBeNull();
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(page.text("#featured-status")).toBe("Coming Soon");
+    expect(page.text("#featured-status")).toBe("Next match");
     expect(page.doc.querySelector("#featured-action a")).toBeNull();
   });
 });
@@ -472,12 +473,12 @@ describe("Predictions — the open form", () => {
     expect(page.text("#content .match-meta span:first-child")).toBe("Liga Nacional");
     expect(page.text("#venue-select-m1")).toBe("Beer Box");
     expect(Array.from(page.doc.querySelectorAll("#goalscorer-select-m1 option")).map((o) => o.textContent)).toEqual(["Sin goleador / Sin gol", "Ana Díaz", "Bob Stone", "Cleo Park"]);
-    expect(page.text('[id^="geo-status"]')).toBe("Estás dentro del alcance de esta sede.");
+    expect(page.text('[id^="geo-status"]')).toBe("Tu navegador indica que estás dentro del alcance de esta sede. El servidor lo confirma al enviar.");
     expect(englishLeft(page.doc)).toEqual([]);
   });
 
   it("outside the venue's range, and with no location at all, say so in Spanish", async () => {
-    expect((await loadPredictions({ position: { latitude: 14.5, longitude: -87.5, accuracy: 5 } })).text('[id^="geo-status"]')).toBe("Parecés estar fuera del alcance de esta sede — el envío podría ser rechazado.");
+    expect((await loadPredictions({ position: { latitude: 14.5, longitude: -87.5, accuracy: 5 } })).text('[id^="geo-status"]')).toBe("Tu navegador indica que estás fuera del alcance de esta sede; al enviar, el servidor decide.");
     const none = await loadPredictions({ position: null });
     expect(none.text('[id^="geo-status"]')).toBe("Ubicación no disponible — activá el acceso a la ubicación para enviar una predicción.");
     none.en();
@@ -637,12 +638,20 @@ describe("Predictions — results, prizes and times", () => {
   });
 
   it("the kick-off time follows the language for month and weekday names, and the time-zone policy is the one it always had (the device's)", async () => {
-    const page = await loadPredictions({ authenticated: false, match: { kickoffAt: "2026-10-24T20:00:00.000Z" } });
-    const node = page.q("[data-kickoff]")!;
-    expect(node.textContent).toBe(new Date("2026-10-24T20:00:00.000Z").toLocaleString("es-HN"));
+    // One instant is both the start of the match and the end of participation: two labelled lines, the same time, the zone written out.
+    const when = (locale: string, iso: string) => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(iso));
+    const OPEN = "2031-10-24T20:00:00.000Z";
+    const page = await loadPredictions({ authenticated: false, match: { kickoffAt: OPEN } });
+    const lines = () => Array.from(page.doc.querySelectorAll("[data-time-key]")).map((n) => n.textContent);
+    expect(lines()).toEqual([`Inicio del partido: ${when("es-HN", OPEN)}`, `Cierre de participación: ${when("es-HN", OPEN)} (al inicio del partido)`]);
     page.en();
-    expect(node.textContent).toBe(new Date("2026-10-24T20:00:00.000Z").toLocaleString("en-US"));
-    expect(PRED_HTML).not.toMatch(/timeZone/); // Predictions never forced a zone, and still does not
+    expect(lines()).toEqual([`Match start: ${when("en-US", OPEN)}`, `Participation closes: ${when("en-US", OPEN)} (when the match starts)`]);
+    // Once the instant has passed the participation is closed since then: one line, the same time.
+    const CLOSED = "2026-01-24T20:00:00.000Z";
+    const closed = await loadPredictions({ authenticated: false, match: { kickoffAt: CLOSED } });
+    expect(Array.from(closed.doc.querySelectorAll("[data-time-key]")).map((n) => n.textContent)).toEqual([`Participación cerrada desde el inicio del partido: ${when("es-HN", CLOSED)}`]);
+    expect(when("es-HN", OPEN)).toMatch(/GMT|UTC|[A-Z]{2,5}/); // the zone is part of what is shown
+    expect(PRED_HTML).not.toMatch(/timeZone\s*:/); // Predictions never forced a zone (it only writes the device's out), and still does not
   });
 
   it("the page script keeps the shared module as the only owner of the saved choice, and touches browser storage for one purpose only: the unsent progressive draft, in session storage, in one marked region, with no credentials", () => {

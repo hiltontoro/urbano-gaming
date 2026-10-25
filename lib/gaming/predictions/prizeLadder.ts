@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 
 import type { CategoryState, PredictionContract, PredictionRecord } from "./types";
-import { InvalidAttemptShapeError } from "./types";
+import { InvalidAttemptShapeError, IncoherentAnswersError } from "./types";
+import type { IncoherenceCode } from "./types";
 
 /**
  * URBANO Score — the progressive prediction contract and its prize
@@ -202,6 +203,93 @@ export function parseProgressiveAnswers(input: unknown): ProgressiveAnswers {
   if (attemptedLevel >= 3) answers.goalscorer = parseGoalscorer(input.goalscorer);
   if (attemptedLevel >= 4) answers.goalMinute = parseGoalMinute(input.goalMinute);
   return answers;
+}
+
+// --- Coherence between answers --------------------------------------------
+//
+// The categories are independent questions, but one scoreline has to be able to produce them all:
+//   - 0-0: a category that is attempted can only be answered with an explicit NONE (no team scores, no player scores, no minute);
+//   - any goal: NONE is not an answer (there will be a first team, a scorer and a minute);
+//   - the first team to score needs at least one goal in the predicted scoreline;
+//   - the goalscorer must belong to a team with at least one predicted goal.
+// The goalscorer and the minute need not refer to the same goal. A category that was not attempted is not an answer and is never
+// completed here, and the attempted level is never raised. These rules judge a NEW answer or an EDIT; an exact repeat of a prediction
+// already accepted is a replay (isExactProgressiveReplay) and keeps its confirmation semantics, whatever it contains.
+
+export const INCOHERENCE_MESSAGES: Record<IncoherenceCode, string> = {
+  ONLY_NONE_WITH_NO_GOALS: "With a 0-0 scoreline, a later category can only be answered with none.",
+  NONE_NOT_ALLOWED_WITH_GOALS: "With goals in the scoreline, none is not a valid answer for a later category.",
+  FIRST_TEAM_WITHOUT_GOALS: "The first team to score must have at least one goal in the predicted scoreline.",
+  SCORER_TEAM_WITHOUT_GOALS: "The goalscorer must belong to a team with at least one goal in the predicted scoreline.",
+};
+
+export type ScorerSide = "HOME" | "AWAY";
+
+export interface CoherenceProblem {
+  code: IncoherenceCode;
+  category: "firstTeam" | "goalscorer" | "goalMinute";
+}
+
+/**
+ * Every contradiction in the answers, in ladder order; an empty list means they are coherent. scorerSide is the side of the picked
+ * goalscorer's team in THIS match, or null when it is not known (then only the rules that do not need it are applied).
+ */
+export function progressiveCoherenceProblems(answers: ProgressiveAnswers, scorerSide: ScorerSide | null): CoherenceProblem[] {
+  const { home, away } = answers.scoreline;
+  const goals = home + away;
+  const problems: CoherenceProblem[] = [];
+  const check = (category: CoherenceProblem["category"], answer: { kind: "PICKED" | "NONE" } | undefined) => {
+    if (answer === undefined) return; // not attempted: not an answer, nothing to contradict
+    if (goals === 0 && answer.kind === "PICKED") problems.push({ code: "ONLY_NONE_WITH_NO_GOALS", category });
+    else if (goals > 0 && answer.kind === "NONE") problems.push({ code: "NONE_NOT_ALLOWED_WITH_GOALS", category });
+  };
+  check("firstTeam", answers.firstTeam);
+  check("goalscorer", answers.goalscorer);
+  check("goalMinute", answers.goalMinute);
+  if (answers.firstTeam && answers.firstTeam.kind === "PICKED") {
+    const scored = answers.firstTeam.team === "HOME" ? home : away;
+    if (goals > 0 && scored === 0) problems.push({ code: "FIRST_TEAM_WITHOUT_GOALS", category: "firstTeam" });
+  }
+  if (answers.goalscorer && answers.goalscorer.kind === "PICKED" && scorerSide !== null) {
+    const scored = scorerSide === "HOME" ? home : away;
+    if (goals > 0 && scored === 0) problems.push({ code: "SCORER_TEAM_WITHOUT_GOALS", category: "goalscorer" });
+  }
+  return problems;
+}
+
+/** Throws IncoherentAnswersError for the first contradiction; returns when the answers are coherent. */
+export function assertCoherentAnswers(answers: ProgressiveAnswers, scorerSide: ScorerSide | null): void {
+  const [first] = progressiveCoherenceProblems(answers, scorerSide);
+  if (first) throw new IncoherentAnswersError(first.code, INCOHERENCE_MESSAGES[first.code]);
+}
+
+/**
+ * true when `answers` sent for `venueActivationId` with `offerDigest` are, in every answer, the prediction already stored: the same
+ * test the database function uses for a replay. A replay changes nothing (no new edit, no new measurement), so it is never judged
+ * again, not even by rules that came after the stored prediction was accepted.
+ */
+export function isExactProgressiveReplay(
+  stored: PredictionRecord | null,
+  venueActivationId: string,
+  answers: ProgressiveAnswers,
+  offerDigest: string | null
+): boolean {
+  if (!stored || stored.predictionContract !== PROGRESSIVE_PREDICTION_CONTRACT) return false;
+  if (typeof offerDigest !== "string" || offerDigest.length === 0 || stored.acceptedOfferDigest !== offerDigest) return false;
+  const columns = progressiveColumnsOf(answers);
+  return (
+    stored.venueActivationId === venueActivationId &&
+    stored.attemptedLevel === answers.attemptedLevel &&
+    stored.predictedHomeScore === answers.scoreline.home &&
+    stored.predictedAwayScore === answers.scoreline.away &&
+    stored.firstTeamState === columns.firstTeamState &&
+    stored.predictedFirstTeamToScore === columns.firstTeam &&
+    stored.goalscorerState === columns.goalscorerState &&
+    stored.predictedGoalscorerPlayerId === columns.goalscorerPlayerId &&
+    stored.goalMinuteState === columns.goalMinuteState &&
+    stored.predictedGoalMinuteRegulation === columns.goalMinuteRegulation &&
+    stored.predictedGoalMinuteStoppage === columns.goalMinuteStoppage
+  );
 }
 
 /** The stored form of the answers: explicit state per category, a value only when PICKED. */

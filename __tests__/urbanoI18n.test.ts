@@ -171,7 +171,7 @@ describe("the two languages carry the same table", () => {
 
   it("Spanish is real Spanish: no entry is an unchanged copy of the English one unless it is a name or a symbol", () => {
     const SAME_ON_PURPOSE = new Set([
-      "home.title", "home.score.clasico", "pred.title", "pred.vs", "home.status.playtest", "profile.soon.avatar", // "El Clásico: Real Madrid vs. Barcelona" is the fixture's name, the same in both languages
+      "home.title", "home.score.clasico", "pred.title", "pred.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "El Clásico: FC Barcelona vs. Real Madrid CF" is the fixture's name, the same in both languages
     ]);
     for (const key of Object.keys(en)) {
       if (SAME_ON_PURPOSE.has(key)) continue;
@@ -192,6 +192,7 @@ describe("the table is tied to the strings it translates", () => {
   it("every known server message is exactly what the server says, and maps to its key", () => {
     const sources = [
       read("lib/gaming/predictions/types.ts"),
+      read("lib/gaming/predictions/prizeLadder.ts"),
       read("lib/gaming/predictions/httpAuth.ts"),
       read("app/api/gaming/predictions/matches/[matchId]/predict/route.ts"),
       read("app/api/gaming/member/route.ts"),
@@ -234,7 +235,7 @@ describe("every public page is wired to the table", () => {
   const { es, en } = i18n.dictionary() as { es: Record<string, string>; en: Record<string, string> };
   const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
 
-  for (const file of ["public/index.html", "public/soccer-predictions.html", "public/profile.html"]) {
+  for (const file of ["public/index.html", "public/soccer-predictions.html", "public/profile.html", "public/leaderboards.html", "public/rewards.html"]) {
     it(`${file}: Spanish first paint, a key for every translated node, and the first-paint text equals the Spanish table`, () => {
       const dom = new JSDOM(read(file), { url: "http://localhost/" }); // no scripts run: this is the no-script first paint
       const doc = dom.window.document;
@@ -264,7 +265,7 @@ describe("every public page is wired to the table", () => {
 
   it("the administrative portal and the other consumers of the shared sign-in component do NOT load the language module (they stay in English)", () => {
     for (const file of ["public/predictions-admin.html", "public/competitions-admin.html", "public/host-applications-admin.html", "public/competitions.html",
-      "public/become-a-host.html", "public/leaderboards.html", "public/rewards.html", "public/trivia-playtest.html", "public/quiz-playtest.html"]) {
+      "public/become-a-host.html", "public/trivia-playtest.html", "public/quiz-playtest.html"]) {
       expect(read(file), file).not.toContain("urbanoI18n.js");
     }
   });

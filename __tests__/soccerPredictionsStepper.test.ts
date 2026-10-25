@@ -3,6 +3,8 @@ import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { CLASICO_ROSTER_SNAPSHOT } from "../lib/gaming/predictions/rosters/clasicoRosterSnapshot";
+
 /**
  * URBANO Score — the member's stepper over the ladder (public/soccer-predictions.html), and the administrator's level controls
  * (public/predictions-admin.html), each parsed and run whole in jsdom as shipped, with a stubbed fetch and a stubbed UrbanoAuth: no
@@ -19,6 +21,7 @@ import path from "node:path";
 const SCORE_HTML = readFileSync(path.join(process.cwd(), "public/soccer-predictions.html"), "utf8");
 const ADMIN_HTML = readFileSync(path.join(process.cwd(), "public/predictions-admin.html"), "utf8");
 const I18N_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoI18n.js"), "utf8");
+const CRESTS_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoClubCrests.js"), "utf8");
 const API = "/api/gaming/predictions";
 const DIGEST = "ab".repeat(32);
 const HOSTILE = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
@@ -72,6 +75,8 @@ function savedView(level: number, over: Record<string, unknown> = {}) {
 
 interface LoadOptions {
   lang?: "es" | "en";
+  /** Evaluate the club crests module, as the page's script tag would (jsdom does not load external scripts). Off by default. */
+  crests?: boolean;
   match?: Record<string, unknown>;
   levels?: number[];
   mine?: Record<string, unknown>;
@@ -82,6 +87,12 @@ interface LoadOptions {
   /** "blocked": touching session storage throws; "full": reading works but every write throws (quota). */
   sessionStorage?: "blocked" | "full";
   geolocation?: boolean;
+  /** false: do not press "Edit participation" when the page opens on the summary. */
+  openEdit?: boolean;
+  /** How the browser answers a location request: a position (default), or one of the three errors it reports. */
+  location?: "denied" | "timeout" | "unavailable";
+  /** The browser has not been answered yet: the permission is "prompt" and no position arrives. */
+  pendingPermission?: boolean;
   predict?: (call: Call, index: number) => { status: number; json?: unknown } | "reject" | Promise<{ status: number; json?: unknown } | "reject">;
   matchesAfterFirst?: () => Record<string, unknown>;
 }
@@ -120,10 +131,20 @@ async function loadScore(opts: LoadOptions = {}) {
         }
       }
       window.eval(I18N_SOURCE);
+      if (opts.crests) window.eval(CRESTS_SOURCE);
+      if (opts.pendingPermission) {
+        Object.defineProperty(window.navigator, "permissions", { configurable: true, value: { query: async () => ({ state: "prompt" }) } });
+      }
       if (opts.geolocation !== false) {
         Object.defineProperty(window.navigator, "geolocation", {
           configurable: true,
-          value: { getCurrentPosition: (ok: (p: unknown) => void) => ok({ coords: { latitude: 14.07, longitude: -87.19, accuracy: 5 } }) },
+          value: {
+            getCurrentPosition: (ok: (p: unknown) => void, fail: (e: { code: number }) => void) => {
+              if (opts.pendingPermission) return;
+              if (opts.location) fail({ code: opts.location === "denied" ? 1 : opts.location === "unavailable" ? 2 : 3 });
+              else ok({ coords: { latitude: 14.07, longitude: -87.19, accuracy: 5 } });
+            },
+          },
         });
       }
       w.UrbanoAuth = {
@@ -174,6 +195,12 @@ async function loadScore(opts: LoadOptions = {}) {
     }
   };
   await until(() => !!doc.querySelector("#content .card"), "the match card");
+  // With something saved the page opens on "My participation"; editing is an explicit action. Most journeys here are about the form,
+  // so they press it (openEdit: false stays on the summary, which is what the summary tests do).
+  if (opts.openEdit !== false) {
+    const editButton = doc.querySelector("[data-mine-edit]") as HTMLElement | null;
+    if (editButton) { editButton.click(); await new Promise((r) => setTimeout(r, 30)); }
+  }
   const q = (sel: string) => doc.querySelector(sel) as HTMLElement | null;
   const qa = (sel: string) => [...doc.querySelectorAll(sel)] as HTMLElement[];
   const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -232,10 +259,15 @@ async function sendAndConfirm(p: Score, level: number) {
   await p.settle(60);
 }
 
+const SPANISH_ESSENTIALS = "Escalera consecutiva: cada nivel exige acertar todos los anteriores. Un solo premio: el del nivel más alto que aciertes en orden. Completar un nivel no significa ganar.";
+const ENGLISH_ESSENTIALS = "Consecutive ladder: each level requires getting every earlier level right. One prize only: the one for the highest level you get right in order. Completing a level does not mean winning.";
 const SPANISH_RULES = "Cada nivel requiere acertar todos los anteriores. Podés enviar al completar un nivel o continuar para intentar uno mayor. Recibís únicamente el premio del nivel más alto que acertés.";
 const ENGLISH_RULES = "Each level requires getting every previous level right. You can send when you complete a level or continue to try a higher one. You receive only the prize of the highest level you get right.";
 
 const DRAFT_KEY = "urbano.score.draft.member-1.m1";
+/** "My participation": what is saved, in one place. After a send the page shows it instead of the form. */
+const summary = (p: Score) => p.text(p.q("[data-mine-summary]"));
+const editAgain = async (p: Score) => { await p.click(p.q("[data-mine-edit]")); };
 const SPANISH_RESTORED = "Recuperamos tus respuestas sin enviar de este navegador. Todavía no están guardadas: enviá tu participación para guardarlas.";
 const ENGLISH_RESTORED = "We restored your unsent answers from this browser. They are not saved yet: send your entry to save them.";
 const SPANISH_DRAFT_STATUS = "Borrador en este navegador: todavía no está enviado ni guardado.";
@@ -257,9 +289,14 @@ function draftEntry(over: Record<string, unknown> = {}, answers: Record<string, 
 describe("the stepper and what it says", () => {
   it("states the rules in Spanish and in English, before anything is answered", async () => {
     const es = await loadScore();
-    expect(es.text(es.q(".ladder-rules"))).toBe(SPANISH_RULES);
+    // What must never be hidden is on screen: a consecutive ladder, a single prize, completing is not winning. The long explanation is
+    // in a disclosure that starts closed.
+    expect(es.text(es.q(".ladder-rules"))).toBe(SPANISH_ESSENTIALS);
+    expect(es.text(es.q("[data-ladder-help-body]"))).toContain(SPANISH_RULES);
+    expect((es.q("[data-ladder-help]") as HTMLDetailsElement).open).toBe(false);
     const en = await loadScore({ lang: "en" });
-    expect(en.text(en.q(".ladder-rules"))).toBe(ENGLISH_RULES);
+    expect(en.text(en.q(".ladder-rules"))).toBe(ENGLISH_ESSENTIALS);
+    expect(en.text(en.q("[data-ladder-help-body]"))).toContain(ENGLISH_RULES);
     es.close();
     en.close();
   });
@@ -334,21 +371,23 @@ describe("the stepper and what it says", () => {
     const p = await loadScore();
     await answerScoreline(p);
     const panel = p.text(p.q("[data-ladder-panel]"));
-    expect(panel).toContain("el premio máximo posible en esta sede es: Prize L1. Solo lo recibís si acertás el marcador exacto.");
-    expect(panel).toContain("Completar un nivel no da un premio por sí solo");
-    expect(panel).not.toMatch(/ganaste|ganado|obtuviste|tu premio es/i);
+    expect(panel).toContain("Premio máximo posible con el nivel 1: Prize L1. Solo lo recibís si acertás el marcador exacto.");
+    expect(p.text(p.q("[data-ladder-help-body]"))).toContain("Completar un nivel no da un premio por sí solo");
+    expect(p.text(p.q("form[data-ladder]"))).not.toMatch(/ganaste|ganado|obtuviste|tu premio es/i);
     await p.click(p.action(/Continuar al nivel 2/));
-    await answerFirst(p, "AWAY");
+    await answerFirst(p, "HOME");
     expect(p.text(p.q("[data-ladder-panel]"))).toContain("Prize L2. Solo lo recibís si acertás el marcador exacto y el primer equipo en anotar.");
     p.close();
   });
 
   it("describes the prize of the level a step would send with, also when the person went back from a higher completed level", async () => {
     const p = await loadScore({ mine: { prediction: savedView(4), evaluation: null, qualification: null } });
-    expect(p.text(p.q("[data-ladder-panel]"))).toContain("es: Prize L4. Solo lo recibís si acertás el marcador exacto, el primer equipo, un goleador y un minuto de gol.");
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("con el nivel 4: Prize L4. Solo lo recibís si acertás el marcador exacto, el primer equipo, un goleador y un minuto de gol.");
     await p.click(p.qa(".ladder-step-btn")[1]); // back to level 2 with levels 3 and 4 still answered
-    expect(p.text(p.q("[data-ladder-panel]"))).toContain("Nivel actual: Nivel 2 · Mediana");
-    expect(p.text(p.q("[data-ladder-panel]"))).toContain("es: Prize L2. Solo lo recibís si acertás el marcador exacto y el primer equipo en anotar.");
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("Paso actual: Nivel 2 · Mediana");
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("Listo para enviar: Nivel 2 · Mediana"); // the same level the main button names
+    expect(p.action(/Guardar con nivel 2/)).toBeTruthy();
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("con el nivel 2: Prize L2. Solo lo recibís si acertás el marcador exacto y el primer equipo en anotar.");
     expect(p.text(p.q("[data-ladder-panel]"))).not.toContain("Prize L4.");
     p.close();
   });
@@ -369,14 +408,15 @@ describe("the stepper and what it says", () => {
     await answerScoreline(p, "3", "0");
     p.win.UrbanoI18n.setLang("en");
     await p.settle();
-    expect(p.text(p.q(".ladder-rules"))).toBe(ENGLISH_RULES);
-    expect(p.text(p.q("[data-ladder-panel]"))).toContain("With this level, the highest possible prize at this venue is: Prize L1. You only get it if you get the exact scoreline right.");
+    expect(p.text(p.q(".ladder-rules"))).toBe(ENGLISH_ESSENTIALS);
+    expect(p.text(p.q("[data-ladder-help-body]"))).toContain(ENGLISH_RULES);
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("Highest possible prize with level 1: Prize L1. You only get it if you get the exact scoreline right.");
     expect(p.action(/Send with level 1/)).toBeTruthy();
     expect(home(p).value).toBe("3");
     expect(away(p).value).toBe("0");
     p.win.UrbanoI18n.setLang("es");
     await p.settle();
-    expect(p.text(p.q(".ladder-rules"))).toBe(SPANISH_RULES);
+    expect(p.text(p.q(".ladder-rules"))).toBe(SPANISH_ESSENTIALS);
     p.close();
   });
 
@@ -427,24 +467,52 @@ describe("answering the levels", () => {
     p.close();
   });
 
-  it("level 3 needs a player or the explicit 'no player' answer; level 4 a valid minute or the explicit 'no goals' answer", async () => {
+  it("level 3 needs a player and level 4 a valid minute; with goals 'none' is not an answer, and the last complete level can be sent from an unanswered step", async () => {
     const p = await loadScore();
-    await answerScoreline(p);
+    await answerScoreline(p, "2", "1");
     await p.click(p.action(/Continuar al nivel 2/));
-    await answerFirst(p, "NONE");
+    await answerFirst(p, "HOME");
     await p.click(p.action(/Continuar al nivel 3/));
-    expect(p.action(/Enviar con nivel 3/)!.disabled).toBe(true); // nothing chosen yet: not an answer
-    expect(p.action(/Continuar al nivel 4/)!.disabled).toBe(true);
-    await answerScorer(p, "NONE");
+    expect(p.action(/Continuar al nivel 4/)!.disabled).toBe(true); // nothing chosen yet: not an answer
+    expect(p.action(/Enviar con nivel 2/)!.disabled).toBe(false); // ...but level 2 is complete and can be sent from here
+    expect(p.action(/Enviar con nivel 3/)).toBeUndefined();
+    expect((p.q("#ladder-scorer-m1 option[value=NONE]") as HTMLOptionElement).disabled).toBe(true); // goals: "no player" is not an answer
+    await answerScorer(p, "p1");
     expect(p.action(/Continuar al nivel 4/)!.disabled).toBe(false);
     await p.click(p.action(/Continuar al nivel 4/));
-    expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(true);
+    expect(p.action(/Enviar con nivel 3/)!.disabled).toBe(false); // level 4 is empty: what is ready is level 3
     await answerMinute(p, "91");
-    expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(true);
+    expect(p.action(/Enviar con nivel 4/)).toBeUndefined();
     await answerMinute(p, "30");
     expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(false);
-    await p.click(p.q(".ladder-none.team-toggle"));
+    await p.click(p.q(".ladder-none.team-toggle")); // "no goals" with goals in the scoreline: refused, nothing changes
+    expect(p.q(".ladder-none.team-toggle")!.getAttribute("aria-pressed")).toBe("false");
+    expect((p.q("#ladder-minute-m1") as HTMLInputElement).disabled).toBe(false);
+    expect((p.q("#ladder-minute-m1") as HTMLInputElement).value).toBe("30");
+    expect(p.text(p.q("[data-ladder-body] .ladder-fix"))).toContain("el marcador tiene que ser 0–0");
+    expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(false);
+    p.close();
+  });
+
+  it("with a 0-0 scoreline the only answers are the explicit 'none' ones: the teams, the players and the minute are not choices", async () => {
+    const p = await loadScore();
+    await answerScoreline(p, "0", "0");
+    await p.click(p.action(/Continuar al nivel 2/));
+    for (const side of ["HOME", "AWAY"]) expect(p.q(`.team-toggle[data-value="${side}"]`)!.getAttribute("aria-disabled")).toBe("true");
+    expect(p.q('.team-toggle[data-value="NONE"]')!.getAttribute("aria-disabled")).toBeNull();
+    expect(p.text(p.q("[data-ladder-body] .ladder-fix"))).toContain("Con un marcador 0–0 solo podés responder «ninguno»");
+    await answerFirst(p, "HOME"); // not a choice
+    expect(p.action(/Continuar al nivel 3/)!.disabled).toBe(true);
+    await answerFirst(p, "NONE");
+    await p.click(p.action(/Continuar al nivel 3/));
+    expect(p.qa("#ladder-scorer-m1 optgroup option").every((o) => (o as HTMLOptionElement).disabled)).toBe(true);
+    expect((p.q("#ladder-scorer-m1 option[value=NONE]") as HTMLOptionElement).disabled).toBe(false);
+    await answerScorer(p, "NONE");
+    await p.click(p.action(/Continuar al nivel 4/));
     expect((p.q("#ladder-minute-m1") as HTMLInputElement).disabled).toBe(true);
+    expect(p.action(/Enviar con nivel 3/)!.disabled).toBe(false);
+    expect(p.action(/Enviar con nivel 4/)).toBeUndefined();
+    await p.click(p.q(".ladder-none.team-toggle"));
     expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(false);
     p.close();
   });
@@ -466,12 +534,17 @@ describe("answering the levels", () => {
     p.close();
   });
 
-  it("the explanation says that choosing 'no team / no player / no goals' is an answer and that not answering is different", async () => {
-    const p = await loadScore();
-    await answerScoreline(p);
-    await p.click(p.action(/Continuar al nivel 2/));
-    expect(p.text(p.q("[data-ladder-body]"))).toContain("Elegir esta opción es una respuesta: es correcta solo si el partido termina sin goles en tiempo reglamentario. No responder es distinto: ese nivel no se evalúa.");
-    p.close();
+  it("the explanation says that choosing 'no team / no player / no goals' is an answer and that not answering is different: only where it is pertinent", async () => {
+    const goals = await loadScore();
+    await answerScoreline(goals, "2", "1");
+    await goals.click(goals.action(/Continuar al nivel 2/));
+    expect(goals.text(goals.q("[data-ladder-body]"))).not.toContain("Elegir esta opción es una respuesta"); // with goals "none" is not a choice
+    goals.close();
+    const none = await loadScore();
+    await answerScoreline(none, "0", "0");
+    await none.click(none.action(/Continuar al nivel 2/));
+    expect(none.text(none.q("[data-ladder-body]"))).toContain("Elegir esta opción es una respuesta: es correcta solo si el partido termina sin goles en tiempo reglamentario. No responder es distinto: ese nivel no se evalúa.");
+    none.close();
   });
 });
 
@@ -491,7 +564,13 @@ describe("sending", () => {
       attemptedLevel: 1, scoreline: { home: 2, away: 1 }, venueActivationId: "act-1", offerDigest: DIGEST,
       latitude: 14.07, longitude: -87.19, accuracyMeters: 5,
     });
-    expect(p.text(p.q("#submit-msg-m1"))).toContain("Participación guardada hasta el nivel 1 (Fácil).");
+    // After the send the page shows "My participation" (not the form), with the confirmation and what was sent.
+    expect(p.q("form[data-ladder]")).toBeNull();
+    expect(p.text(p.q("[data-mine-notice]"))).toContain("Participación guardada hasta el nivel 1 (Fácil).");
+    expect(summary(p)).toContain("Nivel enviado: Nivel 1 · Fácil");
+    expect(summary(p)).toContain("Sede: Beer Box");
+    expect(summary(p)).toContain("Marcador: 2–1");
+    expect(p.q("[data-mine-edit]")).not.toBeNull();
     p.close();
   });
 
@@ -550,7 +629,7 @@ describe("sending", () => {
     await answerFirst(p, "HOME");
     await p.click(p.action(/Continuar al nivel 3/));
     await answerScorer(p, "p1"); // level 3 answered...
-    await p.click(p.action(/Volver/)); // ...back to level 2
+    await p.click(p.action(/^Volver$/)); // ...back to level 2
     expect(p.text(p.q("[data-ladder-title]"))).toContain("¿Qué equipo anotará primero?");
     await answerFirst(p, "AWAY");
     await sendAndConfirm(p, 2); // ...and send with level 2
@@ -569,24 +648,59 @@ describe("sending", () => {
     await answerFirst(p, "HOME");
     await p.click(p.action(/Continuar al nivel 3/));
     await answerScorer(p, "p1");
-    await p.click(p.action(/Volver/));
+    await p.click(p.action(/^Volver$/));
     await sendAndConfirm(p, 2);
-    expect(p.text(p.q("#submit-msg-m1"))).toContain("hasta el nivel 2");
+    expect(p.text(p.q("[data-mine-notice]"))).toContain("hasta el nivel 2");
+    await editAgain(p);
     await p.click(p.action(/Continuar al nivel 3/));
     expect((p.q("#ladder-scorer-m1") as HTMLSelectElement).value).toBe("");
-    expect(p.action(/Guardar con nivel 3/)!.disabled).toBe(true);
+    expect(p.action(/Guardar con nivel 3/)).toBeUndefined(); // level 3 is empty: it cannot be what is sent...
+    expect(p.action(/Guardar con nivel 2/)!.disabled).toBe(false); // ...the last complete level can
     p.close();
   });
 
-  it("does not send when no position can be read, and says so", async () => {
-    const p = await loadScore({ geolocation: false });
-    await answerScoreline(p);
-    await p.click(p.action(/Enviar con nivel 1/));
-    await p.click(p.action(/Confirmar y enviar/));
-    await p.settle(60);
-    expect(p.posts()).toHaveLength(0);
-    expect(p.text(p.q("#submit-msg-m1"))).toContain("Se requiere tu ubicación");
-    expect(p.action(/Confirmar y enviar/)!.disabled).toBe(false);
+  it("does not send when no position can be read, and says WHY: no location in the browser, permission denied, too slow, or unavailable", async () => {
+    const cases: Array<[LoadOptions, string]> = [
+      [{ geolocation: false }, "Tu navegador no ofrece ubicación."],
+      [{ location: "denied" }, "El permiso de ubicación está denegado. Activalo en los ajustes de tu navegador para poder enviar."],
+      [{ location: "timeout" }, "La ubicación tardó demasiado en responder. Volvé a intentarlo."],
+      [{ location: "unavailable" }, "No se pudo determinar tu ubicación en este momento."],
+    ];
+    for (const [options, expected] of cases) {
+      const p = await loadScore(options);
+      await answerScoreline(p);
+      await p.click(p.action(/Enviar con nivel 1/));
+      await p.click(p.action(/Confirmar y enviar/));
+      await p.settle(60);
+      expect(p.posts()).toHaveLength(0);
+      expect(p.text(p.q("#submit-msg-m1"))).toBe(expected);
+      expect(p.text(p.q(`#geo-status-m1`))).toBe(expected);
+      expect(p.text(p.q("#geo-status-m1"))).not.toContain("fuera del alcance"); // no measurement is never "outside the venue"
+      expect(p.action(/Confirmar y enviar/)!.disabled).toBe(false);
+      p.close();
+    }
+  });
+
+  it("tells apart the browser's measurement from the server's decision: within or outside what the BROWSER reports, then the server decides", async () => {
+    const within = await loadScore();
+    await within.settle();
+    expect(within.text(within.q("#geo-status-m1"))).toBe("Tu navegador indica que estás dentro del alcance de esta sede. El servidor lo confirma al enviar.");
+    within.close();
+    const outside = await loadScore({ match: { venueActivations: [{ ...(ladderMatch().venueActivations[0] as any), venue: { venueId: "v1", name: "Far Bar", latitude: 15.5, longitude: -88.5, radiusMeters: 50, active: true } }] } });
+    await outside.settle();
+    expect(outside.text(outside.q("#geo-status-m1"))).toBe("Tu navegador indica que estás fuera del alcance de esta sede; al enviar, el servidor decide.");
+    outside.close();
+    // the server's own refusal is shown as the server words it
+    const refused = await loadScore({ predict: () => ({ status: 403, json: { error: "Submission failed geolocation eligibility." } }) });
+    await answerScoreline(refused);
+    await sendAndConfirm(refused, 1);
+    expect(refused.text(refused.q("#submit-msg-m1"))).toBe("El envío no cumplió los requisitos de ubicación.");
+    refused.close();
+  });
+
+  it("while the permission is pending the page says it is waiting for the person, not that they are outside", async () => {
+    const p = await loadScore({ pendingPermission: true });
+    expect(p.text(p.q("#geo-status-m1"))).toBe("Esperando tu permiso de ubicación…");
     p.close();
   });
 });
@@ -604,7 +718,7 @@ describe("reducing a saved participation", () => {
 
   it("asks before reducing, says what is deleted, and sends only the lower level", async () => {
     const p = await loadScore({ mine: { prediction: savedView(3), evaluation: null, qualification: null } });
-    await p.click(p.action(/Volver/));
+    await p.click(p.action(/^Volver$/));
     await p.click(p.action(/Guardar con nivel 2/));
     const review = p.text(p.q("[data-ladder-review]"));
     expect(review).toContain("Tu participación guardada llega hasta el nivel 3. Si la enviás con el nivel 2, se borran tus respuestas de los niveles siguientes.");
@@ -740,6 +854,7 @@ describe("retry, a changed offer, leaving the page", () => {
       expect(leave()).toBe(true);
       await sendAndConfirm(p, 1);
       expect(leave()).toBe(false);
+      await editAgain(p);
       await p.type(home(p), "9");
       expect(leave()).toBe(true);
       p.close();
@@ -832,7 +947,7 @@ describe("the unsent draft", () => {
       expect(withoutTime(p.session())).toEqual(withoutTime(snapshot));
       noPostsAtAll(p);
       // Going back shows the scoreline that was typed.
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
       expect(home(p).value).toBe("2");
       expect(away(p).value).toBe("1");
       p.close();
@@ -852,7 +967,7 @@ describe("the unsent draft", () => {
       expect(p.posts()).toHaveLength(1);
       expect(p.posts()[0].body).toMatchObject({ attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "AWAY" }, offerDigest: DIGEST, venueActivationId: "act-1" });
       expect(p.session()).toEqual({});
-      expect(status(p)).toBe("Guardado en tu cuenta: participación hasta el nivel 2 (Mediana).");
+      expect(summary(p)).toContain("Nivel enviado: Nivel 2 · Mediana");
       p.close();
     });
 
@@ -883,11 +998,11 @@ describe("the unsent draft", () => {
       expect(titleLevel(p)).toBe("4");
       expect(p.q(".team-toggle.ladder-none")!.getAttribute("aria-pressed")).toBe("true");
       expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(false);
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
       expect((p.q("#ladder-scorer-m1") as HTMLSelectElement).value).toBe("NONE");
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
       expect(toggled(p)).toBe("NONE");
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
       expect([home(p).value, away(p).value]).toEqual(["0", "0"]);
       p.close();
 
@@ -1069,7 +1184,7 @@ describe("the unsent draft", () => {
       expect(message(p)).toBe("Recuperamos cambios sin enviar de este navegador sobre tu participación guardada. Lo guardado no cambia hasta que la envíes.");
       expect(status(p)).toBe("Guardado en tu cuenta: hasta el nivel 2 (Mediana). Tenés cambios sin enviar en este navegador: todavía no están guardados.");
       expect((p.q("select") as HTMLSelectElement).disabled).toBe(true);
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
       expect([home(p).value, away(p).value]).toEqual(["5", "0"]);
       noPostsAtAll(p);
       expect(JSON.parse(p.session()[DRAFT_KEY]).baseUpdatedAt).toBe("y");
@@ -1099,8 +1214,8 @@ describe("the unsent draft", () => {
       expect(p.q("[data-ladder-conflict]")).toBeNull();
       expect(p.session()).toEqual({});
       expect(status(p)).toBe("Guardado en tu cuenta: participación hasta el nivel 3 (Difícil).");
-      await p.click(p.action(/Volver/));
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
+      await p.click(p.action(/^Volver$/));
       expect([home(p).value, away(p).value]).toEqual(["2", "1"]);
       noPostsAtAll(p);
       p.close();
@@ -1169,8 +1284,8 @@ describe("the unsent draft", () => {
       await p.click(p.action(/Continuar al nivel 3/));
       await answerScorer(p, "p1");
       expect(JSON.parse(p.session()[DRAFT_KEY]).a.scorer).toBe("p1");
-      await p.click(p.action(/Volver/));
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
+      await p.click(p.action(/^Volver$/));
       await sendAndConfirm(p, 1);
       expect(p.posts()[0].body).toMatchObject({ attemptedLevel: 1 });
       expect(p.posts()[0].body.firstTeam).toBeUndefined();
@@ -1185,8 +1300,8 @@ describe("the unsent draft", () => {
 
     it("reducing a saved entry in a draft asks to confirm as before, and the reduced draft is not kept after the send", async () => {
       const p = await loadScore({ mine: savedMine(3) });
-      await p.click(p.action(/Volver/));
-      await p.click(p.action(/Volver/));
+      await p.click(p.action(/^Volver$/));
+      await p.click(p.action(/^Volver$/));
       await p.type(home(p), "7");
       expect(JSON.parse(p.session()[DRAFT_KEY]).baseUpdatedAt).toBe("y");
       await p.click(p.action(/Guardar con nivel 1/));
@@ -1214,7 +1329,7 @@ describe("the unsent draft", () => {
         await sendAndConfirm(p, 2);
         expect(p.posts()).toHaveLength(1);
         expect(p.posts()[0].body).toMatchObject({ attemptedLevel: 2, scoreline: { home: 1, away: 2 } });
-        expect(status(p)).toBe("Guardado en tu cuenta: participación hasta el nivel 2 (Mediana).");
+        expect(summary(p)).toContain("Nivel enviado: Nivel 2 · Mediana");
         expect(errors).toEqual([]);
         p.close();
       }
@@ -1278,8 +1393,10 @@ describe("after the match closes", () => {
   it("past kickoff: a participation is waited on, a missing one is reported, and no form is offered either way", async () => {
     const past = new Date(Date.now() - 3600_000).toISOString();
     const waiting = await loadScore({ match: { kickoffAt: past }, mine: { prediction: savedView(2), evaluation: null, qualification: null } });
-    expect(waiting.text(waiting.q("#content .card"))).toContain("Tu participación llega hasta el nivel 2 (Mediana). Esperando el resultado oficial.");
+    expect(waiting.text(waiting.q("#content .card"))).toContain("Estado: cerrada, el partido ya empezó. Esperando el resultado oficial.");
+    expect(summary(waiting)).toContain("Nivel enviado: Nivel 2 · Mediana");
     expect(waiting.q("form[data-ladder]")).toBeNull();
+    expect(waiting.q("[data-mine-edit]")).toBeNull(); // closed: nothing to edit
     const missed = await loadScore({ match: { kickoffAt: past } });
     expect(missed.text(missed.q("#content .card"))).toContain("No enviaste una predicción antes del inicio del partido.");
     expect(missed.q("form[data-ladder]")).toBeNull();
@@ -1417,5 +1534,682 @@ describe("administration: prizes by ladder level", () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(page.text("#msg-tier")).toBe("This venue's prizes can no longer change: participants have already accepted this offer.");
     page.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coherence between answers, as the form shows it (the server judges the same rules again: progressiveCoherence.test.ts)
+// ---------------------------------------------------------------------------
+
+describe("coherence between answers in the form", () => {
+  const titleLevel = (p: Score) => p.q("[data-ladder-title]")?.getAttribute("data-ladder-title");
+  const fixText = (p: Score) => p.text(p.q("[data-ladder-body] .ladder-fix"));
+  const removed = (p: Score) => p.text(p.q("[data-ladder-removed]"));
+  const blockedTeams = (p: Score) => p.qa(".team-toggle[aria-disabled='true']").map((b) => b.getAttribute("data-value"));
+
+  async function answerUpToMinute(p: Score, h = "2", a = "1") {
+    await answerScoreline(p, h, a);
+    await p.click(p.action(/Continuar al nivel 2/));
+    await answerFirst(p, "HOME");
+    await p.click(p.action(/Continuar al nivel 3/));
+    await answerScorer(p, "p1");
+    await p.click(p.action(/Continuar al nivel 4/));
+    await answerMinute(p, "30");
+  }
+
+  it("the first team needs a goal in the scoreline: a team with none is not a choice, and tapping it says why and changes nothing", async () => {
+    const p = await loadScore();
+    await answerScoreline(p, "0", "2");
+    await p.click(p.action(/Continuar al nivel 2/));
+    expect(blockedTeams(p)).toEqual(["HOME", "NONE"]);
+    expect(fixText(p)).toContain("Ese equipo no tiene goles en tu marcador");
+    expect(fixText(p)).not.toContain("0–0"); // the "none needs 0–0" reason is given when "none" is tapped, not on every step
+    await answerFirst(p, "HOME");
+    expect(p.q('.team-toggle[data-value="HOME"]')!.getAttribute("aria-pressed")).toBe("false");
+    expect(p.action(/Continuar al nivel 3/)!.disabled).toBe(true);
+    await answerFirst(p, "NONE");
+    expect(fixText(p)).toContain("el marcador tiene que ser 0–0");
+    expect(p.action(/Continuar al nivel 3/)!.disabled).toBe(true);
+    await answerFirst(p, "AWAY");
+    expect(p.action(/Continuar al nivel 3/)!.disabled).toBe(false);
+    p.close();
+  });
+
+  it("the goalscorer must belong to a team with goals: the players of a team without goals cannot be picked", async () => {
+    const p = await loadScore();
+    await answerScoreline(p, "2", "0");
+    await p.click(p.action(/Continuar al nivel 2/));
+    await answerFirst(p, "HOME");
+    await p.click(p.action(/Continuar al nivel 3/));
+    const state = Object.fromEntries(p.qa("#ladder-scorer-m1 option[value]").map((o) => [(o as HTMLOptionElement).value, (o as HTMLOptionElement).disabled]));
+    expect(state).toEqual({ "": false, NONE: true, p1: false, p2: false, p3: true });
+    expect(fixText(p)).toContain("Los jugadores de un equipo sin goles en tu marcador no se pueden elegir");
+    await answerScorer(p, "p3");
+    expect(p.action(/Continuar al nivel 4/)!.disabled).toBe(true); // a disabled option is not an answer, even if forced
+    p.close();
+  });
+
+  it("the goalscorer and the minute need not be the same goal: any scorer of a team with goals, any minute", async () => {
+    const p = await loadScore();
+    await answerUpToMinute(p, "1", "3");
+    expect(p.action(/Enviar con nivel 4/)!.disabled).toBe(false);
+    p.close();
+  });
+
+  it("changing the scoreline takes out the later answers that no longer fit, says which, keeps the ones that still fit, and sends nothing", async () => {
+    const p = await loadScore();
+    await answerUpToMinute(p, "2", "1");
+    await p.click(p.qa(".ladder-step-btn")[0]);
+    await p.type(home(p), "0"); // 0-1: the home team has no goal any more
+    expect(removed(p)).toContain("Cambiaste una respuesta anterior y quitamos las siguientes, que ya no son compatibles. Revisalas antes de guardar:");
+    expect(p.qa("[data-ladder-removed] li").map((li) => p.text(li))).toEqual(["Primer equipo en anotar", "Cualquier goleador"]);
+    // the minute still fits a 0-1: it is kept; the removed levels are empty again and block what is above them
+    expect(p.qa(".ladder-step-btn").map((b) => (b as HTMLButtonElement).disabled)).toEqual([false, false, true, true]);
+    await p.click(p.action(/Continuar al nivel 2/));
+    expect(p.qa(".team-toggle[aria-pressed='true']")).toHaveLength(0); // never completed for the person
+    await answerFirst(p, "AWAY");
+    await p.click(p.action(/Continuar al nivel 3/));
+    expect((p.q("#ladder-scorer-m1") as HTMLSelectElement).value).toBe("");
+    await answerScorer(p, "p3");
+    await p.click(p.action(/Continuar al nivel 4/));
+    expect((p.q("#ladder-minute-m1") as HTMLInputElement).value).toBe("30");
+    expect(p.posts()).toHaveLength(0);
+    p.close();
+  });
+
+  it("a scoreline that still fits everything takes nothing out and says nothing", async () => {
+    const p = await loadScore();
+    await answerUpToMinute(p, "2", "1");
+    await p.click(p.qa(".ladder-step-btn")[0]);
+    await p.type(home(p), "3");
+    expect(p.q("[data-ladder-removed]")!.hidden).toBe(true);
+    expect(p.qa(".ladder-step-btn").map((b) => (b as HTMLButtonElement).disabled)).toEqual([false, false, false, false]);
+    p.close();
+  });
+
+  it("a 0-0 takes out every later answer except none-type ones, and never fills them in or raises the level", async () => {
+    const p = await loadScore();
+    await answerUpToMinute(p, "2", "1");
+    await p.click(p.qa(".ladder-step-btn")[0]);
+    await p.type(home(p), "0");
+    await p.type(away(p), "0");
+    expect(p.qa("[data-ladder-removed] li").map((li) => p.text(li))).toEqual(["Primer equipo en anotar", "Cualquier goleador", "Cualquier minuto de gol"]);
+    expect(p.text(p.q("[data-ladder-panel]"))).toContain("Listo para enviar: Nivel 1 · Fácil"); // the level goes down, never up
+    expect(p.action(/Enviar con nivel 1/)!.disabled).toBe(false);
+    p.close();
+  });
+
+  it("the removed answers' notice goes away when the person answers those levels again", async () => {
+    const p = await loadScore();
+    await answerUpToMinute(p, "2", "1");
+    await p.click(p.qa(".ladder-step-btn")[0]);
+    await p.type(home(p), "0");
+    expect(p.qa("[data-ladder-removed] li")).toHaveLength(2);
+    await p.click(p.action(/Continuar al nivel 2/));
+    await answerFirst(p, "AWAY");
+    expect(p.qa("[data-ladder-removed] li").map((li) => p.text(li))).toEqual(["Cualquier goleador"]);
+    p.close();
+  });
+
+  it("an unsent draft written before these rules is restored without its contradictions, and says so", async () => {
+    const draft = draftEntry({ step: 3 }, { home: "0", away: "0", first: "HOME", scorer: "p1", minute: "30" });
+    const p = await loadScore({ session: { [DRAFT_KEY]: draft } });
+    expect(p.qa("[data-ladder-removed] li").map((li) => p.text(li))).toEqual(["Primer equipo en anotar", "Cualquier goleador", "Cualquier minuto de gol"]);
+    expect(p.posts()).toHaveLength(0);
+    p.close();
+  });
+
+  it("the form states what blocks, in English too, and a blocked option points at its explanation", async () => {
+    const p = await loadScore({ lang: "en" });
+    await answerScoreline(p, "0", "0");
+    await p.click(p.action(/Continue to level 2/));
+    expect(fixText(p)).toBe("With a 0–0 scoreline you can only answer “none”. Choose it, or change the scoreline in level 1.");
+    const home1 = p.q('.team-toggle[data-value="HOME"]')!;
+    expect(home1.getAttribute("aria-describedby")).toBe(p.q("[data-ladder-body] .ladder-fix")!.id);
+    expect(p.q("[data-ladder-body] .ladder-fix")!.getAttribute("aria-live")).toBe("polite");
+    p.close();
+  });
+
+  describe("a participation saved before these rules", () => {
+    const legacy = () => ({ prediction: savedView(3, { firstTeam: { kind: "NONE" } }), evaluation: null, qualification: null }); // 2-1 with "no team" first
+
+    it("stays exactly as saved, is shown as it is, and says what to correct to change it", async () => {
+      const p = await loadScore({ mine: legacy(), openEdit: false });
+      expect(summary(p)).toContain("Nivel enviado: Nivel 3 · Difícil");
+      expect(summary(p)).toContain("Primer equipo: Ningún equipo anotará");
+      expect(p.text(p.q("[data-mine-summary] .ladder-fix"))).toContain("Tu participación guardada combina respuestas que ya no son compatibles entre sí.");
+      expect(p.qa("[data-mine-summary] .ladder-fix li").map((li) => p.text(li))).toEqual(["Primer equipo en anotar"]);
+      expect(p.posts()).toHaveLength(0);
+      p.close();
+    });
+
+    it("cannot be sent again as it is; fixing the one answer lets it be saved at the same level, and nothing else changes", async () => {
+      const p = await loadScore({ mine: legacy() });
+      expect(p.text(p.q("[data-ladder-legacy]"))).toContain("Para cambiarla, corregí:");
+      expect(titleLevel(p)).toBe("2"); // the form opens where the contradiction is
+      expect(p.q('.team-toggle[data-value="NONE"]')!.getAttribute("aria-pressed")).toBe("true");
+      expect(p.q('.team-toggle[data-value="NONE"]')!.getAttribute("aria-disabled")).toBe("true");
+      expect(fixText(p)).toContain("el marcador tiene que ser 0–0");
+      expect(p.action(/Guardar con nivel 1/)).toBeTruthy(); // only the part that is coherent could be sent
+      expect(p.action(/Guardar con nivel 3/)).toBeUndefined();
+      await answerFirst(p, "HOME");
+      expect(p.q("[data-ladder-legacy]")!.hidden).toBe(true);
+      expect(p.action(/Guardar con nivel 2/)).toBeTruthy(); // from step 2 the button names step 2, as it always did...
+      await p.click(p.action(/Continuar al nivel 3/)); // ...so the person goes on to level 3 to save at the level that was saved
+      expect(p.action(/Guardar con nivel 3/)!.disabled).toBe(false);
+      await sendAndConfirm(p, 3);
+      expect(p.posts()[0].body).toMatchObject({ attemptedLevel: 3, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" }, goalscorer: { kind: "PICKED", playerId: "p1" } });
+      p.close();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "My participation": what is saved, in one place, and editing as an explicit act
+// ---------------------------------------------------------------------------
+
+describe("My participation", () => {
+  const SENT = "2026-10-24T20:00:00.000Z";
+  const mineAt = (level: number, over: Record<string, unknown> = {}) => ({ prediction: savedView(level, { createdAt: SENT, updatedAt: SENT, ...over }), evaluation: null, qualification: null });
+
+  it("a member with something saved sees the summary first, not the form: venue, level sent, state, date, answers — and no automatic reopening", async () => {
+    const p = await loadScore({ mine: mineAt(3), openEdit: false });
+    expect(p.q("form[data-ladder]")).toBeNull();
+    const text = summary(p);
+    expect(text).toContain("Mi participación");
+    expect(text).toContain("Sede: Beer Box");
+    expect(text).toContain("Nivel enviado: Nivel 3 · Difícil");
+    expect(text).toContain("Enviada:");
+    expect(text).toContain("Estado: guardada. Podés editarla hasta");
+    expect(text).toContain("Marcador: 2–1");
+    expect(text).toContain("Primer equipo: Alpha FC");
+    expect(text).toContain("Goleador: Ana Díaz");
+    expect(text).not.toContain("Minuto:"); // level 4 was not sent
+    expect(text).not.toMatch(/ganaste|ganado|premio/i); // it says what was sent, never that something was won
+    expect(p.q("[data-mine-edit]")!.textContent).toBe("Editar participación");
+    expect(p.posts()).toHaveLength(0);
+    p.close();
+  });
+
+  it("the date of the last change is shown only when it differs from the first send", async () => {
+    const same = await loadScore({ mine: mineAt(2), openEdit: false });
+    expect(summary(same)).not.toContain("Última actualización");
+    const later = await loadScore({ mine: mineAt(2, { updatedAt: "2026-10-24T20:30:00.000Z" }), openEdit: false });
+    expect(summary(later)).toContain("Última actualización:");
+    same.close();
+    later.close();
+  });
+
+  it("times are written with their zone, in the page's language, and follow a change of language", async () => {
+    const p = await loadScore({ mine: mineAt(1), openEdit: false });
+    const when = (locale: string) => new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(SENT));
+    expect(summary(p)).toContain(`Enviada: ${when("es-HN")}`);
+    p.win.UrbanoI18n.setLang("en");
+    await p.settle();
+    expect(summary(p)).toContain(`Sent: ${when("en-US")}`);
+    expect(summary(p)).toContain("Status: saved. You can edit it until");
+    p.close();
+  });
+
+  it("editing is explicit: the button opens the form with the saved answers, and 'back to the summary' keeps what was typed without saving it", async () => {
+    const p = await loadScore({ mine: mineAt(2), openEdit: false });
+    await p.click(p.q("[data-mine-edit]"));
+    expect(p.q("form[data-ladder]")).not.toBeNull();
+    expect(p.q("[data-mine-summary]")).toBeNull();
+    expect(p.q('.team-toggle[data-value="HOME"]')!.getAttribute("aria-pressed")).toBe("true");
+    await p.click(p.q('.team-toggle[data-value="AWAY"]'));
+    await p.click(p.action(/Volver al resumen/));
+    expect(p.q("form[data-ladder]")).toBeNull();
+    expect(summary(p)).toContain("Primer equipo: Alpha FC"); // what is SAVED, untouched
+    expect(summary(p)).toContain("Tenés cambios sin enviar en este navegador. Todavía no están guardados.");
+    expect(p.q("[data-mine-edit]")!.textContent).toBe("Continuar edición");
+    await p.click(p.q("[data-mine-edit]"));
+    expect(p.q('.team-toggle[data-value="AWAY"]')!.getAttribute("aria-pressed")).toBe("true"); // the same form, with what was typed
+    expect(p.posts()).toHaveLength(0);
+    p.close();
+  });
+
+  it("a new send replaces the summary, and a retry of the same answers is a plain send of the same request", async () => {
+    const p = await loadScore({ mine: mineAt(1), openEdit: false });
+    await p.click(p.q("[data-mine-edit]"));
+    await p.type(home(p), "3");
+    await sendAndConfirm(p, 1);
+    expect(summary(p)).toContain("Marcador: 3–1");
+    expect(p.text(p.q("[data-mine-notice]"))).toContain("Participación guardada hasta el nivel 1 (Fácil).");
+    expect(p.posts()).toHaveLength(1);
+    p.close();
+  });
+
+  it("a closed match shows the summary without any way to edit; a missed one says so", async () => {
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    const closed = await loadScore({ match: { kickoffAt: past }, mine: mineAt(3) });
+    expect(summary(closed)).toContain("Estado: cerrada, el partido ya empezó. Esperando el resultado oficial.");
+    expect(closed.q("[data-mine-edit]")).toBeNull();
+    expect(closed.q("form[data-ladder]")).toBeNull();
+    closed.close();
+  });
+
+  it("when the venue has no valid offer the saved entry is still shown, with no edit button and a state line that says why (never 'you can edit it')", async () => {
+    const p = await loadScore({ levels: [], mine: mineAt(2) });
+    expect(summary(p)).toContain("Sede: Beer Box");
+    expect(summary(p)).toContain("Nivel enviado: Nivel 2 · Mediana");
+    expect(p.q("[data-mine-edit]")).toBeNull();
+    expect(summary(p)).toContain("Estado: guardada. Esta sede no tiene un premio válido configurado, así que no recibe cambios.");
+    expect(summary(p)).not.toContain("Podés editarla");
+    expect(summary(p)).not.toContain("ninguna sede tiene premios configurados"); // that sentence is about a match with nothing to take part in, not about this entry
+    p.close();
+  });
+
+  it("a DISABLED venue activation: the saved entry is shown, the state line says the venue no longer takes changes, and there is no edit button", async () => {
+    const base = ladderMatch().venueActivations[0] as any;
+    const p = await loadScore({ match: { venueActivations: [{ ...base, enabled: false }] }, mine: mineAt(2) });
+    expect(summary(p)).toContain("Estado: guardada. Esta sede ya no recibe cambios.");
+    expect(summary(p)).not.toContain("Podés editarla");
+    expect(p.q("[data-mine-edit]")).toBeNull();
+    expect(p.q("form[data-ladder]")).toBeNull();
+    expect(summary(p)).toContain("Marcador: 2–1"); // what was saved is still shown
+    p.win.UrbanoI18n.setLang("en");
+    await p.settle();
+    expect(summary(p)).toContain("Status: saved. This venue no longer takes changes.");
+    p.close();
+  });
+
+  it("a venue that is not available says so, in both languages, and offers no edit", async () => {
+    const base = ladderMatch().venueActivations[0] as any;
+    const p = await loadScore({ match: { venueActivations: [{ ...base, venue: { ...base.venue, active: false } }] }, mine: mineAt(1) });
+    expect(summary(p)).toContain("Estado: guardada. Esta sede no está disponible por ahora, así que no se pueden hacer cambios.");
+    expect(p.q("[data-mine-edit]")).toBeNull();
+    p.win.UrbanoI18n.setLang("en");
+    await p.settle();
+    expect(summary(p)).toContain("Status: saved. This venue is not available for now, so changes cannot be made.");
+    p.close();
+  });
+
+  it("an enabled, available venue still says 'you can edit it until' and keeps the edit button (the reason texts are not shown)", async () => {
+    const p = await loadScore({ mine: mineAt(2), openEdit: false });
+    expect(summary(p)).toContain("Estado: guardada. Podés editarla hasta");
+    expect(summary(p)).not.toMatch(/ya no recibe cambios|no está disponible por ahora|premio válido/);
+    expect(p.q("[data-mine-edit]")).not.toBeNull();
+    p.close();
+  });
+
+  it("the labels of the card say what the time is: the start of the match and the close of participation are one instant", async () => {
+    const p = await loadScore({ mine: mineAt(1), openEdit: false });
+    const lines = p.qa("[data-match-times] p").map((n) => p.text(n));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^Inicio del partido: /);
+    expect(lines[1]).toMatch(/^Cierre de participación: .* \(al inicio del partido\)$/);
+    expect(lines[0].split(": ")[1]).toBe(lines[1].split(": ")[1].replace(" (al inicio del partido)", ""));
+    p.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// El Clásico: the home team first, rosters shown by squad number and name, search, and crests
+// ---------------------------------------------------------------------------
+
+/** The two real rosters as the public matches route would return them: id, name and squad number, in the database's order (by name). */
+function clasicoTeams() {
+  const team = (index: number, teamId: string, prefix: string) => ({
+    teamId,
+    name: CLASICO_ROSTER_SNAPSHOT.teams[index].teamName,
+    players: CLASICO_ROSTER_SNAPSHOT.teams[index].players
+      .map((player) => ({ playerId: `${prefix}-${player.jerseyNumber}`, name: player.name, jerseyNumber: player.jerseyNumber }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  });
+  return { homeTeam: team(0, "t-fcb", "fcb"), awayTeam: team(1, "t-rm", "rm") };
+}
+const sortedLabels = (index: number) =>
+  CLASICO_ROSTER_SNAPSHOT.teams[index].players.slice().sort((a, b) => a.jerseyNumber - b.jerseyNumber).map((player) => `${player.jerseyNumber} · ${player.name}`);
+const continueTo = async (p: Score, level: number) => { await p.click(p.action(new RegExp(`(Continuar al nivel|Continue to level) ${level}`))); };
+const searchBox = (p: Score) => p.q("#ladder-scorer-search-m1");
+const scorerOptions = (p: Score) => p.qa("#ladder-scorer-m1 option").filter((o) => (o as HTMLOptionElement).value !== "" && (o as HTMLOptionElement).value !== "NONE").map((o) => p.text(o));
+const scorerGroup = (p: Score, team: string) => p.qa("#ladder-scorer-m1 optgroup").find((g) => g.getAttribute("label") === team);
+/** Takes the stepper to the scorer step with the given scoreline, the first team being whoever scores. */
+async function toScorerStep(p: Score, h: string, a: string) {
+  await answerScoreline(p, h, a);
+  await continueTo(p, 2);
+  await answerFirst(p, Number(h) > 0 ? "HOME" : "AWAY");
+  await continueTo(p, 3);
+}
+
+describe("El Clásico: FC Barcelona is the home team, and what belongs to each team stays with it", () => {
+  it("shows FC Barcelona first and Real Madrid CF second, and the HOME side of every answer is Barcelona's", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    expect(p.qa(".match-teams .team-label").map((n) => p.text(n))).toEqual(["FC Barcelona", "Real Madrid CF"]);
+    expect(p.qa(".score-stepper .team-name").map((n) => p.text(n))).toEqual(["FC Barcelona", "Real Madrid CF"]);
+    expect(home(p).getAttribute("aria-label")).toBe("Goles de FC Barcelona");
+    expect(away(p).getAttribute("aria-label")).toBe("Goles de Real Madrid CF");
+    await answerScoreline(p, "2", "1");
+    await continueTo(p, 2);
+    expect(p.text(p.q('.team-toggle[data-value="HOME"]'))).toBe("FC Barcelona");
+    expect(p.text(p.q('.team-toggle[data-value="AWAY"]'))).toBe("Real Madrid CF");
+    await answerFirst(p, "HOME");
+    await continueTo(p, 3);
+    await answerScorer(p, "fcb-10");
+    await sendAndConfirm(p, 3);
+    // what leaves the browser says HOME / home goals for Barcelona, and the scorer is Barcelona's player
+    expect(p.posts()[0].body).toMatchObject({ scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" }, goalscorer: { kind: "PICKED", playerId: "fcb-10" } });
+    expect(summary(p)).toContain("10 · Lamine Yamal");
+    p.close();
+  });
+
+  it("a team with no goals in the scoreline has neither its side as first team nor its players as scorers — whichever team that is", async () => {
+    const barcelonaOnly = await loadScore({ match: clasicoTeams() });
+    await answerScoreline(barcelonaOnly, "1", "0");
+    await continueTo(barcelonaOnly, 2);
+    expect(barcelonaOnly.q('.team-toggle[data-value="AWAY"]')!.getAttribute("aria-disabled")).toBe("true"); // Real Madrid has no goal
+    expect(barcelonaOnly.q('.team-toggle[data-value="HOME"]')!.getAttribute("aria-disabled")).toBeNull();
+    await answerFirst(barcelonaOnly, "HOME");
+    await continueTo(barcelonaOnly, 3);
+    const disabledOf = (p: Score, team: string) => [...scorerGroup(p, team)!.querySelectorAll("option")].every((o) => (o as HTMLOptionElement).disabled);
+    const enabledOf = (p: Score, team: string) => [...scorerGroup(p, team)!.querySelectorAll("option")].every((o) => !(o as HTMLOptionElement).disabled);
+    expect(disabledOf(barcelonaOnly, "Real Madrid CF")).toBe(true);
+    expect(enabledOf(barcelonaOnly, "FC Barcelona")).toBe(true);
+    barcelonaOnly.close();
+
+    const madridOnly = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(madridOnly, "0", "2");
+    expect(disabledOf(madridOnly, "FC Barcelona")).toBe(true);
+    expect(enabledOf(madridOnly, "Real Madrid CF")).toBe(true);
+    await answerScorer(madridOnly, "rm-10");
+    await sendAndConfirm(madridOnly, 3);
+    expect(madridOnly.posts()[0].body).toMatchObject({ scoreline: { home: 0, away: 2 }, firstTeam: { kind: "PICKED", team: "AWAY" }, goalscorer: { kind: "PICKED", playerId: "rm-10" } });
+    expect(summary(madridOnly)).toContain("10 · Mbappé");
+    madridOnly.close();
+  });
+});
+
+describe("the scorer is chosen by squad number and name", () => {
+  it("lists each team's own roster as 'number · name', in number order, and nothing else about a player", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(p, "2", "1");
+    expect([...scorerGroup(p, "FC Barcelona")!.querySelectorAll("option")].map((o) => p.text(o))).toEqual(sortedLabels(0));
+    expect([...scorerGroup(p, "Real Madrid CF")!.querySelectorAll("option")].map((o) => p.text(o))).toEqual(sortedLabels(1));
+    expect(scorerOptions(p)).toHaveLength(53);
+    for (const label of scorerOptions(p)) expect(label).toMatch(/^\d{1,2} · \S/);
+    expect(scorerOptions(p).join(" ")).not.toMatch(/\b(POR|DEF|MED|DEL)\b|fcbarcelona|realmadrid|2026/); // no position, source or date
+    p.close();
+  });
+
+  it("finds a player by part of the name, ignoring accents and case, and by squad number — a number matches that number only", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(p, "2", "1");
+    const search = async (query: string) => { await p.type(searchBox(p), query); return scorerOptions(p); };
+    expect(await search("yam")).toEqual(["10 · Lamine Yamal"]);
+    expect(await search("YAMAL")).toEqual(["10 · Lamine Yamal"]);
+    expect(await search("garcia")).toEqual(["1 · Joan García", "24 · Eric García"]); // accent-insensitive; both Garcías, Barcelona's only
+    expect(await search("tchoua")).toEqual(["14 · Tchouaméni"]);
+    expect(await search("vini")).toEqual(["7 · Vini Jr."]);
+    expect(await search("10")).toEqual(["10 · Lamine Yamal", "10 · Mbappé"]); // one per team, never 100 or 110
+    expect(await search("#1")).toEqual(["1 · Joan García", "1 · Courtois"]); // not 10, 11, 12, 13…
+    expect(await search("1")).toEqual(["1 · Joan García", "1 · Courtois"]);
+    expect(await search("jesus")).toEqual(["9 · Gabriel Jesus"]);
+    expect(await search("selim")).toEqual(["29 · Hamza Mohamed Abdelkarim Elsayed Selim"]); // the longest name, whole
+    expect(await search("")).toHaveLength(53); // clearing the search brings everyone back
+    p.close();
+  });
+
+  it("says so, in the member's language, when nothing matches — and never changes what is selected or blocked", async () => {
+    const es = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(es, "2", "1");
+    await es.type(searchBox(es), "zzz");
+    expect(scorerOptions(es)).toEqual([]);
+    expect(es.text(es.q(".scorer-search-status"))).toBe("Ningún jugador coincide con «zzz». Probá con otra parte del nombre o con el dorsal.");
+    expect(es.text(es.q('label[for="ladder-scorer-search-m1"]'))).toBe("Buscar jugador por nombre o dorsal");
+    es.close();
+    const en = await loadScore({ match: clasicoTeams(), lang: "en" });
+    await toScorerStep(en, "2", "1");
+    await en.type(searchBox(en), "zzz");
+    expect(en.text(en.q(".scorer-search-status"))).toBe("No player matches “zzz”. Try another part of the name or the squad number.");
+    expect(en.text(en.q('label[for="ladder-scorer-search-m1"]'))).toBe("Search a player by name or number");
+    await en.type(searchBox(en), "");
+    expect(en.text(en.q(".scorer-search-status"))).toBe("");
+    en.close();
+  });
+
+  it("keeps the selected player in the list while a search hides everybody else, and the selection is what is sent", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(p, "2", "1");
+    await answerScorer(p, "fcb-10");
+    await p.type(searchBox(p), "courtois");
+    expect(scorerOptions(p)).toEqual(["10 · Lamine Yamal", "1 · Courtois"]); // the choice stays visible; Courtois (away) is listed but blocked below
+    expect((p.q("#ladder-scorer-m1") as HTMLSelectElement).value).toBe("fcb-10");
+    await sendAndConfirm(p, 3);
+    expect(p.posts()[0].body.goalscorer).toEqual({ kind: "PICKED", playerId: "fcb-10" });
+    p.close();
+  });
+
+  it("shows the longest name whole, wrapping instead of being cut, in the summary", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    await toScorerStep(p, "2", "1");
+    await answerScorer(p, "fcb-29");
+    await sendAndConfirm(p, 3);
+    expect(summary(p)).toContain("29 · Hamza Mohamed Abdelkarim Elsayed Selim");
+    expect(SCORE_HTML).toMatch(/\.mine-summary\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    p.close();
+  });
+});
+
+describe("a saved participation follows the player's id, not the number or the spelling shown", () => {
+  const saved = (playerId: string) => savedView(3, { goalscorer: { kind: "PICKED", playerId }, scoreline: { home: 2, away: 1 } });
+  it("shows the same player under a changed squad number or published spelling, because the id did not change", async () => {
+    const before = await loadScore({ match: clasicoTeams(), mine: { prediction: saved("fcb-10"), evaluation: null, qualification: null }, openEdit: false });
+    expect(summary(before)).toContain("Goleador: 10 · Lamine Yamal");
+    before.close();
+    const teams = clasicoTeams();
+    teams.homeTeam.players = teams.homeTeam.players.map((player) => (player.playerId === "fcb-10" ? { ...player, jerseyNumber: 19, name: "Lamine Yamal Nasraoui" } : player));
+    const after = await loadScore({ match: teams, mine: { prediction: saved("fcb-10"), evaluation: null, qualification: null }, openEdit: false });
+    expect(summary(after)).toContain("Goleador: 19 · Lamine Yamal Nasraoui");
+    after.close();
+  });
+
+  it("a team whose roster has no numbers (a player added by hand) shows just the name", async () => {
+    const p = await loadScore({ openEdit: false, mine: { prediction: savedView(3, { goalscorer: { kind: "PICKED", playerId: "p1" } }), evaluation: null, qualification: null } });
+    expect(summary(p)).toContain("Goleador: Ana Díaz");
+    p.close();
+  });
+});
+
+describe("club crests on the Score page", () => {
+  it("draws each team's crest in front of its name — match header, scoreline steppers, first-team buttons — home team first, as decoration beside the written name", async () => {
+    const p = await loadScore({ match: clasicoTeams(), crests: true });
+    const headerKeys = p.qa(".match-teams .club-crest").map((img) => img.getAttribute("data-crest"));
+    expect(headerKeys).toEqual(["fc-barcelona", "real-madrid-cf"]);
+    expect(p.qa(".match-teams img").every((img) => img.getAttribute("alt") === "" && img.getAttribute("aria-hidden") === "true")).toBe(true);
+    expect(p.qa(".match-teams .team-label").map((n) => p.text(n))).toEqual(["FC Barcelona", "Real Madrid CF"]); // the names are text; crests add no words
+    expect(p.qa(".score-stepper .team-name .club-crest").map((img) => img.getAttribute("data-crest"))).toEqual(["fc-barcelona", "real-madrid-cf"]);
+    await answerScoreline(p, "2", "1");
+    await continueTo(p, 2);
+    expect(p.qa(".team-toggle .club-crest").map((img) => img.getAttribute("data-crest"))).toEqual(["fc-barcelona", "real-madrid-cf"]);
+    expect(p.text(p.q('.team-toggle[data-value="HOME"]'))).toBe("FC Barcelona");
+    p.close();
+  });
+
+  it("without the crests module the page is the same, in text: no image anywhere and every name still shown", async () => {
+    const p = await loadScore({ match: clasicoTeams() });
+    expect(p.qa("img.club-crest")).toHaveLength(0);
+    expect(p.qa(".score-stepper .team-name").map((n) => p.text(n))).toEqual(["FC Barcelona", "Real Madrid CF"]);
+    expect(p.qa(".match-teams .team-label").map((n) => p.text(n))).toEqual(["FC Barcelona", "Real Madrid CF"]);
+    p.close();
+  });
+
+  it("a team without a crest (any other match) is drawn exactly as before", async () => {
+    const p = await loadScore({ crests: true });
+    expect(p.qa("img.club-crest")).toHaveLength(0);
+    expect(p.qa(".match-teams .team-label").map((n) => p.text(n))).toEqual(["Alpha FC", "Beta FC"]);
+    p.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The proposed prizes of The Pub: a notice where the prizes are listed and before anything is sent — and only where the server flags the match
+// ---------------------------------------------------------------------------
+
+const THE_PUB_PRIZES = [
+  { level: 1, label: "Tequeños de queso" },
+  { level: 2, label: "Cheese Burger con papas" },
+  { level: 3, label: "12 Fried Wings con papas" },
+  { level: 4, label: "L2,000 en consumo de productos de The Pub, no efectivo" },
+];
+const NOTICE_ES = "Premios propuestos, pendientes de confirmación por The Pub el día del partido. Esta demostración no genera derecho a premio.";
+const NOTICE_EN = "Proposed prizes, pending confirmation by The Pub on match day. This demonstration does not create any right to a prize.";
+/** A match of the public answer whose offer carries The Pub's proposed prizes; `provisionalPrizes` is what the server says about it. */
+function pubMatch(provisionalPrizes: boolean | undefined) {
+  const base = ladderMatch();
+  const activation = base.venueActivations[0];
+  return {
+    ...(provisionalPrizes === undefined ? {} : { provisionalPrizes }),
+    venueActivations: [{
+      ...activation,
+      prizeTiers: THE_PUB_TIERS(),
+      offer: { available: true, maxLevel: 4, levels: THE_PUB_PRIZES, digest: DIGEST, problem: null },
+    }],
+  };
+}
+function THE_PUB_TIERS() {
+  return THE_PUB_PRIZES.map((p) => ({ prizeTierId: `tier-${p.level}`, correctDimensionCount: null, ladderLevel: p.level, prizeLabel: p.label }));
+}
+const provisionalBlock = (p: Score) => p.q("[data-ladder-provisional]") as HTMLElement;
+const reviewAfterSendClick = async (p: Score) => { await answerScoreline(p, "2", "1"); await p.click(p.action(/(Enviar|Send) con nivel 1|Send with level 1/)); };
+
+describe("proposed prizes: the notice and the list", () => {
+  it("the list of prizes is visible, level by level, with the notice above it — not hidden inside the closed explanation", async () => {
+    const p = await loadScore({ match: pubMatch(true) });
+    const block = provisionalBlock(p);
+    expect(block.hidden).toBe(false);
+    expect(p.text(block.querySelector(".provisional-notice"))).toBe(NOTICE_ES);
+    expect([...block.querySelectorAll(".ladder-offers li")].map((li) => p.text(li))).toEqual([
+      "Nivel 1 · Fácil: Tequeños de queso",
+      "Nivel 2 · Mediana: Cheese Burger con papas",
+      "Nivel 3 · Difícil: 12 Fried Wings con papas",
+      "Nivel 4 · Legendaria: L2,000 en consumo de productos de The Pub, no efectivo",
+    ]);
+    expect(block.closest("details")).toBeNull();
+    expect(block.firstElementChild!.classList.contains("provisional-notice")).toBe(true); // the notice comes first
+    // the same notice also opens the explanation that lists the prizes inside the disclosure
+    expect(p.text(p.q("[data-ladder-help-body] .provisional-notice"))).toBe(NOTICE_ES);
+    p.close();
+  });
+
+  it("the notice is in the summary shown BEFORE sending, ahead of the prize line, and the review still names the one prize of the level sent", async () => {
+    const p = await loadScore({ match: pubMatch(true) });
+    await reviewAfterSendClick(p);
+    const review = p.q("[data-ladder-review]") as HTMLElement;
+    expect(review.hidden).toBe(false);
+    const notice = review.querySelector(".provisional-notice") as HTMLElement;
+    expect(p.text(notice)).toBe(NOTICE_ES);
+    const prizeLine = [...review.querySelectorAll("p")].find((node) => /Premio máximo posible/.test(p.text(node)))!;
+    expect(p.text(prizeLine)).toContain("Tequeños de queso");
+    // the notice precedes the prize line in the page
+    expect(notice.compareDocumentPosition(prizeLine) & p.win.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // and the way to send is untouched: one confirmation, the same request
+    await p.click(p.action(/Confirmar y enviar/));
+    await p.settle(60);
+    expect(p.posts()).toHaveLength(1);
+    expect(p.posts()[0].body).toMatchObject({ attemptedLevel: 1, scoreline: { home: 2, away: 1 } });
+    const keysFlagged = Object.keys(p.posts()[0].body).sort();
+    p.close();
+    // the very same request goes out when the match is not flagged: the notice adds nothing to what is sent
+    const plain = await loadScore({ match: pubMatch(false) });
+    await reviewAfterSendClick(plain);
+    await plain.click(plain.action(/Confirmar y enviar/));
+    await plain.settle(60);
+    expect(Object.keys(plain.posts()[0].body).sort()).toEqual(keysFlagged);
+    expect(JSON.stringify(Object.keys(plain.posts()[0].body))).not.toMatch(/provisional/i);
+    plain.close();
+  });
+
+  it("in English the notice and the list read the same way, and a change of language redraws them in place", async () => {
+    const p = await loadScore({ match: pubMatch(true) });
+    expect(p.text(provisionalBlock(p).querySelector(".provisional-notice"))).toBe(NOTICE_ES);
+    p.win.UrbanoI18n.setLang("en");
+    await p.settle(60);
+    expect(p.text(provisionalBlock(p).querySelector(".provisional-notice"))).toBe(NOTICE_EN);
+    expect(p.text(provisionalBlock(p).querySelector(".ladder-offers li"))).toBe("Level 1 · Easy: Tequeños de queso"); // the prize names are the venue's own words, as entered
+    expect(p.qa(".provisional-notice")).toHaveLength(2); // the list and the explanation: redrawn, not duplicated
+    await reviewAfterSendClick(p);
+    expect(p.text(p.q("[data-ladder-review] .provisional-notice"))).toBe(NOTICE_EN);
+    p.close();
+  });
+
+  it("does not turn a proposal into a promise, a single winner, a quota or a draw: nothing in the block says so, and the one-prize rule is still the page's", async () => {
+    const p = await loadScore({ match: pubMatch(true) });
+    const blockText = p.text(provisionalBlock(p));
+    expect(blockText).not.toMatch(/ganador|winner|cupo|quota|sorteo|draw|raffle|primeros|first come|únic[oa] |agotar|while supplies|limit/i);
+    expect(blockText).toContain("no genera derecho a premio");
+    expect(p.text(p.q(".ladder-rules"))).toBe(SPANISH_ESSENTIALS); // "Un solo premio: el del nivel más alto que aciertes en orden." is unchanged
+    p.close();
+  });
+
+  it("is absent unless the server says the match is provisional: no flag, or false, and neither the list block nor any notice exists, anywhere", async () => {
+    for (const flag of [undefined, false]) {
+      const p = await loadScore({ match: pubMatch(flag) });
+      expect(provisionalBlock(p).hidden).toBe(true);
+      expect(provisionalBlock(p).childElementCount).toBe(0);
+      expect(p.qa(".provisional-notice")).toHaveLength(0);
+      await reviewAfterSendClick(p);
+      expect(p.qa(".provisional-notice")).toHaveLength(0);
+      expect(p.text(p.q("[data-ladder-review]"))).toContain("Tequeños de queso"); // the prizes are shown as before, as the venue entered them
+      p.close();
+    }
+  });
+
+  it("only a literal true counts: the strings 'true' and '1' or any object do not switch the notice on", async () => {
+    for (const bogus of ["true", "1", { a: 1 }] as unknown[]) {
+      const p = await loadScore({ match: { ...pubMatch(undefined), provisionalPrizes: bogus } });
+      expect(p.qa(".provisional-notice"), JSON.stringify(bogus)).toHaveLength(0);
+      p.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The approved participation window: the page shows when it opens and passes the server's "not yet" on; the server is what refuses
+// ---------------------------------------------------------------------------
+
+describe("the participation window on the Score page", () => {
+  const OPENS_ISO = "2026-10-25T18:30:00.000Z"; // 12:30 p. m., Honduras
+  const NOT_OPEN = "Participation for this match has not opened yet.";
+  const timesText = (p: Score) => p.qa("[data-match-times] p").map((n) => p.text(n));
+
+  it("shows the opening time among the match's times when the server sends one — before the start and the closing — in both languages", async () => {
+    const es = await loadScore({ match: { participationOpensAt: OPENS_ISO } });
+    const esLines = timesText(es);
+    expect(esLines).toHaveLength(3);
+    expect(esLines[0]).toMatch(/^Apertura de participación: /);
+    expect(esLines[1]).toMatch(/^Inicio del partido: /);
+    expect(esLines[2]).toMatch(/^Cierre de participación: /);
+    es.close();
+    const en = await loadScore({ lang: "en", match: { participationOpensAt: OPENS_ISO } });
+    expect(timesText(en)[0]).toMatch(/^Participation opens: /);
+    en.win.UrbanoI18n.setLang("es");
+    await en.settle(60);
+    expect(timesText(en)[0]).toMatch(/^Apertura de participación: /); // redrawn in place
+    en.close();
+  });
+
+  it("shows nothing about an opening for a match without a window: the two usual lines, exactly as before", async () => {
+    for (const match of [{}, { participationOpensAt: null }, { participationOpensAt: "not a date" }]) {
+      const p = await loadScore({ match });
+      expect(timesText(p).map((line) => line.split(":")[0])).toEqual(["Inicio del partido", "Cierre de participación"]);
+      p.close();
+    }
+  });
+
+  it("does not pretend to enforce it: the send button is not hidden or switched off by the clock — the server's refusal is what stops a request, and the page says it in the member's language", async () => {
+    for (const lang of ["es", "en"] as const) {
+      const p = await loadScore({ lang, match: { participationOpensAt: new Date(Date.now() + 3 * 3600_000).toISOString() }, predict: () => ({ status: 409, json: { error: NOT_OPEN } }) });
+      await answerScoreline(p, "1", "0");
+      const send = p.action(/(Enviar|Send) con nivel 1|Send with level 1/) as HTMLButtonElement;
+      expect(send.disabled).toBe(false); // nothing on the page decides that it is too early
+      await p.click(send);
+      await p.click(p.action(/Confirmar y enviar|Confirm and send/));
+      await p.settle(60);
+      expect(p.posts()).toHaveLength(1); // the request did go to the server...
+      const message = p.text(p.q(`#submit-msg-m1`));
+      expect(message).toBe(lang === "es" ? "La participación de este partido todavía no está abierta." : NOT_OPEN); // ...which refused it
+      p.close();
+    }
   });
 });

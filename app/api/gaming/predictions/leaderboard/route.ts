@@ -17,6 +17,12 @@ export const dynamic = "force-dynamic";
  * leaderboard is inherently public-facing.
  */
 export async function GET() {
+  // CLOSED BY DEFAULT, like GET /api/gaming/leaderboard: it opens only when GAMING_LEADERBOARD_PUBLIC is exactly "true"; otherwise it
+  // answers a stable, empty body and reads neither credentials nor any ranking.
+  if (process.env.GAMING_LEADERBOARD_PUBLIC !== "true") {
+    return NextResponse.json({ leaderboard: [], available: false }, { headers: { "Cache-Control": "no-store" } });
+  }
+
   const credentials = getSupabaseCredentials();
   if (!credentials) {
     return NextResponse.json(

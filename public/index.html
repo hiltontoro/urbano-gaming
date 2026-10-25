@@ -38,6 +38,12 @@
     /* Dark scrim laid over the editorial photographs: strongest on the left, where the text sits, lighter over the picture's subject. */
     --art-scrim: linear-gradient(90deg, rgba(10, 10, 10, 0.9), rgba(10, 10, 10, 0.53) 62%, rgba(10, 10, 10, 0.25)),
                  linear-gradient(0deg, rgba(10, 10, 10, 0.85), transparent 70%);
+    /* The scrim of the three picture cards (Score, Poker, Halloween). The dark zone is measured in pixels, not in percentages, because the
+       text has a fixed width whatever the width of the card: about 330 px of ivory text on the left stays on a deep dark, and from there the
+       dark opens up quickly so the picture shows at its own brightness. The bottom layer only backs the line of buttons; it is short on
+       purpose, so it does not dim the lower half of the picture. (--art-scrim above is Trivia's and did not change.) */
+    --art-photo-scrim: linear-gradient(90deg, rgba(10, 10, 10, 0.9) 0, rgba(10, 10, 10, 0.78) 240px, rgba(10, 10, 10, 0.38) 360px, rgba(10, 10, 10, 0.08) 470px, rgba(10, 10, 10, 0) 580px),
+                       linear-gradient(0deg, rgba(10, 10, 10, 0.5), transparent 36%);
   }
   * { box-sizing: border-box; }
   body {
@@ -94,7 +100,7 @@
   .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
   [hidden] { display: none !important; }
   .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
-  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-history:focus-visible,
+  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-play:focus-visible,
   .exp-card.is-actionable:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
   .signin-btn {
@@ -166,9 +172,12 @@
   }
   .featured-card h2 { font-size: 24px; margin: 6px 0 0; font-weight: 800; }
 
-  .featured-note { color: var(--muted); font-size: 13.5px; margin: 16px 0 20px; }
   .featured-card .status-pill { margin-bottom: 4px; }
-  .featured-history { display: inline-block; margin-top: 4px; font-size: 13px; color: var(--muted); text-decoration: underline; }
+  /* The one action of the card: a button-shaped link to URBANO Score (the same shape as the other cards' actions). */
+  .featured-play {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 46px; margin-top: 18px; padding: 11px 24px;
+    border-radius: 999px; background: var(--primary-fill); color: var(--primary-ink); font-size: 15px; font-weight: 700; text-decoration: none;
+  }
 
   /* Card grids (Experiences, Skill Games, Minigames, Organizers). The element ids keep the historical "-carousel" name that the pages'
      tests and evidence refer to; the cards are no longer a sideways-scrolling strip, so every card is visible without swiping. */
@@ -218,10 +227,11 @@
      (public/assets/home), purely decorative (empty alt text, never announced) and carry no availability, rule or reward: what a card
      offers is its status pill and its words, exactly as before. */
   .art-card { position: relative; isolation: isolate; overflow: hidden; background-color: var(--charcoal); justify-content: flex-end; }
-  .art-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% center; z-index: -2; opacity: 0.84; pointer-events: none; }
-  .art-scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+  .art-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% center; z-index: -2; pointer-events: none; }
+  .art-scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-photo-scrim); }
   .art-card .exp-card-top { margin-bottom: auto; }
-  .art-card .status-pill { background: rgba(10, 10, 10, 0.72); }
+  /* A chip is its own dark zone behind its own text: with the picture no longer dimmed, a deeper fill keeps its small text above 4.5:1. */
+  .art-card .status-pill { background: rgba(10, 10, 10, 0.86); }
   .art-card .status-featured { color: var(--exp-purple-soft); }
   .art-kicker {
     font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
@@ -250,18 +260,23 @@
     content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
     background: url("/assets/home/urbano-score-pitch.svg") right center / auto 100% no-repeat;
   }
-  .featured-card.art-card::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
-  .featured-card.art-card .status-pill { margin-bottom: auto; background: rgba(10, 10, 10, 0.72); }
+  .featured-card.art-card::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-photo-scrim); }
+  .featured-card.art-card .status-pill { margin-bottom: auto; background: rgba(10, 10, 10, 0.86); }
   .featured-card.art-card h2 { font-size: 30px; line-height: 1.15; margin-top: 18px; }
-  .featured-descriptor { margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  /* Club crests (decoration only): the team names are always written in text, so the crest is an addition that can be removed. */
+  .club-crest { width: 24px; height: 24px; object-fit: contain; flex: none; }
+  .featured-crests { margin: 14px 0 0; display: flex; align-items: center; gap: 12px; }
+  .featured-crest { display: inline-flex; }
+  .featured-crest .club-crest { width: 34px; height: 34px; }
+  .featured-crest-vs { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.7); }
+  .featured-descriptor { text-wrap: balance; margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
   .featured-scope {
     margin: 10px 0 0; display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.4;
     color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.72); padding: 4px 10px; border-radius: 6px;
   }
   .featured-when { margin: 8px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
   .featured-when span { display: block; }
-  .featured-card.art-card .featured-note { max-width: 46ch; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-  .featured-card.art-card .featured-history { color: rgba(245, 241, 232, 0.86); }
+  .featured-window { margin: 6px 0 0; font-size: 13px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.88); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 
   /* Minigame tiles (Rutas, Towers): the mockup's compact game card — a tinted purple gradient, a line icon and a plain title. They are
      informational: a status pill and words, no link and no action. */
@@ -297,7 +312,10 @@
        the lower part, so the scrim is darkest at the bottom and lets the photograph show above it. */
     .minigames-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
     :root { --art-scrim: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.86) 45%, rgba(10, 10, 10, 0.3) 78%, rgba(10, 10, 10, 0.12) 100%),
-                         linear-gradient(90deg, rgba(10, 10, 10, 0.5), rgba(10, 10, 10, 0.2)); }
+                         linear-gradient(90deg, rgba(10, 10, 10, 0.5), rgba(10, 10, 10, 0.2));
+            /* Picture cards on a phone: the text sits low, so the dark is deepest at the bottom and falls away upward; there is no
+               uniform horizontal layer any more, which was dimming the whole picture, text or no text. */
+            --art-photo-scrim: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.9) 34%, rgba(10, 10, 10, 0.5) 52%, rgba(10, 10, 10, 0.1) 70%, rgba(10, 10, 10, 0) 86%); }
     .art-img { object-position: 68% center; }
     .art-halloween .art-img { object-position: 84% center; }
     .featured-card.art-card::before { background-position: 70% center; }
@@ -357,19 +375,23 @@
 <div class="section">
   <div class="section-label" data-i18n="home.featured.label">Destacado</div>
   <!-- URBANO Score announcement (historically "Soccer Predictions": the route /soccer-predictions.html and every identifier keep that name).
-       Static and informational: it announces El Clásico at The Pub by Beer Box and says predictions are coming soon. It makes no request,
-       reads no match, offers no way to take part and never says that predictions are open: the page does not look at the public matches
-       list at all, so a past or test match in the database cannot turn this card into an opening. The only link is to the member's past
-       predictions and results, labelled as such. Date, time and who plays at home are as published by LaLiga and the two clubs.
-       Hiding the way in from this card is not a closure of the predictions service itself. -->
+       Static and informational: it announces El Clásico at The Pub by Beer Box, with the stadium. It makes no request, reads no match
+       and never says that predictions for it are open: the page does not look at the public matches list at all, so a past, test or
+       rehearsal match in the database cannot turn this card into an opening. Its one link, "Jugar ahora", goes to URBANO Score, which
+       is where the matches that are actually open (or the honest "none yet") are shown. Past participations are not here: they have
+       their own access, My profile → My participations. Date, time and stadium are as published by LaLiga and the two clubs. -->
   <div class="featured-card art-card" id="featured-predictions">
-    <span class="status-pill status-soon" id="featured-status" data-i18n="home.pred.soon">Próximamente</span>
+    <span class="status-pill status-soon" id="featured-status" data-i18n="home.score.next">Próximo partido</span>
     <h2 id="featured-title">URBANO Score</h2>
-    <p class="featured-descriptor" data-i18n="home.score.clasico">El Clásico: Real Madrid vs. Barcelona</p>
+    <!-- The two crests are decoration drawn by /urbanoClubCrests.js (home team first); the teams are named in the line below, in text. -->
+    <div class="featured-crests" aria-hidden="true"><span class="featured-crest" data-club="FC Barcelona"></span><span class="featured-crest-vs">vs</span><span class="featured-crest" data-club="Real Madrid CF"></span></div>
+    <p class="featured-descriptor" data-i18n="home.score.clasico">El Clásico: FC Barcelona vs. Real Madrid CF</p>
     <p class="featured-scope" data-i18n="home.score.venue">Vivilo en The Pub by Beer Box</p>
-    <p class="featured-when"><time datetime="2026-10-25T20:00:00Z" data-i18n="home.score.when">Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España</time><span data-i18n="home.score.sides">Barcelona es local · Real Madrid, visitante</span></p>
-    <p class="featured-note" id="featured-note" data-i18n="home.score.soon">Predicciones próximamente</p>
-    <a class="featured-history" id="featured-history" href="/soccer-predictions.html" data-i18n="home.pred.historyPast">Ver predicciones y resultados anteriores →</a>
+    <p class="featured-when"><time datetime="2026-10-25T20:00:00Z" data-i18n="home.score.when">Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.</time><span data-i18n="home.score.stadium">Estadio: Spotify Camp Nou</span></p>
+    <!-- The approved window, as INFORMATION: it opens 90 minutes before the planned start (12:30 p. m., Honduras) and closes when the match starts (2:00 p. m.).
+         It does not open anything: the server closes at the start of the match, but it has no opening time; opening is an operational act (see the record). -->
+    <p class="featured-window" data-i18n="home.score.window">Ventana de participación prevista: de 12:30 p. m. a 2:00 p. m. (hora de Honduras)</p>
+    <a class="featured-play" id="featured-play" href="/soccer-predictions.html" data-i18n="home.score.play">Jugar ahora</a>
   </div>
 </div>
 
@@ -400,6 +422,7 @@
 </footer>
 
 <script src="/urbanoI18n.js"></script>
+<script src="/urbanoClubCrests.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -427,13 +450,13 @@
     "home.hero.title": "Jugá, predecí y competí con tu comunidad.",
     "home.hero.sub": "Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.",
     "home.featured.label": "Destacado",
-    "home.pred.soon": "Próximamente",
-    "home.pred.historyPast": "Ver predicciones y resultados anteriores →",
-    "home.score.clasico": "El Clásico: Real Madrid vs. Barcelona",
+    "home.score.clasico": "El Clásico: FC Barcelona vs. Real Madrid CF",
     "home.score.venue": "Vivilo en The Pub by Beer Box",
-    "home.score.when": "Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España",
-    "home.score.sides": "Barcelona es local · Real Madrid, visitante",
-    "home.score.soon": "Predicciones próximamente",
+    "home.score.when": "Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.",
+    "home.score.window": "Ventana de participación prevista: de 12:30 p. m. a 2:00 p. m. (hora de Honduras)",
+    "home.score.next": "Próximo partido",
+    "home.score.stadium": "Estadio: Spotify Camp Nou",
+    "home.score.play": "Jugar ahora",
     "home.games.label": "Juegos de habilidad",
     "home.games.note": "Vienen más juegos competitivos en camino.",
     "home.minigames.label": "Minijuegos",
@@ -723,6 +746,9 @@
 
   // What the server last said about Become a Host (false until it says yes). Kept only so a change of language redraws the same card.
   let lastHostAnswer = false;
+  // The crests on the Score announcement: decoration only, drawn by the central module (absent or switched off, the card is the same
+  // without them: both teams are named in text).
+  if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(document);
   renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
   renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
   renderCatalog(MINIGAMES_CATALOG, "minigames-grid");

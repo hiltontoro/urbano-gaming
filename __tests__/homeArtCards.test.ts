@@ -119,7 +119,7 @@ function violations(page: Page): string[] {
 describe("Home art — the photographs and the Trivia motif", () => {
   it("public/assets/home holds exactly the reviewed assets: two photographs and two code-drawn motifs; no Level 33 art, no stadium photograph, no multi-sport photograph, no PNG original", () => {
     expect(readdirSync(ASSET_DIR).sort()).toEqual(Object.keys(ASSETS).sort());
-    expect(readdirSync(path.join(ROOT, "public/assets"))).toEqual(["home"]);
+    expect(readdirSync(path.join(ROOT, "public/assets")).sort()).toEqual(["clubs", "home"]); // clubs: the two crests, covered by clubCrests.test.ts
     expect(readdirSync(ASSET_DIR).join(" ")).not.toMatch(/level|soccer-predictions|sports|stadium/i);
     expect(PHOTOS).toEqual(["halloween-community.webp", "urbano-poker.webp"]);
   });
@@ -158,9 +158,12 @@ describe("Home art — the photographs and the Trivia motif", () => {
 
   it("the stadium photograph without provenance is not published: not in the folder, not referenced by the page, the language module or any test fixture", () => {
     expect(readdirSync(ASSET_DIR)).not.toContain("urbano-score-stadium.webp");
-    expect(INDEX_HTML).not.toMatch(/stadium/i);
-    expect(I18N_SOURCE).not.toMatch(/stadium/i);
-    for (const file of ["public/profile.html", "public/soccer-predictions.html"]) expect(readFileSync(path.join(ROOT, file), "utf8"), file).not.toMatch(/urbano-score-stadium|stadium/i);
+    // The WORD may appear as text (the card names the stadium, "Estadio: Spotify Camp Nou"); what must not appear is any reference to a
+    // stadium image: no asset path, no image file, no background.
+    const IMAGE_OF_A_STADIUM = /urbano-score-stadium|stadium[\w-]*\.(webp|jpe?g|png|avif|gif)|url\([^)]*stadium/i;
+    expect(INDEX_HTML).not.toMatch(IMAGE_OF_A_STADIUM);
+    expect(I18N_SOURCE).not.toMatch(IMAGE_OF_A_STADIUM);
+    for (const file of ["public/profile.html", "public/soccer-predictions.html"]) expect(readFileSync(path.join(ROOT, file), "utf8"), file).not.toMatch(IMAGE_OF_A_STADIUM);
   });
 
   it("the page references exactly these four and nothing else: no other image file, no remote image, no preload", () => {
@@ -176,8 +179,8 @@ describe("Home art — the photographs and the Trivia motif", () => {
     expect(CODE).not.toMatch(/level[-_ ]?33/i);
   });
 
-  it("brings nothing from the prototype: no script, no illustrative data, no mockup class or navigation hook, no external script besides the three this page already loaded", () => {
-    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoAuth.js", "/hostAvailability.js"]);
+  it("brings nothing from the prototype: no script, no illustrative data, no mockup class or navigation hook, no external script besides the three this page already loaded and the club crests module", () => {
+    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/urbanoAuth.js", "/hostAvailability.js"]);
     expect(CODE).not.toMatch(/\bug-[a-z-]+|data-jump|data-view|data-panel|Founder Design Review|DESIGN PROTOTYPE|Illustrative data|ACRE8M|Community Cup|Community Soccer/);
   });
 });
@@ -292,9 +295,9 @@ describe("Home art — decoration never changes what is available", () => {
     });
     expect(open.doc.getElementById("featured-predictions")!.className).toContain("art-card");
     expect(open.doc.querySelector("#featured-predictions img, #featured-predictions svg")).toBeNull();
-    expect(open.doc.querySelector("#featured-predictions a:not(#featured-history)")).toBeNull();
+    expect(open.doc.querySelector("#featured-predictions a:not(#featured-play)")).toBeNull();
     expect(open.doc.getElementById("featured-predictions")!.outerHTML).toBe(none.doc.getElementById("featured-predictions")!.outerHTML);
-    expect(open.text("#featured-status")).toBe("Próximamente");
+    expect(open.text("#featured-status")).toBe("Próximo partido");
   });
 });
 
@@ -331,22 +334,72 @@ describe("Home art — CSS contract", () => {
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)\\s*${escape(selector)}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
   const phone = css.slice(css.indexOf("@media (max-width: 640px)"), css.indexOf("@media (max-width: 374px)"));
+  /** The layers of a `linear-gradient(...), linear-gradient(...)` value: direction and stops (alpha, position). */
+  const photoStops = (value: string) =>
+    value
+      .split(/\)\s*,\s*(?=linear-gradient\()/)
+      .map((layer) => layer.replace(/\s+/g, " ").trim())
+      .map((layer) => {
+        const direction = layer.match(/^linear-gradient\(\s*([\d.]+deg)\s*,/)![1];
+        const body = layer.slice(layer.indexOf(",") + 1);
+        const stops = Array.from(body.matchAll(/(rgba\([^)]*\)|transparent)(?:\s+(-?[\d.]+(?:px|%)?))?/g)).map((match) => ({
+          alpha: match[1] === "transparent" ? 0 : Number(match[1].match(/([\d.]+)\)$/)![1]),
+          position: match[2] ?? "0",
+        }));
+        return { direction, stops };
+      });
 
   it("a dark scrim sits between every photograph and its text: strongest where the text is, on desktop and on a phone", () => {
+    // --art-scrim is Trivia's (it did not change); --art-photo-scrim is the one of the three picture cards (Score, Poker, Halloween).
     const desktop = css.match(/--art-scrim:\s*([^;]+);/)![1];
     expect(desktop).toMatch(/linear-gradient\(90deg,\s*rgba\(10,\s*10,\s*10,\s*0\.9\)/); // darkest on the text side
     const mobile = phone.match(/--art-scrim:\s*([^;]+);/)![1];
     expect(mobile).toMatch(/linear-gradient\(0deg,\s*rgba\(10,\s*10,\s*10,\s*0\.96\)/); // text sits low on a narrow card: darkest at the bottom
-    expect(rule(".art-scrim")).toMatch(/background:\s*var\(--art-scrim\)/);
-    expect(css).toMatch(/\.featured-card\.art-card::after\s*\{[^}]*var\(--art-scrim\)/);
+    const photoDesktop = css.match(/--art-photo-scrim:\s*([^;]+);/)![1];
+    expect(photoDesktop).toMatch(/^linear-gradient\(90deg,\s*rgba\(10,\s*10,\s*10,\s*0\.9\)\s*0,/); // the deep dark is on the text side
+    const photoMobile = phone.match(/--art-photo-scrim:\s*([^;]+);/)![1];
+    expect(photoMobile).toMatch(/^linear-gradient\(0deg,\s*rgba\(10,\s*10,\s*10,\s*0\.96\)\s*0%/); // and at the bottom on a phone
+    expect(rule(".art-scrim")).toMatch(/background:\s*var\(--art-photo-scrim\)/);
+    expect(css).toMatch(/\.featured-card\.art-card::after\s*\{[^}]*var\(--art-photo-scrim\)/);
     for (const selector of [".art-scrim", ".art-img"]) expect(rule(selector), selector).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("the picture shows at its own brightness: the image is not faded, the dark zone ends where the text ends, and no uniform layer dims the whole picture", () => {
+    // no fade on the photograph itself
+    expect(rule(".art-img")).not.toMatch(/opacity/);
+    expect(css).not.toMatch(/\.art-img\s*\{[^}]*opacity/);
+    // desktop: the dark zone is measured in px (the text has a fixed width whatever the width of the card), it opens up and ends in nothing
+    const stops = photoStops(css.match(/--art-photo-scrim:\s*([^;]+);/)![1]);
+    const horizontal = stops.find((layer) => layer.direction === "90deg")!;
+    expect(horizontal.stops.every((stop) => stop.position.endsWith("px") || stop.position === "0")).toBe(true);
+    expect(horizontal.stops[0].alpha).toBeCloseTo(0.9, 5);
+    expect(horizontal.stops[horizontal.stops.length - 1].alpha).toBe(0);
+    for (let i = 1; i < horizontal.stops.length; i++) expect(horizontal.stops[i].alpha).toBeLessThan(horizontal.stops[i - 1].alpha);
+    // the layer behind the buttons stays short, so it does not dim the lower half of the picture
+    const bottom = stops.find((layer) => layer.direction === "0deg")!;
+    expect(bottom.stops[0].alpha).toBeLessThanOrEqual(0.55);
+    expect(parseInt(bottom.stops[bottom.stops.length - 1].position, 10)).toBeLessThanOrEqual(40);
+    // phone: only a vertical layer (deep at the bottom, where the text is, open above): the uniform horizontal dimmer is gone, and the top is clear
+    const phoneLayers = photoStops(phone.match(/--art-photo-scrim:\s*([^;]+);/)![1]);
+    expect(phoneLayers.map((layer) => layer.direction)).toEqual(["0deg"]);
+    const top = phoneLayers[0].stops[phoneLayers[0].stops.length - 1];
+    expect(top.alpha).toBe(0);
+    expect(parseInt(top.position, 10)).toBeLessThanOrEqual(90);
+    // the dark zone is still deep where the text sits: at the bottom edge and a third of the way up
+    expect(phoneLayers[0].stops[0].alpha).toBeGreaterThanOrEqual(0.95);
+    expect(phoneLayers[0].stops[1].alpha).toBeGreaterThanOrEqual(0.9);
+    // Trivia keeps its own scrim, untouched
+    expect(css).toMatch(/\.art-trivia::after\s*\{[^}]*var\(--art-scrim\)/);
   });
 
   it("text on a photograph is ivory with a shadow, pills are dark chips, and the Predictions pill uses the lighter purple (the contrast measurement depended on these)", () => {
     expect(rule(".art-card .exp-sub")).toMatch(/color:\s*rgba\(245,\s*241,\s*232,\s*0\.92\)/);
     expect(rule(".art-card .exp-sub")).toMatch(/text-shadow/);
-    expect(css).toMatch(/\.featured-card\.art-card \.featured-note\s*\{[^}]*rgba\(245,\s*241,\s*232,\s*0\.92\)[^}]*text-shadow/);
-    expect(rule(".art-card .status-pill")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.72\)/);
+    // the card's own lines are ivory with a shadow, and its one action is the light button with dark ink (the same as the other cards')
+    expect(css).toMatch(/\.featured-when\s*\{[^}]*rgba\(245,\s*241,\s*232,\s*0\.95\)[^}]*text-shadow/);
+    expect(css).toMatch(/\.featured-play\s*\{[^}]*background:\s*var\(--primary-fill\)[^}]*color:\s*var\(--primary-ink\)/);
+    expect(rule(".art-card .status-pill")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.86\)/); // a deeper chip: the picture behind it is no longer dimmed
+    expect(css).toMatch(/\.featured-card\.art-card \.status-pill\s*\{[^}]*background:\s*rgba\(10,\s*10,\s*10,\s*0\.86\)/);
     expect(rule(".game-tile .status-pill")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.55\)/);
     expect(rule(".art-card .status-featured")).toMatch(/color:\s*var\(--exp-purple-soft\)/);
     expect(css).toMatch(/--exp-purple-soft:\s*#b57cff/i);

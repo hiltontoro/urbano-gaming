@@ -2,7 +2,8 @@ import type { PredictionsRepository } from "./db/predictionsRepository";
 import type { PredictionRecord, GeoSubmission } from "./types";
 import { VenueActivationNotFoundError, GeoUnavailableError } from "./types";
 import { evaluateGeoEligibility } from "./geolocation";
-import { parseProgressiveAnswers } from "./prizeLadder";
+import { parseProgressiveAnswers, assertCoherentAnswers, isExactProgressiveReplay } from "./prizeLadder";
+import type { ProgressiveAnswers, ScorerSide } from "./prizeLadder";
 
 /**
  * SUBMIT_PREDICTION — the single write path for both a first-time
@@ -92,6 +93,14 @@ export async function submitPrediction(
  * offerDigest is the fingerprint of the prize offer the member saw. If the
  * offer has since changed the submission is refused, so an accepted offer
  * can never change silently underneath a prediction.
+ *
+ * Coherence: the answers must be able to come from one scoreline (see
+ * progressiveCoherenceProblems). That judges a new answer or an edit; an
+ * exact repeat of the prediction already stored is a replay and keeps its
+ * confirmation semantics, so it is never judged again. Because it is checked
+ * here, before the database function runs, a coherence refusal (400) takes
+ * precedence over a state refusal (409) for the same request; the database
+ * function mirrors the same rule after its shape checks.
  */
 export async function submitProgressivePrediction(
   repo: PredictionsRepository,
@@ -109,6 +118,11 @@ export async function submitProgressivePrediction(
   }
 
   const answers = parseProgressiveAnswers(input.answers);
+
+  const stored = await repo.getPredictionForMember(input.matchId, input.gamingMemberId);
+  if (!isExactProgressiveReplay(stored, input.venueActivationId, answers, input.offerDigest)) {
+    assertCoherentAnswers(answers, await scorerSideOf(repo, input.matchId, answers));
+  }
 
   const activation = await repo.getVenueActivationById(input.venueActivationId);
   if (!activation) {
@@ -138,4 +152,17 @@ export async function submitProgressivePrediction(
     reportedAccuracyMeters: input.geo.accuracyMeters,
     geoEligible: geoResult.eligible,
   });
+}
+
+/**
+ * Which side of THIS match the picked goalscorer plays for, or null when none is picked or the player is not one of the two teams'
+ * (that refusal belongs to the roster check, not to coherence).
+ */
+async function scorerSideOf(repo: PredictionsRepository, matchId: string, answers: ProgressiveAnswers): Promise<ScorerSide | null> {
+  if (!answers.goalscorer || answers.goalscorer.kind !== "PICKED") return null;
+  const [player, match] = await Promise.all([repo.getPlayerById(answers.goalscorer.playerId), repo.getMatchById(matchId)]);
+  if (!player || !match) return null;
+  if (player.teamId === match.homeTeamId) return "HOME";
+  if (player.teamId === match.awayTeamId) return "AWAY";
+  return null;
 }

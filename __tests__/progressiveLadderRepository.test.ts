@@ -407,9 +407,9 @@ describe("editing, reducing and sending again", () => {
     const back = await submitAs(env, world, member, {
       attemptedLevel: 2,
       scoreline: { home: 2, away: 1 },
-      firstTeam: { kind: "NONE" },
+      firstTeam: { kind: "PICKED", team: "HOME" },
     });
-    expect(back.firstTeamState).toBe("NONE");
+    expect(back.firstTeamState).toBe("PICKED");
     expect(back.goalscorerState).toBe("NOT_ATTEMPTED");
     expect(back.predictedGoalscorerPlayerId).toBeNull();
     expect(back.goalMinuteState).toBe("NOT_ATTEMPTED");
@@ -463,7 +463,7 @@ describe("editing, reducing and sending again", () => {
     const member = await env.newMember("m");
     await expect(
       submitAs(env, world, member, {
-        attemptedLevel: 3, scoreline: { home: 1, away: 0 }, firstTeam: { kind: "NONE" },
+        attemptedLevel: 3, scoreline: { home: 1, away: 0 }, firstTeam: { kind: "PICKED", team: "HOME" },
         goalscorer: { kind: "PICKED", playerId: randomUUID() },
       })
     ).rejects.toBeInstanceOf(InvalidGoalscorerSelectionError);
@@ -641,12 +641,11 @@ describe("an exact replay of the accepted request returns the confirmed row; any
       ["the home score", (w) => ({ ...answersFor(w, 4, all), scoreline: { home: 3, away: 1 } })],
       ["the away score", (w) => ({ ...answersFor(w, 4, all), scoreline: { home: 2, away: 2 } })],
       ["the first team", (w) => ({ ...answersFor(w, 4, all), firstTeam: { kind: "PICKED", team: "AWAY" } })],
-      ["the first team turned into 'no team'", (w) => ({ ...answersFor(w, 4, all), firstTeam: { kind: "NONE" } })],
       ["the goalscorer", (w) => ({ ...answersFor(w, 4, all), goalscorer: { kind: "PICKED", playerId: w.players.lewa } })],
-      ["the goalscorer turned into 'no player'", (w) => ({ ...answersFor(w, 4, all), goalscorer: { kind: "NONE" } })],
       ["the goal minute", (w) => ({ ...answersFor(w, 4, all), goalMinute: { kind: "PICKED", regulation: 31, stoppage: null } })],
       ["added time on a boundary minute", (w) => ({ ...answersFor(w, 4, all), goalMinute: { kind: "PICKED", regulation: 45, stoppage: 2 } })],
-      ["the goal minute turned into 'no goals'", (w) => ({ ...answersFor(w, 4, all), goalMinute: { kind: "NONE" } })],
+      // A NONE can only accompany a 0-0 scoreline now, so the "turned into none" variations are one: the whole prediction turned into 0-0 and none.
+      ["the whole prediction turned into 0-0 with none for team, player and minute", () => ({ attemptedLevel: 4, scoreline: { home: 0, away: 0 }, firstTeam: { kind: "NONE" }, goalscorer: { kind: "NONE" }, goalMinute: { kind: "NONE" } })],
       ["the level, reduced", (w) => answersFor(w, 3, all)],
     ];
     it.each(variations)("%s: a new edit — accepted before kickoff, replacing the stored row, never returned as a replay", async (_label, build) => {
@@ -719,7 +718,7 @@ describe("the historical write path never creates or edits a progressive predict
     await expect(historical(repo, world, stranger)).rejects.toBeInstanceOf(ContractMismatchError);
     expect(await repo.getPredictionForMember(world.matchId, stranger)).toBeNull();
 
-    const stored = await submitAs(env, world, member, { attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "NONE" } });
+    const stored = await submitAs(env, world, member, { attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" } });
     await expect(historical(repo, world, member, { predictedHomeScore: 5 })).rejects.toBeInstanceOf(ContractMismatchError);
     await expect(historical(repo, world, member)).rejects.toBeInstanceOf(ContractMismatchError);
     expect(await repo.getPredictionForMember(world.matchId, member)).toEqual(stored);
@@ -1041,7 +1040,7 @@ describe("routes", () => {
     const res = await POST(
       post({
         venueActivationId: w.activationId, offerDigest: digest, attemptedLevel: 3,
-        scoreline: { home: 2, away: 1 }, firstTeam: { kind: "NONE" }, goalscorer: { kind: "PICKED", playerId: w.players.mbappe },
+        scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" }, goalscorer: { kind: "PICKED", playerId: w.players.mbappe },
         latitude: NEAR.latitude, longitude: NEAR.longitude, accuracyMeters: 5,
       }),
       { params: { matchId: w.matchId } }
@@ -1049,7 +1048,7 @@ describe("routes", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.prediction.attemptedLevel).toBe(3);
-    expect(body.prediction.firstTeam).toEqual({ kind: "NONE" });
+    expect(body.prediction.firstTeam).toEqual({ kind: "PICKED", team: "HOME" });
     expect("goalMinute" in body.prediction).toBe(false);
     expect(JSON.stringify(body.prediction)).not.toContain(":null");
     expect((await repo.getPredictionForMember(w.matchId, memberId))!.attemptedLevel).toBe(3);

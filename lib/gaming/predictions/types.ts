@@ -54,7 +54,22 @@ export interface PlayerRecord {
   name: string;
   active: boolean;
   createdAt: string;
+  /**
+   * The ROSTER fields, present only where a roster was loaded for the team (see rosters/). They describe the season's squad list, not the
+   * player: the squad number can change between seasons, the player's identity is `playerId` and nothing else. Absent (or null) for a
+   * player added by hand, and absent altogether while the database does not have the columns yet — every reader must tolerate that.
+   * A roster is not a call-up: nothing here says a player is available for any match.
+   */
+  jerseyNumber?: number | null;
+  position?: PlayerPosition | null;
+  /** Where the roster entry was read and the date it was consulted: provenance, never shown to members. */
+  rosterSource?: string | null;
+  rosterConsultedOn?: string | null;
 }
+
+/** Normalised positions of a roster entry: goalkeeper, defender, midfielder, forward. */
+export type PlayerPosition = "POR" | "DEF" | "MED" | "DEL";
+export const PLAYER_POSITIONS: readonly PlayerPosition[] = ["POR", "DEF", "MED", "DEL"];
 
 export interface MatchRecord {
   matchId: string;
@@ -387,6 +402,16 @@ export class KickoffPassedError extends Error {
   }
 }
 
+/** The approved participation window of this match has not opened yet (see participationWindow.ts). It says "not yet", never "no". */
+export class ParticipationNotOpenError extends Error {
+  readonly opensAt: Date;
+  constructor(opensAt: Date) {
+    super("Participation for this match has not opened yet.");
+    this.name = "ParticipationNotOpenError";
+    this.opensAt = opensAt;
+  }
+}
+
 export class MatchNotClassifiedError extends Error {
   constructor() {
     super("This match has no declared Activity Classification and cannot accept predictions yet.");
@@ -680,6 +705,26 @@ export class InvalidAttemptShapeError extends Error {
   constructor(detail?: string) {
     super(detail || "The prediction does not have a valid shape.");
     this.name = "InvalidAttemptShapeError";
+  }
+}
+
+/**
+ * The answers of a progressive prediction contradict each other: a first team or a goalscorer from a team with no goal in the
+ * predicted scoreline, "none" next to goals, or a player/minute next to a 0-0. It is an InvalidAttemptShapeError (400) so every
+ * existing handler already maps it; `code` tells the cases apart and the message is one of the fixed texts in prizeLadder.ts.
+ */
+export type IncoherenceCode =
+  | "ONLY_NONE_WITH_NO_GOALS"
+  | "NONE_NOT_ALLOWED_WITH_GOALS"
+  | "FIRST_TEAM_WITHOUT_GOALS"
+  | "SCORER_TEAM_WITHOUT_GOALS";
+
+export class IncoherentAnswersError extends InvalidAttemptShapeError {
+  readonly code: IncoherenceCode;
+  constructor(code: IncoherenceCode, message: string) {
+    super(message);
+    this.name = "IncoherentAnswersError";
+    this.code = code;
   }
 }
 

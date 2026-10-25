@@ -188,7 +188,16 @@
   .ladder-hint { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
   .score-stepper-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .score-stepper { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--bg-card); text-align: center; }
-  .score-stepper .team-name { font-size: 13px; font-weight: 700; margin: 0 0 8px; overflow-wrap: anywhere; }
+  .score-stepper .team-name { font-size: 13px; font-weight: 700; margin: 0 0 8px; overflow-wrap: anywhere; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  /* Club crests are decoration beside the team's name, which is always written in text; they can be removed without changing anything else. */
+  .club-crest { width: 24px; height: 24px; object-fit: contain; flex: none; }
+  .match-teams .club-crest { width: 32px; height: 32px; }
+  .match-teams .team-label { display: inline-flex; align-items: center; gap: 10px; }
+  .team-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  /* The scorer's search: a plain text box above the list, and a status line that says when nothing matches. */
+  .scorer-search { margin-bottom: 8px; }
+  .scorer-search-status { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; min-height: 1px; }
+  .scorer-jersey { font-variant-numeric: tabular-nums; }
   .stepper-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
   .stepper-controls button {
     width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
@@ -210,6 +219,9 @@
   .ladder-panel { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 14px 0; background: var(--bg-card); }
   .ladder-panel p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
   .ladder-panel .ladder-current { font-weight: 800; }
+  .ladder-provisional { border: 1px dashed var(--gold); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; background: var(--gold-bg); }
+  .ladder-provisional .ladder-offers-title { margin-top: 8px; }
+  .provisional-notice { margin: 0 0 6px; font-size: 13px; font-weight: 700; line-height: 1.45; color: var(--gold); }
   .ladder-offers-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 10px 0 4px; }
   .ladder-offers { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink); line-height: 1.6; }
   .ladder-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -222,6 +234,25 @@
   .ladder-review { border: 1px dashed var(--exp-purple); border-radius: 12px; padding: 14px; margin: 14px 0; }
   .ladder-review h3 { margin-top: 0; }
   .ladder-review ul { margin: 8px 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  /* The conditions that must never be hidden stay on screen (the essentials and the panel); the long explanation lives in a disclosure. */
+  .ladder-help { border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 0; background: transparent; }
+  .ladder-help > summary { cursor: pointer; padding: 10px 12px; min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 700; color: var(--ink); }
+  .ladder-help > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .ladder-help-body { padding: 0 12px 10px; }
+  .ladder-help-body p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
+  .ladder-ready { font-weight: 700; }
+  .ladder-fix { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--bad); font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+  .ladder-fix.is-info { border-left-color: var(--muted); }
+  .ladder-fix p { margin: 0 0 4px; }
+  .ladder-removed { margin: 0 0 10px; padding: 8px 10px; border-left: 3px solid var(--gold); font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+  .team-toggle:disabled, .team-toggle[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+  .mine-summary { border: 1px solid var(--good); border-radius: 12px; padding: 14px; margin: 0 0 12px; background: var(--bg-card); overflow-wrap: anywhere; }
+  .mine-summary h3 { margin: 0 0 8px; font-size: 17px; font-weight: 800; }
+  .mine-summary ul { margin: 8px 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  .mine-summary p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+  .mine-summary .ladder-actions { margin-top: 10px; }
+  .match-times { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12.5px; color: var(--muted); margin: -6px 0 14px; text-align: center; }
+  .match-times p { margin: 0; }
   .dimension-cell.not-attempted { border-style: dashed; background: transparent; }
   .dimension-cell.not-attempted .mark { color: var(--muted); font-size: 13px; margin-top: 8px; }
   .dimension-cell .state-text { font-size: 12.5px; margin-top: 6px; }
@@ -249,7 +280,7 @@
     .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
     .primary-nav { padding: 0 16px 2px; }
     .back-link, .content, .score-heading { padding-left: 16px; padding-right: 16px; }
-    .match-teams { font-size: 17px; }
+    .match-teams { font-size: 17px; flex-direction: column; gap: 6px; } /* on a phone the two teams stack, home team on top: crest and name never wrap apart */
   }
 </style>
 </head>
@@ -302,6 +333,7 @@
 </footer>
 
 <script src="/urbanoI18n.js"></script>
+<script src="/urbanoClubCrests.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -452,8 +484,8 @@
     "pred.f.update": "Actualizar predicción",
     "pred.f.submit": "Enviar predicción",
     "pred.geo.unavailable": "Ubicación no disponible — activá el acceso a la ubicación para enviar una predicción.",
-    "pred.geo.within": "Estás dentro del alcance de esta sede.",
-    "pred.geo.outside": "Parecés estar fuera del alcance de esta sede — el envío podría ser rechazado.",
+    "pred.geo.within": "Tu navegador indica que estás dentro del alcance de esta sede. El servidor lo confirma al enviar.",
+    "pred.geo.outside": "Tu navegador indica que estás fuera del alcance de esta sede; al enviar, el servidor decide.",
     "pred.submitting": "Enviando…",
     "pred.locationRequired": "Se requiere tu ubicación para enviar una predicción.",
     "pred.saved": "Predicción guardada. Podés editarla hasta el inicio del partido.",
@@ -478,7 +510,7 @@
     "pred.ladder.q.3": "¿Quién marcará un gol?",
     "pred.ladder.q.4": "¿En qué minuto caerá un gol?",
     "pred.ladder.hint.1": "Elegí los dos marcadores: no hay un valor por defecto.",
-    "pred.ladder.hint.2": "Elegí un equipo, o la opción de que ningún equipo anotará.",
+    "pred.ladder.hint.2": "Elegí qué equipo anotará primero. Tiene que ser un equipo con al menos un gol en tu marcador.",
     "pred.ladder.hint.3": "Sirve cualquier jugador que marque un gol en tiempo reglamentario. El goleador y el minuto no tienen que ser del mismo gol.",
     "pred.ladder.hint.4": "Sirve cualquier gol del partido en tiempo reglamentario; no tiene que ser el gol del goleador que elegiste.",
     "pred.ladder.none.first": "Ningún equipo anotará",
@@ -489,18 +521,22 @@
     "pred.ladder.scoreDec": "Restar un gol a {team}",
     "pred.ladder.scoreInc": "Sumar un gol a {team}",
     "pred.ladder.scorerPlaceholder": "Elegí un jugador",
+    "pred.ladder.scorerSearch": "Buscar jugador por nombre o dorsal",
+    "pred.ladder.scorerSearchHint": "Escribí parte del nombre o el número de dorsal.",
+    "pred.ladder.scorerNoMatch": "Ningún jugador coincide con «{q}». Probá con otra parte del nombre o con el dorsal.",
     "pred.ladder.minuteLabel": "Minuto (tiempo reglamentario)",
     "pred.ladder.minutePlaceholder": "Ej. 23",
-    "pred.ladder.current": "Nivel actual: {level}",
-    "pred.ladder.max": "Con este nivel, el premio máximo posible en esta sede es: {prize}. Solo lo recibís si acertás {condition}.",
+    "pred.ladder.current": "Paso actual: {level}",
+    "pred.ladder.max": "Premio máximo posible con el nivel {n}: {prize}. Solo lo recibís si acertás {condition}.",
     "pred.ladder.cond.1": "el marcador exacto",
     "pred.ladder.cond.2": "el marcador exacto y el primer equipo en anotar",
     "pred.ladder.cond.3": "el marcador exacto, el primer equipo y un goleador",
     "pred.ladder.cond.4": "el marcador exacto, el primer equipo, un goleador y un minuto de gol",
     "pred.ladder.noClaim": "Completar un nivel no da un premio por sí solo: depende de que aciertes.",
     "pred.ladder.needAnswer": "Respondé el nivel 1 para poder continuar o enviar.",
-    "pred.ladder.needThis": "Respondé este nivel para poder continuar o enviar.",
+    "pred.ladder.needThis": "Respondé este nivel para continuar al siguiente. Mientras tanto podés enviar con el último nivel completo.",
     "pred.ladder.offers": "Premios de esta sede",
+    "pred.provisional.notice": "Premios propuestos, pendientes de confirmación por The Pub el día del partido. Esta demostración no genera derecho a premio.",
     "pred.ladder.offerRow": "Nivel {n} · {name}: {prize}",
     "pred.ladder.btn.continue": "Continuar al nivel {n}",
     "pred.ladder.btn.send": "Enviar con nivel {n}",
@@ -519,7 +555,6 @@
     "pred.ladder.ans.minute": "Minuto: {value}",
     "pred.ladder.saved": "Participación guardada hasta el nivel {n} ({name}). Podés editarla hasta el inicio del partido.",
     "pred.ladder.noOffer": "Por ahora ninguna sede tiene premios configurados para este partido, así que todavía no recibe participaciones.",
-    "pred.ladder.awaiting": "Tu participación llega hasta el nivel {n} ({name}). Esperando el resultado oficial.",
     "pred.ladder.result.won": "Nivel intentado: {attempted}. Nivel ganado: {won}.",
     "pred.ladder.result.none": "Nivel intentado: {attempted}. No ganaste ningún nivel.",
     "pred.ladder.state.correct": "Acertó",
@@ -537,6 +572,41 @@
     "pred.ladder.conflict.draftLine": "Borrador de este navegador, sin enviar: hasta el nivel {n} ({name}), marcador {score}.",
     "pred.ladder.conflict.keep": "Mantener lo guardado y descartar el borrador",
     "pred.ladder.conflict.use": "Seguir con el borrador (sigue sin enviar)",
+    "pred.ladder.essentials": "Escalera consecutiva: cada nivel exige acertar todos los anteriores. Un solo premio: el del nivel más alto que aciertes en orden. Completar un nivel no significa ganar.",
+    "pred.ladder.noPenalty": "Intentar un nivel más alto no resta: si fallás un nivel, conservás el premio del último nivel que acertaste en orden.",
+    "pred.ladder.helpTitle": "Cómo funcionan los niveles y los premios de esta sede",
+    "pred.ladder.ready": "Listo para enviar: {level}",
+    "pred.ladder.notReady": "Todavía no hay un nivel listo para enviar.",
+    "pred.ladder.fix.noneNeedsZero": "Para elegir «ninguno» el marcador tiene que ser 0–0. Cambialo en el nivel 1.",
+    "pred.ladder.fix.zeroNeedsNone": "Con un marcador 0–0 solo podés responder «ninguno». Elegilo, o cambiá el marcador en el nivel 1.",
+    "pred.ladder.fix.teamNeedsGoal": "Ese equipo no tiene goles en tu marcador. Elegí el otro equipo o cambiá el marcador en el nivel 1.",
+    "pred.ladder.fix.scorerNeedsGoal": "Los jugadores de un equipo sin goles en tu marcador no se pueden elegir. Elegí un jugador del otro equipo o cambiá el marcador en el nivel 1.",
+    "pred.ladder.removed": "Cambiaste una respuesta anterior y quitamos las siguientes, que ya no son compatibles. Revisalas antes de guardar:",
+    "pred.ladder.legacy": "Tu participación guardada combina respuestas que ya no son compatibles entre sí. Sigue guardada tal como está. Para cambiarla, corregí:",
+    "pred.mine.title": "Mi participación",
+    "pred.mine.level": "Nivel enviado: {level}",
+    "pred.mine.venue": "Sede: {venue}",
+    "pred.mine.open": "Estado: guardada. Podés editarla hasta {time}.",
+    "pred.mine.locked.disabled": "Estado: guardada. Esta sede ya no recibe cambios.",
+    "pred.mine.locked.venue": "Estado: guardada. Esta sede no está disponible por ahora, así que no se pueden hacer cambios.",
+    "pred.mine.locked.offer": "Estado: guardada. Esta sede no tiene un premio válido configurado, así que no recibe cambios.",
+    "pred.mine.closed": "Estado: cerrada, el partido ya empezó. Esperando el resultado oficial.",
+    "pred.mine.sent": "Enviada: {time}",
+    "pred.mine.changed": "Última actualización: {time}",
+    "pred.mine.edit": "Editar participación",
+    "pred.mine.continue": "Continuar edición",
+    "pred.mine.cancelEdit": "Volver al resumen",
+    "pred.mine.draft": "Tenés cambios sin enviar en este navegador. Todavía no están guardados.",
+    "pred.mine.noVenue": "una sede de este partido",
+    "pred.geo.pending": "Esperando tu permiso de ubicación…",
+    "pred.geo.denied": "El permiso de ubicación está denegado. Activalo en los ajustes de tu navegador para poder enviar.",
+    "pred.geo.timeout": "La ubicación tardó demasiado en responder. Volvé a intentarlo.",
+    "pred.geo.unavailableNow": "No se pudo determinar tu ubicación en este momento.",
+    "pred.geo.unsupported": "Tu navegador no ofrece ubicación.",
+    "pred.opensLabel": "Apertura de participación: {time}",
+    "pred.kickoffLabel": "Inicio del partido: {time}",
+    "pred.closesLabel": "Cierre de participación: {time} (al inicio del partido)",
+    "pred.closedLabel": "Participación cerrada desde el inicio del partido: {time}",
     "pred.prize.qualified": "Premio obtenido: ",
     "pred.prize.superseded": "(reemplazado por una corrección del resultado).",
     "pred.prize.redeemed": "ya canjeado.",
@@ -546,6 +616,7 @@
     "pred.srv.matchNotFound": "No existe un partido con ese identificador.",
     "pred.srv.cancelled": "Este partido fue cancelado.",
     "pred.srv.locked": "Las predicciones están cerradas para este partido.",
+    "pred.srv.notOpen": "La participación de este partido todavía no está abierta.",
     "pred.srv.notClassified": "Este partido todavía no tiene una clasificación de actividad declarada y no puede recibir predicciones.",
     "pred.srv.activationNotFound": "No existe una activación de sede con ese identificador.",
     "pred.srv.activationMismatch": "Esta activación de sede no corresponde al partido indicado.",
@@ -566,12 +637,17 @@
     "pred.srv.levelNotOffered": "Ese nivel no se ofrece en esta sede.",
     "pred.srv.offerDigestRequired": "Hace falta la huella de la oferta de premios que viste para enviar una participación.",
     "pred.srv.resultFinalized": "Este partido ya tiene un resultado finalizado: ya no se pueden crear ni editar predicciones.",
+    "pred.srv.incoherent.onlyNone": "Con un marcador 0–0, las categorías siguientes solo se pueden responder con «ninguno».",
+    "pred.srv.incoherent.noneWithGoals": "Con goles en el marcador, «ninguno» no es una respuesta válida para las categorías siguientes.",
+    "pred.srv.incoherent.firstTeamNoGoals": "El primer equipo en anotar debe tener al menos un gol en el marcador pronosticado.",
+    "pred.srv.incoherent.scorerTeamNoGoals": "El goleador debe ser de un equipo con al menos un gol en el marcador pronosticado.",
     "pred.srv.contractMismatch": "Este partido usa otro tipo de predicción que el de la solicitud."
   };
   var SERVER = {
     "No match exists for this id.": "pred.srv.matchNotFound",
     "This match has been cancelled.": "pred.srv.cancelled",
     "Predictions are locked for this match.": "pred.srv.locked",
+    "Participation for this match has not opened yet.": "pred.srv.notOpen",
     "This match has no declared Activity Classification and cannot accept predictions yet.": "pred.srv.notClassified",
     "No venue activation exists for this id.": "pred.srv.activationNotFound",
     "This venue activation is not for the supplied match.": "pred.srv.activationMismatch",
@@ -592,6 +668,10 @@
     "That level is not offered at this venue.": "pred.srv.levelNotOffered",
     "The fingerprint of the prize offer you saw is required to send a prediction.": "pred.srv.offerDigestRequired",
     "This match already has a finalized result, so predictions can no longer be created or edited.": "pred.srv.resultFinalized",
+    "With a 0-0 scoreline, a later category can only be answered with none.": "pred.srv.incoherent.onlyNone",
+    "With goals in the scoreline, none is not a valid answer for a later category.": "pred.srv.incoherent.noneWithGoals",
+    "The first team to score must have at least one goal in the predicted scoreline.": "pred.srv.incoherent.firstTeamNoGoals",
+    "The goalscorer must belong to a team with at least one goal in the predicted scoreline.": "pred.srv.incoherent.scorerTeamNoGoals",
     "This match uses a different prediction contract than the one in the request.": "pred.srv.contractMismatch",
     "This match takes the historical prediction; the request used the progressive shape.": "pred.srv.contractMismatch",
     "This match takes the progressive prediction; the request used the historical shape.": "pred.srv.contractMismatch",
@@ -692,9 +772,33 @@ function setServerMessage(node, raw) {
   node.textContent = serverMessageText(raw);
 }
 
-// Kick-off time. The time-zone policy is unchanged (the device's own); only the language of month and weekday names follows the page.
-function formatKickoff(iso) {
-  return new Date(iso).toLocaleString(UrbanoI18n.locale());
+// An instant, with the time zone written out. The zone policy is unchanged (the device's own); the language of month names follows the
+// page. The match start and the end of participation are ONE instant (kickoffAt), so both labels show the same time, seconds included:
+// rounding it would claim a cut-off that is not the real one.
+function formatInstant(iso) {
+  const date = new Date(iso);
+  try {
+    return new Intl.DateTimeFormat(UrbanoI18n.locale(), {
+      year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+    }).format(date);
+  } catch (err) {
+    return date.toLocaleString(UrbanoI18n.locale());
+  }
+}
+
+// A sentence that carries a time. The time is not a plain table lookup (it follows the language and the device), so these nodes are
+// redrawn by renderTimeNodes on a change of language instead of through data-i18n.
+function setTimeText(node, key, iso) {
+  node.removeAttribute("data-i18n");
+  node.removeAttribute("data-i18n-vars");
+  node.setAttribute("data-time-key", key);
+  node.setAttribute("data-time-iso", iso);
+  node.textContent = t(key, { time: formatInstant(iso) });
+}
+function renderTimeNodes(scope) {
+  for (const node of scope.querySelectorAll("[data-time-key]")) {
+    node.textContent = t(node.getAttribute("data-time-key"), { time: formatInstant(node.getAttribute("data-time-iso")) });
+  }
 }
 
 // The prize this qualification is for, resolved from the match's own
@@ -783,15 +887,70 @@ function findPlayerName(match, playerId) {
   return null;
 }
 
-function getCurrentPosition() {
+// A player as shown to a member: the squad number and the name, "10 · Lamine Yamal" — nothing else about the person. A team whose roster has
+// no numbers shows just the name. The name is long for some players; it wraps, it is never cut.
+function playerLabel(player) {
+  return typeof player.jerseyNumber === "number" ? `${player.jerseyNumber} · ${player.name}` : player.name;
+}
+function findPlayerLabel(match, playerId) {
+  if (!playerId) return null;
+  for (const team of [match.homeTeam, match.awayTeam]) {
+    const found = ((team && team.players) || []).find((p) => p.playerId === playerId);
+    if (found) return playerLabel(found);
+  }
+  return null;
+}
+// The roster in the order a person scans it: by squad number, those without one last, then by name.
+function sortedPlayers(players) {
+  return (players || []).slice().sort((a, b) => {
+    const an = typeof a.jerseyNumber === "number" ? a.jerseyNumber : Infinity;
+    const bn = typeof b.jerseyNumber === "number" ? b.jerseyNumber : Infinity;
+    return an !== bn ? an - bn : String(a.name).localeCompare(String(b.name));
+  });
+}
+function searchKey(text) {
+  return String(text == null ? "" : text).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+// A player matches a search when the squad number equals what was typed (the number is looked up as a number, so "1" is not "10"), or every
+// word typed appears at the start of a word of the name.
+function playerMatchesSearch(player, query) {
+  const q = searchKey(String(query).replace(/^#/, ""));
+  if (q === "") return true;
+  if (/^[0-9]+$/.test(q)) return typeof player.jerseyNumber === "number" && String(player.jerseyNumber) === q;
+  const words = searchKey(player.name).split(" ");
+  return q.split(" ").every((part) => words.some((word) => word.startsWith(part)));
+}
+// The crest of a team (an <img>, or null), from the central module. The name is always written beside it.
+function crestNode(teamName) {
+  return window.UrbanoClubCrests && teamName ? window.UrbanoClubCrests.element(teamName) : null;
+}
+
+// A measurement of where the device is, and when there is none, WHY: the person was asked and said no (denied), the device took too long
+// (timeout), it could not tell (unavailable) or the browser has no location at all (unsupported). None of these is "outside the venue":
+// only a measurement can be outside. The server's own decision about a submission is a third, separate thing and is shown as it is.
+function measurePosition() {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) { resolve(null); return; }
+    if (!navigator.geolocation) { resolve({ ok: false, reason: "unsupported" }); return; }
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracyMeters: pos.coords.accuracy }),
-      () => resolve(null),
+      (pos) => resolve({ ok: true, position: { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracyMeters: pos.coords.accuracy } }),
+      (err) => resolve({ ok: false, reason: err && err.code === 1 ? "denied" : err && err.code === 3 ? "timeout" : "unavailable" }),
       { enableHighAccuracy: true, timeout: 10000 }
     );
   });
+}
+function getCurrentPosition() {
+  return measurePosition().then((measured) => (measured.ok ? measured.position : null));
+}
+const GEO_REASON_KEYS = { denied: "pred.geo.denied", timeout: "pred.geo.timeout", unavailable: "pred.geo.unavailableNow", unsupported: "pred.geo.unsupported" };
+// What the browser remembers about the permission, without asking: "prompt" means the person has not decided yet (the browser is about
+// to ask); anything else, or a browser that cannot say, is treated as a plain measurement in progress.
+function geoPermissionState() {
+  try {
+    if (navigator.permissions && typeof navigator.permissions.query === "function") {
+      return navigator.permissions.query({ name: "geolocation" }).then((status) => status.state, () => "unknown");
+    }
+  } catch (err) { /* the browser cannot say */ }
+  return Promise.resolve("unknown");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -929,7 +1088,8 @@ function wholeNumberOrNull(value) {
   const text = String(value === null || value === undefined ? "" : value).trim();
   return /^\d{1,9}$/.test(text) ? parseInt(text, 10) : null;
 }
-function ladderStepComplete(a, level) {
+// Is the level ANSWERED (a value is there), whatever the other answers say.
+function ladderStepAnswered(a, level) {
   if (level === 1) return wholeNumberOrNull(a.home) !== null && wholeNumberOrNull(a.away) !== null;
   if (level === 2) return a.first === "HOME" || a.first === "AWAY" || a.first === "NONE";
   if (level === 3) return a.scorer === "NONE" || (typeof a.scorer === "string" && a.scorer.length > 0);
@@ -943,11 +1103,72 @@ function ladderStepComplete(a, level) {
   }
   return false;
 }
-// How many levels, in order from the first, are complete (never more than the venue offers).
-function ladderCompletedLevel(a, maxLevel) {
+
+// ---- coherence between answers (the same rules as the server: lib/gaming/predictions/prizeLadder.ts, progressiveCoherenceProblems) ----
+//   0-0: a later category can only be answered with an explicit NONE · any goal: NONE is not an answer · the first team needs at least one
+//   predicted goal · the goalscorer's team needs at least one predicted goal. The goalscorer and the minute need not be the same goal.
+// This only decides what the form lets the person pick and send; the server judges again and is the authority. An unanswered category
+// is not an answer and is never contradicted, completed or counted as NONE. `sideOf(playerId)` is "HOME", "AWAY" or null (unknown).
+const LADDER_FIX_KEYS = {
+  ONLY_NONE_WITH_NO_GOALS: "pred.ladder.fix.zeroNeedsNone",
+  NONE_NOT_ALLOWED_WITH_GOALS: "pred.ladder.fix.noneNeedsZero",
+  FIRST_TEAM_WITHOUT_GOALS: "pred.ladder.fix.teamNeedsGoal",
+  SCORER_TEAM_WITHOUT_GOALS: "pred.ladder.fix.scorerNeedsGoal",
+};
+function ladderGoals(a) {
+  const home = wholeNumberOrNull(a.home);
+  const away = wholeNumberOrNull(a.away);
+  return home === null || away === null ? null : { home, away, total: home + away };
+}
+// The contradiction of one level (2, 3 or 4) with the scoreline, as a server code, or null when there is none (or nothing to judge yet).
+function ladderProblem(a, level, sideOf) {
+  const goals = ladderGoals(a);
+  if (goals === null) return null;
+  const none = (isNone) => (goals.total === 0 ? (isNone ? null : "ONLY_NONE_WITH_NO_GOALS") : (isNone ? "NONE_NOT_ALLOWED_WITH_GOALS" : null));
+  if (level === 2) {
+    if (a.first === "NONE") return none(true);
+    if (a.first !== "HOME" && a.first !== "AWAY") return null;
+    const byNone = none(false);
+    if (byNone) return byNone;
+    return (a.first === "HOME" ? goals.home : goals.away) === 0 ? "FIRST_TEAM_WITHOUT_GOALS" : null;
+  }
+  if (level === 3) {
+    if (a.scorer === "NONE") return none(true);
+    if (typeof a.scorer !== "string" || a.scorer.length === 0) return null;
+    const byNone = none(false);
+    if (byNone) return byNone;
+    const side = typeof sideOf === "function" ? sideOf(a.scorer) : null;
+    if (side === null) return null;
+    return (side === "HOME" ? goals.home : goals.away) === 0 ? "SCORER_TEAM_WITHOUT_GOALS" : null;
+  }
+  if (level === 4) {
+    if (a.minuteNone) return none(true);
+    if (String(a.minute).trim() === "") return null;
+    return none(false);
+  }
+  return null;
+}
+function ladderStepComplete(a, level, sideOf) {
+  return ladderStepAnswered(a, level) && (level === 1 || ladderProblem(a, level, sideOf) === null);
+}
+// How many levels, in order from the first, are complete (never more than the venue offers). A level that contradicts the scoreline is not
+// complete, so nothing above it can be sent: the person is shown what to correct instead of a refusal after the fact.
+function ladderCompletedLevel(a, maxLevel, sideOf) {
   let level = 0;
-  while (level < maxLevel && ladderStepComplete(a, level + 1)) level += 1;
+  while (level < maxLevel && ladderStepComplete(a, level + 1, sideOf)) level += 1;
   return level;
+}
+// The levels (2 to maxLevel) that are answered and contradict the scoreline, in ladder order.
+function ladderProblemLevels(a, maxLevel, sideOf) {
+  const levels = [];
+  for (let level = 2; level <= maxLevel; level++) if (ladderProblem(a, level, sideOf) !== null) levels.push(level);
+  return levels;
+}
+// Empties the answer of one level (never the scoreline).
+function ladderClearLevel(a, level) {
+  if (level === 2) a.first = "";
+  if (level === 3) a.scorer = "";
+  if (level === 4) { a.minute = ""; a.stoppage = ""; a.minuteNone = false; }
 }
 // The request for exactly the levels up to `level`. A category above it is absent, never null.
 function ladderPayload(a, level) {
@@ -985,7 +1206,7 @@ function ladderAnswerValue(match, answer, level) {
   }
   if (level === 3) {
     if (answer.scorer === "NONE") return { $t: "pred.ladder.none.scorer" };
-    return findPlayerName(match, answer.scorer) || "?";
+    return findPlayerLabel(match, answer.scorer) || "?";
   }
   if (answer.minuteNone) return { $t: "pred.ladder.none.minute" };
   const minute = wholeNumberOrNull(answer.minute);
@@ -1006,7 +1227,33 @@ function ladderSelectedOffer(activations, activationId) {
   return found;
 }
 
+// The side ("HOME" / "AWAY") of a player in THIS match, or null when the player is in neither roster. The coherence rules need it.
+function ladderSideOf(match) {
+  return (playerId) => {
+    const has = (team) => !!team && (team.players || []).some((p) => p.playerId === playerId);
+    return has(match.homeTeam) ? "HOME" : has(match.awayTeam) ? "AWAY" : null;
+  };
+}
+
+// A sentence followed by one bullet per ladder category (the categories are translated where they are drawn, so a change of language
+// reaches them without rebuilding anything).
+function ladderCategoryList(introKey, levels) {
+  const wrap = document.createElement("div");
+  const intro = document.createElement("p");
+  setText(intro, introKey);
+  const list = document.createElement("ul");
+  list.className = "ladder-offers";
+  for (const level of levels) {
+    const item = document.createElement("li");
+    setText(item, "pred.ladder.dim." + level);
+    list.appendChild(item);
+  }
+  wrap.append(intro, list);
+  return wrap;
+}
+
 function buildLadderForm(match, mine, authState, activations, options) {
+  const opts = options || {};
   const matchId = match.matchId;
   const memberId = authState.gamingMemberId;
   const saved = mine.prediction && mine.prediction.predictionContract === "PROGRESSIVE_LADDER_V1" ? mine.prediction : null;
@@ -1015,6 +1262,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
   const awayName = match.awayTeam ? match.awayTeam.name : null;
   const homeLabel = homeName === null ? t("pred.home") : homeName;
   const awayLabel = awayName === null ? t("pred.away") : awayName;
+  const sideOf = ladderSideOf(match);
 
   const st = {
     activationId: saved ? saved.venueActivationId : activations[0].venueActivationId,
@@ -1024,12 +1272,13 @@ function buildLadderForm(match, mine, authState, activations, options) {
     busy: false,
     a: saved ? ladderAnswersFromSaved(saved) : blankLadderAnswers(),
     saved,
+    removed: [], // the levels whose answers were taken out because a change above them made them incompatible
   };
   // --- a local draft: restored only when everything it was bound to still holds; it never sends or saves anything ---
-  const choice = options && options.conflictChoice;
+  const choice = opts.conflictChoice;
   const stored = readLadderDraft(draftKey, memberId, matchId);
   const verdict = judgeLadderDraft(stored, activations, saved);
-  if (verdict === "conflict" && choice === undefined) return buildLadderConflict(match, mine, authState, activations, stored, saved);
+  if (verdict === "conflict" && choice === undefined) return buildLadderConflict(match, mine, authState, activations, stored, saved, opts);
   let restored = null;
   let discardedByOffer = false;
   if (verdict === "restore" || (verdict === "conflict" && choice === "use")) {
@@ -1045,23 +1294,43 @@ function buildLadderForm(match, mine, authState, activations, options) {
   }
   const activationNow = () => ladderSelectedOffer(activations, st.activationId);
   const maxLevel = () => activationNow().offer.maxLevel;
+  const completedNow = () => ladderCompletedLevel(st.a, maxLevel(), sideOf);
   const clampStep = () => {
-    const allowed = Math.min(maxLevel(), ladderCompletedLevel(st.a, maxLevel()) + 1);
+    const allowed = Math.min(maxLevel(), completedNow() + 1);
     st.step = Math.max(1, Math.min(st.step, allowed));
   };
+  // A change above can make an answer below impossible (for example a goalscorer of a team that no longer has goals). Those answers are
+  // taken out, never kept as if they still held; the person is told which, and reviews before anything is saved.
+  function pruneIncompatible() {
+    const removed = ladderProblemLevels(st.a, 4, sideOf);
+    for (const level of removed) ladderClearLevel(st.a, level);
+    return removed;
+  }
+  // A participation saved before these rules (or by another client) may combine answers that no longer fit. It stays saved exactly as it
+  // is; the form only asks for what has to be corrected before it can be changed.
+  const savedIncoherent = saved ? ladderProblemLevels(ladderAnswersFromSaved(saved), 4, sideOf).length > 0 : false;
+  if (restored) st.removed = pruneIncompatible();
   clampStep();
 
+  const canLeave = !!(saved && typeof opts.onBack === "function");
   const form = el(`<form data-ladder="true" novalidate>
     <div class="field">
       <label ${ix("pred.f.venue")}>${tx("pred.f.venue")}</label>
       <select id="venue-select-${esc(matchId)}"></select>
     </div>
-    <p class="msg" id="geo-status-${esc(matchId)}" ${ix("pred.f.checking")}>${tx("pred.f.checking")}</p>
-    <p class="ladder-rules" ${ix("pred.ladder.rules")}>${tx("pred.ladder.rules")}</p>
+    <p class="msg" id="geo-status-${esc(matchId)}" aria-live="polite" ${ix("pred.f.checking")}>${tx("pred.f.checking")}</p>
+    <p class="ladder-rules" data-ladder-essentials ${ix("pred.ladder.essentials")}>${tx("pred.ladder.essentials")}</p>
+    <div class="ladder-provisional" data-ladder-provisional hidden role="note"></div>
     <p class="ladder-status" data-ladder-status hidden aria-live="polite"></p>
+    <div class="ladder-fix" data-ladder-legacy hidden></div>
+    <div class="ladder-removed" data-ladder-removed hidden role="status" aria-live="polite"></div>
     <ol class="ladder-steps" data-ladder-steps aria-label="${tx("pred.ladder.steps")}" data-i18n-attr="aria-label:pred.ladder.steps"></ol>
     <div class="ladder-body" data-ladder-body></div>
     <div class="ladder-panel" data-ladder-panel></div>
+    <details class="ladder-help" data-ladder-help>
+      <summary ${ix("pred.ladder.helpTitle")}>${tx("pred.ladder.helpTitle")}</summary>
+      <div class="ladder-help-body" data-ladder-help-body></div>
+    </details>
     <div data-ladder-review hidden></div>
     <div class="ladder-actions" data-ladder-actions></div>
     <p class="msg" id="submit-msg-${esc(matchId)}" aria-live="polite"></p>
@@ -1070,10 +1339,14 @@ function buildLadderForm(match, mine, authState, activations, options) {
   const stepsHost = form.querySelector("[data-ladder-steps]");
   const bodyHost = form.querySelector("[data-ladder-body]");
   const panelHost = form.querySelector("[data-ladder-panel]");
+  const helpBody = form.querySelector("[data-ladder-help-body]");
+  const provisionalHost = form.querySelector("[data-ladder-provisional]");
   const reviewHost = form.querySelector("[data-ladder-review]");
   const actionsHost = form.querySelector("[data-ladder-actions]");
   const msgNode = form.querySelector(`#submit-msg-${matchId}`);
   const statusNode = form.querySelector("[data-ladder-status]");
+  const legacyNode = form.querySelector("[data-ladder-legacy]");
+  const removedNode = form.querySelector("[data-ladder-removed]");
 
   // --- venue and position ---
   const select = form.querySelector(`#venue-select-${matchId}`);
@@ -1086,21 +1359,39 @@ function buildLadderForm(match, mine, authState, activations, options) {
   }
   if (saved) select.disabled = true;
   const geoStatus = form.querySelector(`#geo-status-${matchId}`);
-  let lastPosition = null;
+  // Where the device is, as the BROWSER reports it. Four things are kept apart: the permission (waiting, denied), the measurement itself
+  // (timeout, unavailable, or a position), where that position falls (within / outside), and the server's decision when the person
+  // sends — the only one that counts, shown as the server gives it. Not having a position is never "outside".
+  let geo = { kind: "pending", waitingForPermission: false };
   function showGeo() {
-    if (!lastPosition) { setText(geoStatus, "pred.geo.unavailable"); geoStatus.className = "msg error"; return; }
+    if (geo.kind === "pending") {
+      setText(geoStatus, geo.waitingForPermission ? "pred.geo.pending" : "pred.f.checking");
+      geoStatus.className = "msg";
+      return;
+    }
+    if (geo.kind === "failed") { setText(geoStatus, GEO_REASON_KEYS[geo.reason]); geoStatus.className = "msg error"; return; }
     const venue = activationNow().venue;
-    const distance = haversineMeters(lastPosition.latitude, lastPosition.longitude, venue.latitude, venue.longitude);
+    const distance = haversineMeters(geo.position.latitude, geo.position.longitude, venue.latitude, venue.longitude);
     const eligible = distance <= venue.radiusMeters;
     setText(geoStatus, eligible ? "pred.geo.within" : "pred.geo.outside");
     geoStatus.className = eligible ? "msg success" : "msg error";
   }
-  getCurrentPosition().then((position) => { lastPosition = position; showGeo(); });
+  geoPermissionState().then((state) => {
+    if (geo.kind !== "pending") return;
+    geo.waitingForPermission = state === "prompt";
+    showGeo();
+  });
+  measurePosition().then((measured) => {
+    geo = measured.ok ? { kind: "measured", position: measured.position } : { kind: "failed", reason: measured.reason };
+    showGeo();
+  });
   select.addEventListener("change", () => {
     st.activationId = select.value;
     clampStep();
     persist();
     showGeo();
+    renderHelp();
+    renderProvisional();
     renderAll();
   });
 
@@ -1147,10 +1438,24 @@ function buildLadderForm(match, mine, authState, activations, options) {
     if (key === null) { msgNode.removeAttribute("data-i18n"); msgNode.removeAttribute("data-i18n-vars"); msgNode.textContent = ""; return; }
     setText(msgNode, key, vars);
   }
+  // The answers a change above took out (kept on screen until the person sends or answers those levels again).
+  function renderRemoved() {
+    st.removed = st.removed.filter((level) => !ladderStepAnswered(st.a, level));
+    removedNode.replaceChildren();
+    removedNode.hidden = st.removed.length === 0;
+    if (st.removed.length > 0) removedNode.appendChild(ladderCategoryList("pred.ladder.removed", st.removed));
+  }
+  // Only while a saved participation still has an incompatible combination: what has to be corrected to be able to change it.
+  function renderLegacy() {
+    const levels = savedIncoherent ? ladderProblemLevels(st.a, 4, sideOf) : [];
+    legacyNode.replaceChildren();
+    legacyNode.hidden = levels.length === 0;
+    if (levels.length > 0) legacyNode.appendChild(ladderCategoryList("pred.ladder.legacy", levels));
+  }
 
   // --- the steps ---
   function renderSteps() {
-    const done = ladderCompletedLevel(st.a, maxLevel());
+    const done = completedNow();
     stepsHost.replaceChildren();
     for (let level = 1; level <= maxLevel(); level++) {
       const item = document.createElement("li");
@@ -1171,7 +1476,11 @@ function buildLadderForm(match, mine, authState, activations, options) {
     box.className = "score-stepper";
     const name = document.createElement("p");
     name.className = "team-name";
-    name.textContent = teamLabel;
+    const stepperCrest = crestNode(side === "home" ? homeName : awayName);
+    if (stepperCrest) name.appendChild(stepperCrest);
+    const nameText = document.createElement("span");
+    nameText.textContent = teamLabel;
+    name.appendChild(nameText);
     const controls = document.createElement("div");
     controls.className = "stepper-controls";
     const dec = document.createElement("button");
@@ -1195,14 +1504,48 @@ function buildLadderForm(match, mine, authState, activations, options) {
     inc.setAttribute("data-i18n-attr", "aria-label:pred.ladder.scoreInc");
     inc.setAttribute("data-i18n-vars", JSON.stringify({ team: teamLabel }));
     inc.setAttribute("aria-label", t("pred.ladder.scoreInc", { team: teamLabel }));
-    const setValue = (next) => { st.a[side] = next === null ? "" : String(next); input.value = st.a[side]; afterEdit(); };
+    // A change of score is the one edit that can make a later answer impossible: those answers are taken out and the person is told.
+    const afterScore = () => {
+      const removed = pruneIncompatible();
+      if (removed.length > 0) st.removed = Array.from(new Set(st.removed.concat(removed))).sort();
+      afterEdit();
+    };
+    const setValue = (next) => { st.a[side] = next === null ? "" : String(next); input.value = st.a[side]; afterScore(); };
     // An empty score is "not answered", never 0: the first tap of either button sets 0, and only a tap does.
     dec.addEventListener("click", () => { const now = wholeNumberOrNull(input.value); setValue(now === null ? 0 : Math.max(0, now - 1)); });
     inc.addEventListener("click", () => { const now = wholeNumberOrNull(input.value); setValue(now === null ? 0 : now + 1); });
-    input.addEventListener("input", () => { st.a[side] = input.value; afterEdit(); });
+    input.addEventListener("input", () => { st.a[side] = input.value; afterScore(); });
     controls.append(dec, input, inc);
     box.append(name, controls);
     return box;
+  }
+
+  // The explanation of what a step does not allow. `proactive` codes are written out (they are what the person needs to know to
+  // continue); the rest are given when the blocked option is tapped. Always inside a polite live region, and the blocked option points
+  // at it, so the reason reaches a screen reader as well.
+  function fixNote(noteId) {
+    const node = document.createElement("div");
+    node.className = "ladder-fix is-info";
+    node.id = noteId;
+    node.hidden = true;
+    node.setAttribute("aria-live", "polite");
+    const show = (codes, isProblem) => {
+      node.replaceChildren();
+      for (const code of Array.from(new Set(codes))) {
+        const p = document.createElement("p");
+        setText(p, LADDER_FIX_KEYS[code]);
+        node.appendChild(p);
+      }
+      node.className = "ladder-fix" + (isProblem ? "" : " is-info");
+      node.hidden = node.childNodes.length === 0;
+    };
+    return { node, show };
+  }
+  function noneNote() {
+    const note = document.createElement("p");
+    note.className = "ladder-hint ladder-none";
+    setText(note, "pred.ladder.noneNote");
+    return note;
   }
 
   function renderBody() {
@@ -1225,66 +1568,133 @@ function buildLadderForm(match, mine, authState, activations, options) {
       return;
     }
 
+    const goals = ladderGoals(st.a);
+    const goalless = goals !== null && goals.total === 0;
+    const currentProblem = ladderProblem(st.a, level, sideOf);
+    const fix = fixNote(`ladder-fix-${matchId}`);
+    const NONE_WITH_GOALS = "NONE_NOT_ALLOWED_WITH_GOALS";
+    // What is written out without the person asking: everything that explains why options are missing, except that "none" needs a
+    // 0-0 (given when "none" is tapped, so it does not repeat on every step). When the current answer itself contradicts the scoreline
+    // (a participation saved before these rules), its reason is always written out.
+    const proactive = (codes) => (currentProblem !== null ? codes.concat([currentProblem]) : codes.filter((code) => code !== NONE_WITH_GOALS));
+
     if (level === 2) {
       const row = document.createElement("div");
       row.className = "team-toggle-row is-wrap";
       row.setAttribute("role", "group");
-      const options = [["HOME", homeLabel, null], ["AWAY", awayLabel, null], ["NONE", null, "pred.ladder.none.first"]];
-      for (const [value, label, key] of options) {
+      const choices = [["HOME", homeLabel, null], ["AWAY", awayLabel, null], ["NONE", null, "pred.ladder.none.first"]];
+      const blocked = [];
+      for (const [value, label, key] of choices) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "team-toggle";
         button.setAttribute("data-value", value);
         button.setAttribute("aria-pressed", st.a.first === value ? "true" : "false");
-        if (key) setText(button, key); else button.textContent = label;
+        const code = ladderProblem(Object.assign({}, st.a, { first: value }), 2, sideOf);
+        if (code !== null) {
+          blocked.push(code);
+          button.setAttribute("aria-disabled", "true");
+          button.setAttribute("aria-describedby", fix.node.id);
+        }
+        if (key) setText(button, key);
+        else {
+          const buttonCrest = crestNode(value === "HOME" ? homeName : awayName);
+          if (buttonCrest) button.appendChild(buttonCrest);
+          const buttonText = document.createElement("span");
+          buttonText.textContent = label;
+          button.appendChild(buttonText);
+        }
         button.addEventListener("click", () => {
+          if (code !== null) { fix.show([code], false); return; } // not a choice: say why, change nothing
           st.a.first = value;
           for (const other of row.querySelectorAll(".team-toggle")) other.setAttribute("aria-pressed", other.getAttribute("data-value") === value ? "true" : "false");
+          fix.show([], false); // a valid pick: the explanation of what was blocked is no longer needed
           afterEdit();
         });
         row.appendChild(button);
       }
       bodyHost.appendChild(row);
-      const note = document.createElement("p");
-      note.className = "ladder-hint ladder-none";
-      setText(note, "pred.ladder.noneNote");
-      bodyHost.appendChild(note);
+      bodyHost.appendChild(fix.node);
+      fix.show(proactive(blocked), currentProblem !== null);
+      if (goalless || st.a.first === "NONE") bodyHost.appendChild(noneNote());
       return;
     }
 
     if (level === 3) {
       const field = document.createElement("div");
       field.className = "field";
+      // Search by name or squad number. It only narrows the list that is shown: what is blocked, what is selected and what is saved never
+      // depend on it (the selected player always stays in the list, and the reasons below are computed over the whole roster).
+      const searchId = `ladder-scorer-search-${matchId}`;
+      const searchLabel = document.createElement("label");
+      searchLabel.setAttribute("for", searchId);
+      setText(searchLabel, "pred.ladder.scorerSearch");
+      const search = document.createElement("input");
+      search.type = "search";
+      search.id = searchId;
+      search.className = "scorer-search";
+      search.autocomplete = "off";
+      search.setAttribute("aria-describedby", `${searchId}-hint`);
+      const searchHint = document.createElement("p");
+      searchHint.id = `${searchId}-hint`;
+      searchHint.className = "ladder-hint";
+      setText(searchHint, "pred.ladder.scorerSearchHint");
+      const searchStatus = document.createElement("p");
+      searchStatus.className = "scorer-search-status";
+      searchStatus.setAttribute("role", "status");
+      searchStatus.setAttribute("aria-live", "polite");
       const scorerSelect = document.createElement("select");
       scorerSelect.id = `ladder-scorer-${matchId}`;
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      setText(placeholder, "pred.ladder.scorerPlaceholder");
-      scorerSelect.appendChild(placeholder);
-      const none = document.createElement("option");
-      none.value = "NONE";
-      setText(none, "pred.ladder.none.scorer");
-      scorerSelect.appendChild(none);
-      for (const [teamLabel, players] of [[homeLabel, match.homeTeam ? match.homeTeam.players : []], [awayLabel, match.awayTeam ? match.awayTeam.players : []]]) {
-        const group = document.createElement("optgroup");
-        group.label = teamLabel;
+      scorerSelect.setAttribute("aria-describedby", fix.node.id);
+      const sides = [["HOME", homeLabel, match.homeTeam ? sortedPlayers(match.homeTeam.players) : []], ["AWAY", awayLabel, match.awayTeam ? sortedPlayers(match.awayTeam.players) : []]];
+      const blocked = [];
+      for (const [, , players] of sides) {
         for (const player of players) {
-          const option = document.createElement("option");
-          option.value = player.playerId;
-          option.textContent = player.name;
-          group.appendChild(option);
+          const code = ladderProblem(Object.assign({}, st.a, { scorer: player.playerId }), 3, sideOf);
+          if (code !== null) blocked.push(code);
         }
-        scorerSelect.appendChild(group);
       }
-      scorerSelect.value = st.a.scorer;
-      if (scorerSelect.value !== st.a.scorer) { st.a.scorer = ""; scorerSelect.value = ""; }
+      const fillOptions = () => {
+        const query = search.value;
+        scorerSelect.replaceChildren();
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        setText(placeholder, "pred.ladder.scorerPlaceholder");
+        scorerSelect.appendChild(placeholder);
+        const none = document.createElement("option");
+        none.value = "NONE";
+        setText(none, "pred.ladder.none.scorer");
+        if (ladderProblem(Object.assign({}, st.a, { scorer: "NONE" }), 3, sideOf) !== null) none.disabled = true;
+        scorerSelect.appendChild(none);
+        let shown = 0;
+        for (const [, teamLabel, players] of sides) {
+          const group = document.createElement("optgroup");
+          group.label = teamLabel;
+          for (const player of players) {
+            const matchesNow = playerMatchesSearch(player, query);
+            if (!matchesNow && player.playerId !== st.a.scorer) continue;
+            const option = document.createElement("option");
+            option.value = player.playerId;
+            option.textContent = playerLabel(player);
+            if (ladderProblem(Object.assign({}, st.a, { scorer: player.playerId }), 3, sideOf) !== null) option.disabled = true;
+            group.appendChild(option);
+            if (matchesNow) shown += 1;
+          }
+          if (group.children.length > 0) scorerSelect.appendChild(group);
+        }
+        scorerSelect.value = st.a.scorer;
+        if (scorerSelect.value !== st.a.scorer) { st.a.scorer = ""; scorerSelect.value = ""; }
+        if (query.trim() !== "" && shown === 0) setText(searchStatus, "pred.ladder.scorerNoMatch", { q: query.trim() });
+        else { searchStatus.removeAttribute("data-i18n"); searchStatus.removeAttribute("data-i18n-vars"); searchStatus.textContent = ""; }
+      };
+      fillOptions();
+      search.addEventListener("input", fillOptions);
       scorerSelect.addEventListener("change", () => { st.a.scorer = scorerSelect.value; afterEdit(); });
-      field.appendChild(scorerSelect);
+      field.append(searchLabel, search, searchHint, searchStatus, scorerSelect);
       bodyHost.appendChild(field);
-      const note = document.createElement("p");
-      note.className = "ladder-hint ladder-none";
-      setText(note, "pred.ladder.noneNote");
-      bodyHost.appendChild(note);
+      bodyHost.appendChild(fix.node);
+      fix.show(proactive(blocked), currentProblem !== null);
+      if (goalless || st.a.scorer === "NONE") bodyHost.appendChild(noneNote());
       return;
     }
 
@@ -1315,17 +1725,22 @@ function buildLadderForm(match, mine, authState, activations, options) {
     noneButton.className = "team-toggle ladder-none";
     noneButton.setAttribute("aria-pressed", st.a.minuteNone ? "true" : "false");
     setText(noneButton, "pred.ladder.none.minute");
+    const noneCode = ladderProblem(Object.assign({}, st.a, { minuteNone: true }), 4, sideOf);
+    if (noneCode !== null) { noneButton.setAttribute("aria-disabled", "true"); noneButton.setAttribute("aria-describedby", fix.node.id); }
+    // With a 0-0 scoreline there is no minute to pick: the only answer is "no goals".
+    const minuteBlocked = ladderProblem(Object.assign({}, st.a, { minuteNone: false, minute: "1", stoppage: "" }), 4, sideOf) !== null;
     function syncMinuteControls() {
       const m = wholeNumberOrNull(minute.value);
       const boundary = m === 45 || m === 90;
-      stoppage.disabled = st.a.minuteNone || !boundary;
+      stoppage.disabled = st.a.minuteNone || minuteBlocked || !boundary;
       if (stoppage.disabled && !st.a.minuteNone) { stoppage.value = ""; st.a.stoppage = ""; }
-      minute.disabled = st.a.minuteNone;
+      minute.disabled = st.a.minuteNone || minuteBlocked;
       noneButton.setAttribute("aria-pressed", st.a.minuteNone ? "true" : "false");
     }
     minute.addEventListener("input", () => { st.a.minute = minute.value; st.a.minuteNone = false; syncMinuteControls(); afterEdit(); });
     stoppage.addEventListener("input", () => { st.a.stoppage = stoppage.value; afterEdit(); });
     noneButton.addEventListener("click", () => {
+      if (noneCode !== null) { fix.show([noneCode], false); return; } // not a choice: say why, change nothing
       st.a.minuteNone = !st.a.minuteNone;
       if (st.a.minuteNone) { st.a.minute = ""; st.a.stoppage = ""; minute.value = ""; stoppage.value = ""; }
       syncMinuteControls();
@@ -1336,36 +1751,53 @@ function buildLadderForm(match, mine, authState, activations, options) {
     const stoppageHint = document.createElement("p");
     stoppageHint.className = "msg";
     setText(stoppageHint, "pred.f.minuteHint");
-    const note = document.createElement("p");
-    note.className = "ladder-hint ladder-none";
-    setText(note, "pred.ladder.noneNote");
     field.append(label, row, stoppageHint);
-    bodyHost.append(field, noneButton, note);
+    bodyHost.append(field, noneButton, fix.node);
+    fix.show(proactive(minuteBlocked ? ["ONLY_NONE_WITH_NO_GOALS"] : []), currentProblem !== null);
+    if (goalless || st.a.minuteNone) bodyHost.appendChild(noneNote());
   }
-
-  // --- the panel: what is possible, never what was won ---
+  // --- the panel: where the person is, what could be sent, and what that could win — never what was won ---
   function renderPanel() {
     const offer = activationNow().offer;
-    const completed = ladderCompletedLevel(st.a, offer.maxLevel);
+    // What a send would carry right now (the same level the main button names): the level on screen once it is answered, otherwise the
+    // last complete one.
+    const completed = sendLevelNow();
     panelHost.replaceChildren();
+    // The step on screen and the level that is READY to send are different things: a step that is still empty is not ready, and what
+    // would be sent is the last complete level.
     const current = document.createElement("p");
     current.className = "ladder-current";
     setText(current, "pred.ladder.current", { level: { $t: "pred.ladder.level." + st.step } });
-    panelHost.appendChild(current);
+    const ready = document.createElement("p");
+    ready.className = "ladder-ready";
+    if (completed >= 1) setText(ready, "pred.ladder.ready", { level: { $t: "pred.ladder.level." + completed } });
+    else setText(ready, "pred.ladder.notReady");
+    panelHost.append(current, ready);
     const max = document.createElement("p");
-    // The prize described is that of the level this step would send with: the step's own level once it is answered, otherwise the
-    // last level that is complete. It is the highest prize that attempt can reach — never a prize already won.
-    const sendLevel = Math.min(st.step, completed);
-    if (sendLevel >= 1) {
-      setText(max, "pred.ladder.max", { prize: offer.levels[sendLevel - 1].label, condition: { $t: "pred.ladder.cond." + sendLevel } });
+    // The prize described is the highest that the ready level can reach — never a prize already won.
+    if (completed >= 1) {
+      setText(max, "pred.ladder.max", { n: completed, prize: offer.levels[completed - 1].label, condition: { $t: "pred.ladder.cond." + completed } });
     } else {
       setText(max, "pred.ladder.needAnswer");
     }
     panelHost.appendChild(max);
-    const claim = document.createElement("p");
-    claim.className = "ladder-hint";
-    setText(claim, "pred.ladder.noClaim");
-    panelHost.appendChild(claim);
+  }
+  // Prizes that are only PROPOSED (the server says so for this match): the notice is shown wherever the prizes are listed and before anything is
+  // sent. It is a notice only — the offer, the one prize per participant and the evaluation are exactly what they were.
+  const provisional = match.provisionalPrizes === true;
+  function provisionalNotice() {
+    const notice = document.createElement("p");
+    notice.className = "provisional-notice";
+    notice.setAttribute("role", "note");
+    setText(notice, "pred.provisional.notice");
+    return notice;
+  }
+  // The prize list, always visible (not inside the closed disclosure) while the prizes are provisional, with the notice above it.
+  function renderProvisional() {
+    provisionalHost.replaceChildren();
+    provisionalHost.hidden = !provisional;
+    if (!provisional) return;
+    const offer = activationNow().offer;
     const title = document.createElement("p");
     title.className = "ladder-offers-title";
     setText(title, "pred.ladder.offers");
@@ -1376,7 +1808,29 @@ function buildLadderForm(match, mine, authState, activations, options) {
       setText(item, "pred.ladder.offerRow", { n: entry.level, name: { $t: "pred.ladder.name." + entry.level }, prize: entry.label });
       list.appendChild(item);
     }
-    panelHost.append(title, list);
+    provisionalHost.append(provisionalNotice(), title, list);
+  }
+  // The long explanation, in a disclosure that stays as the person left it (it is filled in once per venue, not on every keystroke).
+  function renderHelp() {
+    const offer = activationNow().offer;
+    helpBody.replaceChildren();
+    if (provisional) helpBody.appendChild(provisionalNotice());
+    for (const key of ["pred.ladder.rules", "pred.ladder.noPenalty", "pred.ladder.noClaim"]) {
+      const p = document.createElement("p");
+      setText(p, key);
+      helpBody.appendChild(p);
+    }
+    const title = document.createElement("p");
+    title.className = "ladder-offers-title";
+    setText(title, "pred.ladder.offers");
+    const list = document.createElement("ul");
+    list.className = "ladder-offers";
+    for (const entry of offer.levels) {
+      const item = document.createElement("li");
+      setText(item, "pred.ladder.offerRow", { n: entry.level, name: { $t: "pred.ladder.name." + entry.level }, prize: entry.label });
+      list.appendChild(item);
+    }
+    helpBody.append(title, list);
   }
 
   // --- actions and review ---
@@ -1389,11 +1843,16 @@ function buildLadderForm(match, mine, authState, activations, options) {
     node.addEventListener("click", onClick);
     return node;
   }
+  // The level a send would carry: the level on screen once it is answered, otherwise the last complete level.
+  function sendLevelNow() {
+    const completed = completedNow();
+    return completed >= st.step ? st.step : completed;
+  }
 
   function renderActions() {
     actionsHost.replaceChildren();
     const offer = activationNow().offer;
-    const completed = ladderCompletedLevel(st.a, offer.maxLevel);
+    const completed = completedNow();
     if (st.view === "review") {
       actionsHost.append(
         button("btn-secondary", "pred.ladder.btn.edit", null, () => { st.view = "edit"; st.step = st.declared; renderAll(); }, st.busy),
@@ -1402,12 +1861,14 @@ function buildLadderForm(match, mine, authState, activations, options) {
       return;
     }
     const complete = completed >= st.step;
+    const sendLevel = sendLevelNow();
+    if (canLeave) actionsHost.appendChild(button("btn-secondary", "pred.mine.cancelEdit", null, () => opts.onBack(), st.busy));
     if (st.step > 1) actionsHost.appendChild(button("btn-secondary", "pred.ladder.btn.back", null, () => { st.step -= 1; renderAll(); }, st.busy));
     if (st.step < offer.maxLevel) {
       actionsHost.appendChild(button("btn-secondary", "pred.ladder.btn.continue", { n: st.step + 1 }, () => { st.step += 1; renderAll(); }, st.busy || !complete));
     }
     actionsHost.appendChild(
-      button("btn-primary", st.saved ? "pred.ladder.btn.save" : "pred.ladder.btn.send", { n: st.step }, () => { st.declared = st.step; st.view = "review"; renderAll(); }, st.busy || !complete)
+      button("btn-primary", st.saved ? "pred.ladder.btn.save" : "pred.ladder.btn.send", { n: Math.max(sendLevel, 1) }, () => { st.declared = sendLevel; st.view = "review"; renderAll(); }, st.busy || sendLevel < 1)
     );
     if (!complete) {
       const need = document.createElement("p");
@@ -1434,8 +1895,9 @@ function buildLadderForm(match, mine, authState, activations, options) {
       list.appendChild(item);
     }
     reviewHost.append(title, level, list);
+    if (provisional) reviewHost.appendChild(provisionalNotice());
     const prize = document.createElement("p");
-    setText(prize, "pred.ladder.max", { prize: offer.levels[st.declared - 1].label, condition: { $t: "pred.ladder.cond." + st.declared } });
+    setText(prize, "pred.ladder.max", { n: st.declared, prize: offer.levels[st.declared - 1].label, condition: { $t: "pred.ladder.cond." + st.declared } });
     reviewHost.appendChild(prize);
     if (st.declared < offer.maxLevel) {
       const notSent = document.createElement("p");
@@ -1457,6 +1919,8 @@ function buildLadderForm(match, mine, authState, activations, options) {
   function renderAll() {
     clampStep();
     renderStatus();
+    renderLegacy();
+    renderRemoved();
     renderSteps();
     const editing = st.view === "edit";
     bodyHost.hidden = !editing;
@@ -1469,6 +1933,8 @@ function buildLadderForm(match, mine, authState, activations, options) {
   function afterEdit() {
     persist();
     renderStatus();
+    renderLegacy();
+    renderRemoved();
     renderSteps();
     renderPanel();
     renderActions();
@@ -1483,9 +1949,16 @@ function buildLadderForm(match, mine, authState, activations, options) {
     setMessage("pred.submitting");
     const declared = st.declared;
     try {
-      const position = await getCurrentPosition();
-      if (!position) { setMessage("pred.locationRequired", null, "error"); return; }
-      lastPosition = position;
+      const measured = await measurePosition();
+      if (!measured.ok) {
+        // No measurement is not "outside the venue": say what happened and send nothing.
+        geo = { kind: "failed", reason: measured.reason };
+        showGeo();
+        setMessage(GEO_REASON_KEYS[measured.reason], null, "error");
+        return;
+      }
+      const position = measured.position;
+      geo = { kind: "measured", position };
       showGeo();
       const offer = activationNow().offer;
       const body = Object.assign(ladderPayload(st.a, declared), {
@@ -1504,10 +1977,12 @@ function buildLadderForm(match, mine, authState, activations, options) {
         const fromServer = ladderAnswersFromSaved(st.saved);
         Object.assign(kept, fromServer);
         st.a = kept;
+        st.removed = [];
         st.view = "edit";
         st.step = declared;
         removeLadderDraft(draftKey); // saved: nothing is left unsent, and nothing above the chosen level is kept anywhere
         ladderUnsent.delete(draftKey);
+        if (typeof opts.onSaved === "function") { opts.onSaved(st.saved, declared); return; } // the page shows "My participation" now
         setMessage("pred.ladder.saved", { n: declared, name: { $t: "pred.ladder.name." + declared } }, "success");
       } else {
         persist();
@@ -1530,6 +2005,8 @@ function buildLadderForm(match, mine, authState, activations, options) {
     }
   }
 
+  renderHelp();
+  renderProvisional();
   renderAll();
   if (restored === "draft") setMessage("pred.ladder.draftRestored", null, null);
   else if (restored === "overSaved") setMessage("pred.ladder.draftRestoredOverSaved", null, null);
@@ -1552,7 +2029,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
 
 // A local draft that does not start from the prediction now saved on the server. Nothing is applied and nothing is sent: the person
 // chooses between keeping what is saved (the draft is discarded) and working from the draft (still unsent until they confirm).
-function buildLadderConflict(match, mine, authState, activations, stored, saved) {
+function buildLadderConflict(match, mine, authState, activations, stored, saved, opts) {
   const draftLevel = Math.max(1, ladderCompletedLevel(stored.a, 4));
   // Both lines carry the scoreline, so the person can tell the two versions apart even when they reach the same level.
   const savedVars = { n: saved.attemptedLevel, name: { $t: "pred.ladder.name." + saved.attemptedLevel }, score: saved.scoreline.home + "–" + saved.scoreline.away };
@@ -1569,10 +2046,95 @@ function buildLadderConflict(match, mine, authState, activations, stored, saved)
       <button type="button" class="btn-secondary" data-conflict-use ${ix("pred.ladder.conflict.use")}>${tx("pred.ladder.conflict.use")}</button>
     </div>
   </div>`);
-  const resolve = (conflictChoice) => panel.replaceWith(buildLadderForm(match, mine, authState, activations, { conflictChoice }));
+  const resolve = (conflictChoice) => panel.replaceWith(buildLadderForm(match, mine, authState, activations, Object.assign({}, opts, { conflictChoice })));
   panel.querySelector("[data-conflict-keep]").addEventListener("click", () => resolve("keep"));
   panel.querySelector("[data-conflict-use]").addEventListener("click", () => resolve("use"));
   return panel;
+}
+
+// "My participation": what the server has saved, in one place, without opening the form. Editing is an explicit action (never opened
+// on its own) and only while the match is open and the venue still takes participations. It describes what was SENT and its state; it
+// never says a prize was won.
+const LADDER_LOCK_KEYS = { ACTIVATION_DISABLED: "pred.mine.locked.disabled", VENUE_UNAVAILABLE: "pred.mine.locked.venue", OFFER_UNAVAILABLE: "pred.mine.locked.offer" };
+// Why the venue of a saved participation would not take a new edit, or null. `activation` is the venue activation as the public list shows it.
+function ladderEditBlock(activation) {
+  if (!activation || !activation.enabled) return "ACTIVATION_DISABLED";
+  if (!activation.venue || !activation.venue.active) return "VENUE_UNAVAILABLE";
+  if (!activation.offer || !activation.offer.available) return "OFFER_UNAVAILABLE";
+  return null;
+}
+
+function buildLadderSummary(match, mine, authState, hooks) {
+  const saved = mine.prediction;
+  const state = hooks.state; // "open" | "closed"
+  const draftKey = ladderDraftKey(authState.gamingMemberId, match.matchId);
+  const activation = (match.venueActivations || []).find((a) => a.venueActivationId === saved.venueActivationId) || null;
+  // Editing is offered only while the match is open AND the venue would take a new edit (the same three conditions the list of venues
+  // that take participations uses). When it would not, the state line says why instead of promising an edit that cannot be made.
+  const lockReason = state === "open" ? ladderEditBlock(activation) : null;
+  const editable = state === "open" && lockReason === null;
+  const hasDraft = state === "open" && (readLadderDraft(draftKey, authState.gamingMemberId, match.matchId) !== null || ladderUnsent.has(draftKey));
+  const answers = ladderAnswersFromSaved(saved);
+  const box = el(`<div class="mine-summary" data-mine-summary>
+    <h3 ${ix("pred.mine.title")}>${tx("pred.mine.title")}</h3>
+    <div data-mine-notice aria-live="polite"></div>
+    <ul data-mine-facts></ul>
+    <p data-mine-state></p>
+    <ul class="ladder-offers" data-mine-answers></ul>
+    <div data-mine-extra></div>
+    <div class="ladder-actions" data-mine-actions></div>
+  </div>`);
+  if (hooks.notice) {
+    const notice = document.createElement("p");
+    notice.className = "msg success";
+    setText(notice, hooks.notice.key, hooks.notice.vars);
+    box.querySelector("[data-mine-notice]").appendChild(notice);
+  }
+  const facts = box.querySelector("[data-mine-facts]");
+  const fact = (fill) => { const item = document.createElement("li"); fill(item); facts.appendChild(item); };
+  fact((item) => setText(item, "pred.mine.venue", { venue: activation && activation.venue ? activation.venue.name : { $t: "pred.mine.noVenue" } }));
+  fact((item) => setText(item, "pred.mine.level", { level: { $t: "pred.ladder.level." + saved.attemptedLevel } }));
+  // A time that is missing or unreadable is left out, never drawn as an invalid date.
+  const validTime = (iso) => typeof iso === "string" && !Number.isNaN(new Date(iso).getTime());
+  if (validTime(saved.createdAt)) fact((item) => setTimeText(item, "pred.mine.sent", saved.createdAt));
+  if (validTime(saved.createdAt) && validTime(saved.updatedAt) && new Date(saved.updatedAt).getTime() - new Date(saved.createdAt).getTime() > 1000) {
+    fact((item) => setTimeText(item, "pred.mine.changed", saved.updatedAt));
+  }
+  const stateNode = box.querySelector("[data-mine-state]");
+  if (state === "open") {
+    if (lockReason === null) setTimeText(stateNode, "pred.mine.open", match.kickoffAt);
+    else setText(stateNode, LADDER_LOCK_KEYS[lockReason]);
+  } else setText(stateNode, "pred.mine.closed");
+  const list = box.querySelector("[data-mine-answers]");
+  for (let n = 1; n <= saved.attemptedLevel; n++) {
+    const item = document.createElement("li");
+    setText(item, LADDER_ANSWER_KEYS[n], ladderRowVars(match, answers, n));
+    list.appendChild(item);
+  }
+  const extra = box.querySelector("[data-mine-extra]");
+  const legacyLevels = ladderProblemLevels(answers, 4, ladderSideOf(match));
+  if (legacyLevels.length > 0) {
+    const legacy = ladderCategoryList("pred.ladder.legacy", legacyLevels);
+    legacy.className = "ladder-fix";
+    extra.appendChild(legacy);
+  }
+  if (hasDraft) {
+    const draft = document.createElement("p");
+    draft.className = "msg";
+    setText(draft, "pred.mine.draft");
+    extra.appendChild(draft);
+  }
+  const actions = box.querySelector("[data-mine-actions]");
+  if (editable) {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn-primary";
+    edit.setAttribute("data-mine-edit", "");
+    setText(edit, hasDraft ? "pred.mine.continue" : "pred.mine.edit");
+    edit.addEventListener("click", () => hooks.onEdit());
+    actions.appendChild(edit);
+  }
+  return box;
 }
 
 // The finalized result of a progressive prediction: the level attempted, the level won (never above it), one outcome per category in
@@ -1622,16 +2184,17 @@ function buildLadderResult(match, mine) {
 }
 
 function renderProgressive(card, body, match, mine, authState, kickoffPassed) {
+  const draftKey = ladderDraftKey(authState.gamingMemberId, match.matchId);
   // Once the match is closed (kick-off passed or a result exists) an unsent draft can no longer become a prediction: it is dropped.
-  if (kickoffPassed || match.finalized) removeLadderDraft(ladderDraftKey(authState.gamingMemberId, match.matchId));
+  if (kickoffPassed || match.finalized) removeLadderDraft(draftKey);
   if (match.finalized && mine.evaluation && mine.prediction) {
     body.appendChild(buildLadderResult(match, mine));
     return card;
   }
+  const savedNow = () => (mine.prediction && mine.prediction.predictionContract === "PROGRESSIVE_LADDER_V1" ? mine.prediction : null);
   if (kickoffPassed || match.finalized) {
-    if (mine.prediction) {
-      const vars = { n: mine.prediction.attemptedLevel, name: { $t: "pred.ladder.name." + mine.prediction.attemptedLevel } };
-      body.appendChild(el(`<p class="msg" ${ix("pred.ladder.awaiting", vars)}>${tx("pred.ladder.awaiting", vars)}</p>`));
+    if (savedNow()) {
+      body.appendChild(buildLadderSummary(match, mine, authState, { state: "closed" }));
     } else {
       body.appendChild(el(`<p class="msg" ${ix("pred.missed")}>${tx("pred.missed")}</p>`));
     }
@@ -1639,12 +2202,37 @@ function renderProgressive(card, body, match, mine, authState, kickoffPassed) {
   }
   // Only an activation whose offer is valid (a consecutive prefix of prizes starting at Easy) takes participations.
   const activations = (match.venueActivations || []).filter((a) => a.enabled && a.venue && a.venue.active && a.offer && a.offer.available);
-  if (activations.length === 0) {
-    removeLadderDraft(ladderDraftKey(authState.gamingMemberId, match.matchId));
+  if (activations.length === 0 && !savedNow()) {
+    removeLadderDraft(draftKey);
     body.appendChild(el(`<p class="msg" ${ix("pred.ladder.noOffer")}>${tx("pred.ladder.noOffer")}</p>`));
     return card;
   }
-  body.appendChild(buildLadderForm(match, mine, authState, activations));
+  // Nothing saved yet: the form is the way in. Something saved: "My participation" comes first and the form opens only when the person
+  // asks to edit (an unsent draft does not reopen it by itself either). Going back to the summary keeps the form, and what was typed.
+  const host = document.createElement("div");
+  host.setAttribute("data-ladder-host", "");
+  body.appendChild(host);
+  let formNode = null;
+  const showSummary = (notice) => {
+    host.replaceChildren(buildLadderSummary(match, mine, authState, { state: "open", notice: notice || null, onEdit: showForm }));
+  };
+  const showForm = () => {
+    if (!formNode) {
+      const built = buildLadderForm(match, mine, authState, activations, {
+        onBack: () => showSummary(),
+        onSaved: (prediction, level) => {
+          mine.prediction = prediction;
+          formNode = null; // what is saved changed: the next edit starts from it
+          showSummary({ key: "pred.ladder.saved", vars: { n: level, name: { $t: "pred.ladder.name." + level } } });
+        },
+      });
+      formNode = built.hasAttribute("data-ladder-conflict") ? null : built;
+      host.replaceChildren(built);
+      return;
+    }
+    host.replaceChildren(formNode);
+  };
+  if (savedNow()) showSummary(); else showForm();
   return card;
 }
 
@@ -1655,13 +2243,34 @@ async function renderMatch(match) {
   // Team names are data. When a team is missing the page falls back to a generic label (translated), never to a guessed name.
   const homeTeamName = esc(match.homeTeam ? match.homeTeam.name : t("pred.home"));
   const awayTeamName = esc(match.awayTeam ? match.awayTeam.name : t("pred.away"));
+  // The crest (decoration) goes in front of the name of a team that exists; a missing team has no crest and keeps the generic label.
+  const homeClub = match.homeTeam ? ` data-club="${homeTeamName}"` : "";
+  const awayClub = match.awayTeam ? ` data-club="${awayTeamName}"` : "";
 
   const card = el(`<div class="card accent" data-match-id="${esc(match.matchId)}">
-    <div class="match-teams"><span>${homeTeamName}</span><span class="match-vs" ${ix("pred.vs")}>${tx("pred.vs")}</span><span>${awayTeamName}</span></div>
-    <div class="match-meta"><span>${esc(match.competition)}</span><span data-kickoff="${esc(match.kickoffAt)}">${esc(formatKickoff(match.kickoffAt))}</span></div>
+    <div class="match-teams"><span class="team-label" data-side="home"${homeClub}>${homeTeamName}</span><span class="match-vs" ${ix("pred.vs")}>${tx("pred.vs")}</span><span class="team-label" data-side="away"${awayClub}>${awayTeamName}</span></div>
+    <div class="match-meta"><span>${esc(match.competition)}</span></div>
+    <div class="match-times" data-match-times></div>
     <div id="match-body-${match.matchId}"></div>
   </div>`);
+  if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(card);
   const body = card.querySelector(`#match-body-${match.matchId}`);
+  // ONE instant (kickoffAt) is both the start of the match and the end of participation; the contract has no separate close time, so
+  // the two labels show the same time and say so. Open: both. Closed or finished: the participation is closed since that instant.
+  const timesHost = card.querySelector("[data-match-times]");
+  const timeLine = (key) => { const line = document.createElement("p"); setTimeText(line, key, match.kickoffAt); timesHost.appendChild(line); };
+  if (kickoffPassed || match.finalized) timeLine("pred.closedLabel");
+  else {
+    // An approved event with a participation window says when it opens. This is information: the server refuses before that moment, and the page
+    // does not hide or switch anything to pretend to do so.
+    if (typeof match.participationOpensAt === "string" && !Number.isNaN(new Date(match.participationOpensAt).getTime())) {
+      const opens = document.createElement("p");
+      setTimeText(opens, "pred.opensLabel", match.participationOpensAt);
+      timesHost.appendChild(opens);
+    }
+    timeLine("pred.kickoffLabel");
+    timeLine("pred.closesLabel");
+  }
 
   if (match.finalized) {
     body.appendChild(el(`<span class="status-pill" ${ix("pred.result", { home: match.finalResult.homeScore, away: match.finalResult.awayScore })}>${tx("pred.result", { home: match.finalResult.homeScore, away: match.finalResult.awayScore })}</span>`));
@@ -1699,7 +2308,7 @@ async function renderMatch(match) {
   if (match.finalized && mine.evaluation) {
     const ev = mine.evaluation;
     const pred = mine.prediction;
-    const scorerName = findPlayerName(match, pred.predictedGoalscorerPlayerId);
+    const scorerName = findPlayerLabel(match, pred.predictedGoalscorerPlayerId);
     const homeName = match.homeTeam ? match.homeTeam.name : null;
     const awayName = match.awayTeam ? match.awayTeam.name : null;
     const firstTeamVar =
@@ -1769,10 +2378,10 @@ async function renderMatch(match) {
       <select id="goalscorer-select-${match.matchId}">
         <option value="" ${ix("pred.f.noScorerOpt")}>${tx("pred.f.noScorerOpt")}</option>
         <optgroup label="${homeTeamName}">
-          ${(match.homeTeam ? match.homeTeam.players : []).map((p) => `<option value="${esc(p.playerId)}">${esc(p.name)}</option>`).join("")}
+          ${(match.homeTeam ? sortedPlayers(match.homeTeam.players) : []).map((p) => `<option value="${esc(p.playerId)}">${esc(playerLabel(p))}</option>`).join("")}
         </optgroup>
         <optgroup label="${awayTeamName}">
-          ${(match.awayTeam ? match.awayTeam.players : []).map((p) => `<option value="${esc(p.playerId)}">${esc(p.name)}</option>`).join("")}
+          ${(match.awayTeam ? sortedPlayers(match.awayTeam.players) : []).map((p) => `<option value="${esc(p.playerId)}">${esc(playerLabel(p))}</option>`).join("")}
         </optgroup>
       </select>
     </div>
@@ -1788,8 +2397,8 @@ async function renderMatch(match) {
     <div class="field">
       <label ${ix("pred.f.firstQ")}>${tx("pred.f.firstQ")}</label>
       <div class="team-toggle-row" id="first-team-toggle-${match.matchId}">
-        <button type="button" class="team-toggle" data-value="HOME">${homeTeamName}</button>
-        <button type="button" class="team-toggle" data-value="AWAY">${awayTeamName}</button>
+        <button type="button" class="team-toggle" data-value="HOME"${homeClub}>${homeTeamName}</button>
+        <button type="button" class="team-toggle" data-value="AWAY"${awayClub}>${awayTeamName}</button>
         <button type="button" class="team-toggle" data-value="" ${ix("pred.noGoal")}>${tx("pred.noGoal")}</button>
       </div>
     </div>
@@ -1797,6 +2406,7 @@ async function renderMatch(match) {
     <p class="msg" id="submit-msg-${match.matchId}"></p>
   </form>`);
   body.appendChild(form);
+  if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(form);
 
   const goalscorerSelect = form.querySelector(`#goalscorer-select-${match.matchId}`);
   if (mine.prediction && mine.prediction.predictedGoalscorerPlayerId) {
@@ -2024,12 +2634,10 @@ if (typeof UrbanoAuth.onIdentityChange === "function") {
 }
 
 // A change of language: everything with data-i18n is re-translated in place by UrbanoI18n itself; what remains is the parts that are
-// not a plain table lookup — kick-off times (formatted in the chosen language) and server messages (known ones translate, unknown
+// not a plain table lookup — the sentences that carry a time (formatted in the chosen language) and server messages (known ones translate, unknown
 // ones follow the rule in serverMessageText).
 UrbanoI18n.onChange(() => {
-  for (const node of content.querySelectorAll("[data-kickoff]")) {
-    node.textContent = formatKickoff(node.getAttribute("data-kickoff"));
-  }
+  renderTimeNodes(content);
   for (const node of content.querySelectorAll("[data-server-message]")) {
     node.textContent = serverMessageText(node.getAttribute("data-server-message"));
   }

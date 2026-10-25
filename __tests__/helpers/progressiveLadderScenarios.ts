@@ -240,7 +240,9 @@ export async function settle(env: LadderEnv, world: LadderWorld, key: OfficialKe
 export function answersFor(world: LadderWorld, level: number, flags: Flags): ProgressiveAnswers {
   const answers: ProgressiveAnswers = {
     attemptedLevel: level as 1 | 2 | 3 | 4,
-    scoreline: flags.S ? { home: 2, away: 1 } : { home: 1, away: 0 },
+    // 1-1 is a wrong scoreline against the 2-1 match that is still coherent with either first team and either scorer
+    // (both teams have a goal), so every combination of right and wrong picks is a request the contract accepts.
+    scoreline: flags.S ? { home: 2, away: 1 } : { home: 1, away: 1 },
   };
   if (level >= 2) answers.firstTeam = { kind: "PICKED", team: flags.F ? "HOME" : "AWAY" };
   if (level >= 3) answers.goalscorer = { kind: "PICKED", playerId: flags.G ? world.players.mbappe : world.players.pedri };
@@ -275,23 +277,25 @@ export function twoOneCases(): LadderCase[] {
     expected: scenarioExpectation(c.level, c.flags),
   }));
   const none: LadderCase[] = [
+    // A NONE can only go with a 0-0 scoreline now (a NONE next to goals is refused as incoherent), so on a match WITH goals every NONE
+    // comes with a wrong scoreline and is itself wrong: the evaluation rule (NONE is right only when there were no goals) is unchanged.
     {
       official: "TWO_ONE",
-      name: "level 4: right scoreline, then NONE for team, player and minute on a match WITH goals (all three wrong)",
-      build: () => ({ attemptedLevel: 4, scoreline: { home: 2, away: 1 }, firstTeam: NONE, goalscorer: NONE, goalMinute: NONE }),
-      expected: expectationOf(4, outcomesOf(true, false, false, false)),
+      name: "level 4: a 0-0 scoreline with NONE for team, player and minute on a match WITH goals (all four wrong)",
+      build: () => ({ attemptedLevel: 4, scoreline: { home: 0, away: 0 }, firstTeam: NONE, goalscorer: NONE, goalMinute: NONE }),
+      expected: expectationOf(4, outcomesOf(false, false, false, false)),
     },
     {
       official: "TWO_ONE",
-      name: "level 2: right scoreline, NONE for the first team on a match WITH goals (wrong)",
-      build: () => ({ attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: NONE }),
-      expected: expectationOf(2, outcomesOf(true, false, null, null)),
+      name: "level 2: a 0-0 scoreline with NONE for the first team on a match WITH goals (both wrong)",
+      build: () => ({ attemptedLevel: 2, scoreline: { home: 0, away: 0 }, firstTeam: NONE }),
+      expected: expectationOf(2, outcomesOf(false, false, null, null)),
     },
     {
       official: "TWO_ONE",
-      name: "level 3: right scoreline and first team, NONE for the goalscorer on a match WITH goals (wrong)",
-      build: () => ({ attemptedLevel: 3, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" }, goalscorer: NONE }),
-      expected: expectationOf(3, outcomesOf(true, true, false, null)),
+      name: "level 3: a 0-0 scoreline with NONE for team and player on a match WITH goals (all three wrong)",
+      build: () => ({ attemptedLevel: 3, scoreline: { home: 0, away: 0 }, firstTeam: NONE, goalscorer: NONE }),
+      expected: expectationOf(3, outcomesOf(false, false, false, null)),
     },
   ];
   return [...prefixes, ...none];
@@ -319,35 +323,24 @@ export function goallessCases(): LadderCase[] {
       build: () => ({ attemptedLevel: 3, scoreline: zero, firstTeam: NONE, goalscorer: NONE }),
       expected: expectationOf(3, outcomesOf(true, true, true, null)),
     },
+    // With a goalless official result, a pick is wrong, and a pick can only be sent next to a scoreline with goals (which is wrong too).
     {
       official: "GOALLESS",
-      name: "scoreline wrong with every NONE right: three hits, nothing won",
-      build: () => ({ attemptedLevel: 4, scoreline: { home: 1, away: 0 }, firstTeam: NONE, goalscorer: NONE, goalMinute: NONE }),
-      expected: expectationOf(4, outcomesOf(false, true, true, true)),
-    },
-    {
-      official: "GOALLESS",
-      name: "a picked first team is wrong when there are no goals: level 1 only, though two NONEs are right",
+      name: "1-0 with a picked team, player and minute when there are no goals: all four wrong",
       build: (world) => ({
         attemptedLevel: 4,
-        scoreline: zero,
+        scoreline: { home: 1, away: 0 },
         firstTeam: { kind: "PICKED", team: "HOME" },
-        goalscorer: NONE,
-        goalMinute: NONE,
+        goalscorer: { kind: "PICKED", playerId: world.players.mbappe },
+        goalMinute: { kind: "PICKED", regulation: 30, stoppage: null },
       }),
-      expected: expectationOf(4, outcomesOf(true, false, true, true)),
+      expected: expectationOf(4, outcomesOf(false, false, false, false)),
     },
     {
       official: "GOALLESS",
-      name: "a picked goalscorer is wrong when there are no goals",
-      build: (world) => ({
-        attemptedLevel: 4,
-        scoreline: zero,
-        firstTeam: NONE,
-        goalscorer: { kind: "PICKED", playerId: world.players.mbappe },
-        goalMinute: NONE,
-      }),
-      expected: expectationOf(4, outcomesOf(true, true, false, true)),
+      name: "level 2: 1-0 with the home team first when there are no goals: both wrong",
+      build: () => ({ attemptedLevel: 2, scoreline: { home: 1, away: 0 }, firstTeam: { kind: "PICKED", team: "HOME" } }),
+      expected: expectationOf(2, outcomesOf(false, false, null, null)),
     },
     {
       official: "GOALLESS",

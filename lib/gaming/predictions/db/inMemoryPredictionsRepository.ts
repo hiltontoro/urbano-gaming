@@ -27,6 +27,7 @@ import {
   computeLadderOffer,
   hitCountOf,
   parseProgressiveAnswers,
+  assertCoherentAnswers,
   progressiveColumnsOf,
   wonLevelOf,
   type ProgressiveAnswers,
@@ -225,6 +226,21 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
     };
     this.players.set(record.playerId, record);
     return record;
+  }
+
+  /**
+   * Seeds the roster fields of a player (squad number, position, provenance). It is NOT on the repository interface: in the real system only
+   * the local roster loader writes those columns, so this exists for the behavioural tests alone.
+   */
+  setRosterFields(
+    playerId: string,
+    fields: { jerseyNumber: number | null; position: PlayerRecord["position"]; rosterSource?: string | null; rosterConsultedOn?: string | null }
+  ): PlayerRecord {
+    const record = this.players.get(playerId);
+    if (!record) throw new Error(`Unknown player ${playerId}`);
+    const next: PlayerRecord = { ...record, ...fields, rosterSource: fields.rosterSource ?? null, rosterConsultedOn: fields.rosterConsultedOn ?? null };
+    this.players.set(playerId, next);
+    return next;
   }
 
   async editPlayer(playerId: string, input: { name: string }): Promise<PlayerRecord> {
@@ -760,6 +776,16 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
       if (!player.active) throw new InvalidGoalscorerSelectionError();
     }
 
+    // Coherence between the answers (a new answer or an edit; an exact replay returned above). Mirrors the database function.
+    assertCoherentAnswers(
+      answers,
+      answers.goalscorer !== undefined && answers.goalscorer.kind === "PICKED"
+        ? this.players.get(answers.goalscorer.playerId)!.teamId === match.homeTeamId
+          ? "HOME"
+          : "AWAY"
+        : null
+    );
+
     const existing = [...this.predictions.values()].find(
       (p) => p.matchId === input.matchId && p.gamingMemberId === input.gamingMemberId
     );
@@ -811,6 +837,48 @@ export class InMemoryPredictionsRepository implements PredictionsRepository {
 
   async listPredictionsForMatch(matchId: string): Promise<PredictionRecord[]> {
     return [...this.predictions.values()].filter((p) => p.matchId === matchId);
+  }
+
+  async listPredictionsForMember(gamingMemberId: string, limit = 50): Promise<PredictionRecord[]> {
+    return [...this.predictions.values()]
+      .filter((p) => p.gamingMemberId === gamingMemberId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+      .slice(0, Math.max(1, Math.min(limit, 200)));
+  }
+
+  // Batch reads for a member's history (see the interface): the same records the single reads return, for a list of ids.
+  async getMatchesByIds(matchIds: string[]): Promise<MatchRecord[]> {
+    return [...new Set(matchIds)].map((id) => this.matches.get(id)).filter((record): record is MatchRecord => record !== undefined);
+  }
+
+  async getTeamsByIds(teamIds: string[]): Promise<TeamRecord[]> {
+    return [...new Set(teamIds)].map((id) => this.teams.get(id)).filter((record): record is TeamRecord => record !== undefined);
+  }
+
+  async getPlayersByIds(playerIds: string[]): Promise<PlayerRecord[]> {
+    return [...new Set(playerIds)].map((id) => this.players.get(id)).filter((record): record is PlayerRecord => record !== undefined);
+  }
+
+  async getVenueActivationsByIds(venueActivationIds: string[]): Promise<VenueActivationRecord[]> {
+    return [...new Set(venueActivationIds)].map((id) => this.activations.get(id)).filter((record): record is VenueActivationRecord => record !== undefined);
+  }
+
+  async getVenuesByIds(venueIds: string[]): Promise<VenueRecord[]> {
+    return [...new Set(venueIds)].map((id) => this.venues.get(id)).filter((record): record is VenueRecord => record !== undefined);
+  }
+
+  async listPrizeTiersForActivations(venueActivationIds: string[]): Promise<PrizeTierRecord[]> {
+    const wanted = new Set(venueActivationIds);
+    return [...this.prizeTiers.values()].filter((tier) => wanted.has(tier.venueActivationId));
+  }
+
+  async getCurrentEvaluationsForPredictions(predictionIds: string[]): Promise<EvaluationRecord[]> {
+    const found: EvaluationRecord[] = [];
+    for (const id of new Set(predictionIds)) {
+      const current = await this.getCurrentEvaluationForPrediction(id);
+      if (current) found.push(current);
+    }
+    return found;
   }
 
   async saveDraftMatchResult(input: {

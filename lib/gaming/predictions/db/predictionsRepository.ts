@@ -170,6 +170,26 @@ export interface PredictionsRepository {
     gamingMemberId: string
   ): Promise<PredictionRecord | null>;
   listPredictionsForMatch(matchId: string): Promise<PredictionRecord[]>;
+  /**
+   * The participations of ONE member, newest first, at most `limit` (default 50). Read-only: it touches no result, no XP and no
+   * redemption. The member id is whatever the caller passes; the route that exposes it passes only the verified caller's own.
+   */
+  listPredictionsForMember(gamingMemberId: string, limit?: number): Promise<PredictionRecord[]>;
+
+  /**
+   * Batch reads for a member's history. Each takes the ids it needs (duplicates are ignored, an empty list returns [] without a
+   * request) and returns the records that exist, in no particular order, in ONE request — so building a history costs a constant
+   * number of requests instead of several per participation. Read-only; none of them reads a result, XP, a qualification or a
+   * redemption. The ids are whatever the caller passes: the history passes only ids that belong to the signed-in member's own rows.
+   */
+  getMatchesByIds(matchIds: string[]): Promise<MatchRecord[]>;
+  getTeamsByIds(teamIds: string[]): Promise<TeamRecord[]>;
+  getPlayersByIds(playerIds: string[]): Promise<PlayerRecord[]>;
+  getVenueActivationsByIds(venueActivationIds: string[]): Promise<VenueActivationRecord[]>;
+  getVenuesByIds(venueIds: string[]): Promise<VenueRecord[]>;
+  listPrizeTiersForActivations(venueActivationIds: string[]): Promise<PrizeTierRecord[]>;
+  /** The current evaluation of each of these predictions that has one (the same one getCurrentEvaluationForPrediction would return). */
+  getCurrentEvaluationsForPredictions(predictionIds: string[]): Promise<EvaluationRecord[]>;
 
   // Match Results. Draft save, finalize and correct are all atomic RPCs
   // serialized per match: the save decides initial draft versus

@@ -376,6 +376,8 @@ describe("the offered levels, enforced by the function and by the table", () => 
     const { e, w } = await world([1, 2]);
     const member = await e.newMember("direct-function");
     const digest = (await offerDigestOf(e, w))!;
+    // The scoreline is 0-0 because a "none" answer is only coherent with no goals: the test is about the offer (level, fingerprint), not
+    // about coherence, so its fixture must be coherent whichever version of the function it meets.
     const call = (level: number, stale = false) =>
       withDb(async (client) => {
         await client.query("begin");
@@ -383,7 +385,7 @@ describe("the offered levels, enforced by the function and by the table", () => 
           await client.query("set local session_replication_role = replica");
           const states = (n: number) => (level >= n ? "'NONE'" : "'NOT_ATTEMPTED'");
           const result = await client.query(
-            `select * from upsert_progressive_prediction_atomically($1,$2,$3,$4,1,0,${states(2)},null,${states(3)},null,${states(4)},null,null,$5,now(),1,null,true)`,
+            `select * from upsert_progressive_prediction_atomically($1,$2,$3,$4,0,0,${states(2)},null,${states(3)},null,${states(4)},null,null,$5,now(),1,null,true)`,
             [w.matchId, member, w.activationId, level, stale ? "0".repeat(64) : digest]
           );
           return { ok: true as const, level: result.rows[0].attempted_level };
@@ -1142,12 +1144,11 @@ describe("an exact replay of the accepted request returns the confirmed row and 
       ["the home score", (w) => ({ ...answersFor(w, 4, ALL), scoreline: { home: 3, away: 1 } })],
       ["the away score", (w) => ({ ...answersFor(w, 4, ALL), scoreline: { home: 2, away: 2 } })],
       ["the first team", (w) => ({ ...answersFor(w, 4, ALL), firstTeam: { kind: "PICKED", team: "AWAY" } })],
-      ["the first team turned into 'no team'", (w) => ({ ...answersFor(w, 4, ALL), firstTeam: { kind: "NONE" } })],
       ["the goalscorer", (w) => ({ ...answersFor(w, 4, ALL), goalscorer: { kind: "PICKED", playerId: w.players.lewa } })],
-      ["the goalscorer turned into 'no player'", (w) => ({ ...answersFor(w, 4, ALL), goalscorer: { kind: "NONE" } })],
       ["the goal minute", (w) => ({ ...answersFor(w, 4, ALL), goalMinute: { kind: "PICKED", regulation: 31, stoppage: null } })],
       ["added time on a boundary minute", (w) => ({ ...answersFor(w, 4, ALL), goalMinute: { kind: "PICKED", regulation: 45, stoppage: 2 } })],
-      ["the goal minute turned into 'no goals'", (w) => ({ ...answersFor(w, 4, ALL), goalMinute: { kind: "NONE" } })],
+      // A NONE can only accompany a 0-0 scoreline now, so the "turned into none" variations are one: the whole prediction turned into 0-0 and none.
+      ["the whole prediction turned into 0-0 with none for team, player and minute", () => ({ attemptedLevel: 4, scoreline: { home: 0, away: 0 }, firstTeam: { kind: "NONE" }, goalscorer: { kind: "NONE" }, goalMinute: { kind: "NONE" } })],
       ["the level, reduced", (w) => answersFor(w, 3, ALL)],
     ];
 
@@ -1248,7 +1249,7 @@ describe("the historical write path never creates or edits a progressive predict
     expectRejected(await probe(functionCall, [w.matchId, stranger, w.activationId, 2]), /CONTRACT_MISMATCH/, "create at the function");
     expect(await rowState(w.matchId, stranger)).toEqual([]);
 
-    const stored = await submitAs(e, w, member, { attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "NONE" } });
+    const stored = await submitAs(e, w, member, { attemptedLevel: 2, scoreline: { home: 2, away: 1 }, firstTeam: { kind: "PICKED", team: "HOME" } });
     const before = await rowState(w.matchId, member);
     await expect(historical(w, member, { predictedHomeScore: 5 })).rejects.toBeInstanceOf(ContractMismatchError);
     await expect(historical(w, member)).rejects.toBeInstanceOf(ContractMismatchError);

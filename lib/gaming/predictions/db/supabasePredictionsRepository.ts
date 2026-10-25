@@ -93,6 +93,11 @@ function mapPlayer(row: any): PlayerRecord {
     name: row.name,
     active: row.active,
     createdAt: row.created_at,
+    // Reads select "*", so a database that does not have the roster columns yet simply yields undefined here: never an error.
+    jerseyNumber: typeof row.jersey_number === "number" ? row.jersey_number : null,
+    position: typeof row.position === "string" ? row.position : null,
+    rosterSource: typeof row.roster_source === "string" ? row.roster_source : null,
+    rosterConsultedOn: typeof row.roster_consulted_on === "string" ? row.roster_consulted_on : null,
   };
 }
 
@@ -837,6 +842,80 @@ export class SupabasePredictionsRepository implements PredictionsRepository {
       .eq("match_id", matchId);
     if (error) throw error;
     return (data ?? []).map(mapPrediction);
+  }
+
+  async listPredictionsForMember(gamingMemberId: string, limit = 50): Promise<PredictionRecord[]> {
+    const { data, error } = await this.client
+      .from("predictions")
+      .select("*")
+      .eq("gaming_member_id", gamingMemberId)
+      .order("created_at", { ascending: false })
+      .limit(Math.max(1, Math.min(limit, 200)));
+    if (error) throw error;
+    return (data ?? []).map(mapPrediction);
+  }
+
+  // Batch reads for a member's history (see the interface): ONE request per table for the whole list of ids (split only when a list
+  // is long enough to make the address too big), instead of one request per record.
+  private async readByIds(table: string, column: string, ids: string[]): Promise<any[]> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += 100) chunks.push(unique.slice(i, i + 100));
+    const pages = await Promise.all(
+      chunks.map(async (chunk) => {
+        const { data, error } = await this.client.from(table).select("*").in(column, chunk);
+        if (error) throw error;
+        return data ?? [];
+      })
+    );
+    return pages.flat();
+  }
+
+  async getMatchesByIds(matchIds: string[]): Promise<MatchRecord[]> {
+    return (await this.readByIds("matches", "match_id", matchIds)).map(mapMatch);
+  }
+
+  async getTeamsByIds(teamIds: string[]): Promise<TeamRecord[]> {
+    return (await this.readByIds("teams", "team_id", teamIds)).map(mapTeam);
+  }
+
+  async getPlayersByIds(playerIds: string[]): Promise<PlayerRecord[]> {
+    return (await this.readByIds("players", "player_id", playerIds)).map(mapPlayer);
+  }
+
+  async getVenueActivationsByIds(venueActivationIds: string[]): Promise<VenueActivationRecord[]> {
+    return (await this.readByIds("venue_activations", "venue_activation_id", venueActivationIds)).map(mapActivation);
+  }
+
+  async getVenuesByIds(venueIds: string[]): Promise<VenueRecord[]> {
+    return (await this.readByIds("venues", "venue_id", venueIds)).map(mapVenue);
+  }
+
+  async listPrizeTiersForActivations(venueActivationIds: string[]): Promise<PrizeTierRecord[]> {
+    return (await this.readByIds("prize_tiers", "venue_activation_id", venueActivationIds)).map(mapPrizeTier);
+  }
+
+  async getCurrentEvaluationsForPredictions(predictionIds: string[]): Promise<EvaluationRecord[]> {
+    const rows = await this.readByIds("evaluations", "prediction_id", predictionIds);
+    const byPrediction = new Map<string, any[]>();
+    for (const row of rows) {
+      const list = byPrediction.get(row.prediction_id as string) ?? [];
+      list.push(row);
+      byPrediction.set(row.prediction_id as string, list);
+    }
+    const current: EvaluationRecord[] = [];
+    for (const [predictionId, evaluations] of byPrediction) {
+      if (evaluations.length === 1) {
+        current.push(mapEvaluation(evaluations[0]));
+        continue;
+      }
+      // More than one evaluation means the result was corrected: which one is current is decided by the explicit supersession chain,
+      // which the single-record read already resolves. It is used for these predictions only, so the common case stays one request.
+      const resolved = await this.getCurrentEvaluationForPrediction(predictionId);
+      if (resolved) current.push(resolved);
+    }
+    return current;
   }
 
   async saveDraftMatchResult(input: {

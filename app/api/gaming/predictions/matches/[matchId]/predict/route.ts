@@ -6,6 +6,7 @@ import {
   statusForPredictionsError,
 } from "@/lib/gaming/predictions/httpAuth";
 import { submitPrediction, submitProgressivePrediction } from "@/lib/gaming/predictions/submitPrediction";
+import { assertParticipationOpen } from "@/lib/gaming/predictions/participationWindow";
 import { ContractMismatchError, InvalidAttemptShapeError } from "@/lib/gaming/predictions/types";
 import { PROGRESSIVE_PREDICTION_CONTRACT, progressivePredictionView } from "@/lib/gaming/predictions/prizeLadder";
 
@@ -82,6 +83,10 @@ export async function POST(
     if (!match) {
       return NextResponse.json({ error: "No match exists for this id." }, { status: 404 });
     }
+
+    // An approved event with a participation window is refused here until the window opens (409), whatever the page shows. It only says "not
+    // yet": opening is the venue activation being enabled by a person, and the closing is the start of the match, judged where it always was.
+    assertParticipationOpen(match);
 
     if (match.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT) {
       return await submitProgressive(repo, params.matchId, authResult.gamingMemberId, body);

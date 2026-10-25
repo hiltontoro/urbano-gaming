@@ -14,6 +14,7 @@ import {
   MatchNotFoundError,
   MatchCancelledError,
   KickoffPassedError,
+  ParticipationNotOpenError,
   VenueActivationNotFoundError,
   VenueActivationMatchMismatchError,
   VenueActivationDisabledError,
@@ -78,6 +79,7 @@ export function statusForPredictionsError(err: unknown): number | null {
   if (
     err instanceof MatchCancelledError ||
     err instanceof KickoffPassedError ||
+    err instanceof ParticipationNotOpenError ||
     err instanceof VenueActivationDisabledError ||
     err instanceof VenueActivationMatchMismatchError ||
     err instanceof VenueActivationImmutableError ||

@@ -124,6 +124,24 @@
   .link-out { display: inline-block; margin-top: 16px; font-size: 14px; font-weight: 700; text-decoration: underline; padding: 8px 0; }
   .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
 
+  /* My participations: one card per participation, readable at 375 px. What was SENT, its state, and (only once evaluated) the level it
+     reached are three separate lines; none of them is a prize. */
+  .part-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; }
+  .club-crest { height: 24px; width: auto; max-width: 32px; object-fit: contain; flex: none; }
+  .part-crests { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+  .part-crests-vs { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .part-item { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--bg-card); min-width: 0; }
+  .part-limit { margin: 12px 0 0; }
+  .part-truncated { color: var(--ink); border-left: 3px solid var(--gold); padding: 6px 10px; font-weight: 600; }
+  .part-item h3 { margin: 0 0 4px; font-size: 16px; font-weight: 800; overflow-wrap: anywhere; text-wrap: balance; }
+  .part-item .part-comp { margin: 0 0 8px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+  .part-item p, .part-item li { font-size: 13.5px; line-height: 1.55; margin: 0 0 4px; overflow-wrap: anywhere; }
+  .part-item ul { margin: 8px 0; padding-left: 18px; }
+  .part-item .part-state { font-weight: 700; }
+  .part-item .part-eval { color: var(--ink); }
+  .part-edit { display: inline-block; margin-top: 6px; font-size: 13.5px; font-weight: 700; text-decoration: underline; padding: 10px 0; min-height: 44px; }
+  .part-edit:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
   footer {
     max-width: 720px; margin: 48px auto 0; padding: 20px; text-align: center;
     color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
@@ -193,6 +211,7 @@
 </footer>
 
 <script src="/urbanoI18n.js"></script>
+<script src="/urbanoClubCrests.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -319,6 +338,47 @@
     "profile.soon.avatar": "Avatar",
     "profile.soon.phone": "Teléfono verificado",
     "profile.soon.pill": "Próximamente",
+    "profile.part.heading": "Mis participaciones",
+    "profile.part.intro": "Lo que enviaste en URBANO Score. Un nivel enviado no es un premio ganado: el resultado aparece cuando el partido se evalúa.",
+    "profile.part.limit": "Se muestran hasta las últimas {n} participaciones.",
+    "profile.part.truncated": "Últimas {n} participaciones. Hay participaciones anteriores que no se muestran aquí.",
+    "profile.part.loading": "Cargando tus participaciones…",
+    "profile.part.err": "No pudimos cargar tus participaciones. Recargá la página para intentar de nuevo.",
+    "profile.part.empty": "Todavía no enviaste ninguna participación en URBANO Score.",
+    "profile.part.match": "{home} vs. {away}",
+    "profile.part.home": "Local",
+    "profile.part.away": "Visitante",
+    "profile.part.venue": "Sede: {venue}",
+    "profile.part.venueUnknown": "no disponible",
+    "profile.part.start": "Inicio del partido: {time}",
+    "profile.part.sent": "Enviada: {time}",
+    "profile.part.changed": "Última actualización: {time}",
+    "profile.part.level": "Nivel enviado: {level}",
+    "profile.part.level.1": "Nivel 1 · Fácil",
+    "profile.part.level.2": "Nivel 2 · Mediana",
+    "profile.part.level.3": "Nivel 3 · Difícil",
+    "profile.part.level.4": "Nivel 4 · Legendaria",
+    "profile.part.level.legacy": "formato anterior, sin niveles",
+    "profile.part.state.open": "Estado: abierta. Podés editarla hasta el inicio del partido.",
+    "profile.part.state.closed": "Estado: cerrada, esperando el resultado oficial.",
+    "profile.part.state.cancelled": "Estado: el partido fue cancelado.",
+    "profile.part.state.evaluated": "Estado: evaluada.",
+    "profile.part.state.locked.disabled": "Estado: guardada. Esta sede ya no recibe cambios.",
+    "profile.part.state.locked.venue": "Estado: guardada. Esta sede no está disponible por ahora, así que no se pueden hacer cambios.",
+    "profile.part.state.locked.offer": "Estado: guardada. Esta sede no tiene un premio válido configurado, así que no recibe cambios.",
+    "profile.part.state.locked.generic": "Estado: guardada. Por ahora no se puede cambiar.",
+    "profile.part.eval.level": "Nivel alcanzado: {level}",
+    "profile.part.eval.none": "No alcanzó ningún nivel.",
+    "profile.part.eval.legacy": "Resultado evaluado.",
+    "profile.part.edit": "Editar en URBANO Score →",
+    "profile.part.ans.score": "Marcador: {home}–{away}",
+    "profile.part.ans.first": "Primer equipo: {value}",
+    "profile.part.ans.scorer": "Goleador: {value}",
+    "profile.part.ans.minute": "Minuto: {value}",
+    "profile.part.none.first": "Ningún equipo anotará",
+    "profile.part.none.scorer": "Ningún jugador marcará",
+    "profile.part.none.minute": "No habrá goles en tiempo reglamentario",
+    "profile.part.scorerUnknown": "jugador no disponible",
     "profile.err": "No pudimos cargar tu perfil. Recargá la página para intentar de nuevo."
   };
   var SERVER = {};
@@ -389,6 +449,155 @@ function messageCard(key, buttonKey, onClick) {
   return card;
 }
 
+// An instant with its time zone written out (the device's own); the language of month names follows the page. Redrawn on a change of language.
+function formatInstant(iso) {
+  try {
+    return new Intl.DateTimeFormat(UrbanoI18n.locale(), { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(iso));
+  } catch (err) {
+    return new Date(iso).toLocaleString(UrbanoI18n.locale());
+  }
+}
+function setTimeText(node, key, iso) {
+  node.removeAttribute("data-i18n");
+  node.removeAttribute("data-i18n-vars");
+  node.setAttribute("data-time-key", key);
+  node.setAttribute("data-time-iso", iso);
+  node.textContent = t(key, { time: formatInstant(iso) });
+  return node;
+}
+function renderTimeNodes(scope) {
+  for (const node of scope.querySelectorAll("[data-time-key]")) {
+    node.textContent = t(node.getAttribute("data-time-key"), { time: formatInstant(node.getAttribute("data-time-iso")) });
+  }
+}
+
+function validTime(iso) { return typeof iso === "string" && !Number.isNaN(new Date(iso).getTime()); }
+
+// ---- My participations: the member's own history, from the authenticated read-only route. Nothing is sent to it but the session. ----
+function answerLines(part) {
+  const a = part.answers;
+  const lines = [["profile.part.ans.score", { home: a.scoreline.home, away: a.scoreline.away }]];
+  if (a.firstTeam) {
+    const team = a.firstTeam.team === "HOME" ? (part.match.homeTeam || { $t: "profile.part.home" }) : (part.match.awayTeam || { $t: "profile.part.away" });
+    lines.push(["profile.part.ans.first", { value: a.firstTeam.kind === "NONE" ? { $t: "profile.part.none.first" } : team }]);
+  }
+  if (a.goalscorer) {
+    lines.push(["profile.part.ans.scorer", { value: a.goalscorer.kind === "NONE" ? { $t: "profile.part.none.scorer" } : (a.goalscorer.playerName ? (typeof a.goalscorer.jerseyNumber === "number" ? a.goalscorer.jerseyNumber + " · " + a.goalscorer.playerName : a.goalscorer.playerName) : { $t: "profile.part.scorerUnknown" }) }]);
+  }
+  if (a.goalMinute) {
+    const m = a.goalMinute;
+    lines.push(["profile.part.ans.minute", { value: m.kind === "NONE" ? { $t: "profile.part.none.minute" } : (m.stoppage ? m.regulation + "+" + m.stoppage + "'" : m.regulation + "'") }]);
+  }
+  return lines;
+}
+
+// Why a participation that is still inside its window cannot be changed (the server's own admission rules, as the history reports them).
+const LOCK_STATE_KEYS = { ACTIVATION_DISABLED: "profile.part.state.locked.disabled", VENUE_UNAVAILABLE: "profile.part.state.locked.venue", OFFER_UNAVAILABLE: "profile.part.state.locked.offer" };
+
+function renderParticipation(part) {
+  const item = make("li", "part-item");
+  item.setAttribute("data-participation", part.matchId);
+  // The crests (decoration, from the central module) sit above the title, which names both teams in text; no crest, nothing is drawn.
+  const homeCrest = window.UrbanoClubCrests && part.match.homeTeam ? window.UrbanoClubCrests.element(part.match.homeTeam) : null;
+  const awayCrest = window.UrbanoClubCrests && part.match.awayTeam ? window.UrbanoClubCrests.element(part.match.awayTeam) : null;
+  if (homeCrest || awayCrest) {
+    const crests = make("div", "part-crests");
+    crests.setAttribute("aria-hidden", "true");
+    if (homeCrest) crests.appendChild(homeCrest);
+    if (homeCrest && awayCrest) { const vs = make("span", "part-crests-vs"); vs.textContent = "vs"; crests.appendChild(vs); }
+    if (awayCrest) crests.appendChild(awayCrest);
+    item.appendChild(crests);
+  }
+  const title = document.createElement("h3");
+  setText(title, "profile.part.match", { home: part.match.homeTeam || { $t: "profile.part.home" }, away: part.match.awayTeam || { $t: "profile.part.away" } });
+  item.appendChild(title);
+  const comp = document.createElement("p");
+  comp.className = "part-comp";
+  comp.textContent = part.match.competition;
+  item.appendChild(comp);
+
+  const venue = document.createElement("p");
+  setText(venue, "profile.part.venue", { venue: part.venueName || { $t: "profile.part.venueUnknown" } });
+  item.appendChild(venue);
+  if (validTime(part.match.kickoffAt)) item.appendChild(setTimeText(document.createElement("p"), "profile.part.start", part.match.kickoffAt));
+
+  // What was SENT: the level that was attempted (never a prize), when, and the answers.
+  const level = document.createElement("p");
+  setText(level, "profile.part.level", { level: { $t: part.attemptedLevel ? "profile.part.level." + part.attemptedLevel : "profile.part.level.legacy" } });
+  item.appendChild(level);
+  if (validTime(part.sentAt)) item.appendChild(setTimeText(document.createElement("p"), "profile.part.sent", part.sentAt));
+  if (validTime(part.lastChangedAt)) item.appendChild(setTimeText(document.createElement("p"), "profile.part.changed", part.lastChangedAt));
+  const answers = document.createElement("ul");
+  for (const [key, vars] of answerLines(part)) {
+    const li = document.createElement("li");
+    setText(li, key, vars);
+    answers.appendChild(li);
+  }
+  item.appendChild(answers);
+
+  // The state of the participation, and (only once the match was evaluated) the level it reached. The two are different lines.
+  const state = document.createElement("p");
+  state.className = "part-state";
+  const evaluated = part.evaluation && part.evaluation.evaluated === true;
+  // "Open" (and the promise that it can be edited) is said only when a new edit would really be admitted; otherwise the reason is.
+  setText(state, evaluated ? "profile.part.state.evaluated"
+    : part.state === "CANCELLED" ? "profile.part.state.cancelled"
+    : part.state === "CLOSED" ? "profile.part.state.closed"
+    : part.editable === true ? "profile.part.state.open"
+    : (LOCK_STATE_KEYS[part.editBlockedReason] || "profile.part.state.locked.generic"));
+  item.appendChild(state);
+  if (evaluated) {
+    const reached = document.createElement("p");
+    reached.className = "part-eval";
+    if (part.attemptedLevel === null) setText(reached, "profile.part.eval.legacy");
+    else if (part.evaluation.reachedLevel) setText(reached, "profile.part.eval.level", { level: { $t: "profile.part.level." + part.evaluation.reachedLevel } });
+    else setText(reached, "profile.part.eval.none");
+    item.appendChild(reached);
+  }
+  if (part.editable === true) {
+    const edit = make("a", "part-edit", "profile.part.edit");
+    edit.href = "/soccer-predictions.html";
+    item.appendChild(edit);
+  }
+  return item;
+}
+
+async function loadParticipations(host, mine) {
+  host.replaceChildren(make("p", "msg", "profile.part.loading"));
+  let result;
+  try {
+    const token = await UrbanoAuth.getAccessToken();
+    const response = await fetch("/api/gaming/predictions/participations", { headers: token ? { authorization: "Bearer " + token } : {}, cache: "no-store" });
+    if (!response.ok) throw new Error("participations " + response.status);
+    result = await response.json();
+  } catch (err) {
+    if (mine !== generation) return;
+    console.error("Profile: failed to load participations:", err);
+    host.replaceChildren(make("p", "msg", "profile.part.err"));
+    return;
+  }
+  if (mine !== generation) return;
+  const list = Array.isArray(result && result.participations) ? result.participations : [];
+  if (list.length === 0) { host.replaceChildren(make("p", "msg", "profile.part.empty")); return; }
+  // The list is the newest `limit` participations. Say so, and say when there are older ones: a short list is never the whole history.
+  const limit = Number.isInteger(result.limit) && result.limit > 0 ? result.limit : null;
+  const notes = [];
+  if (result.truncated === true) {
+    const truncated = make("p", "msg part-limit part-truncated", "");
+    truncated.setAttribute("role", "status");
+    setText(truncated, "profile.part.truncated", { n: limit !== null ? limit : list.length });
+    notes.push(truncated);
+  } else if (limit !== null) {
+    const note = make("p", "msg part-limit", "");
+    setText(note, "profile.part.limit", { n: limit });
+    notes.push(note);
+  }
+  const ul = document.createElement("ul");
+  ul.className = "part-list";
+  for (const part of list) ul.appendChild(renderParticipation(part));
+  host.replaceChildren(...notes, ul);
+}
+
 function formatMemberSince(iso) {
   // The time-zone policy matches the Home page (Tegucigalpa); only the language of the month name follows the page language.
   return new Date(iso).toLocaleDateString(UrbanoI18n.locale(), { year: "numeric", month: "long", day: "numeric", timeZone: "America/Tegucigalpa" });
@@ -400,7 +609,7 @@ function verificationKey(emailVerified) {
   return emailVerified === true ? "profile.verified" : emailVerified === false ? "profile.unverified" : "profile.unknown";
 }
 
-function renderProfile(profile) {
+function renderProfile(profile, mine) {
   const identity = make("div", "card accent");
   const list = document.createElement("dl");
   list.className = "profile-fields";
@@ -449,7 +658,17 @@ function renderProfile(profile) {
   }
   soon.appendChild(items);
 
-  body.replaceChildren(identity, soon);
+  // My participations: its own card, filled after the identity (so the profile never waits for it), and dropped if the person changed.
+  const participations = make("div", "card");
+  participations.setAttribute("data-participations", "");
+  participations.appendChild(make("h2", "", "profile.part.heading"));
+  participations.appendChild(make("p", "msg", "profile.part.intro"));
+  const participationsHost = document.createElement("div");
+  participationsHost.setAttribute("aria-live", "polite");
+  participations.appendChild(participationsHost);
+
+  body.replaceChildren(identity, participations, soon);
+  loadParticipations(participationsHost, mine);
 }
 
 // Every build is numbered. Signing out, signing in as someone else, or a slow answer for a previous person is dropped instead of being
@@ -469,7 +688,7 @@ async function load() {
     return;
   }
   if (mine !== generation) return;
-  if (profile.status === "authenticated") renderProfile(profile);
+  if (profile.status === "authenticated") renderProfile(profile, mine);
   else if (profile.status === "profile_incomplete") body.replaceChildren(messageCard("profile.incomplete", "profile.incompleteBtn", () => UrbanoAuth.openSignIn()));
   else body.replaceChildren(messageCard("profile.signedOut", "profile.signedOutBtn", () => UrbanoAuth.openSignIn({ mode: "login" })));
 }
@@ -495,6 +714,7 @@ if (typeof UrbanoAuth.onIdentityChange === "function") {
 }
 
 UrbanoI18n.onChange(() => {
+  renderTimeNodes(body);
   const since = body.querySelector("[data-since]");
   if (since) since.textContent = formatMemberSince(since.getAttribute("data-since"));
 });

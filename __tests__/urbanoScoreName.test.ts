@@ -52,6 +52,7 @@ async function open(page: PageName, lang: "es" | "en") {
         if (String(url) === "/api/gaming/config") return { ok: true, status: 200, json: async () => ({ supabaseUrl: "http://x", supabaseAnonKey: "k" }) };
         if (String(url) === "/api/gaming/auth-methods") return { ok: true, status: 200, json: async () => ({ email: true, phone: false }) };
         if (String(url) === "/api/gaming/predictions/matches") return { status: 200, json: async () => ({ matches: [] }) };
+        if (String(url) === "/api/gaming/predictions/participations") return { ok: true, status: 200, json: async () => ({ participations: [] }) }; // the profile's history
         return { ok: false, status: 404, json: async () => ({}) };
       };
     },
@@ -124,8 +125,8 @@ describe("the old public name is gone from every public text of the current jour
 
 describe("URBANO Score is named, described and bounded where a person meets it", () => {
   const COPY = {
-    es: { descriptor: "Tus predicciones deportivas", scope: "Por ahora solo hay fútbol disponible.", loading: "Cargando URBANO Score…", profileLink: "Mis predicciones en URBANO Score →", homeLine: "El Clásico: Real Madrid vs. Barcelona", homeVenue: "Vivilo en The Pub by Beer Box" },
-    en: { descriptor: "Your sports predictions", scope: "For now, only soccer is available.", loading: "Loading URBANO Score…", profileLink: "My predictions in URBANO Score →", homeLine: "El Clásico: Real Madrid vs. Barcelona", homeVenue: "Watch it at The Pub by Beer Box" },
+    es: { descriptor: "Tus predicciones deportivas", scope: "Por ahora solo hay fútbol disponible.", loading: "Cargando URBANO Score…", profileLink: "Mis predicciones en URBANO Score →", homeLine: "El Clásico: FC Barcelona vs. Real Madrid CF", homeVenue: "Vivilo en The Pub by Beer Box" },
+    en: { descriptor: "Your sports predictions", scope: "For now, only soccer is available.", loading: "Loading URBANO Score…", profileLink: "My predictions in URBANO Score →", homeLine: "El Clásico: FC Barcelona vs. Real Madrid CF", homeVenue: "Watch it at The Pub by Beer Box" },
   } as const;
 
   for (const lang of ["es", "en"] as const) {
@@ -156,7 +157,7 @@ describe("URBANO Score is named, described and bounded where a person meets it",
   }
 
   it("the name and the announcement (Home), and the name, descriptor and scope (public page), are static markup: on screen before any script runs and whatever happens to the list", () => {
-    expect(HTML["index.html"]).toMatch(/<h2 id="featured-title">URBANO Score<\/h2>\s*<p class="featured-descriptor" data-i18n="home\.score\.clasico">El Clásico: Real Madrid vs\. Barcelona<\/p>\s*<p class="featured-scope" data-i18n="home\.score\.venue">Vivilo en The Pub by Beer Box<\/p>/);
+    expect(HTML["index.html"]).toMatch(/<h2 id="featured-title">URBANO Score<\/h2>\s*(?:<!--[\s\S]*?-->\s*)?<div class="featured-crests" aria-hidden="true">[\s\S]*?<\/div>\s*<p class="featured-descriptor" data-i18n="home\.score\.clasico">El Clásico: FC Barcelona vs\. Real Madrid CF<\/p>\s*<p class="featured-scope" data-i18n="home\.score\.venue">Vivilo en The Pub by Beer Box<\/p>/);
     expect(HTML["soccer-predictions.html"]).toMatch(/<h1 id="score-title">URBANO Score<\/h1>\s*<p class="score-descriptor" data-i18n="pred\.descriptor">Tus predicciones deportivas<\/p>\s*<p class="score-scope" data-i18n="pred\.scope">Por ahora solo hay fútbol disponible\.<\/p>/);
   });
 
@@ -179,7 +180,7 @@ describe("URBANO Score is named, described and bounded where a person meets it",
     expect(doc.querySelector("#featured-predictions .featured-cta")).toBeNull();
     const links = Array.from(doc.querySelectorAll("#featured-predictions a")) as HTMLAnchorElement[];
     expect(links.map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html"]);
-    expect(links[0].textContent).toBe("Ver predicciones y resultados anteriores →");
+    expect(links[0].textContent).toBe("Jugar ahora");
   });
 });
 

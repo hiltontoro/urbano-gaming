@@ -3,6 +3,8 @@ import { getSupabaseCredentials, buildPredictionsRepo } from "@/lib/gaming/predi
 import { selectPublicMatches } from "@/lib/gaming/predictions/publicMatchList";
 import { excludeFixtures } from "@/lib/gaming/predictions/fixtureExclusion";
 import { PROGRESSIVE_PREDICTION_CONTRACT, computeLadderOffer } from "@/lib/gaming/predictions/prizeLadder";
+import { hasProvisionalPrizes, provisionalPrizeMatchIds } from "@/lib/gaming/predictions/provisionalPrizes";
+import { participationOpensAt } from "@/lib/gaming/predictions/participationWindow";
 
 // This route has no dynamic path segment and never reads the request
 // object, so Next.js would otherwise treat it as statically
@@ -43,6 +45,11 @@ export async function GET() {
     (match) => match.matchId
   );
 
+  // A public roster entry is the id, the name and the squad number: nothing else about a player (not the position, not where the roster
+  // was read) is exposed here.
+  // The matches whose prizes are only PROPOSED (named exactly in GAMING_PROVISIONAL_PRIZE_MATCH_IDS, unset by default): the page then says so wherever
+  // it lists the prizes and before anything is sent. It is a notice only; nothing about the offer or its evaluation changes.
+  const provisional = provisionalPrizeMatchIds();
   const result = await Promise.all(
     matches.map(async (match) => {
       const [homeTeam, awayTeam, homePlayers, awayPlayers] = await Promise.all([
@@ -95,7 +102,7 @@ export async function GET() {
               name: homeTeam.name,
               players: homePlayers
                 .filter((p) => p.active)
-                .map((p) => ({ playerId: p.playerId, name: p.name })),
+                .map((p) => ({ playerId: p.playerId, name: p.name, jerseyNumber: p.jerseyNumber ?? null })),
             }
           : null,
         awayTeam: awayTeam
@@ -104,13 +111,16 @@ export async function GET() {
               name: awayTeam.name,
               players: awayPlayers
                 .filter((p) => p.active)
-                .map((p) => ({ playerId: p.playerId, name: p.name })),
+                .map((p) => ({ playerId: p.playerId, name: p.name, jerseyNumber: p.jerseyNumber ?? null })),
             }
           : null,
         competition: match.competition,
         kickoffAt: match.kickoffAt,
         cancelledAt: match.cancelledAt,
         predictionContract: match.predictionContract,
+        provisionalPrizes: hasProvisionalPrizes(match.matchId, provisional),
+        // When the approved participation window of this match opens (ISO), or null: information for the page; the server refuses before it.
+        participationOpensAt: participationOpensAt(match.kickoffAt)?.toISOString() ?? null,
         finalized: currentResult !== null,
         finalResult: currentResult
           ? { homeScore: currentResult.homeScore, awayScore: currentResult.awayScore }

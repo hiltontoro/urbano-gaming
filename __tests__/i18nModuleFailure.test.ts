@@ -185,7 +185,7 @@ function homeSnapshot(page: Page) {
     hero: [text(".hero h1"), text(".hero p")],
     nav: Array.from(doc.querySelectorAll(".primary-nav a")).map((a) => [a.textContent, a.getAttribute("href")]),
     labels: Array.from(doc.querySelectorAll(".section-label")).map((e) => e.textContent),
-    featured: { title: text("#featured-title"), descriptor: text(".featured-descriptor"), scope: text(".featured-scope"), when: text(".featured-when"), status: text("#featured-status"), note: text("#featured-note"), history: text("#featured-history"), links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), hasAction: page.q("#featured-action") !== null },
+    featured: { title: text("#featured-title"), descriptor: text(".featured-descriptor"), scope: text(".featured-scope"), when: text(".featured-when"), status: text("#featured-status"), play: text("#featured-play"), links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), hasAction: page.q("#featured-action") !== null },
     cards: Array.from(doc.querySelectorAll(".exp-card")).map((c) => ({
       title: norm(c.querySelector("h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
       pill: norm(c.querySelector(".status-pill")?.textContent), kicker: norm(c.querySelector(".art-kicker")?.textContent), sub: norm(c.querySelector(".exp-sub")?.textContent), action: norm(c.querySelector(".exp-action")?.textContent),
@@ -273,8 +273,8 @@ describe("Home without the module: the same content, the same behaviour", () => 
     for (const mode of FAILURES) {
       const closed = await open("index.html", mode, { hostOpen: false, matches: [futureMatch()] });
       expect(closed.doc.querySelector('a[href="/become-a-host.html"]')).toBeNull();
-      expect(closed.text("#featured-status")).toBe("Próximamente");
-      expect(closed.text("#featured-note")).toBe("Predicciones próximamente");
+      expect(closed.text("#featured-status")).toBe("Próximo partido");
+      expect(closed.text("#featured-play")).toBe("Jugar ahora");
       expect(closed.doc.querySelector("#featured-action")).toBeNull();
       expect(Array.from(closed.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html"]);
       expect(closed.requests.some((r) => r.url.includes("/api/gaming/predictions"))).toBe(false);

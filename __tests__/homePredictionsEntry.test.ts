@@ -6,11 +6,12 @@ import path from "node:path";
 /**
  * The Home page's URBANO Score entry (historically "Soccer Predictions") is a STATIC ANNOUNCEMENT, and says only what is true.
  *
- * The shipped landing page (public/index.html) is parsed and run whole in jsdom. The featured card announces El Clásico (Real Madrid and
- * Barcelona) at The Pub by Beer Box and says that predictions are coming soon. It is informational: no match is created or read, no way
- * to take part is offered, and it never says that predictions are open. In particular the page does NOT look at the public matches list
- * (GET /api/gaming/predictions/matches) at all, so a past, test or open match in the database can never turn the announcement into an
- * opening. The only link is to the member's past predictions and results, labelled as such.
+ * The shipped landing page (public/index.html) is parsed and run whole in jsdom. The featured card announces El Clásico (FC Barcelona, the home
+ * team, and Real Madrid CF) at The Pub by Beer Box, with the stadium. It is informational: no match is created or read and it never says that predictions
+ * for it are open. In particular the page does NOT look at the public matches list (GET /api/gaming/predictions/matches) at all, so a
+ * past, test, rehearsal or open match in the database can never turn the announcement into an opening. Its one action, "Jugar ahora",
+ * goes to URBANO Score, which is where the matches that are actually open (or the honest "none yet") are shown. Past participations are
+ * not on this card: they have their own access, My profile → My participations.
  *
  * Limit, stated plainly: hiding the way in from this card is not a closure of the predictions service. The Predictions page and its API
  * keep working for whatever the database holds; this test pins what the Home says and does, nothing more.
@@ -19,6 +20,7 @@ import path from "node:path";
 const INDEX_HTML = readFileSync(path.join(process.cwd(), "public/index.html"), "utf8");
 // The shared language module the Home page loads. Spanish is the default; the English wording is asserted by loading the page in English.
 const I18N_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoI18n.js"), "utf8");
+const CRESTS_SOURCE = readFileSync(path.join(process.cwd(), "public/urbanoClubCrests.js"), "utf8");
 const MATCHES_URL = "/api/gaming/predictions/matches";
 const PREDICTIONS_PAGE = "/soccer-predictions.html";
 // The page without its explanatory comments (they may legitimately name the matches list to say it is not read).
@@ -28,7 +30,7 @@ type Reply = { status: number; json?: unknown } | "reject";
 
 interface Call { url: string; init: Record<string, any> }
 
-async function loadHome(reply: () => Reply = () => ({ status: 200, json: { matches: [] } }), opts: { lang?: "es" | "en" } = {}) {
+async function loadHome(reply: () => Reply = () => ({ status: 200, json: { matches: [] } }), opts: { lang?: "es" | "en"; crests?: boolean } = {}) {
   const calls: Call[] = [];
   const dom = new JSDOM(INDEX_HTML, {
     url: "http://localhost/",
@@ -39,6 +41,7 @@ async function loadHome(reply: () => Reply = () => ({ status: 200, json: { match
       w.UrbanoAuth = { attachSignInButton: () => {} };
       window.localStorage.setItem("urbano.lang", opts.lang ?? "en");
       window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
+      if (opts.crests) window.eval(CRESTS_SOURCE);
       w.fetch = (url: string, init: Record<string, any> = {}) => {
         calls.push({ url: String(url), init });
         return (async () => {
@@ -58,8 +61,7 @@ async function loadHome(reply: () => Reply = () => ({ status: 200, json: { match
     calls,
     settle: async (ms = 60) => { await new Promise((r) => setTimeout(r, ms)); },
     status: () => squash(q("#featured-status")?.textContent),
-    note: () => squash(q("#featured-note")?.textContent),
-    history: () => q("#featured-history") as HTMLAnchorElement | null,
+    play: () => q("#featured-play") as HTMLAnchorElement | null,
     cardText: () => squash(q("#featured-predictions")?.textContent),
     card: () => q("#featured-predictions") as HTMLElement,
     part: (sel: string) => squash(q(`#featured-predictions ${sel}`)?.textContent),
@@ -87,22 +89,20 @@ const list = (...matches: unknown[]): Reply => ({ status: 200, json: { matches }
 // The announcement, word for word, in both languages (Spanish is the default).
 const COPY = {
   es: {
-    pill: "Próximamente",
-    clasico: "El Clásico: Real Madrid vs. Barcelona",
+    pill: "Próximo partido",
+    clasico: "El Clásico: FC Barcelona vs. Real Madrid CF",
     venue: "Vivilo en The Pub by Beer Box",
-    when: "Domingo 25 de octubre · 2:00 p. m. (hora de Honduras) · 21:00 en España",
-    sides: "Barcelona es local · Real Madrid, visitante",
-    soon: "Predicciones próximamente",
-    history: "Ver predicciones y resultados anteriores →",
+    when: "Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.",
+    stadium: "Estadio: Spotify Camp Nou",
+    play: "Jugar ahora",
   },
   en: {
-    pill: "Coming Soon",
-    clasico: "El Clásico: Real Madrid vs. Barcelona",
+    pill: "Next match",
+    clasico: "El Clásico: FC Barcelona vs. Real Madrid CF",
     venue: "Watch it at The Pub by Beer Box",
-    when: "Sunday, October 25 · 2:00 p.m. (Honduras time) · 9:00 p.m. in Spain",
-    sides: "Barcelona is the home team · Real Madrid, the visitor",
-    soon: "Predictions coming soon",
-    history: "See past predictions and results →",
+    when: "Sunday, October 25 · 🇭🇳 2:00 p.m. · 🇪🇸 9:00 p.m.",
+    stadium: "Stadium: Spotify Camp Nou",
+    play: "Play now",
   },
 } as const;
 
@@ -116,24 +116,53 @@ function announcement(page: Home) {
     clasico: page.part(".featured-descriptor"),
     venue: page.part(".featured-scope"),
     when: page.part(".featured-when time"),
-    sides: page.part(".featured-when span"),
-    soon: page.note(),
-    history: page.part("#featured-history"),
+    stadium: page.part(".featured-when span"),
+    play: page.part("#featured-play"),
   };
 }
 
 describe("the announcement: what the card says, in both languages", () => {
-  it.each(["es", "en"] as const)("%s: URBANO Score, El Clásico, The Pub by Beer Box, the verified date and sides, and predictions coming soon", async (lang) => {
+  it.each(["es", "en"] as const)("%s: URBANO Score, El Clásico, The Pub by Beer Box, the verified date, the stadium and the way into URBANO Score", async (lang) => {
     const page = await loadHome(undefined, { lang });
     const c = COPY[lang];
-    expect(announcement(page)).toEqual({ pill: c.pill, title: "URBANO Score", clasico: c.clasico, venue: c.venue, when: c.when, sides: c.sides, soon: c.soon, history: c.history });
+    expect(announcement(page)).toEqual({ pill: c.pill, title: "URBANO Score", clasico: c.clasico, venue: c.venue, when: c.when, stadium: c.stadium, play: c.play });
   });
 
   it("is already complete before any script or request: the markup itself carries the Spanish announcement and the language keys", () => {
     const withoutScripts = INDEX_HTML.replace(/<script[\s\S]*?<\/script>/g, "");
     const card = withoutScripts.slice(withoutScripts.indexOf('id="featured-predictions"'), withoutScripts.indexOf('<div class="section" id="experiences">'));
-    for (const text of [COPY.es.pill, "URBANO Score", COPY.es.clasico, COPY.es.venue, COPY.es.when, COPY.es.sides, COPY.es.soon, COPY.es.history]) expect(card).toContain(text);
-    for (const key of ["home.pred.soon", "home.score.clasico", "home.score.venue", "home.score.when", "home.score.sides", "home.score.soon", "home.pred.historyPast"]) expect(card).toContain(`data-i18n="${key}"`);
+    for (const text of [COPY.es.pill, "URBANO Score", COPY.es.clasico, COPY.es.venue, COPY.es.when, COPY.es.stadium, COPY.es.play]) expect(card).toContain(text);
+    for (const key of ["home.score.next", "home.score.clasico", "home.score.venue", "home.score.when", "home.score.stadium", "home.score.play"]) expect(card).toContain(`data-i18n="${key}"`);
+  });
+
+  it("draws the two crests, home team first, as decoration the page script asks the central module for — and the card says exactly the same words without them", async () => {
+    const withCrests = await loadHome(undefined, { lang: "es", crests: true });
+    const keys = Array.from(withCrests.card().querySelectorAll(".featured-crests img")).map((img) => img.getAttribute("data-crest"));
+    expect(keys).toEqual(["fc-barcelona", "real-madrid-cf"]);
+    expect(withCrests.calls).toHaveLength(0); // the card still makes no request of its own
+    const without = await loadHome(undefined, { lang: "es" });
+    expect(without.card().querySelectorAll("img")).toHaveLength(0);
+    expect(withCrests.cardText().replace(/\bvs\b/g, "").replace(/\s+/g, " ")).toBe(without.cardText().replace(/\bvs\b/g, "").replace(/\s+/g, " "));
+    expect(announcement(withCrests)).toEqual(announcement(without));
+  });
+
+  it("announces the approved participation window as information — planned, 12:30 p. m. to 2:00 p. m. in Honduras — and says nothing that reads as 'open now'", async () => {
+    const expected = { es: "Ventana de participación prevista: de 12:30 p. m. a 2:00 p. m. (hora de Honduras)", en: "Planned participation window: 12:30 p.m. to 2:00 p.m. (Honduras time)" } as const;
+    for (const lang of ["es", "en"] as const) {
+      const page = await loadHome(undefined, { lang });
+      expect(page.part(".featured-window")).toBe(expected[lang]);
+      expect(page.calls).toHaveLength(0); // still no request: it is text, not a state read from anywhere
+      expect(page.part(".featured-window")).not.toMatch(OPENING_LANGUAGE);
+      expect(page.part(".featured-window")).not.toMatch(/abierta|abre ahora|open now|is open|opens now|ya podés|you can now/i);
+    }
+    // the window is 90 minutes before the planned start and closes at the start: 12:30 + 90 min = 2:00 p. m. in Honduras
+    const iso = INDEX_HTML.match(/<time datetime="([^"]+)"/)![1];
+    const honduras = (ms: number) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/Tegucigalpa", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
+    expect(honduras(new Date(iso).getTime() - 90 * 60_000)).toBe("12:30");
+    expect(honduras(new Date(iso).getTime())).toBe("14:00");
+    // and it is part of the static markup before any script runs
+    const withoutScripts = INDEX_HTML.replace(/<script[\s\S]*?<\/script>/g, "");
+    expect(withoutScripts).toContain('<p class="featured-window" data-i18n="home.score.window">' + expected.es + "</p>");
   });
 
   it("states the moment once, machine-readable, and the visible times are that same moment: 20:00 UTC is 21:00 in Spain and 2:00 p. m. in Honduras on 25 October", () => {
@@ -142,17 +171,25 @@ describe("the announcement: what the card says, in both languages", () => {
     const at = (timeZone: string) => new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
     expect(at("Europe/Madrid")).toBe("25 October at 21:00"); // after the clocks go back that morning: CET, UTC+1
     expect(at("America/Tegucigalpa")).toBe("25 October at 14:00"); // Honduras keeps UTC-6 all year
-    expect(COPY.es.when).toContain("2:00 p. m.");
-    expect(COPY.es.when).toContain("21:00");
-    expect(COPY.en.when).toContain("2:00 p.m.");
-    expect(COPY.en.when).toContain("9:00 p.m.");
+    // the announcement is "🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m." (the flags name the two places; nothing else is added to it)
+    expect(COPY.es.when).toBe("Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.");
+    expect(COPY.en.when).toBe("Sunday, October 25 · 🇭🇳 2:00 p.m. · 🇪🇸 9:00 p.m.");
+  });
+
+  it("no longer says predictions are 'coming soon', no longer names who is home or visitor, and carries no link to past predictions", async () => {
+    for (const lang of ["es", "en"] as const) {
+      const page = await loadHome(undefined, { lang });
+      expect(page.cardText()).not.toMatch(/próximamente|coming soon|es local|home team|visitante|visitor|anteriores|past predictions/i);
+      expect(page.doc.querySelector("#featured-note, #featured-history")).toBeNull();
+    }
   });
 
   it("names El Clásico's two sides as announced and nothing else: no other match, venue, sport, prize or sponsor", async () => {
     for (const lang of ["es", "en"] as const) {
       const page = await loadHome(undefined, { lang });
       expect(page.cardText()).not.toMatch(/Finca|NFL|premio|prize|reward|patrocin|sponsor|gratis|free|L\.\s?\d|\$|HNL|USD|apuest|bet\b|wager/i);
-      expect(page.cardText().match(/Real Madrid/g)).toHaveLength(2); // the title line and the sides line
+      expect(page.cardText().match(/Real Madrid/g)).toHaveLength(1); // the title line (the crests carry no text)
+      expect(page.cardText().indexOf("FC Barcelona")).toBeLessThan(page.cardText().indexOf("Real Madrid CF")); // the home team first
       expect(page.cardText().match(/The Pub by Beer Box/g)).toHaveLength(1);
     }
   });
@@ -164,26 +201,25 @@ describe("the announcement: what the card says, in both languages", () => {
 });
 
 describe("it announces; it never opens", () => {
-  it.each(["es", "en"] as const)("%s: no way to take part, no opening language, no play button, one link only — to the past", async (lang) => {
+  it.each(["es", "en"] as const)("%s: one action only — into URBANO Score — and no claim that predictions for El Clásico are open", async (lang) => {
     const page = await loadHome(() => list(match()), { lang });
     await page.settle();
     expect(page.card().querySelectorAll("a")).toHaveLength(1);
     expect(page.card().querySelectorAll("button, form, input, select, textarea, [role=button], .featured-cta, #featured-action")).toHaveLength(0);
-    const history = page.history()!;
-    expect(history.getAttribute("href")).toBe(PREDICTIONS_PAGE);
-    expect(history.className).not.toContain("featured-cta");
-    expect(history.textContent).toMatch(lang === "es" ? /anteriores/ : /past/); // identified as the past: never "my predictions", never "enter"
+    const play = page.play()!;
+    expect(play.getAttribute("href")).toBe(PREDICTIONS_PAGE);
+    expect(play.textContent).toBe(COPY[lang].play);
     expect(page.cardText()).not.toMatch(OPENING_LANGUAGE);
+    expect(page.cardText()).not.toMatch(/predicci|prediction/i); // the card does not talk about the state of predictions at all
     expect(page.status()).toBe(COPY[lang].pill);
-    expect(page.status()).not.toMatch(/Abierto|Open|Playtest|Destacado|Featured/);
+    expect(page.status()).not.toMatch(/Abierto|Open|Playtest|Destacado|Featured|Próximamente|Coming/);
   });
 
-  it("the pill and the line under it are both about 'soon': the card is in the same Próximamente state as the other informational cards", async () => {
+  it("the pill is about the match (it is the next one), not about predictions", async () => {
     const page = await loadHome(undefined, { lang: "es" });
     const pill = page.doc.querySelector("#featured-status") as HTMLElement;
-    expect(pill.className).toContain("status-soon");
     expect(pill.className).not.toContain("status-featured");
-    expect(pill.getAttribute("data-i18n")).toBe("home.pred.soon");
+    expect(pill.getAttribute("data-i18n")).toBe("home.score.next");
   });
 });
 
@@ -227,7 +263,7 @@ describe("the Home does not look at the matches list, so no database content can
     const page = await loadHome(() => list(match()), { lang: "es" });
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(page.doc.querySelectorAll("#featured-predictions")).toHaveLength(1);
-    expect(announcement(page)).toEqual({ pill: COPY.en.pill, title: "URBANO Score", clasico: COPY.en.clasico, venue: COPY.en.venue, when: COPY.en.when, sides: COPY.en.sides, soon: COPY.en.soon, history: COPY.en.history });
+    expect(announcement(page)).toEqual({ pill: COPY.en.pill, title: "URBANO Score", clasico: COPY.en.clasico, venue: COPY.en.venue, when: COPY.en.when, stadium: COPY.en.stadium, play: COPY.en.play });
     (page.doc.querySelector('[data-lang="es"]') as HTMLElement).click();
     expect(page.part(".featured-scope")).toBe(COPY.es.venue);
     expect(page.calls).toEqual([]);
