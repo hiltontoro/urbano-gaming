@@ -6,6 +6,8 @@ import { APPROVED_PARTICIPATION_WINDOWS, assertParticipationOpen, participationO
 import { ParticipationNotOpenError } from "../lib/gaming/predictions/types";
 import { statusForPredictionsError } from "../lib/gaming/predictions/httpAuth";
 import { NEAR, buildLadderWorld, offerDigestOf, type LadderEnv } from "./helpers/progressiveLadderScenarios";
+import { InMemoryLegalAcceptanceRepository } from "../lib/gaming/legal/db/inMemoryLegalAcceptanceRepository";
+import { acceptEverything, fixtureRegistry } from "./helpers/legalFixtures";
 
 /**
  * THE PARTICIPATION WINDOW, ENFORCED BY THE SERVER. Approved for El Clásico: 25 October 2026, 12:30 p. m. to 2:00 p. m. Honduras time — it opens 90
@@ -19,7 +21,13 @@ vi.mock("@/lib/gaming/predictions/httpAuth", async () => {
   const actual = await vi.importActual<typeof import("../lib/gaming/predictions/httpAuth")>("../lib/gaming/predictions/httpAuth");
   return { ...actual, getSupabaseCredentials: vi.fn(), buildPredictionsRepo: vi.fn(), requireGamingMember: vi.fn() };
 });
+// The conditions (legal texts) are not what this file is about: a member who has accepted the fixture texts is admitted, so the window is what is judged.
+vi.mock("@/lib/gaming/legal/httpLegal", async () => {
+  const actual = await vi.importActual<typeof import("../lib/gaming/legal/httpLegal")>("../lib/gaming/legal/httpLegal");
+  return { ...actual, buildLegalRepo: vi.fn(), currentLegalRegistry: vi.fn() };
+});
 import * as httpAuth from "../lib/gaming/predictions/httpAuth";
+import * as httpLegal from "../lib/gaming/legal/httpLegal";
 
 const CLASICO = "2026-10-25T20:00:00.000Z"; // 2:00 p. m., Honduras
 const kickoff = new Date(CLASICO).getTime();
@@ -93,6 +101,11 @@ describe("the predict route, with the clock around the opening", () => {
     vi.mocked(httpAuth.buildPredictionsRepo).mockReturnValue(repo as never);
     const memberId = await env.newMember("member");
     vi.mocked(httpAuth.requireGamingMember).mockResolvedValue({ gamingMemberId: memberId } as never);
+    const legal = new InMemoryLegalAcceptanceRepository();
+    const registry = fixtureRegistry(kickoffAt);
+    vi.mocked(httpLegal.buildLegalRepo).mockReturnValue(legal as never);
+    vi.mocked(httpLegal.currentLegalRegistry).mockReturnValue(registry);
+    await acceptEverything(legal, registry, { matchId: w.matchId, kickoffAt }, memberId);
     const digest = (await offerDigestOf(env, w))!;
     const POST = (await import("../app/api/gaming/predictions/matches/[matchId]/predict/route")).POST;
     const send = async (at: number, homeGoals = 1) => {

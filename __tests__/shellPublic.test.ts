@@ -184,8 +184,11 @@ describe("Home — header and footer", () => {
     const footer = page.doc.querySelector("footer")!;
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
     const links = Array.from(footer.querySelectorAll("a"));
-    expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["TecnoMovi", "https://www.tecnomovi.com/"]]);
-    expect(links[0].getAttribute("rel")).toContain("noopener");
+    // the only OUTSIDE link is TecnoMovi's; beside it, one internal link to the legal texts (the terms, the privacy notice and the rules)
+    const outside = links.filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""));
+    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["TecnoMovi", "https://www.tecnomovi.com/"]]);
+    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(outside[0].getAttribute("rel")).toContain("noopener");
     // The footer line is not translated: it is a name, the same in both languages.
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
@@ -409,7 +412,8 @@ describe("Predictions — Spanish first, header, footer and navigation", () => {
     expect(page.text(".back-link")).toBe("← Volver a URBANO Gaming");
     expect(page.q(".back-link")!.getAttribute("href")).toBe("/");
     expect(page.doc.querySelector("a.brand-link")!.getAttribute("href")).toBe("https://urbanohn.com/");
-    expect(page.doc.querySelector("footer a")!.getAttribute("href")).toBe("https://www.tecnomovi.com/");
+    expect(page.doc.querySelector('footer a[href^="https://"]')!.getAttribute("href")).toBe("https://www.tecnomovi.com/");
+    expect(page.doc.querySelector('footer a[href="/legal.html"]')).not.toBeNull();
     expect(page.text("footer")).toContain("Powered by TecnoMovi");
     expect(page.attach[0].options.accountLink).toBe(page.doc.getElementById("account-link"));
     expect(Array.from(page.doc.querySelectorAll(".lang-switch button")).map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);

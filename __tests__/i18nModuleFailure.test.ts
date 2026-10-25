@@ -176,7 +176,7 @@ const visible = (doc: Document) => {
   body.querySelectorAll("script, style").forEach((n) => n.remove());
   return norm(body.textContent);
 };
-const RAW_KEY = /\b(?:shell|home|pred|profile|auth)\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*\b/;
+const RAW_KEY = /\b(?:shell|home|pred|legal|profile|auth)\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*\b/;
 
 function homeSnapshot(page: Page) {
   const { doc, text } = page;
@@ -469,7 +469,7 @@ describe("the generated Spanish blocks never drift from the module's dictionary"
     const m = I18N_SOURCE.match(/var SERVER_MESSAGES = (\{[\s\S]*?\n  \});/)!;
     return vm.runInNewContext("(" + m[1] + ")") as Record<string, string>;
   })();
-  const PREFIXES: Record<PageName, string[]> = { "index.html": ["shell.", "home.", "auth."], "soccer-predictions.html": ["shell.", "pred.", "auth."], "profile.html": ["shell.", "profile.", "auth."] };
+  const PREFIXES: Record<PageName, string[]> = { "index.html": ["shell.", "home.", "auth."], "soccer-predictions.html": ["shell.", "pred.", "legal.", "auth."], "profile.html": ["shell.", "profile.", "auth."] };
 
   function fallbackOf(page: PageName) {
     const m = PAGE_HTML[page].match(/<script id="i18n-fallback">([\s\S]*?)<\/script>/);
@@ -515,7 +515,7 @@ describe("the generated Spanish blocks never drift from the module's dictionary"
     for (const page of Object.keys(PAGE_HTML) as PageName[]) {
       const fallback = fallbackOf(page);
       const html = PAGE_HTML[page].replace(/<script id="i18n-fallback">[\s\S]*?<\/script>/, "");
-      const used = new Set(Array.from(html.matchAll(/["'`](?:shell|home|pred|profile|auth)\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*["'`]/g)).map((m) => m[0].slice(1, -1)));
+      const used = new Set(Array.from(html.matchAll(/["'`](?:shell|home|pred|legal|profile|auth)\.[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*["'`]/g)).map((m) => m[0].slice(1, -1)));
       for (const key of used) expect(fallback.has(key), `${page} uses ${key}`).toBe(true);
     }
   });

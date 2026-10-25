@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="legalpage.title">Términos, privacidad y reglas — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * The legal texts, readable by anyone without an account, and — for a signed-in member — the record of what that member accepted and
+   * when. It shows only what the server publishes: the registry of texts is EMPTY until the Founder approves one, and then this page says
+   * so instead of showing a draft. Every string of a text is put on the page as text (never as markup), and the list and each text come
+   * from the server, so what is read here is exactly what the acceptance records by version and hash.
+   */
+  :root {
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --gold: #d4af37;
+    --primary-fill: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed;
+    --exp-purple-glow: rgba(124, 58, 237, 0.45);
+    --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --good: #4ade80;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 60px;
+  }
+  a { color: inherit; text-decoration: none; }
+  [hidden] { display: none !important; }
+
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+    max-width: 720px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand-link { display: inline-flex; align-items: center; gap: 10px; border-radius: 6px; }
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before {
+    content: ""; position: absolute; inset: -9px;
+    background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
+    filter: blur(4px); z-index: 0;
+  }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge {
+    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+  .header-tools { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; max-width: 100%; }
+  .lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button {
+    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted);
+    background: transparent; border: none; padding: 9px 12px; min-height: 44px; min-width: 44px; cursor: pointer;
+  }
+  .lang-switch button[aria-pressed="true"] { color: var(--primary-ink); background: var(--primary-fill); }
+  .account-group { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; position: relative; }
+  .account-group .signin-btn { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
+  a.signin-btn { display: inline-block; text-align: center; }
+  .signin-btn {
+    font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
+    border-radius: 8px; border: 1px solid var(--ink); background: transparent;
+    color: var(--ink); cursor: pointer;
+  }
+  .signin-btn:hover { background: var(--surface-2); }
+  .signin-status {
+    display: none; max-width: 720px; margin: 10px auto 0; padding: 10px 20px 0;
+    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  }
+
+  .primary-nav {
+    display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    max-width: 720px; margin: 16px auto 0; padding: 0 20px 2px;
+  }
+  .primary-nav::-webkit-scrollbar { display: none; }
+  .nav-link {
+    flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted);
+    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  .content { max-width: 720px; margin: 20px auto 0; padding: 0 20px; }
+  .legal-title { font-size: 24px; font-weight: 800; margin: 0 0 16px; }
+  .card {
+    border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2);
+    padding: 20px; margin: 0 0 18px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 14px; font-weight: 700; }
+  .msg { font-size: 13px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
+  .btn-primary {
+    font-family: inherit; font-size: 14px; font-weight: 700; padding: 13px 18px;
+    border-radius: 10px; border: none; background: var(--primary-fill); color: var(--primary-ink);
+    cursor: pointer; min-height: 46px;
+  }
+
+  .legal-groups { display: grid; gap: 14px; }
+  .legal-group h3 { font-size: 15px; font-weight: 800; margin: 0 0 6px; }
+  .legal-versions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .legal-versions a { display: inline-block; font-size: 14px; font-weight: 600; text-decoration: underline; padding: 10px 0; min-height: 44px; overflow-wrap: anywhere; }
+  .legal-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; margin-left: 8px; }
+  .legal-tag.good { color: var(--good); border-color: var(--good); }
+
+  .legal-doc { line-height: 1.65; }
+  .legal-doc h2 { font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 22px 0 8px; font-weight: 800; }
+  .legal-doc h1 { font-size: 22px; font-weight: 800; margin: 0 0 6px; text-wrap: balance; overflow-wrap: anywhere; }
+  .legal-doc p, .legal-doc li { font-size: 14.5px; margin: 0 0 10px; overflow-wrap: anywhere; }
+  .legal-doc ul { padding-left: 20px; margin: 0 0 12px; }
+  .legal-meta { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; overflow-wrap: anywhere; }
+  .legal-meta code { font-size: 11.5px; word-break: break-all; }
+  .table-wrap { overflow-x: auto; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 10px; }
+  .legal-doc table { border-collapse: collapse; width: 100%; min-width: 360px; font-size: 13.5px; }
+  .legal-doc th, .legal-doc td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .legal-doc th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .legal-back { display: inline-block; font-size: 14px; font-weight: 700; text-decoration: underline; padding: 10px 0; min-height: 44px; }
+  .legal-mine { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .legal-mine li { font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; }
+
+  footer {
+    max-width: 720px; margin: 48px auto 0; padding: 20px; text-align: center;
+    color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+  }
+  footer p { margin: 0 0 6px; }
+  footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
+
+  .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
+  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .btn-primary:focus-visible,
+  .legal-versions a:focus-visible, .legal-back:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  .legal-doc:focus { outline: none; }
+
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; }
+    .header-tools { display: contents; }
+    .lang-switch { margin-left: auto; }
+    .account-group { flex: 1 1 100%; }
+    .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
+    .primary-nav { padding: 0 16px 2px; }
+    .content { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="shell-header">
+  <div class="brand">
+    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+      <span class="brand-word">URBANO</span>
+    </a>
+    <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
+  </div>
+  <div class="header-tools">
+    <div class="lang-switch" role="group" aria-label="Idioma" data-i18n-attr="aria-label:shell.lang.label">
+      <button type="button" data-lang="es" lang="es" aria-pressed="true" aria-label="Cambiar a español" data-i18n-attr="aria-label:shell.lang.es">ES</button>
+      <button type="button" data-lang="en" lang="en" aria-pressed="false" aria-label="Cambiar a inglés" data-i18n-attr="aria-label:shell.lang.en">EN</button>
+    </div>
+    <div class="account-group">
+      <a class="signin-btn" id="account-link" href="/profile.html" hidden></a>
+      <button class="signin-btn" id="btn-signin" style="visibility:hidden">Iniciar sesión / Crear cuenta</button>
+    </div>
+  </div>
+</header>
+<p class="signin-status" id="signin-status"></p>
+
+<nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
+  <a class="nav-link" href="/" data-i18n="shell.nav.home">Inicio</a>
+  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
+  <a class="nav-link" href="/#experiences" data-i18n="shell.nav.experiences">Experiencias</a>
+  <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
+  <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
+</nav>
+
+<main class="content" id="content">
+  <h1 class="legal-title" data-i18n="legalpage.heading">Términos, privacidad y reglas</h1>
+  <p class="msg" data-i18n="legalpage.onlyEs">Por ahora los textos están disponibles solo en español.</p>
+  <div id="legal-list" aria-live="polite">
+    <div class="empty-state" data-i18n="legalpage.loading">Cargando los textos…</div>
+  </div>
+  <article id="legal-doc" class="card legal-doc" tabindex="-1" hidden></article>
+  <section id="legal-mine" class="card" hidden aria-labelledby="legal-mine-title"></section>
+</main>
+
+<footer>
+  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p><a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a></p>
+  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+</footer>
+
+<script src="/urbanoI18n.js"></script>
+<script id="i18n-fallback">
+/* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
+   If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
+   supplies the language table; nothing here decides what is available or allowed. There is no English without the module, so the
+   language selector is hidden instead of offering a control that does nothing. */
+(function (w) {
+  "use strict";
+  var m = w.UrbanoI18n;
+  if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
+  var ES = {
+    "shell.lang.label": "Idioma",
+    "shell.lang.es": "Cambiar a español",
+    "shell.lang.en": "Cambiar a inglés",
+    "shell.brand.urbano": "URBANO — ir a urbanohn.com",
+    "shell.brand.gaming": "URBANO Gaming — inicio",
+    "shell.nav.label": "Navegación principal",
+    "shell.nav.home": "Inicio",
+    "shell.nav.play": "Jugar",
+    "shell.nav.experiences": "Experiencias",
+    "shell.nav.leaderboards": "Clasificaciones",
+    "shell.nav.rewards": "Premios",
+    "shell.footer.part": "URBANO Gaming — parte de URBANO",
+    "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "shell.footer.legal": "Términos, privacidad y reglas",
+    "legalpage.title": "Términos, privacidad y reglas — URBANO Gaming",
+    "legalpage.heading": "Términos, privacidad y reglas",
+    "legalpage.onlyEs": "Por ahora los textos están disponibles solo en español.",
+    "legalpage.loading": "Cargando los textos…",
+    "legalpage.loadFailed": "No pudimos cargar los textos. Probá de nuevo.",
+    "legalpage.retry": "Reintentar",
+    "legalpage.none": "Todavía no hay textos publicados. Cuando se publiquen, los vas a poder leer completos acá, sin necesidad de cuenta.",
+    "legalpage.listTitle": "Textos publicados",
+    "legalpage.doc.ACCOUNT_TERMS": "Términos de cuenta",
+    "legalpage.doc.PRIVACY_NOTICE": "Aviso de privacidad",
+    "legalpage.doc.EVENT_RULES": "Reglas del evento y canje",
+    "legalpage.version": "Versión {version}",
+    "legalpage.current": "Vigente",
+    "legalpage.old": "Anterior",
+    "legalpage.event": "Evento: {time}",
+    "legalpage.notFound": "Ese texto no está publicado.",
+    "legalpage.back": "Volver a la lista",
+    "legalpage.mine.title": "Tu registro",
+    "legalpage.mine.empty": "Todavía no registraste ninguna aceptación.",
+    "legalpage.mine.signin": "Iniciá sesión para ver qué aceptaste y cuándo.",
+    "legalpage.mine.accepted": "Aceptado el {time}",
+    "legalpage.mine.read": "Leído el {time}",
+    "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
+    "auth.btn.finish": "Terminá de crear tu cuenta",
+    "auth.btn.hi": "Hola, {name}",
+    "auth.profile.title": "Ver mi perfil",
+    "auth.signOut": "Cerrar sesión",
+    "auth.panel.aria": "Iniciar sesión o crear una cuenta",
+    "auth.entry.title": "Entrá a URBANO",
+    "auth.entry.note": "Iniciá sesión en tu cuenta o creá una.",
+    "auth.login": "Iniciar sesión",
+    "auth.register": "Crear cuenta",
+    "auth.method.loginNote": "Elegí cómo recibir tu código.",
+    "auth.method.registerNote": "Te enviaremos un código para confirmar que sos vos.",
+    "auth.method.email": "Correo",
+    "auth.method.phone": "Teléfono",
+    "auth.method.phoneSoon": "Teléfono — todavía no disponible",
+    "auth.method.phoneSoonTitle": "El acceso por teléfono todavía no está disponible.",
+    "auth.method.phoneSoonMsg": "El acceso por teléfono todavía no está disponible. Usá tu correo.",
+    "auth.input.emailPlaceholder": "tu@ejemplo.com",
+    "auth.input.emailAria": "Correo electrónico",
+    "auth.input.phoneAria": "Número de teléfono",
+    "auth.sendLogin": "Enviar código de acceso",
+    "auth.sendVerification": "Enviar código de verificación",
+    "auth.phoneHint": "Usá el código de país, por ejemplo +504 9999 9999.",
+    "auth.back": "Volver",
+    "auth.switch.toRegister": "Crear una cuenta en su lugar",
+    "auth.switch.toLogin": "Ya tengo una cuenta",
+    "auth.code.title": "Ingresá tu código",
+    "auth.code.introLoginEmail": "Si {id} tiene una cuenta, te llegará un código en breve. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introLoginPhone": "Si {id} tiene una cuenta, te llegará un mensaje de texto con un código. Puede tardar un minuto.",
+    "auth.code.introRegisterEmail": "Enviamos un código a {id}. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introRegisterPhone": "Enviamos un mensaje de texto con un código a {id}. Puede tardar un minuto.",
+    "auth.code.placeholder": "Código de verificación",
+    "auth.code.verify": "Verificar",
+    "auth.code.resend": "Reenviar código",
+    "auth.code.resendIn": "Reenviar código en {s} s",
+    "auth.code.otherNumber": "Usar otro número",
+    "auth.code.otherEmail": "Usar otro correo",
+    "auth.code.noCodeEmail": "¿No te llegó el código por correo? ",
+    "auth.code.noCodePhone": "¿No te llegó el código por mensaje de texto? ",
+    "auth.name.title": "Elegí tu nombre para mostrar",
+    "auth.name.note": "Así vas a aparecer en los juegos.",
+    "auth.name.placeholder": "Cómo vas a aparecer en los juegos",
+    "auth.name.aria": "Nombre para mostrar",
+    "auth.continue": "Continuar",
+    "auth.welcome.title": "Te damos la bienvenida de nuevo",
+    "auth.welcome.email": "Este correo ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.welcome.phone": "Este número de teléfono ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.msg.phoneEmpty": "Ingresá tu número de teléfono con el código de país, por ejemplo +504 9999 9999.",
+    "auth.msg.phoneNoCountry": "Empezá con el código de país, por ejemplo +504 9999 9999 para Honduras.",
+    "auth.msg.phoneInvalid": "Ese número de teléfono no parece válido. Usá el código de país seguido del número, por ejemplo +504 9999 9999.",
+    "auth.msg.emailEmpty": "Ingresá tu correo electrónico.",
+    "auth.msg.emailInvalid": "Eso no parece un correo electrónico. Revisalo e intentá de nuevo.",
+    "auth.msg.requestingLogin": "Solicitando tu código de acceso...",
+    "auth.msg.sendingVerification": "Enviando tu código de verificación...",
+    "auth.msg.sendingNew": "Enviando un código nuevo...",
+    "auth.msg.resentLogin": "Si existe una cuenta, te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.resentRegister": "Te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.codeEmptyPhone": "Ingresá el código de tu mensaje de texto.",
+    "auth.msg.codeEmptyEmail": "Ingresá el código de tu correo.",
+    "auth.msg.verifying": "Verificando...",
+    "auth.msg.incompleteLogin": "Encontramos tu acceso pero no una cuenta terminada. Elegí un nombre para mostrar para terminarla.",
+    "auth.msg.lastStep": "Un último paso para terminar de crear tu cuenta.",
+    "auth.msg.nameEmpty": "Ingresá un nombre para mostrar.",
+    "auth.msg.saving": "Guardando...",
+    "auth.err.rateLimited": "Demasiadas solicitudes. Esperá {seconds} segundos e intentá de nuevo.",
+    "auth.err.rateLimitedFew": "Demasiadas solicitudes. Esperá unos segundos e intentá de nuevo.",
+    "auth.err.codeInvalid": "Ese código no es válido o venció. Revisá el código o pedí uno nuevo.",
+    "auth.err.signupClosed": "Por ahora no se pueden crear cuentas nuevas.",
+    "auth.err.phoneUnavailable": "El acceso por teléfono no está disponible en este momento.",
+    "auth.err.phoneUnavailableYet": "El acceso por teléfono todavía no está disponible.",
+    "auth.err.invalidPhone": "Ese número de teléfono no se puede usar.",
+    "auth.err.invalidEmail": "Ese correo electrónico no se puede usar.",
+    "auth.err.network": "No pudimos conectarnos con el servidor. Revisá tu conexión e intentá de nuevo.",
+    "auth.err.unknown": "Algo salió mal. Intentá de nuevo.",
+    "auth.err.notSignedIn": "No iniciaste sesión.",
+    "auth.err.identityChanged": "Tu sesión cambió. Intentá de nuevo.",
+    "auth.err.profileFailed": "No se pudo completar el perfil.",
+    "auth.srv.nameEmpty": "El nombre para mostrar no puede estar vacío.",
+    "auth.srv.nameTooLong": "El nombre para mostrar no puede superar los 40 caracteres.",
+    "auth.link.error": "Este enlace de acceso no es válido, ya se usó o venció. Pedí uno nuevo para iniciar sesión.",
+    "auth.link.retry": "Pedir un código nuevo"
+  };
+  var SERVER = {};
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+  function t(key, vars) {
+    var template = own(ES, key) ? ES[key] : key;
+    return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
+      if (!vars || !own(vars, name)) return whole;
+      var value = vars[name];
+      if (value && typeof value === "object" && typeof value.$t === "string") return t(value.$t);
+      return value === null || value === undefined ? "" : String(value);
+    });
+  }
+  w.UrbanoI18n = {
+    fallback: true,
+    STORAGE_KEY: "urbano.lang",
+    DEFAULT_LANG: "es",
+    LANGS: ["es"],
+    getLang: function () { return "es"; },
+    setLang: function () { return false; },
+    t: t,
+    has: function (key) { return own(ES, key); },
+    locale: function () { return "es-HN"; },
+    serverMessageKey: function (message) { return own(SERVER, message) ? SERVER[message] : null; },
+    onChange: function () { return function () {}; },
+    apply: function () {},
+    dictionary: function () { return { es: ES, en: {} }; }
+  };
+  var groups = w.document.querySelectorAll(".lang-switch");
+  for (var i = 0; i < groups.length; i++) { groups[i].hidden = true; groups[i].style.display = "none"; }
+})(window);
+</script>
+<script src="/urbanoAuth.js"></script>
+<script>
+UrbanoAuth.attachSignInButton(
+  document.getElementById("btn-signin"),
+  document.getElementById("signin-status"),
+  { accountLink: document.getElementById("account-link") }
+);
+
+const t = (key, vars) => UrbanoI18n.t(key, vars);
+const listHost = document.getElementById("legal-list");
+const docHost = document.getElementById("legal-doc");
+const mineHost = document.getElementById("legal-mine");
+const DOC_NAME_KEYS = { ACCOUNT_TERMS: "legalpage.doc.ACCOUNT_TERMS", PRIVACY_NOTICE: "legalpage.doc.PRIVACY_NOTICE", EVENT_RULES: "legalpage.doc.EVENT_RULES" };
+const DOC_ORDER = ["ACCOUNT_TERMS", "PRIVACY_NOTICE", "EVENT_RULES"];
+
+// Sets a node's text from the language table and remembers the key so a change of language re-translates it in place.
+function setText(node, key, vars) {
+  node.setAttribute("data-i18n", key);
+  if (vars) node.setAttribute("data-i18n-vars", JSON.stringify(vars));
+  node.textContent = t(key, vars);
+  return node;
+}
+function make(tag, className, key) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (key) setText(node, key);
+  return node;
+}
+function plain(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text; // always text: a document can never carry markup onto this page
+  return node;
+}
+
+// An instant with its time zone written out (the device's own); the language of month names follows the page. Redrawn on a change of language.
+function formatInstant(iso) {
+  try {
+    return new Intl.DateTimeFormat(UrbanoI18n.locale(), { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(new Date(iso));
+  } catch (err) {
+    return new Date(iso).toLocaleString(UrbanoI18n.locale());
+  }
+}
+function setTimeText(node, key, iso) {
+  node.removeAttribute("data-i18n");
+  node.removeAttribute("data-i18n-vars");
+  node.setAttribute("data-time-key", key);
+  node.setAttribute("data-time-iso", iso);
+  node.textContent = t(key, { time: formatInstant(iso) });
+  return node;
+}
+function renderTimeNodes(scope) {
+  for (const node of scope.querySelectorAll("[data-time-key]")) {
+    node.textContent = t(node.getAttribute("data-time-key"), { time: formatInstant(node.getAttribute("data-time-iso")) });
+  }
+}
+UrbanoI18n.onChange(() => renderTimeNodes(document));
+
+async function authedFetch(path) {
+  const token = await UrbanoAuth.getAccessToken();
+  const headers = {};
+  if (token) headers.authorization = "Bearer " + token;
+  const res = await fetch(path, { headers });
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json, signedIn: !!token };
+}
+
+const params = new URLSearchParams(window.location.search);
+const wantedDoc = params.get("doc");
+const wantedVersion = params.get("version");
+const wantedKickoff = params.get("kickoffAt");
+
+function docUrl(entry) {
+  let url = "/legal.html?doc=" + encodeURIComponent(entry.key) + "&version=" + encodeURIComponent(entry.version);
+  if (entry.scope && entry.scope.kind === "EVENT") url += "&kickoffAt=" + encodeURIComponent(entry.scope.kickoffAt);
+  return url;
+}
+
+function renderList(documents) {
+  listHost.replaceChildren();
+  if (!documents.length) {
+    listHost.appendChild(messageNode("legalpage.none"));
+    return;
+  }
+  const card = make("div", "card");
+  card.appendChild(make("h2", null, "legalpage.listTitle"));
+  const groups = make("div", "legal-groups");
+  for (const key of DOC_ORDER) {
+    const entries = documents.filter((d) => d.key === key);
+    if (!entries.length) continue;
+    const group = make("div", "legal-group");
+    group.appendChild(make("h3", null, DOC_NAME_KEYS[key]));
+    const ul = make("ul", "legal-versions");
+    // the current version first, then the older ones: an older text stays readable
+    entries.sort((a, b) => Number(b.current) - Number(a.current));
+    for (const entry of entries) {
+      const li = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = docUrl(entry);
+      link.appendChild(setText(document.createElement("span"), "legalpage.version", { version: entry.version }));
+      li.appendChild(link);
+      const tag = make("span", entry.current ? "legal-tag good" : "legal-tag", entry.current ? "legalpage.current" : "legalpage.old");
+      li.appendChild(tag);
+      if (entry.scope && entry.scope.kind === "EVENT") {
+        const when = document.createElement("span");
+        when.className = "msg";
+        when.style.marginLeft = "8px";
+        setTimeText(when, "legalpage.event", entry.scope.kickoffAt);
+        li.appendChild(when);
+      }
+      ul.appendChild(li);
+    }
+    group.appendChild(ul);
+    groups.appendChild(group);
+  }
+  card.appendChild(groups);
+  listHost.appendChild(card);
+}
+
+function messageNode(key, buttonKey, onClick) {
+  const wrap = make("div", "card");
+  wrap.appendChild(make("p", "msg", key));
+  if (buttonKey) {
+    const button = make("button", "btn-primary", buttonKey);
+    button.type = "button";
+    button.addEventListener("click", onClick);
+    wrap.appendChild(button);
+  }
+  return wrap;
+}
+
+// A document is a list of typed blocks, put on the page as text.
+function renderBlocks(host, blocks) {
+  for (const block of blocks) {
+    if (block.kind === "heading") host.appendChild(plain("h2", block.text));
+    else if (block.kind === "paragraph") host.appendChild(plain("p", block.text));
+    else if (block.kind === "list") {
+      const ul = document.createElement("ul");
+      for (const item of block.items) ul.appendChild(plain("li", item));
+      host.appendChild(ul);
+    } else if (block.kind === "table") {
+      const wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      const table = document.createElement("table");
+      const head = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const cell of block.header) {
+        const th = plain("th", cell);
+        th.scope = "col";
+        headRow.appendChild(th);
+      }
+      head.appendChild(headRow);
+      const body = document.createElement("tbody");
+      for (const row of block.rows) {
+        const tr = document.createElement("tr");
+        for (const cell of row) tr.appendChild(plain("td", cell));
+        body.appendChild(tr);
+      }
+      table.append(head, body);
+      wrap.appendChild(table);
+      host.appendChild(wrap);
+    }
+  }
+}
+
+async function showDocument() {
+  const query = new URLSearchParams();
+  if (wantedVersion) query.set("version", wantedVersion);
+  if (wantedKickoff) query.set("kickoffAt", wantedKickoff);
+  const url = "/api/gaming/legal/documents/" + encodeURIComponent(wantedDoc) + (query.toString() ? "?" + query.toString() : "");
+  const result = await authedFetch(url);
+  docHost.hidden = false;
+  docHost.replaceChildren();
+  if (result.status !== 200 || !result.json || !result.json.document) {
+    docHost.appendChild(make("p", "msg", "legalpage.notFound"));
+  } else {
+    const doc = result.json.document;
+    docHost.appendChild(plain("h1", doc.title));
+    const meta = document.createElement("p");
+    meta.className = "legal-meta";
+    meta.appendChild(setText(document.createElement("span"), "legalpage.version", { version: doc.version }));
+    meta.appendChild(document.createTextNode(" · "));
+    meta.appendChild(make("span", null, doc.current ? "legalpage.current" : "legalpage.old"));
+    meta.appendChild(document.createTextNode(" · SHA-256 "));
+    meta.appendChild(plain("code", doc.sha256));
+    docHost.appendChild(meta);
+    renderBlocks(docHost, doc.blocks);
+  }
+  const back = make("a", "legal-back", "legalpage.back");
+  back.href = "/legal.html";
+  docHost.appendChild(back);
+  docHost.focus();
+}
+
+async function showMine() {
+  const result = await authedFetch("/api/gaming/legal/acceptances");
+  mineHost.hidden = false;
+  mineHost.replaceChildren();
+  const title = make("h2", null, "legalpage.mine.title");
+  title.id = "legal-mine-title";
+  mineHost.appendChild(title);
+  if (!result.signedIn || result.status === 401) {
+    mineHost.appendChild(make("p", "msg", "legalpage.mine.signin"));
+    return;
+  }
+  const rows = result.status === 200 && result.json && Array.isArray(result.json.acceptances) ? result.json.acceptances : null;
+  if (rows === null) {
+    mineHost.appendChild(make("p", "msg", "legalpage.loadFailed"));
+    return;
+  }
+  if (rows.length === 0) {
+    mineHost.appendChild(make("p", "msg", "legalpage.mine.empty"));
+    return;
+  }
+  const ul = make("ul", "legal-mine");
+  for (const row of rows) {
+    const li = document.createElement("li");
+    li.appendChild(make("strong", null, DOC_NAME_KEYS[row.documentKey] || "legalpage.doc.ACCOUNT_TERMS"));
+    li.appendChild(document.createTextNode(" — "));
+    li.appendChild(setText(document.createElement("span"), "legalpage.version", { version: row.documentVersion }));
+    li.appendChild(document.createTextNode(" — "));
+    li.appendChild(setTimeText(document.createElement("span"), row.actType === "READ_ACKNOWLEDGMENT" ? "legalpage.mine.read" : "legalpage.mine.accepted", row.acceptedAt));
+    ul.appendChild(li);
+  }
+  mineHost.appendChild(ul);
+}
+
+async function load() {
+  try {
+    const list = await fetch("/api/gaming/legal/documents", { headers: {} });
+    const json = await list.json();
+    if (!list.ok || !json || !Array.isArray(json.documents)) throw new Error("list");
+    renderList(json.documents);
+  } catch (err) {
+    listHost.replaceChildren(messageNode("legalpage.loadFailed", "legalpage.retry", () => load()));
+  }
+  if (wantedDoc) await showDocument();
+  await showMine();
+}
+load();
+</script>
+</body>
+</html>

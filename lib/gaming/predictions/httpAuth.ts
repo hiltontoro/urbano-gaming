@@ -64,6 +64,7 @@ import {
   InvalidPrizeTierLadderLevelError,
 } from "./types";
 import { ResultChangedWhileLoadingError } from "./resultView";
+import { LegalConditionsError } from "../legal/types";
 
 /** Maps a known Predictions domain error to its HTTP status; null if unrecognized. */
 export function statusForPredictionsError(err: unknown): number | null {
@@ -100,6 +101,7 @@ export function statusForPredictionsError(err: unknown): number | null {
     err instanceof PrizeQualificationNotHeldError ||
     err instanceof ContractMismatchError ||
     err instanceof ContractFrozenError ||
+    err instanceof LegalConditionsError ||
     err instanceof OfferNotAvailableError ||
     err instanceof OfferChangedError ||
     err instanceof OfferFrozenError ||

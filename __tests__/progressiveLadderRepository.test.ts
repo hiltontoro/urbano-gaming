@@ -60,9 +60,26 @@ vi.mock("@/lib/gaming/predictions/httpAuth", async () => {
     requirePlatformAuthorityHttp: vi.fn(),
   };
 });
+vi.mock("@/lib/gaming/legal/httpLegal", async () => {
+  const actual = await vi.importActual<typeof import("../lib/gaming/legal/httpLegal")>("../lib/gaming/legal/httpLegal");
+  return { ...actual, buildLegalRepo: vi.fn(), currentLegalRegistry: vi.fn() };
+});
 import * as httpAuth from "../lib/gaming/predictions/httpAuth";
+import * as httpLegal from "../lib/gaming/legal/httpLegal";
+import { InMemoryLegalAcceptanceRepository } from "../lib/gaming/legal/db/inMemoryLegalAcceptanceRepository";
+import { acceptEverything, fixtureRegistry } from "./helpers/legalFixtures";
 
 const FINALIZER = "gm-finalizer";
+
+// These route tests are about the request shapes and refusals, not about the legal texts: the member here has accepted the fixture texts of the match.
+async function conditionsFor(repo: InMemoryPredictionsRepository, matchId: string, memberId: string) {
+  const kickoffAt = (await repo.getMatchById(matchId))!.kickoffAt;
+  const registry = fixtureRegistry(kickoffAt);
+  const legal = new InMemoryLegalAcceptanceRepository();
+  vi.mocked(httpLegal.buildLegalRepo).mockReturnValue(legal as never);
+  vi.mocked(httpLegal.currentLegalRegistry).mockReturnValue(registry);
+  await acceptEverything(legal, registry, { matchId, kickoffAt }, memberId);
+}
 
 function freshEnv(): { env: LadderEnv; repo: InMemoryPredictionsRepository } {
   const repo = new InMemoryPredictionsRepository();
@@ -1030,6 +1047,7 @@ describe("routes", () => {
     useRepo(repo);
     const memberId = await env.newMember("route");
     vi.mocked(httpAuth.requireGamingMember).mockResolvedValue({ gamingMemberId: memberId } as never);
+    await conditionsFor(repo, w.matchId, memberId);
     const digest = (await offerDigestOf(env, w))!;
     const POST = (await import("../app/api/gaming/predictions/matches/[matchId]/predict/route")).POST;
     return { env, repo, w, memberId, digest, POST };
@@ -1098,6 +1116,7 @@ describe("routes", () => {
     const home = await repo.createTeam({ name: "H" });
     const away = await repo.createTeam({ name: "A" });
     const match = await repo.createMatch({ homeTeamId: home.teamId, awayTeamId: away.teamId, competition: "Old", kickoffAt: new Date(Date.now() + 3600_000).toISOString() });
+    await conditionsFor(repo, match.matchId, "m");
     await repo.setMatchActivityClassification(match.matchId, "TRAINING", FINALIZER, null);
     const venue = await repo.createVenue({ name: "V", latitude: 10, longitude: 10, radiusMeters: 100 });
     const activation = await repo.createVenueActivation({ matchId: match.matchId, venueId: venue.venueId });

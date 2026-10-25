@@ -251,7 +251,8 @@ describe("the profile uses the same shell", () => {
     expect(Array.from(page.doc.querySelectorAll(".account-group > *")).map((e) => e.id)).toEqual(["account-link", "btn-signin"]);
     expect(page.calls.attach).toHaveLength(1);
     expect(page.calls.attach[0].options.accountLink).toBe(page.doc.getElementById("account-link"));
-    expect(page.doc.querySelector("footer a")!.getAttribute("href")).toBe("https://www.tecnomovi.com/");
+    expect(page.doc.querySelector('footer a[href^="https://"]')!.getAttribute("href")).toBe("https://www.tecnomovi.com/");
+    expect(page.doc.querySelector('footer a[href="/legal.html"]')).not.toBeNull();
     expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
     expect(page.doc.title).toBe("Mi perfil — URBANO Gaming");
   });

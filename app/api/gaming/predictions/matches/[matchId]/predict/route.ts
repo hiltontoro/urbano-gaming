@@ -9,6 +9,8 @@ import { submitPrediction, submitProgressivePrediction } from "@/lib/gaming/pred
 import { assertParticipationOpen } from "@/lib/gaming/predictions/participationWindow";
 import { ContractMismatchError, InvalidAttemptShapeError } from "@/lib/gaming/predictions/types";
 import { PROGRESSIVE_PREDICTION_CONTRACT, progressivePredictionView } from "@/lib/gaming/predictions/prizeLadder";
+import { makeAdmissionGate, type AdmissionGate } from "@/lib/gaming/legal/requirements";
+import { buildLegalRepo, currentLegalRegistry, legalErrorResponse } from "@/lib/gaming/legal/httpLegal";
 
 /** The fields of the historical request: four dimensions at once, a bare null meaning "No Goal". */
 const HISTORICAL_FIELDS = [
@@ -47,6 +49,11 @@ const PROGRESSIVE_ALLOWED_FIELDS = [
  * a category above the level is ABSENT, never null, and the fingerprint of
  * the prize offer the member saw (`offerDigest`) must be echoed back. A
  * request of the other contract's shape is refused (409), not guessed at.
+ *
+ * CONDITIONS. A new participation or a real edit is an admission: the member must have accepted the CURRENT account terms and event rules and
+ * acknowledged the CURRENT privacy notice (409 with a code and the documents that are missing otherwise; 409 "not published" while the
+ * registry of texts has no approved text, which is how it ships). An exact replay of a participation that already exists is not an admission
+ * and passes without them. Neither is decided by the page.
  */
 export async function POST(
   request: Request,
@@ -88,8 +95,15 @@ export async function POST(
     // yet": opening is the venue activation being enabled by a person, and the closing is the start of the match, judged where it always was.
     assertParticipationOpen(match);
 
+    const gate = makeAdmissionGate({
+      repo: buildLegalRepo(credentials),
+      registry: currentLegalRegistry(),
+      match: { matchId: match.matchId, kickoffAt: match.kickoffAt },
+      gamingMemberId: authResult.gamingMemberId,
+    });
+
     if (match.predictionContract === PROGRESSIVE_PREDICTION_CONTRACT) {
-      return await submitProgressive(repo, params.matchId, authResult.gamingMemberId, body);
+      return await submitProgressive(repo, params.matchId, authResult.gamingMemberId, body, gate);
     }
 
     if (PROGRESSIVE_FIELDS.some((field) => field in body)) {
@@ -97,8 +111,10 @@ export async function POST(
         "This match takes the historical prediction; the request used the progressive shape."
       );
     }
-    return await submitHistorical(repo, params.matchId, authResult.gamingMemberId, body);
+    return await submitHistorical(repo, params.matchId, authResult.gamingMemberId, body, gate);
   } catch (err) {
+    const legal = legalErrorResponse(err);
+    if (legal) return legal;
     const status = statusForPredictionsError(err);
     if (status) {
       return NextResponse.json({ error: (err as Error).message }, { status });
@@ -123,7 +139,8 @@ async function submitProgressive(
   repo: ReturnType<typeof buildPredictionsRepo>,
   matchId: string,
   gamingMemberId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  gate: AdmissionGate
 ) {
   if (HISTORICAL_FIELDS.some((field) => field in body)) {
     throw new ContractMismatchError(
@@ -154,7 +171,7 @@ async function submitProgressive(
     answers,
     offerDigest: typeof body.offerDigest === "string" ? body.offerDigest : null,
     geo: geoOf(body),
-  });
+  }, gate);
   return NextResponse.json({ prediction: progressivePredictionView(prediction) }, { status: 201 });
 }
 
@@ -162,7 +179,8 @@ async function submitHistorical(
   repo: ReturnType<typeof buildPredictionsRepo>,
   matchId: string,
   gamingMemberId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  gate: AdmissionGate
 ) {
   const {
     venueActivationId,
@@ -201,6 +219,6 @@ async function submitHistorical(
     predictedGoalMinuteStoppage: predictedGoalMinuteStoppage as number | null,
     predictedFirstTeamToScore: predictedFirstTeamToScore as "HOME" | "AWAY" | null,
     geo: geoOf(body),
-  });
+  }, gate);
   return NextResponse.json({ prediction }, { status: 201 });
 }

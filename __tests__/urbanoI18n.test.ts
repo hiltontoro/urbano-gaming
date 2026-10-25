@@ -194,6 +194,7 @@ describe("the table is tied to the strings it translates", () => {
       read("lib/gaming/predictions/types.ts"),
       read("lib/gaming/predictions/prizeLadder.ts"),
       read("lib/gaming/predictions/httpAuth.ts"),
+      read("lib/gaming/legal/types.ts"),
       read("app/api/gaming/predictions/matches/[matchId]/predict/route.ts"),
       read("app/api/gaming/member/route.ts"),
       read("lib/gaming/types.ts"),

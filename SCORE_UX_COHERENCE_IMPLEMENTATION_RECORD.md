@@ -192,6 +192,19 @@ Registered at the Founder's request, after the delivery of §11. When it was reg
 - **Constraints kept:** local preparation only; the Legendary level does not assume a single winner; no quotas and no draws are introduced into the ladder (every participant who reaches a level is evaluated at that level, as the ladder already works).
 - **Open for the approval:** who prepares and hands over each prize and answers for it; whether the Legendary credit can be split between several winners and how it is redeemed; the wording of the conditions shown to members in Spanish and English (none was written).
 
+### 12.1 Superseded by the Founder's later decisions (2026-10-25) — the table above is kept as history
+
+The Founder's current proposal replaces the table above. It is still a **proposal awaiting The Pub's written confirmation**, not a confirmed offer, and no financial cover by Tecnomovi is announced (no amount is approved; any co-financing is an internal negotiation only):
+
+| Level | Current proposal |
+|---|---|
+| Easy (Fácil) | tequeños de queso |
+| Medium (Mediana) | Cheese Burger con papas |
+| Hard (Difícil) | cubetazo de 5 cervezas (brand, size and a non-alcohol alternative still pending) |
+| Legendary (Legendaria) | L 3,000 in products of The Pub, not cash, **for each winner** |
+
+L 2,000 and L 5,000 are replaced / discarded for this version. One prize per participant, the highest level reached in order; no quotas and no draws. The demo fixture of the tests (`THE_PUB_PRIZES`) now carries this wording; the real labels are data loaded when the real match is prepared (OP-6 of the register), never code.
+
 ## 13. Release preparation (2026-10-25): the server-enforced window, and the register of durable operations
 
 ### 13.1 The participation window is enforced by the server — in the API, not in the database
@@ -228,3 +241,29 @@ Pushing to `main` deploys to Production automatically (the repository's Vercel i
 5. **Technical verification** on Production: the deployed SHA, the public pages, Clasificaciones closed, a rehearsal of the closing and of the "not yet", with no real participation created.
 
 If any of them is pending at 12:30 p. m., participation stays closed and the pending item is reported. Nothing in this release opens the event.
+
+## 14. Acceptance of the legal texts before taking part — LOCAL gate (2026-10-25)
+
+**Authority and limits.** Implemented and tested LOCALLY on the Founder's explicit instruction. It does **not** authorize a commit, a push, a deployment or applying the migration in Production, and none was done: the clone is on `local/legal-acceptance-gate` at `92e8372` with the changes uncommitted. No acceptance was recorded for any real person or by the Founder; the only rows ever written are for invented test members on a disposable local database, and they are removed by the tests.
+
+### 14.1 What it does
+- Before a **new participation or a real edit** reaches the database, the predict route asks the gate (`lib/gaming/legal/requirements.ts`) whether the member has, for **this match**, accepted the current *account terms* and the current *event rules* (with the declaration of being 18 or older, a condition of this event and not of the platform) and **acknowledged having read** the current *privacy notice*. Three different acts: the privacy notice is a read-acknowledgment, never worded or stored as a consent to any processing; there is no marketing consent anywhere.
+- An **exact replay** of a participation that already exists (same activation, answers and offer digest — `isExactProgressiveReplay`) is not an admission and passes without the conditions, and is never turned into one. A participation made before any conditions existed keeps its replay and cannot be edited until the conditions are accepted.
+- **The registry of current texts is empty** (`lib/gaming/legal/documents.ts`, `LEGAL_DOCUMENTS = []`): nothing is published, no acceptance can be recorded, every new participation or edit is refused `409 LEGAL_DOCUMENTS_NOT_PUBLISHED`, and the public viewer says that no text is published. A text enters only when the Founder approves it, as an entry with its version and pinned SHA-256; a text whose bytes do not match the pinned hash, or an ambiguous registry, publishes nothing. Drafts live outside the repository; a test fails if a draft marker appears in the code or the public pages.
+- The shared sign-in (`urbanoAuth.js`) and the other games' pages are untouched. The only change to other pages is a footer link to `/legal.html` on Home, Score and Profile (and the regenerated Spanish fallback blocks of Rewards and Leaderboards, which gain one shell key).
+
+### 14.2 Data
+One migration, `20261025130000_create_legal_acceptances.sql`: table `legal_acceptances` (member, document, version, SHA-256 of the exact text shown, kind of act, the match for event rules, the age declaration, language, source, database time), insert-only (a trigger refuses any UPDATE), **two partial unique indexes** so that the global documents (scope NULL) cannot repeat — a plain `UNIQUE` lets NULLs through — and a single idempotent writer `record_legal_acceptance()` that is safe under concurrent requests and refuses a different hash for an existing version. `service_role` only (RLS on, no browser privileges; checked in the catalog). Not applied in Production; a prepared copy with its checksum is outside the repository.
+
+### 14.3 Evidence (final bytes, local)
+- `npm test`: 79 files / 3,164 tests pass; `tsc --noEmit` 0; `npm run build` 0.
+- Contract suite, serial, on a fresh disposable database with all migrations (the two staged ones and this one): 33 files / 950 tests pass; of them `legalAcceptanceSupabase.contract.test.ts` (19): constraints, the NULL-scope duplicate case, immutability, 40 simultaneous writers ending in one row for a global and for an event document, ACL for `anon` and a signed-in member with real tokens, routes and the admission gate against the real route.
+- End-to-end over HTTP against a real `next start` build and the real local Auth and database (a copy with invented fixture texts; not the deliverable): 8 steps — public texts, 401s, refusal without conditions, stale hash and missing age refused, recorded for the caller only, admission, isolation, exact replay, 20 simultaneous requests ending in three rows, an edit.
+- Negative controls: 18 mutations of the code, 10 of the page, 11 of the SQL — every one makes tests fail, except one equivalent mutant (granting the function to `authenticated` changes nothing observable because the function is `SECURITY INVOKER` and the table has no browser privileges; both layers are in the catalog evidence).
+- Page: jsdom journeys of the review step (pending, accepted, unpublished, failed check, stale text, refusal at the send, English, text-only rendering of a hostile title, re-asking after leaving the review) and of the viewer page; a real browser check of the viewer and of the Home card at 320 and 375 px.
+
+### 14.4 Halloween card (text only)
+The card titled "Concurso de disfraces" (English "Costume contest") with the Founder's description in both languages, **kept as "Próximamente" / "Coming Soon"**, still informational: no link, no action, no vote, no prize. Measured in a real browser at 375 px (title 2 lines, text 3 lines) and 320 px (title 2 / text 4 lines in Spanish; 1 / 4 in English): nothing clipped, nothing outside the card, no horizontal scroll.
+
+### 14.5 Not done
+Nothing was committed, pushed, deployed or applied in Production; no marketing mechanism; no sign-in change; no real texts approved or published; no participation opened.

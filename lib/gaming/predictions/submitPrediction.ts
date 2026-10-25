@@ -4,6 +4,7 @@ import { VenueActivationNotFoundError, GeoUnavailableError } from "./types";
 import { evaluateGeoEligibility } from "./geolocation";
 import { parseProgressiveAnswers, assertCoherentAnswers, isExactProgressiveReplay } from "./prizeLadder";
 import type { ProgressiveAnswers, ScorerSide } from "./prizeLadder";
+import type { AdmissionGate } from "../legal/requirements";
 
 /**
  * SUBMIT_PREDICTION — the single write path for both a first-time
@@ -41,11 +42,15 @@ export async function submitPrediction(
     predictedGoalMinuteStoppage: number | null;
     predictedFirstTeamToScore: "HOME" | "AWAY" | null;
     geo: GeoSubmission | null;
-  }
+  },
+  gate?: AdmissionGate
 ): Promise<PredictionRecord> {
   if (!input.geo) {
     throw new GeoUnavailableError();
   }
+
+  // Every submission of the historical contract is an admission or an edit: the conditions are asked for each time (no replay concept here).
+  if (gate) await gate.assertConditions();
 
   const activation = await repo.getVenueActivationById(input.venueActivationId);
   if (!activation) {
@@ -94,6 +99,9 @@ export async function submitPrediction(
  * offer has since changed the submission is refused, so an accepted offer
  * can never change silently underneath a prediction.
  *
+ * Conditions (the legal texts): a new participation or a real edit needs the current conditions accepted (the `gate`); an exact replay of a
+ * participation that already exists does not, and does not become a new admission.
+ *
  * Coherence: the answers must be able to come from one scoreline (see
  * progressiveCoherenceProblems). That judges a new answer or an edit; an
  * exact repeat of the prediction already stored is a replay and keeps its
@@ -111,7 +119,8 @@ export async function submitProgressivePrediction(
     answers: unknown;
     offerDigest: string | null;
     geo: GeoSubmission | null;
-  }
+  },
+  gate?: AdmissionGate
 ): Promise<PredictionRecord> {
   if (!input.geo) {
     throw new GeoUnavailableError();
@@ -120,8 +129,12 @@ export async function submitProgressivePrediction(
   const answers = parseProgressiveAnswers(input.answers);
 
   const stored = await repo.getPredictionForMember(input.matchId, input.gamingMemberId);
-  if (!isExactProgressiveReplay(stored, input.venueActivationId, answers, input.offerDigest)) {
+  const replay = isExactProgressiveReplay(stored, input.venueActivationId, answers, input.offerDigest);
+  if (!replay) {
     assertCoherentAnswers(answers, await scorerSideOf(repo, input.matchId, answers));
+    // A new participation or a real edit is an admission: the current conditions must be in place. An exact repeat of a participation that
+    // already exists is not an admission and is never judged against conditions again (same reasoning as the coherence check above).
+    if (gate) await gate.assertConditions();
   }
 
   const activation = await repo.getVenueActivationById(input.venueActivationId);

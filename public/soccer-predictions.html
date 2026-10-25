@@ -234,6 +234,15 @@
   .ladder-review { border: 1px dashed var(--exp-purple); border-radius: 12px; padding: 14px; margin: 14px 0; }
   .ladder-review h3 { margin-top: 0; }
   .ladder-review ul { margin: 8px 0; padding-left: 18px; font-size: 14px; line-height: 1.7; }
+  /* The conditions (legal texts) a person accepts before the first send: every text is one tap away, every box is a full-size target. */
+  .ladder-conditions { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--bg-card); }
+  .ladder-conditions h3 { margin: 0 0 8px; }
+  .ladder-conditions-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 14px; }
+  .ladder-conditions-list li { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+  .legal-read { display: inline-block; font-size: 13.5px; font-weight: 700; text-decoration: underline; padding: 10px 0; min-height: 44px; }
+  .legal-tick { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 8px 0; font-weight: 600; cursor: pointer; }
+  .legal-tick input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; accent-color: var(--exp-purple); }
+  .legal-read:focus-visible, .legal-tick input:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   /* The conditions that must never be hidden stay on screen (the essentials and the panel); the long explanation lives in a disclosure. */
   .ladder-help { border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 0; background: transparent; }
   .ladder-help > summary { cursor: pointer; padding: 10px 12px; min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 700; color: var(--ink); }
@@ -329,6 +338,7 @@
 
 <footer>
   <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p><a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a></p>
   <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
 </footer>
 
@@ -357,6 +367,7 @@
     "shell.nav.rewards": "Premios",
     "shell.footer.part": "URBANO Gaming — parte de URBANO",
     "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "shell.footer.legal": "Términos, privacidad y reglas",
     "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
     "auth.btn.finish": "Terminá de crear tu cuenta",
     "auth.btn.hi": "Hola, {name}",
@@ -619,6 +630,28 @@
     "pred.srv.cancelled": "Este partido fue cancelado.",
     "pred.srv.locked": "Las predicciones están cerradas para este partido.",
     "pred.srv.notOpen": "La participación de este partido todavía no está abierta.",
+    "pred.srv.legalNotPublished": "Las condiciones de este evento todavía no están publicadas.",
+    "pred.srv.legalRequired": "Tenés que aceptar las condiciones vigentes antes de participar.",
+    "pred.srv.legalStale": "El texto que viste ya no es el vigente.",
+    "pred.srv.legalAge": "Hace falta la declaración de tener 18 años o más.",
+    "legal.title": "Condiciones para participar",
+    "legal.intro": "Antes de enviar tu pronóstico, leé cada texto completo. Podés volver a leerlos cuando quieras.",
+    "legal.loading": "Comprobando las condiciones…",
+    "legal.loadFailed": "No pudimos comprobar las condiciones. Probá de nuevo.",
+    "legal.retry": "Reintentar",
+    "legal.notPublished": "Las condiciones de este evento todavía no están publicadas, así que por ahora no se puede enviar el pronóstico.",
+    "legal.read": "Leer el texto completo (se abre en otra pestaña)",
+    "legal.version": "Versión {version}",
+    "legal.accept": "Acepto: {title}",
+    "legal.ack": "Leí: {title}",
+    "legal.ack.note": "Esto confirma que leíste el aviso. No es un permiso para ningún otro uso de tus datos.",
+    "legal.age": "Declaro que tengo 18 años cumplidos o más.",
+    "legal.doneAccept": "Aceptado el {time}",
+    "legal.doneRead": "Leído el {time}",
+    "legal.needAll": "Marcá todas las casillas para poder enviar.",
+    "legal.saving": "Guardando tu aceptación…",
+    "legal.saveFailed": "No pudimos guardar tu aceptación. Probá de nuevo.",
+    "legal.stale": "El texto cambió mientras lo leías. Leelo de nuevo y volvé a marcar.",
     "pred.srv.notClassified": "Este partido todavía no tiene una clasificación de actividad declarada y no puede recibir predicciones.",
     "pred.srv.activationNotFound": "No existe una activación de sede con ese identificador.",
     "pred.srv.activationMismatch": "Esta activación de sede no corresponde al partido indicado.",
@@ -650,6 +683,10 @@
     "This match has been cancelled.": "pred.srv.cancelled",
     "Predictions are locked for this match.": "pred.srv.locked",
     "Participation for this match has not opened yet.": "pred.srv.notOpen",
+    "The conditions for this event have not been published yet.": "pred.srv.legalNotPublished",
+    "The current conditions must be accepted before taking part.": "pred.srv.legalRequired",
+    "The text you were shown is no longer the current one.": "pred.srv.legalStale",
+    "The declaration of being 18 or older is required.": "pred.srv.legalAge",
     "This match has no declared Activity Classification and cannot accept predictions yet.": "pred.srv.notClassified",
     "No venue activation exists for this id.": "pred.srv.activationNotFound",
     "This venue activation is not for the supplied match.": "pred.srv.activationMismatch",
@@ -1395,6 +1432,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
       <div class="ladder-help-body" data-ladder-help-body></div>
     </details>
     <div data-ladder-review hidden></div>
+    <div class="ladder-conditions" data-ladder-conditions hidden></div>
     <div class="ladder-actions" data-ladder-actions></div>
     <p class="msg" id="submit-msg-${esc(matchId)}" aria-live="polite"></p>
   </form>`);
@@ -1405,6 +1443,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
   const helpBody = form.querySelector("[data-ladder-help-body]");
   const provisionalHost = form.querySelector("[data-ladder-provisional]");
   const reviewHost = form.querySelector("[data-ladder-review]");
+  const conditionsHost = form.querySelector("[data-ladder-conditions]");
   const actionsHost = form.querySelector("[data-ladder-actions]");
   const msgNode = form.querySelector(`#submit-msg-${matchId}`);
   const statusNode = form.querySelector("[data-ladder-status]");
@@ -1919,7 +1958,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
     if (st.view === "review") {
       actionsHost.append(
         button("btn-secondary", "pred.ladder.btn.edit", null, () => { st.view = "edit"; st.step = st.declared; renderAll(); }, st.busy),
-        button("btn-primary", "pred.ladder.btn.confirm", null, confirmSend, st.busy)
+        button("btn-primary", "pred.ladder.btn.confirm", null, confirmSend, st.busy || !conditionsReady())
       );
       return;
     }
@@ -1979,6 +2018,171 @@ function buildLadderForm(match, mine, authState, activations, options) {
     reviewHost.appendChild(editable);
   }
 
+  // --- the conditions: read in full, ticked, and recorded BEFORE location is asked for or anything is sent ---
+  // The server is what decides (it refuses a send without them); this only shows what is left. Nothing is ticked for anyone.
+  const legalState = { status: "idle", data: null, ticks: {}, age: false };
+  const tickKey = (d) => d.key + "@" + d.version;
+  function conditionsNeeded() {
+    return legalState.data && Array.isArray(legalState.data.documents) ? legalState.data.documents.filter((d) => !d.accepted) : [];
+  }
+  function conditionsReady() {
+    if (legalState.status !== "ready" || !legalState.data || legalState.data.published !== true) return false;
+    return conditionsNeeded().every((d) => legalState.ticks[tickKey(d)] === true && (!d.needsAgeDeclaration || legalState.age === true));
+  }
+  function legalHref(d) {
+    let href = "/legal.html?doc=" + encodeURIComponent(d.key) + "&version=" + encodeURIComponent(d.version);
+    if (d.scope && d.scope.kind === "EVENT") href += "&kickoffAt=" + encodeURIComponent(d.scope.kickoffAt);
+    return href;
+  }
+  async function loadConditions() {
+    if (legalState.status === "loading") return;
+    legalState.status = "loading";
+    renderConditions();
+    renderActions();
+    try {
+      const result = await authedFetch("/api/gaming/legal/acceptances?matchId=" + encodeURIComponent(matchId));
+      if (result.status === 200 && result.json && Array.isArray(result.json.documents)) {
+        legalState.data = result.json;
+        legalState.status = "ready";
+      } else {
+        legalState.status = "failed";
+      }
+    } catch (err) {
+      legalState.status = "failed";
+    }
+    renderConditions();
+    renderActions();
+  }
+  function renderConditions() {
+    if (st.view !== "review") { conditionsHost.hidden = true; conditionsHost.replaceChildren(); return; }
+    conditionsHost.hidden = false;
+    conditionsHost.replaceChildren();
+    const title = document.createElement("h3");
+    setText(title, "legal.title");
+    conditionsHost.appendChild(title);
+    if (legalState.status === "idle" || legalState.status === "loading") {
+      const loading = document.createElement("p");
+      loading.className = "msg";
+      setText(loading, "legal.loading");
+      conditionsHost.appendChild(loading);
+      return;
+    }
+    if (legalState.status === "failed") {
+      const failed = document.createElement("p");
+      failed.className = "msg error";
+      setText(failed, "legal.loadFailed");
+      conditionsHost.append(failed, button("btn-secondary", "legal.retry", null, () => { legalState.status = "idle"; renderAll(); }, false));
+      return;
+    }
+    const data = legalState.data;
+    if (data.published !== true) {
+      const unpublished = document.createElement("p");
+      unpublished.className = "msg error";
+      unpublished.setAttribute("data-legal-unpublished", "true");
+      setText(unpublished, "legal.notPublished");
+      conditionsHost.appendChild(unpublished);
+      return;
+    }
+    const intro = document.createElement("p");
+    intro.className = "ladder-hint";
+    setText(intro, "legal.intro");
+    conditionsHost.appendChild(intro);
+    const list = document.createElement("ul");
+    list.className = "ladder-conditions-list";
+    for (const d of data.documents) {
+      const item = document.createElement("li");
+      item.setAttribute("data-legal-doc", d.key);
+      const name = document.createElement("strong");
+      name.textContent = d.title; // text only: a document never reaches the page as markup
+      const version = document.createElement("span");
+      setText(version, "legal.version", { version: d.version });
+      item.append(name, document.createTextNode(" · "), version);
+      const link = document.createElement("a");
+      link.className = "legal-read";
+      link.href = legalHref(d);
+      link.target = "_blank";
+      link.rel = "noopener";
+      setText(link, "legal.read");
+      if (d.accepted) {
+        const done = document.createElement("span");
+        done.className = "msg";
+        done.setAttribute("data-legal-done", d.key);
+        setTimeText(done, d.actType === "READ_ACKNOWLEDGMENT" ? "legal.doneRead" : "legal.doneAccept", d.acceptedAt);
+        item.append(document.createTextNode(" — "), done, document.createElement("br"), link);
+      } else {
+        item.append(document.createElement("br"), link);
+        const label = document.createElement("label");
+        label.className = "legal-tick";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.setAttribute("data-legal-tick", d.key);
+        box.checked = legalState.ticks[tickKey(d)] === true;
+        box.addEventListener("change", () => { legalState.ticks[tickKey(d)] = box.checked; renderActions(); renderNeedAll(); });
+        const text = document.createElement("span");
+        setText(text, d.actType === "READ_ACKNOWLEDGMENT" ? "legal.ack" : "legal.accept", { title: d.title });
+        label.append(box, text);
+        item.appendChild(label);
+        if (d.actType === "READ_ACKNOWLEDGMENT") {
+          // An acknowledgment of information, never worded as a consent to anything.
+          const note = document.createElement("p");
+          note.className = "ladder-hint";
+          setText(note, "legal.ack.note");
+          item.appendChild(note);
+        }
+        if (d.needsAgeDeclaration) {
+          const ageLabel = document.createElement("label");
+          ageLabel.className = "legal-tick";
+          const age = document.createElement("input");
+          age.type = "checkbox";
+          age.setAttribute("data-legal-age", "true");
+          age.checked = legalState.age === true;
+          age.addEventListener("change", () => { legalState.age = age.checked; renderActions(); renderNeedAll(); });
+          const ageText = document.createElement("span");
+          setText(ageText, "legal.age");
+          ageLabel.append(age, ageText);
+          item.appendChild(ageLabel);
+        }
+      }
+      list.appendChild(item);
+    }
+    conditionsHost.appendChild(list);
+    const need = document.createElement("p");
+    need.className = "msg";
+    need.setAttribute("data-legal-need", "true");
+    need.setAttribute("aria-live", "polite");
+    conditionsHost.appendChild(need);
+    renderNeedAll();
+  }
+  function renderNeedAll() {
+    const need = conditionsHost.querySelector("[data-legal-need]");
+    if (!need) return;
+    if (conditionsNeeded().length > 0 && !conditionsReady()) setText(need, "legal.needAll");
+    else { need.removeAttribute("data-i18n"); need.textContent = ""; }
+  }
+  // Records the acts still missing (the server repeats every check and answers the same on a repeat), before anything else is asked or sent.
+  async function acceptConditionsNow() {
+    const needed = conditionsNeeded();
+    if (needed.length === 0) return true;
+    setMessage("legal.saving");
+    const body = {
+      matchId,
+      acceptances: needed.map((d) => Object.assign({ documentKey: d.key, documentVersion: d.version, contentSha256: d.sha256 }, d.needsAgeDeclaration ? { ageDeclared18: true } : {})),
+    };
+    const result = await authedFetch("/api/gaming/legal/acceptances", { method: "POST", body: JSON.stringify(body) });
+    if ((result.status === 200 || result.status === 201) && result.json && Array.isArray(result.json.documents)) {
+      legalState.data = result.json;
+      return true;
+    }
+    // The text changed under the person, or something is not published: show what is current and ask again; nothing was sent.
+    legalState.ticks = {};
+    legalState.age = false;
+    legalState.status = "idle";
+    if (result.json && result.json.code === "LEGAL_DOCUMENT_STALE") setMessage("legal.stale", null, "error");
+    else if (result.json && result.json.error) { msgNode.className = "msg error"; setServerMessage(msgNode, String(result.json.error)); }
+    else setMessage("legal.saveFailed", null, "error");
+    return false;
+  }
+
   function renderAll() {
     clampStep();
     renderStatus();
@@ -1991,7 +2195,11 @@ function buildLadderForm(match, mine, authState, activations, options) {
     if (editing) renderBody(); else bodyHost.replaceChildren();
     renderPanel();
     renderReview();
+    // Leaving the review forgets what was loaded (the texts may change); entering it asks the server what is left.
+    if (st.view !== "review" && legalState.status !== "idle" && legalState.status !== "loading") legalState.status = "idle";
+    renderConditions();
     renderActions();
+    if (st.view === "review" && legalState.status === "idle") loadConditions();
   }
   function afterEdit() {
     persist();
@@ -2012,6 +2220,7 @@ function buildLadderForm(match, mine, authState, activations, options) {
     setMessage("pred.submitting");
     const declared = st.declared;
     try {
+      if (!(await acceptConditionsNow())) return; // the conditions first: nothing is measured for the send and nothing is sent without them
       const measured = await measurePosition();
       if (!measured.ok) {
         // No measurement is not "outside the venue": say what happened and send nothing.
@@ -2051,6 +2260,11 @@ function buildLadderForm(match, mine, authState, activations, options) {
         persist();
         const raw = result.json && result.json.error ? String(result.json.error) : null;
         if (raw) { msgNode.className = "msg error"; setServerMessage(msgNode, raw); } else setMessage("pred.failed", null, "error");
+        if (result.json && typeof result.json.code === "string" && result.json.code.indexOf("LEGAL_") === 0) {
+          legalState.ticks = {};
+          legalState.age = false;
+          legalState.status = "idle";
+        }
         if (result.status === 409 && raw && UrbanoI18n.serverMessageKey(raw) === "pred.srv.offerChanged") {
           // The offer changed since the page loaded: show the current one on the rebuilt form and say so. The draft was answered under
           // the old offer, so it is not restored there.

@@ -93,6 +93,16 @@ interface LoadOptions {
   location?: "denied" | "timeout" | "unavailable";
   /** The browser has not been answered yet: the permission is "prompt" and no position arrives. */
   pendingPermission?: boolean;
+  /**
+   * The conditions (legal texts) as the server reports them for this match. Default "accepted": every required text already accepted, so the
+   * journeys that are not about the conditions are not asked for them. "pending": published and nothing accepted yet. "unpublished": the
+   * registry has no approved text (how it ships). "failed": the check itself fails.
+   */
+  legal?: "accepted" | "pending" | "unpublished" | "failed";
+  /** Replaces the title of the event rules in the server's answer (to prove a text from the server is only ever text). */
+  legalTitle?: string;
+  /** Overrides the answer to the acceptance POST (for example a stale text). */
+  legalPost?: (call: Call) => { status: number; json?: unknown } | undefined;
   predict?: (call: Call, index: number) => { status: number; json?: unknown } | "reject" | Promise<{ status: number; json?: unknown } | "reject">;
   matchesAfterFirst?: () => Record<string, unknown>;
 }
@@ -102,6 +112,17 @@ async function loadScore(opts: LoadOptions = {}) {
   let predictIndex = 0;
   let matchesLoads = 0;
   const initialMatch = ladderMatch(opts.match, opts.levels);
+  const legalMode = opts.legal ?? "accepted";
+  let legalAccepted = legalMode === "accepted";
+  const legalDocs = () => [
+    { key: "ACCOUNT_TERMS", actType: "ACCEPTANCE", version: "t-1", locale: "es", title: "Términos de cuenta (texto de prueba)", sha256: "a".repeat(64), scope: { kind: "GLOBAL" }, needsAgeDeclaration: false },
+    { key: "PRIVACY_NOTICE", actType: "READ_ACKNOWLEDGMENT", version: "p-1", locale: "es", title: "Aviso de privacidad (texto de prueba)", sha256: "b".repeat(64), scope: { kind: "GLOBAL" }, needsAgeDeclaration: false },
+    { key: "EVENT_RULES", actType: "ACCEPTANCE", version: "e-1", locale: "es", title: opts.legalTitle ?? "Reglas del evento (texto de prueba)", sha256: "c".repeat(64), scope: { kind: "EVENT", kickoffAt: "2026-10-25T20:00:00.000Z" }, needsAgeDeclaration: true },
+  ].map((d) => ({ ...d, accepted: legalAccepted, acceptedAt: legalAccepted ? "2026-10-25T17:00:00.000Z" : null }));
+  const legalStatus = () =>
+    legalMode === "unpublished"
+      ? { published: false, unpublished: ["ACCOUNT_TERMS", "PRIVACY_NOTICE", "EVENT_RULES"], satisfied: false, documents: [] }
+      : { published: true, unpublished: [], satisfied: legalAccepted, documents: legalDocs() };
   const auth = { signedIn: opts.authenticated !== false, memberId: opts.memberId ?? "member-1" };
   const resetCallbacks: Array<() => void> = [];
   const changeCallbacks: Array<(state: unknown) => unknown> = [];
@@ -165,6 +186,15 @@ async function loadScore(opts: LoadOptions = {}) {
           return reply(200, { matches: [match] });
         }
         if (call.url === `${API}/matches/m1/mine`) return reply(200, opts.mine ?? { prediction: null, evaluation: null, qualification: null });
+        if (call.url === "/api/gaming/legal/acceptances?matchId=m1" && call.method === "GET") {
+          return legalMode === "failed" ? reply(500, { error: "Failed to read the acceptances." }) : reply(200, legalStatus());
+        }
+        if (call.url === "/api/gaming/legal/acceptances" && call.method === "POST") {
+          const custom = opts.legalPost ? opts.legalPost(call) : undefined;
+          if (custom) return reply(custom.status, custom.json ?? null);
+          legalAccepted = true;
+          return reply(201, { recorded: 3, alreadyRecorded: 0, ...legalStatus() });
+        }
         if (call.url === `${API}/matches/m1/predict` && call.method === "POST") {
           const index = predictIndex++;
           const custom = opts.predict ? await opts.predict(call, index) : undefined;
@@ -2049,8 +2079,8 @@ describe("club crests on the Score page", () => {
 const THE_PUB_PRIZES = [
   { level: 1, label: "Tequeños de queso" },
   { level: 2, label: "Cheese Burger con papas" },
-  { level: 3, label: "12 Fried Wings con papas" },
-  { level: 4, label: "L2,000 en consumo de productos de The Pub, no efectivo" },
+  { level: 3, label: "Cubetazo de 5 cervezas" },
+  { level: 4, label: "L3,000 en productos de The Pub, no efectivo, por cada ganador" },
 ];
 const NOTICE_ES = "Premios propuestos, pendientes de confirmación por The Pub el día del partido. Esta demostración no genera derecho a premio.";
 const NOTICE_EN = "Proposed prizes, pending confirmation by The Pub on match day. This demonstration does not create any right to a prize.";
@@ -2082,8 +2112,8 @@ describe("proposed prizes: the notice and the list", () => {
     expect([...block.querySelectorAll(".ladder-offers li")].map((li) => p.text(li))).toEqual([
       "Nivel 1 · Fácil: Tequeños de queso",
       "Nivel 2 · Mediana: Cheese Burger con papas",
-      "Nivel 3 · Difícil: 12 Fried Wings con papas",
-      "Nivel 4 · Legendaria: L2,000 en consumo de productos de The Pub, no efectivo",
+      "Nivel 3 · Difícil: Cubetazo de 5 cervezas",
+      "Nivel 4 · Legendaria: L3,000 en productos de The Pub, no efectivo, por cada ganador",
     ]);
     expect(block.closest("details")).toBeNull();
     expect(block.firstElementChild!.classList.contains("provisional-notice")).toBe(true); // the notice comes first
@@ -2135,7 +2165,10 @@ describe("proposed prizes: the notice and the list", () => {
 
   it("does not turn a proposal into a promise, a single winner, a quota or a draw: nothing in the block says so, and the one-prize rule is still the page's", async () => {
     const p = await loadScore({ match: pubMatch(true) });
-    const blockText = p.text(provisionalBlock(p));
+    // The words of the PAGE (the notice, the headings) must not promise anything; the prize names are the venue's own words, as entered (the
+    // Legendary proposal says "por cada ganador" itself), so they are taken out before looking.
+    let blockText = p.text(provisionalBlock(p));
+    for (const prize of THE_PUB_PRIZES) blockText = blockText.replace(prize.label, "");
     expect(blockText).not.toMatch(/ganador|winner|cupo|quota|sorteo|draw|raffle|primeros|first come|únic[oa] |agotar|while supplies|limit/i);
     expect(blockText).toContain("no genera derecho a premio");
     expect(p.text(p.q(".ladder-rules"))).toBe(SPANISH_ESSENTIALS); // "Un solo premio: el del nivel más alto que aciertes en orden." is unchanged
@@ -2211,5 +2244,193 @@ describe("the participation window on the Score page", () => {
       expect(message).toBe(lang === "es" ? "La participación de este partido todavía no está abierta." : NOT_OPEN); // ...which refused it
       p.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The conditions (legal texts), before the first send
+// ---------------------------------------------------------------------------
+
+describe("the conditions before the first send", () => {
+  const ACCEPT_URL = "/api/gaming/legal/acceptances";
+  async function toReview(p: Score) {
+    await answerScoreline(p, "2", "1");
+    await p.click(p.action(/Enviar con nivel 1|Send with level 1/));
+  }
+  const panel = (p: Score) => p.q("[data-ladder-conditions]")!;
+  const confirm = (p: Score) => p.action(/Confirmar y enviar|Confirm and send/)!;
+  const ticks = (p: Score) => p.qa("[data-legal-tick]") as HTMLInputElement[];
+  const ageBox = (p: Score) => p.q("[data-legal-age]") as HTMLInputElement;
+  const tick = async (p: Score, box: HTMLInputElement) => { box.checked = true; box.dispatchEvent(new p.win.Event("change", { bubbles: true })); await p.settle(); };
+  const legalCalls = (p: Score) => p.calls.filter((c) => c.url.startsWith(ACCEPT_URL));
+
+  it("when nothing is accepted yet, shows the three texts with a link to each in full, and sends nothing until every box is ticked", async () => {
+    const p = await loadScore({ legal: "pending" });
+    await toReview(p);
+    expect(p.text(panel(p))).toContain("Condiciones para participar");
+    expect(p.qa("[data-legal-doc]").map((n) => n.getAttribute("data-legal-doc"))).toEqual(["ACCOUNT_TERMS", "PRIVACY_NOTICE", "EVENT_RULES"]);
+    const links = p.qa("[data-ladder-conditions] a.legal-read") as HTMLAnchorElement[];
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      "/legal.html?doc=ACCOUNT_TERMS&version=t-1",
+      "/legal.html?doc=PRIVACY_NOTICE&version=p-1",
+      "/legal.html?doc=EVENT_RULES&version=e-1&kickoffAt=2026-10-25T20%3A00%3A00.000Z",
+    ]);
+    for (const a of links) { expect(a.target).toBe("_blank"); expect(a.rel).toContain("noopener"); expect(p.text(a)).toBe("Leer el texto completo (se abre en otra pestaña)"); }
+    expect(confirm(p).disabled).toBe(true);
+    expect(p.text(p.q("[data-legal-need]"))).toBe("Marcá todas las casillas para poder enviar.");
+    await p.click(confirm(p)); // a disabled button does nothing
+    expect(legalCalls(p).filter((c) => c.method === "POST")).toEqual([]);
+    expect(p.posts()).toEqual([]);
+    p.close();
+  });
+
+  it("the terms and the rules are ACCEPTED; the privacy notice is only READ, and says so: it is never worded as a consent", async () => {
+    const p = await loadScore({ legal: "pending" });
+    await toReview(p);
+    const labels = p.qa("[data-ladder-conditions] label.legal-tick").map((l) => p.text(l));
+    expect(labels).toEqual([
+      "Acepto: Términos de cuenta (texto de prueba)",
+      "Leí: Aviso de privacidad (texto de prueba)",
+      "Acepto: Reglas del evento (texto de prueba)",
+      "Declaro que tengo 18 años cumplidos o más.",
+    ]);
+    const privacy = p.q('[data-legal-doc="PRIVACY_NOTICE"]')!;
+    expect(p.text(privacy)).toContain("Esto confirma que leíste el aviso. No es un permiso para ningún otro uso de tus datos.");
+    expect(p.text(privacy)).not.toMatch(/Acepto|consent/i);
+    expect(p.q('[data-legal-doc="ACCOUNT_TERMS"] .ladder-hint')).toBeNull();
+    p.close();
+  });
+
+  it("needs every box, the age declaration included; then records the acts BEFORE the prediction is sent, each with the version and the hash it showed", async () => {
+    const p = await loadScore({ legal: "pending" });
+    await toReview(p);
+    const [terms, privacy, rules] = ticks(p);
+    await tick(p, terms);
+    await tick(p, privacy);
+    await tick(p, rules);
+    expect(confirm(p).disabled).toBe(true); // the declaration of being 18 or older is still to do
+    await tick(p, ageBox(p));
+    expect(confirm(p).disabled).toBe(false);
+    expect(p.text(p.q("[data-legal-need]"))).toBe("");
+    await p.click(confirm(p));
+    await p.settle(60);
+    const order = p.calls.filter((c) => c.method === "POST").map((c) => c.url);
+    expect(order).toEqual([ACCEPT_URL, `${API}/matches/m1/predict`]);
+    expect(legalCalls(p).find((c) => c.method === "POST")!.body).toEqual({
+      matchId: "m1",
+      acceptances: [
+        { documentKey: "ACCOUNT_TERMS", documentVersion: "t-1", contentSha256: "a".repeat(64) },
+        { documentKey: "PRIVACY_NOTICE", documentVersion: "p-1", contentSha256: "b".repeat(64) },
+        { documentKey: "EVENT_RULES", documentVersion: "e-1", contentSha256: "c".repeat(64), ageDeclared18: true },
+      ],
+    });
+    expect(p.posts()).toHaveLength(1);
+    expect(p.q("form[data-ladder]")).toBeNull(); // saved: the page shows "My participation"
+    p.close();
+  });
+
+  it("with the texts already accepted it asks for nothing: it shows when, and sends straight away, without another acceptance request", async () => {
+    const p = await loadScore({ legal: "accepted" });
+    await toReview(p);
+    expect(ticks(p)).toEqual([]);
+    expect(p.qa("[data-legal-done]")).toHaveLength(3);
+    expect(p.text(p.q('[data-legal-done="PRIVACY_NOTICE"]'))).toMatch(/^Leído el /);
+    expect(p.text(p.q('[data-legal-done="ACCOUNT_TERMS"]'))).toMatch(/^Aceptado el /);
+    expect(confirm(p).disabled).toBe(false);
+    await p.click(confirm(p));
+    await p.settle(60);
+    expect(legalCalls(p).filter((c) => c.method === "POST")).toEqual([]);
+    expect(p.posts()).toHaveLength(1);
+    p.close();
+  });
+
+  it("with no approved text (how it ships) says so, offers no box, and neither records nor sends anything", async () => {
+    const p = await loadScore({ legal: "unpublished" });
+    await toReview(p);
+    expect(p.text(p.q("[data-legal-unpublished]"))).toBe("Las condiciones de este evento todavía no están publicadas, así que por ahora no se puede enviar el pronóstico.");
+    expect(ticks(p)).toEqual([]);
+    expect(confirm(p).disabled).toBe(true);
+    await p.click(confirm(p));
+    expect(p.calls.filter((c) => c.method === "POST")).toEqual([]);
+    p.close();
+  });
+
+  it("when the check itself fails it says so, keeps the send disabled, and a retry asks again", async () => {
+    const p = await loadScore({ legal: "failed" });
+    await toReview(p);
+    expect(p.text(panel(p))).toContain("No pudimos comprobar las condiciones. Probá de nuevo.");
+    expect(confirm(p).disabled).toBe(true);
+    const before = legalCalls(p).filter((c) => c.method === "GET").length;
+    await p.click(p.qa("[data-ladder-conditions] button").find((b) => /Reintentar/.test(p.text(b))));
+    await p.settle(40);
+    expect(legalCalls(p).filter((c) => c.method === "GET").length).toBe(before + 1);
+    expect(p.posts()).toEqual([]);
+    p.close();
+  });
+
+  it("when the text changed under the person, says so, sends nothing, forgets the ticks and shows the current texts again", async () => {
+    const p = await loadScore({
+      legal: "pending",
+      legalPost: () => ({ status: 409, json: { error: "The text you were shown is no longer the current one.", code: "LEGAL_DOCUMENT_STALE", missing: [] } }),
+    });
+    await toReview(p);
+    const [terms, privacy, rules] = ticks(p);
+    for (const box of [terms, privacy, rules, ageBox(p)]) await tick(p, box);
+    await p.click(confirm(p));
+    await p.settle(60);
+    expect(p.text(p.q("#submit-msg-m1"))).toBe("El texto cambió mientras lo leías. Leelo de nuevo y volvé a marcar.");
+    expect(p.posts()).toEqual([]);
+    expect(ticks(p).every((box) => !box.checked)).toBe(true);
+    expect(confirm(p).disabled).toBe(true);
+    p.close();
+  });
+
+  it("a refusal about the conditions from the send itself is shown in the person's language and the conditions are asked for again", async () => {
+    const p = await loadScore({
+      legal: "accepted",
+      predict: () => ({ status: 409, json: { error: "The current conditions must be accepted before taking part.", code: "LEGAL_CONDITIONS_REQUIRED", missing: [{ documentKey: "ACCOUNT_TERMS", documentVersion: "t-2" }] } }),
+    });
+    await toReview(p);
+    const before = legalCalls(p).filter((c) => c.method === "GET").length;
+    await p.click(confirm(p));
+    await p.settle(80);
+    expect(p.text(p.q("#submit-msg-m1"))).toBe("Tenés que aceptar las condiciones vigentes antes de participar.");
+    expect(legalCalls(p).filter((c) => c.method === "GET").length).toBe(before + 1);
+    p.close();
+  });
+
+  it("speaks English when the page is in English, with the same structure", async () => {
+    const p = await loadScore({ legal: "pending", lang: "en" });
+    await toReview(p);
+    expect(p.qa("[data-ladder-conditions] label.legal-tick").map((l) => p.text(l))).toEqual([
+      "I accept: Términos de cuenta (texto de prueba)",
+      "I have read: Aviso de privacidad (texto de prueba)",
+      "I accept: Reglas del evento (texto de prueba)",
+      "I declare that I am 18 years old or older.",
+    ]);
+    expect(p.text(p.q('[data-legal-doc="PRIVACY_NOTICE"]'))).toContain("This confirms that you read the notice. It is not a permission for any other use of your data.");
+    p.close();
+  });
+
+  it("puts the title that comes from the server on the page as text, never as markup", async () => {
+    const p = await loadScore({ legal: "pending", legalTitle: '<img src=x onerror="window.__pwned=1"><b>x</b>' });
+    await toReview(p);
+    expect(p.q("[data-ladder-conditions] img")).toBeNull();
+    expect(p.q("[data-ladder-conditions] b")).toBeNull();
+    expect(p.text(p.q('[data-legal-doc="EVENT_RULES"]'))).toContain('<img src=x onerror="window.__pwned=1"><b>x</b>');
+    expect((p.win as any).__pwned).toBeUndefined();
+    p.close();
+  });
+
+  it("leaving the review and coming back asks the server again (the texts may have changed in between)", async () => {
+    const p = await loadScore({ legal: "pending" });
+    await toReview(p);
+    const first = legalCalls(p).filter((c) => c.method === "GET").length;
+    await p.click(p.action(/Volver a editar|Edit/) ?? p.qa(".ladder-actions button").find((b) => /editar|Edit/i.test(p.text(b))));
+    expect(p.q("[data-ladder-conditions]")!.hidden).toBe(true);
+    await p.click(p.action(/Enviar con nivel 1|Send with level 1/));
+    await p.settle(40);
+    expect(legalCalls(p).filter((c) => c.method === "GET").length).toBe(first + 1);
+    p.close();
   });
 });
