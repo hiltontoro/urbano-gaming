@@ -12,11 +12,12 @@ import {
   visibleInAdminView,
   type FixtureManifest,
 } from "@/lib/gaming/predictions/fixtureExclusion";
-import { TEMPORARY_FIXTURE_EXCLUSION } from "@/lib/gaming/predictions/fixtureExclusionManifest";
+import { EFFECTIVE_FIXTURE_EXCLUSION, REHEARSAL_FIXTURE_EXCLUSION, TEMPORARY_FIXTURE_EXCLUSION } from "@/lib/gaming/predictions/fixtureExclusionManifest";
 import { buildCatalogWorld, callCount, callSignature, callsTouching, type CatalogWorld } from "./fixtureCatalogWorld";
 
 /**
- * The temporary exclusion of the verified contract-test fixtures. It is an exact list of ids (172 of them, with fingerprints), never a rule:
+ * The temporary exclusion of the verified contract-test fixtures (first batch, 172 ids) and of our own rehearsals of 2026-10-25 (second
+ * batch, 8 ids; see the last two blocks). It is an exact list of ids with fingerprints, never a rule:
  * nothing is hidden by name, prefix, date, age, classification or competition, a new match is never taken for a fixture, and an excluded
  * match costs no dependent query. Nothing is deleted or altered.
  */
@@ -86,6 +87,123 @@ describe("the manifest is exactly the inventoried set", () => {
       expect(() => verifyFixtureManifest(manifest), label).toThrow(FixtureManifestIntegrityError);
       expect(() => excludeFixtures([{ id: "x" }], "matches", (item) => item.id, manifest), `${label} must not be used to hide anything`).toThrow(FixtureManifestIntegrityError);
     }
+  });
+});
+
+// ---- the second batch: our own rehearsals of 2026-10-25 ------------------------------------------------------------------------
+const R = REHEARSAL_FIXTURE_EXCLUSION;
+const E = EFFECTIVE_FIXTURE_EXCLUSION;
+
+/** The ids exactly as the full Production backup of 2026-10-25 (10:10, Honduras) holds them, written out here so an edit cannot go unnoticed. */
+const REHEARSAL_IDS = {
+  matches: ["0ef3b349-6636-4a41-97a8-676aa33bfd1b", "58765eb4-7bec-4c1f-8bca-c542bd93239a", "c25f8a8f-99ea-4756-b5a6-8a84a3f173de"],
+  teams: ["9bd7171b-355b-43ed-a684-72316bb5200f", "eab01687-bbaa-4eba-ac20-63c02bf22c31"],
+  activations: ["36670fbd-0af7-4516-9c90-8122cecf615b", "754b4eea-91c7-429b-a726-2eefb1ed7c11", "8e19e862-8278-4709-b0b5-73395af21e1b"],
+} as const;
+const REAL_ROWS = {
+  venues: { thePub: "703657cc-2f77-4c96-bf33-c22aa8bd8247", fincaOcho: "2105dd59-3131-4735-8ea3-e98fef64e557", fincaOcho15m: "1ab69d0b-aa72-4e64-bdba-d0d29d9d359d" },
+  clasico: { matchId: "ad72e2e2-dad0-48ef-8e7a-7d8369d37af6", activationId: "5f9ea3d1-9892-4d72-a1d0-c5c1d458d93a", homeTeamId: "e6a1db23-c8d2-4bdf-9b03-af1815ab94fd" },
+} as const;
+
+describe("the rehearsal batch is exactly the inventoried set", () => {
+  it("holds the 3 matches, 2 teams and 3 activations of the rehearsals, no venue, and their fingerprints are reproduced from the ids", () => {
+    expect({ matches: [...R.matches].sort(), teams: [...R.teams].sort(), activations: [...R.activations].sort(), venues: [...R.venues] }).toEqual({
+      matches: [...REHEARSAL_IDS.matches].sort(), teams: [...REHEARSAL_IDS.teams].sort(), activations: [...REHEARSAL_IDS.activations].sort(), venues: [],
+    });
+    for (const kind of KINDS) {
+      expect(R.fingerprints[kind].count, kind).toBe(R[kind].length);
+      expect(fixtureFingerprint(R[kind]), kind).toBe(R.fingerprints[kind].sha256);
+    }
+    expect(() => verifyFixtureManifest(R)).not.toThrow();
+    expect(R.playersReachedThroughTheirTeam).toHaveLength(4); // recorded for the record: they are reached only through their (excluded) teams
+  });
+
+  it("pins the fingerprints computed from the backup", () => {
+    expect(R.fingerprints.matches.sha256).toBe("2b6fa6dba97d19c6a1595f827f9421bdd3412b38827dc4b81ac57c9d352f0241");
+    expect(R.fingerprints.teams.sha256).toBe("4fe82299d88b0bffbf9d1cf82cda0ec90e0f426920b3883d97f21ee7ef93ffb6");
+    expect(R.fingerprints.activations.sha256).toBe("76cf1a5c387927f7e4674d54d1e0e19c661ab12bf6f04a8f3addfe7a51f719a4");
+    expect(R.fingerprints.venues.sha256).toBe(fixtureFingerprint([]));
+  });
+
+  it("the first batch is untouched: same counts, same ids, same fingerprints as before the rehearsals were added", () => {
+    expect({ matches: M.matches.length, teams: M.teams.length, venues: M.venues.length, activations: M.activations.length }).toEqual({ matches: 36, teams: 82, venues: 30, activations: 24 });
+    expect(M.fingerprints.matches.sha256).toBe("2fe72826a5391a51a421586c22ce4a2a20c7589a3de0769e35a55084b09c0ca2");
+    expect(() => verifyFixtureManifest(M)).not.toThrow();
+  });
+});
+
+describe("the manifest that the server applies is exactly both batches together", () => {
+  it("has 39 matches, 84 teams, 30 venues and 27 activations (180 ids), with the fingerprints of the union pinned and reproduced", () => {
+    expect({ matches: E.matches.length, teams: E.teams.length, venues: E.venues.length, activations: E.activations.length }).toEqual({ matches: 39, teams: 84, venues: 30, activations: 27 });
+    expect(E.fingerprints.matches.sha256).toBe("b9d36220cfc356430a6cd6796155ff6597e0873e4084d3c24c31243c5868899b");
+    expect(E.fingerprints.teams.sha256).toBe("d301577fee71b91c08c896abb5d0b164712785a640b77990ed0bc26ccec31211");
+    expect(E.fingerprints.venues.sha256).toBe(M.fingerprints.venues.sha256); // the venues did not change
+    expect(E.fingerprints.activations.sha256).toBe("ea68f28574dc7097a1ddfc5e139cdd642706c00b4bed763a4efb52730911c5cd");
+    expect(() => verifyFixtureManifest(E)).not.toThrow();
+    const all = KINDS.flatMap((kind) => [...E[kind]]);
+    expect(all).toHaveLength(180);
+    expect(new Set(all).size).toBe(180); // no id twice, none in two lists
+  });
+
+  it("contains every id of both batches and nothing else", () => {
+    for (const kind of KINDS) expect([...E[kind]].sort(), kind).toEqual([...M[kind], ...R[kind]].sort());
+  });
+
+  it("does NOT contain the real rows: the venues of the real flow, the real Clasico, its activation and its teams", () => {
+    for (const id of Object.values(REAL_ROWS.venues)) expect(isFixtureId("venues", id), id).toBe(false);
+    expect(isFixtureId("matches", REAL_ROWS.clasico.matchId)).toBe(false);
+    expect(isFixtureId("activations", REAL_ROWS.clasico.activationId)).toBe(false);
+    expect(isFixtureId("teams", REAL_ROWS.clasico.homeTeamId)).toBe(false);
+    for (const kind of KINDS) for (const id of Object.values(REAL_ROWS.venues)) expect(E[kind] as readonly string[], `${kind} ${id}`).not.toContain(id);
+  });
+
+  it("refuses an edited union: dropping, swapping or adding a rehearsal id all fail loudly, so a hidden row cannot be changed without a new inventory", () => {
+    const mutate = (change: (m: any) => void) => { const m = copy(E); change(m); return m as FixtureManifest; };
+    const bad: Array<[string, FixtureManifest]> = [
+      ["dropped rehearsal match", mutate((m) => { m.matches = m.matches.filter((id: string) => id !== REHEARSAL_IDS.matches[0]); })],
+      ["dropped rehearsal team", mutate((m) => { m.teams = m.teams.filter((id: string) => id !== REHEARSAL_IDS.teams[1]); })],
+      ["dropped rehearsal activation", mutate((m) => { m.activations.pop(); })],
+      ["swapped rehearsal match for the real Clasico", mutate((m) => { m.matches[m.matches.indexOf(REHEARSAL_IDS.matches[2])] = REAL_ROWS.clasico.matchId; })],
+      ["added a venue (The Pub)", mutate((m) => { m.venues.push(REAL_ROWS.venues.thePub); })],
+    ];
+    for (const [label, manifest] of bad) {
+      expect(() => verifyFixtureManifest(manifest), label).toThrow(FixtureManifestIntegrityError);
+      expect(() => excludeFixtures([{ id: "x" }], "matches", (item) => item.id, manifest), `${label} must not be used to hide anything`).toThrow(FixtureManifestIntegrityError);
+    }
+  });
+});
+
+describe("what the default exclusion hides of our rehearsals — and what it never does", () => {
+  const item = (id: string, extra: Record<string, unknown> = {}) => ({ id, ...extra });
+
+  it("hides each rehearsal id under its own kind and not under another", () => {
+    for (const id of REHEARSAL_IDS.matches) { expect(isFixtureId("matches", id), id).toBe(true); expect(isFixtureId("teams", id), id).toBe(false); }
+    for (const id of REHEARSAL_IDS.teams) { expect(isFixtureId("teams", id), id).toBe(true); expect(isFixtureId("matches", id), id).toBe(false); }
+    for (const id of REHEARSAL_IDS.activations) { expect(isFixtureId("activations", id), id).toBe(true); expect(isFixtureId("venues", id), id).toBe(false); }
+  });
+
+  it("is by id and nothing else: the very same names, competition and classification under a new id are not hidden", () => {
+    const sameNames = [
+      item("77777777-7777-4777-8777-777777777777", { name: "Equipo A (ensayo)" }),
+      item("88888888-8888-4888-8888-888888888888", { competition: "ENSAYO — sin premios reales · The Pub", classification: "TRAINING", cancelledAt: "2026-10-25T02:06:40.759124Z", kickoffAt: "2026-10-25T02:50:39.304568Z" }),
+    ];
+    expect(excludeFixtures(sameNames, "matches", (i) => i.id)).toEqual(sameNames);
+    expect(excludeFixtures(sameNames, "teams", (i) => i.id)).toEqual(sameNames);
+    // …while a rehearsal id is hidden whatever it looks like
+    const disguised = item(REHEARSAL_IDS.matches[1], { competition: "El Clásico", name: "FC Barcelona", classification: "OFFICIAL" });
+    expect(excludeFixtures([disguised], "matches", (i) => i.id)).toEqual([]);
+  });
+
+  it("the code of the exclusion never mentions the word «ensayo» (nothing is decided by it)", () => {
+    const code = readFileSync(path.join(process.cwd(), "lib/gaming/predictions/fixtureExclusion.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/ensayo|rehearsal|training/i);
+  });
+
+  it("the admin views hide the rehearsals by default and bring them back only with ?includeFixtures=1", () => {
+    const request = (query: string) => new Request(`http://localhost/api/gaming/predictions/admin/matches${query}`);
+    const rows = [...REHEARSAL_IDS.matches.map((id) => ({ id })), { id: REAL_ROWS.clasico.matchId }];
+    expect(visibleInAdminView(request(""), rows, "matches", (r) => r.id)).toEqual([{ id: REAL_ROWS.clasico.matchId }]);
+    expect(visibleInAdminView(request("?includeFixtures=1"), rows, "matches", (r) => r.id)).toEqual(rows);
   });
 });
 
@@ -230,5 +348,40 @@ describe("GET /api/gaming/predictions/matches: fixtures are left out before anyt
     await ask();
     expect(JSON.stringify({ m: world.current.matches, t: world.current.teams, v: world.current.venues, a: world.current.activations, p: world.current.players })).toBe(before);
     expect(world.current.calls.every(([method]) => /^(list|get)/.test(method))).toBe(true);
+  });
+});
+
+describe("GET /api/gaming/predictions/matches with our rehearsals in the catalog", () => {
+  const ask = async () => {
+    const response = await publicMatches();
+    expect(response.status).toBe(200);
+    return (await response.json()) as { matches: Array<{ matchId: string; homeTeam: { name: string } | null; venueActivations: Array<{ venueActivationId: string; enabled: boolean }> }> };
+  };
+
+  beforeEach(() => { world.current = null; });
+
+  it("lists the real Clasico (disabled activation) and the same-name match under a new id, and none of the rehearsal matches", async () => {
+    world.current = buildCatalogWorld({ withRehearsal: true });
+    const { rehearsal } = world.current;
+    const body = await ask();
+    const ids = body.matches.map((m) => m.matchId);
+    for (const id of rehearsal!.ids.matches) expect(ids).not.toContain(id);
+    expect(ids).toContain(rehearsal!.clasico.matchId);
+    expect(ids).toContain(rehearsal!.sameNameNewIds.matchId);
+    const clasico = body.matches.find((m) => m.matchId === rehearsal!.clasico.matchId)!;
+    expect(clasico.homeTeam?.name).toBe("FC Barcelona");
+    expect(clasico.venueActivations).toEqual([expect.objectContaining({ venueActivationId: rehearsal!.clasico.activationId, enabled: false })]);
+  });
+
+  it("reads nothing about a rehearsal row and changes nothing", async () => {
+    world.current = buildCatalogWorld({ withRehearsal: true });
+    const w = world.current;
+    const before = JSON.stringify({ m: w.matches, t: w.teams, p: w.players, a: w.activations, tiers: w.tiers });
+    await ask();
+    expect(callsTouching(w.calls, w.rehearsal!.ids.matches)).toEqual([]);
+    expect(callsTouching(w.calls, w.rehearsal!.ids.activations)).toEqual([]);
+    expect(callsTouching(w.calls, w.rehearsal!.ids.teams)).toEqual([]);
+    expect(JSON.stringify({ m: w.matches, t: w.teams, p: w.players, a: w.activations, tiers: w.tiers })).toBe(before);
+    expect(w.calls.every(([method]) => /^(list|get)/.test(method))).toBe(true);
   });
 });

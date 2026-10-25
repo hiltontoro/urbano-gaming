@@ -207,3 +207,74 @@ export const TEMPORARY_FIXTURE_EXCLUSION = {
     "fe6f899d-f310-420e-8c96-085885d1f4d4",
   ],
 } as const;
+
+/**
+ * SECOND BATCH (2026-10-25): the rows of OUR OWN REHEARSALS of the Score flow, created in Production on 2026-10-25 (UTC) while the
+ * ladder, the location check and the participation window were being tried out. Like the first batch, they are exact ids read from
+ * Production (the full backup taken on 2026-10-25 at 10:10 Honduras time, before the real El Clasico was loaded), they are NOT deleted
+ * and NOT altered, and they stay out of the public list and out of the administration portal's default view only. Their three
+ * participations, their prize tiers and every audit record stay where they are.
+ *
+ * Again, no rule: no name, no word ("ensayo"), no competition, no date, no classification decides anything. The teams are called
+ * "Equipo A (ensayo)" and "Equipo B (ensayo)" and the matches "ENSAYO - sin premios reales - ...", and a row created tomorrow with the
+ * very same names is NOT hidden. Only these ids are.
+ *
+ * Deliberately NOT here: the venues. "The Pub by Beer Box" and "Finca Ocho - Plaza San Rafael" are real places that the real flow uses,
+ * and the 15 m copy of Finca Ocho made by a rehearsal stays visible until a separate decision names it.
+ *
+ * Players are not listed as a kind either (same convention as the first batch): they are only ever reached through their team, which is
+ * excluded first. Their exact ids are recorded below for the record only; nothing reads that list.
+ */
+export const REHEARSAL_FIXTURE_EXCLUSION = {
+  manifestId: "score-rehearsals-2026-10-25",
+  inventoriedAt: "2026-10-25",
+  createdFrom: "2026-10-25T00:01:49.491192Z",
+  createdTo: "2026-10-25T01:24:29.788801Z",
+  fingerprints: {
+    matches: { count: 3, sha256: "2b6fa6dba97d19c6a1595f827f9421bdd3412b38827dc4b81ac57c9d352f0241" },
+    teams: { count: 2, sha256: "4fe82299d88b0bffbf9d1cf82cda0ec90e0f426920b3883d97f21ee7ef93ffb6" },
+    venues: { count: 0, sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+    activations: { count: 3, sha256: "76cf1a5c387927f7e4674d54d1e0e19c661ab12bf6f04a8f3addfe7a51f719a4" },
+  },
+  matches: [
+    "0ef3b349-6636-4a41-97a8-676aa33bfd1b",
+    "58765eb4-7bec-4c1f-8bca-c542bd93239a",
+    "c25f8a8f-99ea-4756-b5a6-8a84a3f173de",
+  ],
+  teams: [
+    "9bd7171b-355b-43ed-a684-72316bb5200f",
+    "eab01687-bbaa-4eba-ac20-63c02bf22c31",
+  ],
+  venues: [],
+  activations: [
+    "36670fbd-0af7-4516-9c90-8122cecf615b",
+    "754b4eea-91c7-429b-a726-2eefb1ed7c11",
+    "8e19e862-8278-4709-b0b5-73395af21e1b",
+  ],
+  /** For the record only (reached through their team, never filtered by id): the four rehearsal players. */
+  playersReachedThroughTheirTeam: [
+    "4404e556-1107-461f-8ea2-06dc5925918c",
+    "5c58d4c1-35de-4b06-b412-5826e4aac71f",
+    "bf747952-8312-41e9-baa5-17d82dd6139d",
+    "cfa5bd0c-ec61-4890-9e4f-87736861e7e2",
+  ],
+} as const;
+
+/**
+ * The manifest the server applies: both batches together, with the fingerprints of the union pinned here as literals (so editing either
+ * list without a new inventory fails loudly). The first batch keeps its own pinned fingerprints above.
+ */
+export const EFFECTIVE_FIXTURE_EXCLUSION = {
+  manifestId: "score-fixtures-2026-08-25-and-rehearsals-2026-10-25",
+  inventoriedAt: "2026-10-25",
+  fingerprints: {
+    matches: { count: 39, sha256: "b9d36220cfc356430a6cd6796155ff6597e0873e4084d3c24c31243c5868899b" },
+    teams: { count: 84, sha256: "d301577fee71b91c08c896abb5d0b164712785a640b77990ed0bc26ccec31211" },
+    venues: { count: 30, sha256: "845aa1b0d1797cbde02cc566fa7afb1587af0aa733b48ec4960ae6d1addc04c0" },
+    activations: { count: 27, sha256: "ea68f28574dc7097a1ddfc5e139cdd642706c00b4bed763a4efb52730911c5cd" },
+  },
+  matches: [...TEMPORARY_FIXTURE_EXCLUSION.matches, ...REHEARSAL_FIXTURE_EXCLUSION.matches],
+  teams: [...TEMPORARY_FIXTURE_EXCLUSION.teams, ...REHEARSAL_FIXTURE_EXCLUSION.teams],
+  venues: [...TEMPORARY_FIXTURE_EXCLUSION.venues, ...REHEARSAL_FIXTURE_EXCLUSION.venues],
+  activations: [...TEMPORARY_FIXTURE_EXCLUSION.activations, ...REHEARSAL_FIXTURE_EXCLUSION.activations],
+} as const;

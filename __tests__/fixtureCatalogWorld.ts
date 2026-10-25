@@ -1,4 +1,4 @@
-import { TEMPORARY_FIXTURE_EXCLUSION } from "@/lib/gaming/predictions/fixtureExclusionManifest";
+import { REHEARSAL_FIXTURE_EXCLUSION, TEMPORARY_FIXTURE_EXCLUSION } from "@/lib/gaming/predictions/fixtureExclusionManifest";
 import type {
   MatchRecord,
   MatchResultRecord,
@@ -54,6 +54,19 @@ export interface CatalogWorld {
   repo: Record<string, (...args: any[]) => Promise<any>>;
   /** Ids of the rows that belong to the fixture set (by the manifest) for each kind. */
   fixtureIds: { matches: Set<string>; teams: Set<string>; venues: Set<string>; activations: Set<string> };
+  /** Present with `withRehearsal`: the rows of our own rehearsals (exact ids of the second batch) and the rows that must stay visible beside them. */
+  rehearsal: RehearsalCatalog | null;
+}
+
+export interface RehearsalCatalog {
+  /** The exact rehearsal rows (second batch): hidden by default, listed with ?includeFixtures=1. */
+  ids: { matches: Set<string>; teams: Set<string>; activations: Set<string>; players: Set<string>; tiers: Set<string> };
+  /** The REAL El Clasico as the preparation script created it: new ids, disabled activation, at the real venue. Never hidden. */
+  clasico: { matchId: string; homeTeamId: string; awayTeamId: string; activationId: string; venueId: string };
+  /** Real venues of Production that the real flow uses, plus the 15 m copy a rehearsal made: none of them is a fixture. */
+  venueIds: { thePub: string; fincaOcho: string; fincaOcho15m: string };
+  /** A team and a match that carry EXACTLY the names of the rehearsal rows but were created later, with new ids. Never hidden. */
+  sameNameNewIds: { teamId: string; matchId: string };
 }
 
 interface Options {
@@ -63,6 +76,8 @@ interface Options {
   withoutLegit?: boolean;
   /** Leave the fixture rows out entirely: a catalog that never had them. */
   withoutFixtures?: boolean;
+  /** Add the rows of our own rehearsals (exact ids of the second batch) and the real rows that must stay visible beside them. */
+  withRehearsal?: boolean;
 }
 
 function unlisted(id: string): string {
@@ -156,6 +171,51 @@ export function buildCatalogWorld(options: Options = {}): CatalogWorld {
     results.push({ matchResultId: legitId("result", 1), matchId: legit.oldMatchId, homeScore: 2, awayScore: 1, finalizedAt: "2020-01-01T22:00:00.000Z", supersedesMatchResultId: null, enteredByGamingMemberId: "real", finalizedByGamingMemberId: "real" } as MatchResultRecord);
   }
 
+  let rehearsal: RehearsalCatalog | null = null;
+  if (options.withRehearsal) {
+    const R = REHEARSAL_FIXTURE_EXCLUSION;
+    const CREATED_REHEARSAL = "2026-10-25T00:10:13.926831+00:00";
+    const [teamA, teamB] = [R.teams[1]!, R.teams[0]!]; // eab01687 = "Equipo A (ensayo)", 9bd7171b = "Equipo B (ensayo)"
+    teams.push({ teamId: teamA, name: "Equipo A (ensayo)", createdAt: CREATED_REHEARSAL }, { teamId: teamB, name: "Equipo B (ensayo)", createdAt: CREATED_REHEARSAL });
+    const rehearsalPlayers = R.playersReachedThroughTheirTeam.map((playerId, i) => ({ playerId, teamId: i < 2 ? teamA : teamB, name: `Jugador ${i < 2 ? "A" : "B"}${(i % 2) + 1} (ensayo)`, active: true, createdAt: CREATED_REHEARSAL }));
+    players.push(...rehearsalPlayers);
+    const competitions = ["ENSAYO — sin premios reales · The Pub", "ENSAYO — sin premios reales · Finca Ocho", "ENSAYO — sin premios reales · Finca Ocho (15 m)"];
+    const finca = "2105dd59-3131-4735-8ea3-e98fef64e557", finca15 = "1ab69d0b-aa72-4e64-bdba-d0d29d9d359d", thePub = "703657cc-2f77-4c96-bf33-c22aa8bd8247";
+    venues.push(
+      { venueId: thePub, name: "The Pub by Beer Box", latitude: 14.099309, longitude: -87.180864, radiusMeters: 30.48, active: true, createdAt: CREATED_REHEARSAL },
+      { venueId: finca, name: "Finca Ocho • Plaza San Rafael", latitude: 14.086665, longitude: -87.187477, radiusMeters: 30.48, active: true, createdAt: CREATED_REHEARSAL },
+      { venueId: finca15, name: "Finca Ocho • Plaza San Rafael · 15 m", latitude: 14.086665, longitude: -87.187477, radiusMeters: 15, active: true, createdAt: CREATED_REHEARSAL }
+    );
+    const rehearsalVenues = [thePub, finca, finca15];
+    const tierIds = new Set<string>();
+    R.matches.forEach((matchId, i) => {
+      matches.push({ matchId, homeTeamId: teamA, awayTeamId: teamB, competition: competitions[i]!, kickoffAt: "2026-10-25T01:10:47.472559+00:00", cancelledAt: "2026-10-25T00:36:20.695495+00:00", activityClassification: "TRAINING", xpEligible: null, predictionContract: "PROGRESSIVE_LADDER_V1", createdAt: CREATED_REHEARSAL });
+      const venueActivationId = R.activations[i]!;
+      activations.push({ venueActivationId, matchId, venueId: rehearsalVenues[i]!, enabled: false, createdAt: CREATED_REHEARSAL });
+      [1, 2, 3, 4].forEach((level) => {
+        const prizeTierId = `f${pad(i * 10 + level, 7)}-0000-4000-8000-${pad(i * 10 + level)}`;
+        tierIds.add(prizeTierId);
+        tiers.push({ prizeTierId, venueActivationId, correctDimensionCount: null, ladderLevel: level, prizeLabel: "Simulación, sin valor ni entrega", createdAt: CREATED_REHEARSAL });
+      });
+    });
+    // the REAL Clasico: new ids, FC Barcelona home, the disabled activation at The Pub
+    const clasico = { matchId: "ad72e2e2-dad0-48ef-8e7a-7d8369d37af6", homeTeamId: "e6a1db23-c8d2-4bdf-9b03-af1815ab94fd", awayTeamId: "e6a1db23-0000-4000-8000-000000000002", activationId: "5f9ea3d1-9892-4d72-a1d0-c5c1d458d93a", venueId: thePub };
+    teams.push({ teamId: clasico.homeTeamId, name: "FC Barcelona", createdAt: "2026-10-25T17:24:00.000Z" }, { teamId: clasico.awayTeamId, name: "Real Madrid CF", createdAt: "2026-10-25T17:24:00.000Z" });
+    players.push({ playerId: "e6a1db23-0000-4000-8000-000000000011", teamId: clasico.homeTeamId, name: "Pedri", active: true, createdAt: "2026-10-25T17:24:00.000Z" }, { playerId: "e6a1db23-0000-4000-8000-000000000012", teamId: clasico.awayTeamId, name: "Vinícius Júnior", active: true, createdAt: "2026-10-25T17:24:00.000Z" });
+    matches.push({ matchId: clasico.matchId, homeTeamId: clasico.homeTeamId, awayTeamId: clasico.awayTeamId, competition: "El Clásico", kickoffAt: "2026-10-25T20:00:00+00:00", cancelledAt: null, activityClassification: null, xpEligible: null, predictionContract: "PROGRESSIVE_LADDER_V1", createdAt: "2026-10-25T17:24:00.000Z" });
+    activations.push({ venueActivationId: clasico.activationId, matchId: clasico.matchId, venueId: thePub, enabled: false, createdAt: "2026-10-25T17:24:00.000Z" });
+    // a row made later with EXACTLY the same names as a rehearsal row, and a new id: nothing about the name may hide it
+    const sameNameNewIds = { teamId: "a1a1a1a1-0000-4000-8000-00000000a001", matchId: "a1a1a1a1-0000-4000-8000-00000000a002" };
+    teams.push({ teamId: sameNameNewIds.teamId, name: "Equipo A (ensayo)", createdAt: "2026-10-25T18:00:00.000Z" });
+    matches.push({ matchId: sameNameNewIds.matchId, homeTeamId: sameNameNewIds.teamId, awayTeamId: clasico.awayTeamId, competition: "ENSAYO — sin premios reales · The Pub", kickoffAt: "2099-03-01T20:00:00.000Z", cancelledAt: null, activityClassification: "TRAINING", xpEligible: null, predictionContract: "PROGRESSIVE_LADDER_V1", createdAt: "2026-10-25T18:00:00.000Z" });
+    rehearsal = {
+      ids: { matches: new Set<string>(R.matches), teams: new Set<string>(R.teams), activations: new Set<string>(R.activations), players: new Set(rehearsalPlayers.map((p) => p.playerId)), tiers: tierIds },
+      clasico,
+      venueIds: { thePub, fincaOcho: finca, fincaOcho15m: finca15 },
+      sameNameNewIds,
+    };
+  }
+
   const calls: RepoCall[] = [];
   const log = (method: string, arg: string | null) => { calls.push([method, arg]); };
   const repo: CatalogWorld["repo"] = {
@@ -170,7 +230,7 @@ export function buildCatalogWorld(options: Options = {}): CatalogWorld {
     getCurrentFinalizedMatchResult: async (id: string) => { log("getCurrentFinalizedMatchResult", id); return results.find((r) => r.matchId === id) ?? null; },
   };
 
-  return { matches, teams, players, venues, activations, tiers, results, legit, calls, repo, fixtureIds };
+  return { matches, teams, players, venues, activations, tiers, results, legit, calls, repo, fixtureIds, rehearsal };
 }
 
 /** The calls grouped by method and sorted, so two runs can be compared whatever order the concurrent queries finished in. */

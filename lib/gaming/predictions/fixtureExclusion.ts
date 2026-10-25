@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { TEMPORARY_FIXTURE_EXCLUSION } from "./fixtureExclusionManifest";
+import { EFFECTIVE_FIXTURE_EXCLUSION } from "./fixtureExclusionManifest";
 
 /**
  * Temporary exclusion of an exact, verified set of test fixtures from the public match list and from the administration portal's
@@ -72,12 +72,12 @@ function setsOf(manifest: FixtureManifest): Readonly<Record<FixtureKind, Readonl
   return sets;
 }
 
-export function isFixtureId(kind: FixtureKind, id: string, manifest: FixtureManifest = TEMPORARY_FIXTURE_EXCLUSION): boolean {
+export function isFixtureId(kind: FixtureKind, id: string, manifest: FixtureManifest = EFFECTIVE_FIXTURE_EXCLUSION): boolean {
   return setsOf(manifest)[kind].has(String(id).toLowerCase());
 }
 
 /** The items whose id is not in the manifest, in their original order. */
-export function excludeFixtures<T>(items: readonly T[], kind: FixtureKind, idOf: (item: T) => string, manifest: FixtureManifest = TEMPORARY_FIXTURE_EXCLUSION): T[] {
+export function excludeFixtures<T>(items: readonly T[], kind: FixtureKind, idOf: (item: T) => string, manifest: FixtureManifest = EFFECTIVE_FIXTURE_EXCLUSION): T[] {
   const excluded = setsOf(manifest)[kind];
   if (excluded.size === 0) return [...items];
   return items.filter((item) => !excluded.has(String(idOf(item)).toLowerCase()));
@@ -98,7 +98,7 @@ export function visibleInAdminView<T>(
   items: readonly T[],
   kind: FixtureKind,
   idOf: (item: T) => string,
-  manifest: FixtureManifest = TEMPORARY_FIXTURE_EXCLUSION
+  manifest: FixtureManifest = EFFECTIVE_FIXTURE_EXCLUSION
 ): T[] {
   return includeFixturesRequested(request) ? [...items] : excludeFixtures(items, kind, idOf, manifest);
 }
