@@ -259,7 +259,7 @@ describe("Home without the module: the same content, the same behaviour", () => 
     for (const mode of FAILURES) {
       const page = await open("index.html", mode);
       const cards = homeSnapshot(page).cards;
-      expect(cards.map((c) => c.title), mode).toEqual(["URBANO Poker", "Halloween", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+      expect(cards.map((c) => c.title), mode).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
       expect(cards.filter((c) => !c.locked).map((c) => [c.title, c.href, c.pill]), mode).toEqual([["URBANO Poker", "/host.html?experience=poker", "Playtest"], ["Trivia", "/trivia-playtest.html", "Playtest"]]);
       for (const card of cards.filter((c) => c.locked)) {
         expect(card.tag).toBe("DIV");

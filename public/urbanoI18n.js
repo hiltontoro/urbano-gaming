@@ -101,7 +101,8 @@
       "home.host.closed": "Las solicitudes para ser anfitrión todavía no están abiertas.",
       "home.host.open": "Postulate para organizar un torneo privado, solo por invitación, en tu local, para adultos que conocés.",
       "home.host.action": "Postularme →",
-      "home.halloween.sub": "Votación de la comunidad en vivo, pensada para Halloween.",
+      "home.halloween.title": "Concurso de disfraces",
+      "home.halloween.sub": "Disfrazate, sorprendé y conquistá los votos. Votá por tu favorito: ¡el disfraz más votado se lleva un premio!",
 
       // ---- shared sign-in component (urbanoAuth.js) ----
       "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
@@ -531,7 +532,8 @@
       "home.host.closed": "Host applications are not open yet.",
       "home.host.open": "Apply to run a private, invite-only tournament at your venue, for adults you know.",
       "home.host.action": "Apply →",
-      "home.halloween.sub": "Live community voting, designed for Halloween.",
+      "home.halloween.title": "Costume contest",
+      "home.halloween.sub": "Dress up, surprise everyone and win the votes. Vote for your favorite: the most-voted costume wins a prize!",
 
       "auth.btn.signedOut": "Log in / Create account",
       "auth.btn.finish": "Finish creating your account",

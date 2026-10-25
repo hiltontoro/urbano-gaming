@@ -145,7 +145,7 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text("#featured-status")).toBe("Next match");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
-    expect(page.card("Halloween")!.textContent).toContain("Coming Soon");
+    expect(page.card("Costume contest")!.textContent).toContain("Coming Soon");
     expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
     expect(page.text(".featured-scope")).toBe("Watch it at The Pub by Beer Box");
     expect(page.text("#featured-play")).toBe("Play now");
@@ -229,10 +229,10 @@ describe("Home — honest cards", () => {
   it("the Founder's order; the playable cards keep their exact destinations; every other card is informational: no link, no operational action", async () => {
     const page = await loadHome();
     const cards = Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.querySelector("h3")!.textContent);
-    expect(cards).toEqual(["URBANO Poker", "Halloween", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+    expect(cards).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
     const actionable = Array.from(page.doc.querySelectorAll(".exp-card.is-actionable")).map((c) => [c.querySelector("h3")!.textContent, c.getAttribute("href")]);
     expect(actionable).toEqual([["URBANO Poker", "/host.html?experience=poker"], ["Trivia", "/trivia-playtest.html"]]);
-    for (const title of ["Halloween", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
+    for (const title of ["Concurso de disfraces", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
       const card = page.card(title)!;
       expect(card.tagName, title).toBe("DIV");
       expect(card.className, title).toContain("is-locked");

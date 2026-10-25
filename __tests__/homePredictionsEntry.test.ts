@@ -275,14 +275,14 @@ describe("the rest of Home keeps its access and its states", () => {
     const page = await loadHome(() => list());
     await page.settle();
     const titles = Array.from(page.doc.querySelectorAll(".exp-card h3")).map((h) => h.textContent);
-    expect(titles).toEqual(["URBANO Poker", "Halloween", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
+    expect(titles).toEqual(["URBANO Poker", "Costume contest", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
     expect(Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i); // the retired card: its implementation and documentation are untouched, the Home card is gone
     const byTitle = (t: string) => Array.from(page.doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h3")?.textContent === t) as HTMLElement;
     for (const [title, href] of [["Trivia", "/trivia-playtest.html"], ["URBANO Poker", "/host.html?experience=poker"]] as const) {
       expect(byTitle(title).getAttribute("href"), title).toBe(href);
       expect(byTitle(title).className).toContain("is-actionable");
     }
-    for (const title of ["Halloween", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]) {
+    for (const title of ["Costume contest", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]) {
       expect(byTitle(title).className, title).toContain("is-locked");
       expect(byTitle(title).tagName, title).toBe("DIV"); // informational: no link, no operational action
       expect(byTitle(title).getAttribute("href"), title).toBeNull();
