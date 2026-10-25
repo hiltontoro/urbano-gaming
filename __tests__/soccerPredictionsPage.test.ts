@@ -23,6 +23,10 @@ interface Overrides {
   authenticated?: boolean;
   /** What getState reports when authenticated is false: "unauthenticated" (default) or "profile_incomplete". */
   authStatus?: string;
+  /** What the member's own route answers (default: a saved prediction with its evaluation and qualification). */
+  mine?: Record<string, unknown>;
+  /** The page language (default English; this file asserts English wording). */
+  lang?: "en" | "es";
 }
 
 function buildMatch(over: Record<string, unknown> = {}) {
@@ -72,7 +76,7 @@ const EVALUATION = { evaluationId: "e1", scorelineCorrect: true, goalscorerCorre
 
 async function loadPage(over: Overrides = {}) {
   const match = buildMatch(over.match);
-  const mine = { prediction: PREDICTION, evaluation: EVALUATION, qualification: over.qualification === undefined ? qualification() : over.qualification };
+  const mine = over.mine ?? { prediction: PREDICTION, evaluation: EVALUATION, qualification: over.qualification === undefined ? qualification() : over.qualification };
   const calls: string[] = [];
   const signIns: Array<Record<string, any>> = [];
   const dom = new JSDOM(HTML, {
@@ -81,7 +85,7 @@ async function loadPage(over: Overrides = {}) {
     pretendToBeVisual: true,
     beforeParse(window) {
       const w = window as unknown as Record<string, any>;
-      window.localStorage.setItem("urbano.lang", "en");
+      window.localStorage.setItem("urbano.lang", over.lang ?? "en");
       window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
       w.UrbanoAuth = {
         attachSignInButton: () => {},
@@ -542,6 +546,132 @@ describe("H. Access wording follows the state of the match", () => {
     card.appendChild(holder);
     (page.win as any).eval("resumeIntent({ status: 'authenticated' })");
     expect(page.doc.body.textContent).toContain("You're signed in. Make your prediction below.");
+    page.close();
+  });
+});
+
+// ---- the REAL card before its venue is enabled: a disabled action, never opened by the clock ----------------------------------------
+describe("E. A match with an approved participation window and no enabled venue shows its real card with a disabled action", () => {
+  const OFFER = {
+    maxLevel: 4, digest: "d", available: true, problem: null,
+    levels: [
+      { level: 1, label: "Una orden de tequeños" },
+      { level: 2, label: "Bono de consumo de L250" },
+      { level: 3, label: "Bono de consumo de L500" },
+      { level: 4, label: "Paquete de cuatro entradas para Halloween de The Pub (valor L1,200)" },
+    ],
+  };
+  const venue = { venueId: "v1", name: "The Pub by Beer Box", latitude: 14.099309, longitude: -87.180864, radiusMeters: 30.48, active: true };
+  const activation = (over: Record<string, unknown> = {}) => ({ venueActivationId: "act-1", enabled: false, venue, prizeTiers: [], offer: OFFER, ...over });
+  const FUTURE_KICKOFF = "2099-01-01T20:00:00.000Z";
+  const FUTURE_OPENS = "2099-01-01T18:30:00.000Z"; // 12:30 p. m. in Honduras
+  const PAST_OPENS = "2020-01-01T18:30:00.000Z";
+  const closedMatch = (over: Record<string, unknown> = {}) => ({
+    finalized: false, finalResult: null, kickoffAt: FUTURE_KICKOFF, participationOpensAt: FUTURE_OPENS, predictionContract: "PROGRESSIVE_LADDER_V1",
+    homeTeam: { teamId: "t1", name: "FC Barcelona", players: [] }, awayTeam: { teamId: "t2", name: "Real Madrid CF", players: [] },
+    competition: "El Clásico", venueActivations: [activation()], ...over,
+  });
+  const action = (page: { doc: Document }) => page.doc.querySelector("[data-not-open-action]") as HTMLButtonElement | null;
+
+  it("signed out: the disabled action says when it opens, there is no login prompt and no form, and the prizes are listed as they are", async () => {
+    const page = await loadPage({ authenticated: false, match: closedMatch() });
+    expect(action(page)!.textContent).toBe("Take part — opening expected 12:30 p.m.");
+    expect(action(page)!.disabled).toBe(true);
+    expect(action(page)!.getAttribute("aria-disabled")).toBe("true");
+    expect(page.doc.querySelector("[data-login-cta]")).toBeNull();
+    expect(page.doc.querySelector("form")).toBeNull();
+    const rows = [...page.doc.querySelectorAll("[data-not-open-offer] li")].map((li) => li.textContent);
+    expect(rows).toHaveLength(4);
+    for (const label of OFFER.levels.map((l) => l.label)) expect(rows.join("\n")).toContain(label);
+    expect(page.calls).toEqual([`${API}/matches`]); // nothing else was asked for
+    page.close();
+  });
+
+  it("in Spanish the action is exactly «Participar — apertura prevista 12:30 p. m.»", async () => {
+    const page = await loadPage({ authenticated: false, lang: "es", match: closedMatch() });
+    expect(action(page)!.textContent).toBe("Participar — apertura prevista 12:30 p. m.");
+    expect(action(page)!.disabled).toBe(true);
+    page.close();
+  });
+
+  it("the hour of Honduras is the instant minus six hours, written the same on every device: noon, midnight and the minutes", async () => {
+    const cases: Array<[string, string]> = [["2099-01-01T18:00:00.000Z", "12:00 p. m."], ["2099-01-01T06:00:00.000Z", "12:00 a. m."], ["2099-01-01T06:05:00.000Z", "12:05 a. m."], ["2099-01-01T05:59:00.000Z", "11:59 p. m."], ["2099-01-01T19:45:00.000Z", "1:45 p. m."]];
+    for (const [opens, written] of cases) {
+      const page = await loadPage({ authenticated: false, lang: "es", match: closedMatch({ participationOpensAt: opens }) });
+      expect(action(page)!.textContent, opens).toBe(`Participar — apertura prevista ${written}`);
+      page.close();
+    }
+  });
+
+  it("once the hour has passed and it is still closed, it says «Opening pending» / «Apertura pendiente» — still disabled", async () => {
+    const en = await loadPage({ authenticated: false, match: closedMatch({ participationOpensAt: PAST_OPENS }) });
+    expect(action(en)!.textContent).toBe("Opening pending");
+    expect(action(en)!.disabled).toBe(true);
+    expect(en.doc.querySelector("form")).toBeNull();
+    en.close();
+    const es = await loadPage({ authenticated: false, lang: "es", match: closedMatch({ participationOpensAt: PAST_OPENS }) });
+    expect(action(es)!.textContent).toBe("Apertura pendiente");
+    es.close();
+  });
+
+  it("the passing of the hour only changes the sentence: it never enables the button or shows a form", async () => {
+    const opens = new Date(Date.now() + 1200).toISOString();
+    const page = await loadPage({ authenticated: false, match: closedMatch({ participationOpensAt: opens }) });
+    expect(action(page)!.getAttribute("data-state")).toBe("expected");
+    await new Promise((r) => setTimeout(r, 1700));
+    expect(action(page)!.getAttribute("data-state")).toBe("pending");
+    expect(action(page)!.textContent).toBe("Opening pending");
+    expect(action(page)!.disabled).toBe(true);
+    expect(page.doc.querySelector("form")).toBeNull();
+    expect(page.doc.querySelector("[data-login-cta]")).toBeNull();
+    expect(page.calls).toEqual([`${API}/matches`]);
+    page.close();
+  });
+
+  it("signed in with nothing saved: the same disabled action (and no form)", async () => {
+    const page = await loadPage({ authenticated: true, mine: {}, match: closedMatch() });
+    expect(action(page)!.textContent).toBe("Take part — opening expected 12:30 p.m.");
+    expect(page.doc.querySelector("form")).toBeNull();
+    page.close();
+  });
+
+  it("signed in with something already saved: the saved participation is still shown, not the disabled action", async () => {
+    const page = await loadPage({
+      authenticated: true,
+      mine: { prediction: { ...PREDICTION, predictionContract: "COMPLETE_COUNT_V1" } },
+      match: closedMatch({ predictionContract: "COMPLETE_COUNT_V1" }),
+    });
+    expect(page.doc.querySelector("[data-not-open]")).toBeNull();
+    expect(page.doc.body.textContent).toContain("No venue is currently active for this match.");
+    page.close();
+  });
+
+  it("once a venue is ENABLED with a valid offer the card is the normal one: login prompt for a visitor, no disabled action — the clock plays no part", async () => {
+    for (const opens of [FUTURE_OPENS, PAST_OPENS]) {
+      const page = await loadPage({ authenticated: false, match: closedMatch({ participationOpensAt: opens, venueActivations: [activation({ enabled: true })] }) });
+      expect(page.doc.querySelector("[data-not-open]")).toBeNull();
+      expect(page.doc.querySelector("[data-login-cta]")).not.toBeNull();
+      page.close();
+    }
+  });
+
+  it("a match WITHOUT an approved window is untouched: no disabled action is added to it", async () => {
+    const page = await loadPage({ authenticated: false, match: closedMatch({ participationOpensAt: null }) });
+    expect(page.doc.querySelector("[data-not-open]")).toBeNull();
+    expect(page.doc.querySelector("[data-login-cta]")).not.toBeNull();
+    page.close();
+  });
+
+  it("after the match has started the usual closed wording applies, not this action", async () => {
+    const started = await loadPage({ authenticated: false, match: closedMatch({ kickoffAt: "2020-01-01T20:00:00.000Z", participationOpensAt: PAST_OPENS }) });
+    expect(started.doc.querySelector("[data-not-open]")).toBeNull();
+    started.close();
+  });
+
+  it("with no valid offer yet (no prizes loaded) the action is still there, and no empty prize list is drawn", async () => {
+    const page = await loadPage({ authenticated: false, match: closedMatch({ venueActivations: [activation({ offer: { maxLevel: 0, levels: [], digest: null, available: false, problem: "NO_LEVELS" } })] }) });
+    expect(action(page)!.disabled).toBe(true);
+    expect(page.doc.querySelector("[data-not-open-offer]")).toBeNull();
     page.close();
   });
 });

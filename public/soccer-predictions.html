@@ -604,6 +604,8 @@
     "pred.geo.unavailableNow": "No se pudo determinar tu ubicación en este momento.",
     "pred.geo.unsupported": "Tu navegador no ofrece ubicación.",
     "pred.opensLabel": "Apertura de participación: {time}",
+    "pred.notOpen.btn": "Participar — apertura prevista {time}",
+    "pred.notOpen.pending": "Apertura pendiente",
     "pred.kickoffLabel": "Inicio del partido: {time}",
     "pred.closesLabel": "Cierre de participación: {time} (al inicio del partido)",
     "pred.closedLabel": "Participación cerrada desde el inicio del partido: {time}",
@@ -799,6 +801,67 @@ function renderTimeNodes(scope) {
   for (const node of scope.querySelectorAll("[data-time-key]")) {
     node.textContent = t(node.getAttribute("data-time-key"), { time: formatInstant(node.getAttribute("data-time-iso")) });
   }
+  for (const node of scope.querySelectorAll("[data-clock-key]")) {
+    node.textContent = t(node.getAttribute("data-clock-key"), { time: hondurasClock(node.getAttribute("data-clock-iso")) });
+  }
+}
+
+// The clock of Honduras for an instant, "12:30 p. m." (Spanish) or "12:30 p.m." (English). Honduras has no daylight saving (UTC-6 all year),
+// so it is the instant minus six hours, exactly, whatever the device's own zone: the event happens there and the opening is announced in it.
+function hondurasClock(iso) {
+  const d = new Date(new Date(iso).getTime() - 6 * 60 * 60 * 1000);
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  const english = String(UrbanoI18n.locale()).slice(0, 2) === "en";
+  const suffix = english ? (h < 12 ? "a.m." : "p.m.") : (h < 12 ? "a. m." : "p. m.");
+  return (h % 12 === 0 ? 12 : h % 12) + ":" + (m < 10 ? "0" : "") + m + " " + suffix;
+}
+
+// The REAL card of a match that has an approved participation window but no enabled venue. Its one action is a disabled button: it says when
+// the participation is expected to open, and once that hour has passed without anything being enabled it says the opening is pending. The
+// hour only changes this sentence; it never enables anything (only a venue the administration has enabled does, and then this is not shown).
+function buildNotOpenAction(match) {
+  const opens = new Date(match.participationOpensAt).getTime();
+  const host = el(`<div data-not-open><button type="button" class="btn-primary" data-not-open-action disabled aria-disabled="true"></button></div>`);
+  const button = host.querySelector("[data-not-open-action]");
+  const show = () => {
+    if (Date.now() >= opens) {
+      button.removeAttribute("data-clock-key");
+      button.removeAttribute("data-clock-iso");
+      button.setAttribute("data-state", "pending");
+      setText(button, "pred.notOpen.pending");
+    } else {
+      button.removeAttribute("data-i18n");
+      button.removeAttribute("data-i18n-vars");
+      button.setAttribute("data-state", "expected");
+      button.setAttribute("data-clock-key", "pred.notOpen.btn");
+      button.setAttribute("data-clock-iso", match.participationOpensAt);
+      button.textContent = t("pred.notOpen.btn", { time: hondurasClock(match.participationOpensAt) });
+    }
+  };
+  show();
+  const wait = opens - Date.now();
+  if (wait > 0 && wait < 2147483000) setTimeout(show, wait + 250);
+  return host;
+}
+
+// The prizes of the first venue whose offer is valid, listed exactly as the form lists them (read-only here, nothing to choose yet).
+function buildNotOpenOffer(match) {
+  const activation = (match.venueActivations || []).find((a) => a.offer && a.offer.available);
+  if (!activation) return null;
+  const wrap = el(`<div data-not-open-offer></div>`);
+  const title = document.createElement("p");
+  title.className = "ladder-offers-title";
+  setText(title, "pred.ladder.offers");
+  const list = document.createElement("ul");
+  list.className = "ladder-offers";
+  for (const entry of activation.offer.levels) {
+    const item = document.createElement("li");
+    setText(item, "pred.ladder.offerRow", { n: entry.level, name: { $t: "pred.ladder.name." + entry.level }, prize: entry.label });
+    list.appendChild(item);
+  }
+  wrap.append(title, list);
+  return wrap;
 }
 
 // The prize this qualification is for, resolved from the match's own
@@ -2278,7 +2341,18 @@ async function renderMatch(match) {
     body.appendChild(el(`<span class="status-pill bad" ${ix("pred.locked")}>${tx("pred.locked")}</span>`));
   }
 
+  // A match with an approved participation window and no enabled venue: nothing can be sent. The card stays, with its action disabled.
+  const hasWindow = typeof match.participationOpensAt === "string" && !Number.isNaN(new Date(match.participationOpensAt).getTime());
+  const anyEnabledVenue = (match.venueActivations || []).some((a) => a.enabled && a.venue && a.venue.active);
+  const closedUntilEnabled = hasWindow && !match.finalized && !kickoffPassed && !anyEnabledVenue;
+  const appendNotOpen = () => {
+    body.appendChild(buildNotOpenAction(match));
+    const offer = buildNotOpenOffer(match);
+    if (offer) body.appendChild(offer);
+  };
+
   if (authState.status !== "authenticated") {
+    if (closedUntilEnabled) { appendNotOpen(); return card; }
     // Not signed in (or signed in but the account is not finished): one clear next step that remembers THIS match, so after
     // logging in the person lands back here, not on a generic page. The words follow the state of the match: only an OPEN match
     // invites a prediction. A closed match (kick-off passed) offers access to an existing participation, and a finalized one access to
@@ -2300,6 +2374,9 @@ async function renderMatch(match) {
 
   const mineRes = await authedFetch(`/api/gaming/predictions/matches/${match.matchId}/mine`);
   const mine = mineRes.json || {};
+
+  // Something already saved is still shown (the summary below); only a person with nothing saved meets the disabled action.
+  if (closedUntilEnabled && !mine.prediction) { appendNotOpen(); return card; }
 
   if (match.predictionContract === "PROGRESSIVE_LADDER_V1") {
     return renderProgressive(card, body, match, mine, authState, kickoffPassed);
