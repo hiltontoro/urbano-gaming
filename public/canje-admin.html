@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<title>Puesto de canje · Administración</title>
+<style>
+  :root { --bg: #0a0a0a; --card: #161616; --ink: #f5f1e8; --muted: #bdb7ac; --line: #2a2a2a; --gold: #d4af37; --ok: #7bd88f; --bad: #ff8a80; --warn: #ffd37a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: Montserrat, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; line-height: 1.45; -webkit-text-size-adjust: 100%; }
+  main { max-width: 600px; margin: 0 auto; padding: 16px; position: relative; }
+  h1 { font-size: 1.25rem; margin: 10px 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 8px; }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 14px 0; }
+  label { display: block; font-weight: 600; margin: 12px 0 6px; }
+  input[type="password"] { width: 100%; font: inherit; font-size: 1.1rem; padding: 14px; border-radius: 10px; border: 1px solid var(--line); background: #0f0f0f; color: var(--ink); min-height: 52px; }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+  button { font: inherit; font-weight: 700; min-height: 48px; padding: 10px 20px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--ink); color: #0a0a0a; border-color: transparent; }
+  button.danger { background: #b3261e; color: #fff; border-color: transparent; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; align-items: center; }
+  .msg { min-height: 1.4em; margin: 10px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+  .msg.error { color: var(--bad); } .msg.success { color: var(--ok); } .msg.warn { color: var(--warn); }
+  .warning { border: 2px solid var(--warn); border-radius: 12px; padding: 12px 14px; margin: 12px 0; background: #241d08; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+  dt { color: var(--muted); } dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  ul { padding-left: 20px; margin: 8px 0; } li { margin: 6px 0; }
+  .check { display: flex; gap: 12px; align-items: flex-start; font-weight: 600; margin: 14px 0 0; }
+  .check input { width: 26px; height: 26px; margin-top: 2px; flex: none; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Puesto de canje de The Pub · Administración</h1>
+  <p class="muted">Aquí se define o cambia el PIN del puesto sin pedir un despliegue nuevo. Solo entra una cuenta de administración existente.</p>
+
+  <div class="row">
+    <button id="btn-signin" type="button" style="visibility:hidden">Entrar</button>
+    <span class="msg" id="auth-status" role="status"></span>
+  </div>
+  <p id="access-msg" class="msg" role="status"></p>
+
+  <section id="admin" hidden>
+    <div class="card">
+      <h2>Estado del puesto</h2>
+      <dl>
+        <dt>Puesto</dt><dd id="s-label"></dd>
+        <dt>PIN</dt><dd id="s-pin"></dd>
+        <dt>Versión del PIN</dt><dd id="s-version"></dd>
+        <dt>Sesiones abiertas</dt><dd id="s-sessions"></dd>
+        <dt>Último cambio</dt><dd id="s-last"></dd>
+        <dt>Vence</dt><dd id="s-expires"></dd>
+        <dt>Estado</dt><dd id="s-state"></dd>
+      </dl>
+      <div class="row"><button id="btn-reload" type="button">Actualizar</button></div>
+    </div>
+
+    <div class="card">
+      <h2>Definir o cambiar el PIN</h2>
+      <div class="warning"><strong>Al guardar, se cierran todas las sesiones abiertas</strong> y el PIN anterior deja de servir. Elige tú el PIN en privado: 8 a 12 dígitos, nada obvio. No lo pongas en el PDF, en el QR, en un enlace ni en un chat con el PDF; compártelo por separado.</div>
+      <form id="pin-form" autocomplete="off">
+        <label for="pin">PIN nuevo</label>
+        <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+        <label for="pin2">Repite el PIN</label>
+        <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+        <div class="row"><button id="btn-save" class="primary" type="submit" disabled>Guardar PIN</button></div>
+      </form>
+      <p id="pin-msg" class="msg" role="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Qué datos guarda el puesto, para qué y por cuánto tiempo</h2>
+      <ul>
+        <li><strong>Nombre o iniciales declarados</strong> por quien entrega un premio: solo para dejar constancia de esa entrega, junto con la fecha y la hora. Se guarda únicamente cuando se registra una entrega (no en repeticiones ni rechazos). <strong>No hay borrado implementado:</strong> queda mientras exista el registro del canje.</li>
+        <li><strong>Huella (hash con sal) de la dirección de red</strong> en los intentos de PIN: solo para limitar los intentos. Se borra al registrar un intento nuevo pasadas 24 horas y de inmediato al cerrar el puesto. Si el puesto no se usa ni se cierra, los últimos intentos permanecen hasta que ocurra una de las dos cosas.</li>
+        <li><strong>Sesiones:</strong> solo la huella del código de sesión y su vencimiento; sin nombre ni dirección.</li>
+        <li>El PIN <strong>nunca</strong> se guarda: solo una huella con sal. El registro de cambios dice quién lo cambió y cuándo, no el PIN.</li>
+      </ul>
+      <p class="muted">La revisión regulatoria de estos datos sigue pendiente; esto describe lo que el sistema hace, no un cumplimiento.</p>
+    </div>
+
+    <div class="card">
+      <h2>Cerrar el puesto</h2>
+      <p class="muted">Cierra el puesto para siempre (no se puede reabrir), termina todas las sesiones y borra las huellas de los intentos. Hazlo al terminar el 31 de octubre o si hay un problema que cambiar el PIN no resuelve.</p>
+      <label class="check"><input id="close-sure" type="checkbox"><span>Entiendo que el puesto no se puede reabrir.</span></label>
+      <div class="row"><button id="btn-close" class="danger" type="button" disabled>Cerrar el puesto</button></div>
+      <p id="close-msg" class="msg" role="status"></p>
+    </div>
+  </section>
+</main>
+<script src="/urbanoAuth.js"></script>
+<script src="/canjeAdmin.js"></script>
+</body>
+</html>
