@@ -171,12 +171,66 @@ describe("the two languages carry the same table", () => {
 
   it("Spanish is real Spanish: no entry is an unchanged copy of the English one unless it is a name or a symbol", () => {
     const SAME_ON_PURPOSE = new Set([
-      "home.title", "home.score.clasico", "pred.title", "pred.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "El Clásico: FC Barcelona vs. Real Madrid CF" is the fixture's name, the same in both languages
+      "home.title", "pred.title", "pred.vs", "upcoming.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "vs" is the same word in both languages (the separator between two teams)
     ]);
     for (const key of Object.keys(en)) {
       if (SAME_ON_PURPOSE.has(key)) continue;
       expect(es[key], `${key} is still English`).not.toBe(en[key]);
     }
+  });
+
+  it("the deleted Clásico card left no key behind, and the allow-list names only keys that exist (a stale entry would hide a real copy of English later)", () => {
+    expect(Object.keys(es).filter((k) => k.startsWith("home.score."))).toEqual([]);
+    expect(Object.keys(en).filter((k) => k.startsWith("home.score."))).toEqual([]);
+    // the disclaimer moved to upcoming.disclaimer: the old home.upcoming.disclaimer no longer exists in either language
+    expect(es["home.upcoming.disclaimer"]).toBeUndefined();
+    expect(en["home.upcoming.disclaimer"]).toBeUndefined();
+    const source = read("__tests__/urbanoI18n.test.ts");
+    const list = /const SAME_ON_PURPOSE = new Set\(\[([\s\S]*?)\]\);/.exec(source)![1].replace(/\/\/.*$/gm, ""); // the keys only, not the comment beside them
+    const named = Array.from(list.matchAll(/"([\w.]+)"/g)).map((m) => m[1]);
+    expect(named.length).toBeGreaterThan(0);
+    for (const key of named) expect(en[key], `${key} is in the allow-list but is not a key of the table`).toBeDefined();
+  });
+
+  it("the words of the upcoming-matches card: the state chips never say a match is NOT open, 'vs' is the same word in both languages, and one o'clock takes the singular article only in Spanish", () => {
+    expect(es["upcoming.state.next"]).toBe("Preselección");
+    expect(en["upcoming.state.next"]).toBe("Shortlisted");
+    for (const text of [es["upcoming.state.next"], en["upcoming.state.next"]]) expect(text).not.toMatch(/no abierto|not open/i);
+    expect(es["upcoming.vs"]).toBe("vs");
+    expect(en["upcoming.vs"]).toBe("vs");
+    expect(es["upcoming.opensAt"]).toBe("Participación desde las {time} (hora de Honduras)");
+    expect(es["upcoming.opensAtOne"]).toBe("Participación desde la {time} (hora de Honduras)");
+    expect(en["upcoming.opensAt"]).toBe("Participation from {time} (Honduras time)");
+    expect(en["upcoming.opensAtOne"]).toBe(en["upcoming.opensAt"]);
+    expect(es["upcoming.opensAtOne"]).not.toBe(es["upcoming.opensAt"]);
+    expect(placeholders(es["upcoming.opensAtOne"])).toEqual(["time"]);
+    expect(placeholders(en["upcoming.opensAtOne"])).toEqual(["time"]);
+    expect(es["upcoming.status.none"]).toBe("Todavía no hay partidos abiertos para participar.");
+    expect(en["upcoming.status.none"]).toBe("No match is open for participation yet.");
+    expect(es["upcoming.status.open"]).toBe("Hay partidos abiertos para participar. Los ves en la cartelera de Score.");
+    expect(en["upcoming.status.open"]).toBe("Some matches are open for participation. You can see them in the Score fixtures.");
+  });
+
+  it("the card's other words: intro, teams label, link, past access and its note, the disclaimer (which says nothing about prizes), and the Score page's lineup titles", () => {
+    expect(es["home.upcoming.intro"]).toBe("Preselección de los próximos partidos de URBANO Score.");
+    expect(en["home.upcoming.intro"]).toBe("Shortlist of the upcoming URBANO Score matches.");
+    expect(es["home.upcoming.teamsLabel"]).toBe("Equipos que podrían aparecer en URBANO Score");
+    expect(en["home.upcoming.teamsLabel"]).toBe("Teams that may appear in URBANO Score");
+    expect(en["home.upcoming.play"]).toBe("See the Score fixtures");
+    expect(es["home.upcoming.past"]).toBe("Mis participaciones y premios");
+    expect(en["home.upcoming.past"]).toBe("My participations and prizes");
+    expect(es["home.upcoming.pastNote"]).toBe("Tus participaciones en partidos finalizados y el estado de tus premios.");
+    expect(en["home.upcoming.pastNote"]).toBe("Your participations in finished matches and the status of your prizes.");
+    expect(es["upcoming.disclaimer"]).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
+    expect(en["upcoming.disclaimer"]).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
+    // the card makes no statement about prizes: the old sentence ("prizes are shown only when confirmed") is gone from both languages
+    for (const text of [es["upcoming.disclaimer"], en["upcoming.disclaimer"]]) expect(text).not.toMatch(/premio|prize/i);
+    expect(es["pred.lineup.title"]).toBe("Cartelera");
+    expect(en["pred.lineup.title"]).toBe("Fixtures");
+    expect(es["pred.lineup.upcomingTitle"]).toBe("Próximos partidos (preselección)");
+    expect(en["pred.lineup.upcomingTitle"]).toBe("Upcoming matches (shortlist)");
+    expect(es["pred.lineup.upcomingNote"]).toBe("Por ahora no están abiertos para participar. Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
+    expect(en["pred.lineup.upcomingNote"]).toBe("They are not open for participation for now. Dates and times are informational and may change. Honduras time.");
   });
 
   it("the language names stay correct in each language", () => {

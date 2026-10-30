@@ -23,21 +23,40 @@ const ROOT = process.cwd();
 const INDEX_HTML = readFileSync(path.join(ROOT, "public/index.html"), "utf8");
 const PRED_HTML = readFileSync(path.join(ROOT, "public/soccer-predictions.html"), "utf8");
 const I18N_SOURCE = readFileSync(path.join(ROOT, "public/urbanoI18n.js"), "utf8");
+const UPCOMING_DATA_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcomingData.js"), "utf8");
+const UPCOMING_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcoming.js"), "utf8");
 const MATCHES_URL = "/api/gaming/predictions/matches";
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const closers: Array<() => void> = [];
 afterEach(() => { while (closers.length) closers.pop()!(); vi.restoreAllMocks(); });
 
-interface StorageOpts { stored?: "es" | "en" | null; storage?: "ok" | "blocked" }
+interface StorageOpts { stored?: "es" | "en" | null; storage?: "ok" | "blocked"; now?: string }
+
+/** The page's own clock, fixed at `iso` and ticking from there: the "Próximos partidos" list is real data that leaves the card as its matches
+ *  pass, so the tests of the Home may not depend on today's date. */
+function fixClock(window: any, iso: string) {
+  const RealDate = window.Date;
+  const offset = Date.parse(iso) - RealDate.now();
+  function FakeDate(...args: unknown[]) { return args.length ? new RealDate(...args) : new RealDate(RealDate.now() + offset); }
+  FakeDate.prototype = RealDate.prototype;
+  FakeDate.now = () => RealDate.now() + offset;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  window.Date = FakeDate;
+}
+const HOME_NOW = "2026-10-29T15:00:00Z"; // the day of the Founder's decisions: nothing in the list has started
 
 function prepareWindow(window: any, opts: StorageOpts) {
+  if (opts.now) fixClock(window, opts.now);
   if (opts.storage === "blocked") Object.defineProperty(window, "localStorage", { get() { throw new Error("storage blocked"); }, configurable: true });
   else if (opts.stored) window.localStorage.setItem("urbano.lang", opts.stored);
   // The browser says English; the page must ignore that.
   Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
   Object.defineProperty(window.navigator, "languages", { value: ["en-US"], configurable: true });
   window.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
+  window.eval(UPCOMING_DATA_SOURCE); // the "Próximos partidos" card's editorial list and logic, as its two script tags would load them
+  window.eval(UPCOMING_SOURCE);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -66,26 +85,30 @@ const englishLeft = (doc: Document) => visibleStrings(doc).map((t) => t.replace(
 // Home
 // ---------------------------------------------------------------------------------------------------------------------------------
 
+/** A match the server would accept a participation for (an ENABLED activation of an ACTIVE venue with an AVAILABLE offer), three hours after the
+ *  PAGE's clock, between two teams that are none of the announced ones. */
 function hostileSafeMatch(over: Record<string, unknown> = {}) {
   return {
-    matchId: "m1", competition: "Liga Nacional", cancelledAt: null, finalized: false,
-    kickoffAt: new Date(Date.now() + 3 * 3600_000).toISOString(),
+    matchId: "m1", competition: "Liga Nacional", cancelledAt: null, finalized: false, participationOpensAt: null,
+    kickoffAt: new Date(Date.parse(HOME_NOW) + 3 * 3600_000).toISOString(),
     homeTeam: { name: "Alpha FC" }, awayTeam: { name: "Beta FC" },
-    venueActivations: [{ enabled: true, venue: { active: true } }],
+    venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: true } }],
     ...over,
   };
 }
 
-async function loadHome(opts: StorageOpts & { matches?: unknown[] } = {}) {
+async function loadHome(opts: StorageOpts & { matches?: unknown[]; matchesAnswer?: () => Promise<unknown> } = {}) {
   const attach: Array<{ button: any; status: any; options: any }> = [];
+  const calls: Array<{ url: string; method: string }> = [];
   const dom = new JSDOM(INDEX_HTML, {
     url: "http://localhost/", runScripts: "dangerously", pretendToBeVisual: true,
     beforeParse(window) {
       const w = window as any;
-      prepareWindow(w, opts);
+      prepareWindow(w, { now: HOME_NOW, ...opts });
       w.UrbanoAuth = { attachSignInButton: (button: any, status: any, options: any) => { attach.push({ button, status, options }); } };
-      w.fetch = async (url: string) => {
-        if (String(url) === MATCHES_URL) return { status: 200, json: async () => ({ matches: opts.matches ?? [] }) };
+      w.fetch = async (url: string, init?: any) => {
+        calls.push({ url: String(url), method: init?.method ?? "GET" });
+        if (String(url) === MATCHES_URL) return opts.matchesAnswer ? opts.matchesAnswer() : { status: 200, json: async () => ({ matches: opts.matches ?? [] }) };
         return { status: 404, json: async () => ({}) };
       };
     },
@@ -95,7 +118,18 @@ async function loadHome(opts: StorageOpts & { matches?: unknown[] } = {}) {
   const doc = win.document as Document;
   await tick();
   const card = (title: string) => Array.from(doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h3")?.textContent === title) as HTMLElement | undefined;
-  return { win, doc, attach, card, text: (sel: string) => (doc.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim() };
+  const chips = () => Array.from(doc.querySelectorAll("#upcoming-list .upcoming-chip")).map((c) => c.textContent);
+  return { win, doc, attach, calls, card, chips, text: (sel: string) => (doc.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim() };
+}
+type HomePage = Awaited<ReturnType<typeof loadHome>>;
+
+/** The Home offers nothing to play from the Score card: no element anywhere on the page says "Jugar ahora" / "Play now", and the card's links are
+ *  the way to earlier participations and prizes, then the lineup — both informational. */
+function expectNoCallToPlay(page: HomePage, label: string) {
+  expect(visibleStrings(page.doc).filter((t) => /Jugar ahora|Play now/i.test(t)), label).toEqual([]);
+  expect(page.doc.querySelector("#featured-play, .featured-play, #featured-action"), label).toBeNull();
+  expect(Array.from(page.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), label).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
+  expect(page.doc.querySelectorAll("#featured-predictions button, #featured-predictions form, #featured-predictions input"), label).toHaveLength(0);
 }
 
 describe("Home — Spanish first, never from the browser", () => {
@@ -105,13 +139,21 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.text(".hero h1")).toBe("Jugá, predecí y competí con tu comunidad.");
     expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
     expect(Array.from(page.doc.querySelectorAll(".section-label")).map((e) => e.textContent)).toEqual(["Destacado", "Experiencias", "Juegos de habilidad", "Minijuegos", "Para organizadores"]);
-    expect(page.text("#featured-status")).toBe("Próximo partido");
+    expect(page.text("#featured-status")).toBe("Próximos partidos");
     expect(page.text("#featured-title")).toBe("URBANO Score");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
-    expect(page.text(".featured-scope")).toBe("Vivilo en The Pub by Beer Box");
-    expect(page.text(".featured-when")).toBe("Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.Estadio: Spotify Camp Nou");
-    expect(page.text("#featured-play")).toBe("Jugar ahora");
-    expect(page.doc.querySelector("#featured-note")).toBeNull(); // no "predictions coming soon" line
+    expect(page.text(".featured-descriptor")).toBe("Preselección de los próximos partidos de URBANO Score.");
+    expect(page.text("#featured-past")).toBe("Mis participaciones y premios");
+    expect(page.text(".featured-access-note")).toBe("Tus participaciones en partidos finalizados y el estado de tus premios.");
+    expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
+    expect(page.doc.querySelectorAll("#featured-teams ul.ten-crests > li.crest-chip")).toHaveLength(10);
+    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(5);
+    expect(page.chips()).toEqual(["Preselección", "Preselección", "Preselección", "Preselección", "Preselección"]);
+    expect(page.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar."); // the list was read and holds no open match
+    expect(page.text("#featured-note")).toBe("Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
+    expect(page.doc.querySelector(".featured-window")).toBeNull(); // (the note is #featured-note / .featured-note now)
+    expect(page.text("#featured-lineup")).toBe("Ver cartelera de Score");
+    expect(page.text(".featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
+    expectNoCallToPlay(page, "es");
     expect(page.doc.querySelector("#featured-history")).toBeNull(); // history has its own access (My profile)
     expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
   });
@@ -142,14 +184,20 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.win.localStorage.getItem("urbano.lang")).toBe("en");
     expect(page.text(".hero h1")).toBe("Play, predict, and compete with your community.");
     expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
-    expect(page.text("#featured-status")).toBe("Next match");
+    expect(page.text("#featured-status")).toBe("Upcoming matches");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
     expect(page.card("Costume contest")!.textContent).toContain("Coming Soon");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
-    expect(page.text(".featured-scope")).toBe("Watch it at The Pub by Beer Box");
-    expect(page.text("#featured-play")).toBe("Play now");
-    expect(page.text(".featured-when")).toContain("Stadium: Spotify Camp Nou");
+    expect(page.text(".featured-descriptor")).toBe("Shortlist of the upcoming URBANO Score matches.");
+    expect(page.text("#featured-past")).toBe("My participations and prizes");
+    expect(page.text(".featured-access-note")).toBe("Your participations in finished matches and the status of your prizes.");
+    expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
+    expect(page.chips()).toEqual(["Shortlisted", "Shortlisted", "Shortlisted", "Shortlisted", "Shortlisted"]);
+    expect(page.text("#upcoming-status")).toBe("No match is open for participation yet.");
+    expect(page.text("#featured-note")).toBe("Dates and times are informational and may change. Honduras time.");
+    expect(page.text("#featured-lineup")).toBe("See the Score fixtures");
+    expect(page.text(".featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
+    expectNoCallToPlay(page, "en");
     expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
   });
 
@@ -262,26 +310,103 @@ describe("Home — honest cards", () => {
     expect(page.doc.querySelector("#featured-predictions h2")!.textContent).toBe("URBANO Score");
   });
 
-  it("the Predictions entry is an announcement in both languages and stays one even when the database holds an eligible match: no opening, no play button, no request", async () => {
+  it("the Predictions entry announces in both languages and stays an announcement even when the database holds an eligible match that is not one of the announced ones: no opening, no call to play, no request beyond the one read", async () => {
     const page = await loadHome({ matches: [hostileSafeMatch()] });
-    for (const [lang, pill, play] of [["es", "Próximo partido", "Jugar ahora"], ["en", "Next match", "Play now"]] as const) {
+    // (the match is open by the server's own conditions, so the ONE sentence under the list says that some matches are open and points to the Score
+    // fixtures; it is the server's list that decides that, not the rows, and every row remains a preselection)
+    for (const [lang, pill, chip, lineup, sentence] of [
+      ["es", "Próximos partidos", "Preselección", "Ver cartelera de Score", "Hay partidos abiertos para participar. Los ves en la cartelera de Score."],
+      ["en", "Upcoming matches", "Shortlisted", "See the Score fixtures", "Some matches are open for participation. You can see them in the Score fixtures."],
+    ] as const) {
       if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
       expect(page.text("#featured-status"), lang).toBe(pill);
-      expect(page.text("#featured-play"), lang).toBe(play);
+      expect(page.text("#featured-lineup"), lang).toBe(lineup);
+      expect(page.text("#upcoming-status"), lang).toBe(sentence);
+      expect(page.chips(), lang).toEqual([chip, chip, chip, chip, chip]);
       expect(page.doc.querySelector("#featured-action"), lang).toBeNull();
       expect(page.doc.querySelector("#featured-match"), lang).toBeNull();
-      expect(page.doc.querySelectorAll("#featured-predictions a"), lang).toHaveLength(1);
-      expect(page.text("#featured-predictions"), lang).not.toMatch(/Alpha FC|Beta FC|Liga Nacional|Abierto|Open for|Entrar|Enter URBANO/);
+      expectNoCallToPlay(page, lang); // the way to earlier participations and prizes, then the lineup: nothing else
+      expect(page.text("#featured-predictions"), lang).not.toMatch(/Alpha FC|Beta FC|Abierto|Open to|Open for|Entrar|Enter URBANO/);
+    }
+    // the card reads the public matches list exactly once, with nothing sent; no other URBANO Score endpoint is touched
+    expect(page.calls.filter((c) => c.url.includes("/api/gaming/predictions"))).toEqual([{ url: MATCHES_URL, method: "GET" }]);
+  });
+
+  it("matches the database holds that are finalized or cancelled change nothing either, in both languages", async () => {
+    const page = await loadHome({ matches: [hostileSafeMatch({ finalized: true }), hostileSafeMatch({ cancelledAt: "2026-10-01T00:00:00Z" })] });
+    expect(page.text("#featured-status")).toBe("Próximos partidos");
+    expect(page.chips()).toEqual(Array(5).fill("Preselección"));
+    expect(page.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar."); // neither a finished nor a cancelled match counts as open
+    expect(page.doc.querySelector("#featured-action a")).toBeNull();
+    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    expect(page.text("#featured-status")).toBe("Upcoming matches");
+    expect(page.chips()).toEqual(Array(5).fill("Shortlisted"));
+    expect(page.text("#upcoming-status")).toBe("No match is open for participation yet.");
+    expect(page.doc.querySelector("#featured-action a")).toBeNull();
+    expectNoCallToPlay(page, "en");
+  });
+
+  it("the access to earlier participations and prizes comes BEFORE the list of coming matches and the lineup link after it, so nobody has to look for the history under future matches", async () => {
+    const page = await loadHome();
+    const card = page.doc.getElementById("featured-predictions")!;
+    const past = card.querySelector("#featured-past")!;
+    const list = card.querySelector("#upcoming-list")!;
+    const lineup = card.querySelector("#featured-lineup")!;
+    expect(past.compareDocumentPosition(list) & 4 /* FOLLOWING */).toBeTruthy();
+    expect(list.compareDocumentPosition(lineup) & 4).toBeTruthy();
+    expect(past.getAttribute("href")).toBe("/soccer-predictions.html#historial");
+  });
+});
+
+describe("Home — the sentence about participation speaks for the server's list, and only for a list that was read", () => {
+  const OPEN = { es: "Hay partidos abiertos para participar. Los ves en la cartelera de Score.", en: "Some matches are open for participation. You can see them in the Score fixtures." };
+  const NONE = { es: "Todavía no hay partidos abiertos para participar.", en: "No match is open for participation yet." };
+
+  it("a list that was read: 'open' when it holds a match that accepts participation (whether or not it is one of the rows), 'none' otherwise; the rows are a preselection either way", async () => {
+    const accepted = await loadHome({ matches: [hostileSafeMatch()] });
+    const unknownTeams = await loadHome({ matches: [hostileSafeMatch({ homeTeam: { name: "Delta FC" }, awayTeam: { name: "Gamma FC" } })] });
+    const offerGone = await loadHome({ matches: [hostileSafeMatch({ venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: false } }] })] });
+    const started = await loadHome({ matches: [hostileSafeMatch({ kickoffAt: new Date(Date.parse(HOME_NOW) - 3600_000).toISOString() })] });
+    const windowNotOpen = await loadHome({ matches: [hostileSafeMatch({ participationOpensAt: new Date(Date.parse(HOME_NOW) + 3600_000).toISOString() })] });
+    for (const [name, page, which] of [["accepting match", accepted, OPEN], ["other accepting match", unknownTeams, OPEN], ["no offer", offerGone, NONE], ["already started", started, NONE], ["window not open", windowNotOpen, NONE]] as const) {
+      for (const lang of ["es", "en"] as const) {
+        if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+        expect(page.text("#upcoming-status"), `${name} ${lang}`).toBe(which[lang]);
+        expect((page.doc.getElementById("upcoming-status") as HTMLElement).hidden, `${name} ${lang}`).toBe(false);
+        expect(page.chips(), `${name} ${lang}`).toEqual(Array(5).fill(lang === "es" ? "Preselección" : "Shortlisted"));
+      }
     }
   });
 
-  it("no eligible match keeps the entry unavailable in both languages", async () => {
-    const page = await loadHome({ matches: [hostileSafeMatch({ finalized: true }), hostileSafeMatch({ cancelledAt: "2026-10-01T00:00:00Z" })] });
-    expect(page.text("#featured-status")).toBe("Próximo partido");
-    expect(page.doc.querySelector("#featured-action a")).toBeNull();
-    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(page.text("#featured-status")).toBe("Next match");
-    expect(page.doc.querySelector("#featured-action a")).toBeNull();
+  it("while the list is being read, and when it cannot be read (an error status, no list in the answer, an unreadable body, a network error), no sentence is shown at all, in either language", async () => {
+    const answers: Record<string, () => Promise<unknown>> = {
+      "pending": () => new Promise(() => {}),
+      "HTTP 500": async () => ({ status: 500, json: async () => ({ matches: [hostileSafeMatch()] }) }),
+      "HTTP 401": async () => ({ status: 401, json: async () => ({ error: "unauthorized" }) }),
+      "not a list": async () => ({ status: 200, json: async () => ({ matches: { 0: hostileSafeMatch() } }) }),
+      "not JSON": async () => ({ status: 200, json: async () => { throw new SyntaxError("Unexpected token <"); } }),
+      "network error": async () => { throw new TypeError("Failed to fetch"); },
+    };
+    for (const [name, matchesAnswer] of Object.entries(answers)) {
+      const page = await loadHome({ matchesAnswer });
+      for (const lang of ["es", "en"] as const) {
+        if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+        const status = page.doc.getElementById("upcoming-status") as HTMLElement;
+        expect(status.textContent, `${name} ${lang}`).toBe("");
+        expect(status.hidden, `${name} ${lang}`).toBe(true);
+        expect(page.text("#featured-predictions"), `${name} ${lang}`).not.toMatch(/partidos abiertos para participar|match is open for participation|matches are open for participation/);
+        expect(page.chips(), `${name} ${lang}`).toEqual(Array(5).fill(lang === "es" ? "Preselección" : "Shortlisted")); // the card itself is intact
+        expectNoCallToPlay(page, `${name} ${lang}`);
+      }
+    }
+  });
+
+  it("the two lists on the card are announced as lists, and the arrow of the access link is not in the page: it is CSS content with an empty alternative text", async () => {
+    const page = await loadHome();
+    expect(page.doc.querySelector("#featured-teams ul.ten-crests")!.getAttribute("role")).toBe("list");
+    expect(page.doc.getElementById("upcoming-list")!.getAttribute("role")).toBe("list");
+    for (const link of Array.from(page.doc.querySelectorAll("#featured-predictions a"))) expect(link.textContent, link.id).not.toMatch(/→/);
+    expect(INDEX_HTML).toMatch(/\.featured-access-link::after\s*\{[^}]*content:\s*"→";\s*content:\s*"→"\s*\/\s*"";/);
   });
 });
 
@@ -335,6 +460,8 @@ interface PredOpts extends StorageOpts {
   predict?: { status: number; json: unknown };
   matchesFail?: boolean;
   noMatches?: boolean;
+  /** Replaces the answer of the public matches list (an error status, a body without the list…). */
+  answerMatches?: () => Promise<unknown>;
 }
 
 function predMatch(over: Record<string, unknown> = {}) {
@@ -384,6 +511,7 @@ async function loadPredictions(opts: PredOpts = {}) {
         }
         if (target === "/api/gaming/predictions/matches") {
           if (opts.matchesFail) throw new TypeError("network");
+          if (opts.answerMatches) return opts.answerMatches();
           return { status: 200, json: async () => ({ matches: JSON.parse(JSON.stringify(matches)) }) };
         }
         if (target.endsWith("/mine")) return { status: 200, json: async () => JSON.parse(JSON.stringify(opts.mine ?? {})) };
@@ -432,6 +560,82 @@ describe("Predictions — Spanish first, header, footer and navigation", () => {
   });
 });
 
+describe("Predictions — the fixtures, the shortlist and the history, in both languages", () => {
+  // the page's clock is fixed (the announced matches leave the list as they pass), and the server's one match starts five hours after it
+  const options = { now: HOME_NOW, match: { kickoffAt: new Date(Date.parse(HOME_NOW) + 5 * 3600_000).toISOString() } };
+
+  it("Spanish first: Cartelera, Próximos partidos (preselección) with its note, Historial; the shortlist lists the five announced matches as preselection and every word of it follows the language", async () => {
+    const page = await loadPredictions(options);
+    expect(page.text("#cartelera-title")).toBe("Cartelera");
+    expect(page.text("#lineup-upcoming h3")).toBe("Próximos partidos (preselección)");
+    expect(page.text("#lineup-upcoming .score-section-intro")).toBe("Por ahora no están abiertos para participar. Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
+    expect((page.q("#lineup-upcoming") as HTMLElement).hidden).toBe(false);
+    expect(page.text("#historial-title")).toBe("Historial");
+    expect(page.doc.querySelectorAll("#score-upcoming .upcoming-item")).toHaveLength(5);
+    expect(Array.from(page.doc.querySelectorAll("#score-upcoming .upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Preselección"));
+    expect(page.q("#score-upcoming")!.getAttribute("aria-label")).toBe("Lista de próximos partidos");
+    expect(page.text("#score-access-history")).toBe("Mis participaciones y premios");
+  });
+
+  it("English: the lineup is 'Fixtures', its shortlist 'Upcoming matches (shortlist)' with the English note, the chips say 'Shortlisted', the history is 'History' — all redrawn in place by the selector", async () => {
+    const page = await loadPredictions(options);
+    const list = page.q("#score-upcoming")!;
+    const heading = page.q("#cartelera-title")!;
+    page.en();
+    expect(page.text("#cartelera-title")).toBe("Fixtures");
+    expect(page.q("#cartelera-title")).toBe(heading); // translated in place, not rebuilt
+    expect(page.text("#lineup-upcoming h3")).toBe("Upcoming matches (shortlist)");
+    expect(page.text("#lineup-upcoming .score-section-intro")).toBe("They are not open for participation for now. Dates and times are informational and may change. Honduras time.");
+    expect(page.text("#historial-title")).toBe("History");
+    expect(page.text("#historial .score-section-intro")).toBe("Finished matches, with your participation and your prizes.");
+    expect(page.q("#score-upcoming")).toBe(list);
+    expect(Array.from(page.doc.querySelectorAll("#score-upcoming .upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Shortlisted"));
+    expect(page.q("#score-upcoming")!.getAttribute("aria-label")).toBe("List of upcoming matches");
+    expect(page.text("#score-access-history")).toBe("My participations and prizes");
+    expect(page.text(".score-access-note")).toBe("Your participations in finished matches and the status of your prizes.");
+    // and a page opened in English draws the same
+    const saved = await loadPredictions({ ...options, stored: "en" });
+    expect(saved.text("#cartelera-title")).toBe("Fixtures");
+    expect(saved.text("#lineup-upcoming h3")).toBe("Upcoming matches (shortlist)");
+    expect(saved.text("#historial-title")).toBe("History");
+    // no Spanish word of the old design is left in the English page's lineup and shortlist
+    expect(saved.text("#cartelera")).not.toMatch(/Cartelera|Preselección|Próximos|preselección/);
+  });
+
+  it("the shortlist is announced as a list; the access arrow is decoration (CSS content with an empty alternative text) and never part of the link's name; the crests note closes every drawing, in the language chosen", async () => {
+    const page = await loadPredictions(options);
+    expect(page.q("#score-upcoming")!.tagName).toBe("UL");
+    expect(page.q("#score-upcoming")!.getAttribute("role")).toBe("list");
+    expect(page.q("#score-access-history")!.textContent).not.toMatch(/→/);
+    expect(PRED_HTML).toMatch(/\.score-access-link::after\s*\{[^}]*content:\s*"→";\s*content:\s*"→"\s*\/\s*"";/);
+    const lastOfContent = () => page.q("#content")!.lastElementChild as HTMLElement;
+    expect([lastOfContent().tagName, lastOfContent().className]).toEqual(["P", "score-crests-note"]);
+    expect(lastOfContent().textContent).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
+    page.en();
+    expect(lastOfContent().textContent).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
+  });
+
+  it("an unreadable list is a load failure, not an empty one: no 'no matches yet', no 'no finished matches yet' and no shortlist is drawn from a list nobody read, and the usual error is shown in the chosen language", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing: Array<[string, () => Promise<unknown>]> = [
+      ["HTTP 500", async () => ({ status: 500, json: async () => ({ matches: [] }) })],
+      ["no list in the answer", async () => ({ status: 200, json: async () => ({ error: "x" }) })],
+    ];
+    for (const [name, answer] of failing) {
+      const page = await loadPredictions({ ...options, authenticated: false, answerMatches: answer });
+      expect(page.text("#cartelera .load-error .msg"), name).toBe("No pudimos cargar los partidos. Intentá de nuevo.");
+      expect(page.text("#historial .load-error .msg"), name).toBe("No pudimos cargar tu historial de participaciones y premios. Intentá de nuevo.");
+      expect(page.text("#cartelera [data-retry]"), name).toBe("Reintentar");
+      page.en();
+      expect(page.text("#cartelera .load-error .msg"), name).toBe("Couldn't load the matches. Try again.");
+      expect(page.text("#historial .load-error .msg"), name).toBe("Couldn't load your history of participations and prizes. Try again.");
+      expect(page.text("#historial [data-retry]"), name).toBe("Try again");
+      expect(page.text("#content"), name).not.toMatch(/Todavía no hay|There are no finished|No matches are open|Preselección|Shortlisted/); // nothing says that there are no matches or no history
+      expect(page.doc.querySelector("#score-upcoming, #lineup-upcoming, .score-crests-note, .empty-state"), name).toBeNull();
+    }
+  });
+});
+
 describe("Predictions — signed out and unfinished account", () => {
   it("signed out: the Spanish prompt and action, translated IN PLACE when the language changes (the same button, not a new one)", async () => {
     const page = await loadPredictions({ authenticated: false });
@@ -457,9 +661,9 @@ describe("Predictions — signed out and unfinished account", () => {
     expect(empty.text("#content .empty-state")).toBe("No matches are open for prediction yet — check back soon.");
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failed = await loadPredictions({ authenticated: false, matchesFail: true });
-    expect(failed.text("#content .empty-state")).toBe("No pudimos cargar los partidos. Recargá la página para intentar de nuevo.");
+    expect(failed.text("#cartelera .load-error .msg")).toBe("No pudimos cargar los partidos. Intentá de nuevo.");
     failed.en();
-    expect(failed.text("#content .empty-state")).toBe("Couldn't load the matches. Reload the page to try again.");
+    expect(failed.text("#cartelera .load-error .msg")).toBe("Couldn't load the matches. Try again.");
   });
 });
 

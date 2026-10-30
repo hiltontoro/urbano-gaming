@@ -1,18 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
- * The Home's editorial cards (Founder Design Review composition): URBANO Score as the featured art card (a static announcement over an
- * original pitch drawn in code), URBANO Poker and Halloween / Community as art cards, Trivia as a visual card of its own, and Rutas /
- * Towers as recognizable Minigame tiles.
+ * The Home's editorial cards (Founder Design Review composition): URBANO Score as the featured art card ("Próximos partidos": an
+ * informational preselection over an original pitch drawn in code, with the crests of the ten teams), URBANO Poker and Halloween /
+ * Community as art cards, Trivia as a visual card of its own, and Rutas / Towers as recognizable Minigame tiles.
  *
  * What this pins: (1) the two photographs (Poker, Halloween) are the only photographs, small local WebP derivatives of the reviewed
  * artwork, each pinned by hash and weight; the two other images are original SVG drawings made in code, also pinned by hash and weight; (2) the art is decoration only, so no card gains an operational action, an availability claim, a reward or an event
  * from the mockup; (3) availability stays exactly what it was (Poker keeps its destination and its Playtest label; everything else that
- * was informational stays informational); (4) the CSS contract that keeps text legible over a photograph and the page free of sideways
+ * was informational stays informational), and the Score card offers no way to play: two informational links in a fixed order, no call
+ * to action, and the crests of the ten teams as decoration that never replaces the written name; (4) the CSS contract that keeps text legible over a photograph and the page free of sideways
  * scrolling; (5) both languages.
  *
  * Limits, stated plainly: jsdom does not lay a page out or paint it. Legibility over the photographs was MEASURED in a real browser (WCAG
@@ -23,10 +24,18 @@ import path from "node:path";
 const ROOT = process.cwd();
 const INDEX_HTML = readFileSync(path.join(ROOT, "public/index.html"), "utf8");
 const I18N_SOURCE = readFileSync(path.join(ROOT, "public/urbanoI18n.js"), "utf8");
+const CRESTS_SOURCE = readFileSync(path.join(ROOT, "public/urbanoClubCrests.js"), "utf8");
+const UPCOMING_DATA_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcomingData.js"), "utf8");
+const UPCOMING_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcoming.js"), "utf8");
 // The page without its explanatory comments: they may legitimately name the mockup or the retired Level 33 card.
 const CODE = INDEX_HTML.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\/\/.*$/gm, "");
 const ASSET_DIR = path.join(ROOT, "public/assets/home");
 const MATCHES_URL = "/api/gaming/predictions/matches";
+/** The ten teams of the strip on the Score card, in the Founder's order (2026-10-29): their crests are mandatory, as decoration. */
+const TEN_TEAMS = ["Real Madrid", "FC Barcelona", "Manchester City", "Manchester United", "Arsenal", "Olimpia", "Motagua", "Inter de Milán", "Bayern Múnich", "Paris Saint-Germain"];
+/** The page's clock in these tests: the day of the Founder's decisions. The editorial list is real data that leaves the card as its matches
+ *  pass, so nothing here may depend on today's date. */
+const HOME_NOW = "2026-10-29T15:00:00Z";
 
 // Provenance.
 //  - Poker and Halloween: derivatives of original images generated for URBANO Gaming and archived with their prompt and hash in the
@@ -58,17 +67,37 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const closers: Array<() => void> = [];
 afterEach(() => { while (closers.length) closers.pop()!(); vi.restoreAllMocks(); });
 
-async function loadHome(html: string = INDEX_HTML, opts: { matches?: unknown[]; stored?: "es" | "en" } = {}) {
+/** The page's own clock, fixed at `iso` and ticking from there. */
+function fixClock(window: any, iso: string) {
+  const RealDate = window.Date;
+  const offset = Date.parse(iso) - RealDate.now();
+  function FakeDate(...args: unknown[]) { return args.length ? new RealDate(...args) : new RealDate(RealDate.now() + offset); }
+  FakeDate.prototype = RealDate.prototype;
+  FakeDate.now = () => RealDate.now() + offset;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  window.Date = FakeDate;
+}
+
+async function loadHome(html: string = INDEX_HTML, opts: { matches?: unknown[]; stored?: "es" | "en"; now?: string; fetchMatches?: () => Promise<unknown>; consoleErrors?: unknown[][]; breakList?: boolean } = {}) {
   const dom = new JSDOM(html, {
     url: "http://localhost/", runScripts: "dangerously", pretendToBeVisual: true,
     beforeParse(window) {
       const w = window as any;
+      fixClock(w, opts.now ?? HOME_NOW);
       if (opts.stored) w.localStorage.setItem("urbano.lang", opts.stored);
       Object.defineProperty(w.navigator, "language", { value: "en-US", configurable: true });
       Object.defineProperty(w.navigator, "languages", { value: ["en-US"], configurable: true });
-      w.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped module is evaluated, as the script tag would
+      w.eval(I18N_SOURCE); // jsdom does not load external scripts: the REAL shipped scripts are evaluated, in the order of the page's script tags
+      w.eval(CRESTS_SOURCE); // the crests of the ten teams are decoration drawn by this module
+      w.eval(UPCOMING_DATA_SOURCE); // the card's editorial list and its logic
+      w.eval(UPCOMING_SOURCE);
+      // a malformed editorial container: reading its matches throws (the list is informational: the page must not depend on it)
+      if (opts.breakList) Object.defineProperty(w.UrbanoUpcomingData, "matches", { get() { throw new Error("malformed editorial list"); }, configurable: true });
       w.UrbanoAuth = { attachSignInButton: () => {} };
-      w.fetch = async (url: string) => (String(url) === MATCHES_URL ? { status: 200, json: async () => ({ matches: opts.matches ?? [] }) } : { status: 404, json: async () => ({}) });
+      // the public matches list: a good answer by default; `fetchMatches` replaces ONLY that answer (a failure, a bad body, an answer that never comes)
+      w.fetch = async (url: string) => (String(url) === MATCHES_URL ? (opts.fetchMatches ? opts.fetchMatches() : { status: 200, json: async () => ({ matches: opts.matches ?? [] }) }) : { status: 404, json: async () => ({}) });
+      if (opts.consoleErrors) w.console.error = (...args: unknown[]) => { opts.consoleErrors!.push(args); };
     },
   });
   closers.push(() => dom.window.close());
@@ -104,7 +133,32 @@ function violations(page: Page): string[] {
     if (!/^\/assets\/home\/[a-z-]+\.webp$/.test(img.getAttribute("src") ?? "")) out.push("an art image does not come from /assets/home");
   }
   for (const scrim of Array.from(doc.querySelectorAll(".art-scrim"))) if (scrim.getAttribute("aria-hidden") !== "true") out.push("a scrim is announced");
-  if (doc.querySelector("#featured-predictions img, #featured-predictions svg")) out.push("the featured card contains an element image");
+  if (doc.querySelector("#featured-predictions img:not(.club-crest), #featured-predictions svg")) out.push("the featured card contains an element image");
+  // The Score card is information, not an invitation: exactly two links (the way to earlier participations and prizes FIRST, then the lineup), no
+  // call to action, and the ten teams in the Founder's order, each named in text (a crest is only an addition to the name).
+  const featured = doc.getElementById("featured-predictions");
+  if (!featured) out.push("the featured card is missing");
+  else {
+    const links = Array.from(featured.querySelectorAll("a")).map((a) => `${a.getAttribute("id")} ${a.getAttribute("href")}`);
+    if (links.join(" | ") !== "featured-past /soccer-predictions.html#historial | featured-lineup /soccer-predictions.html") out.push(`the featured card's links are not the two informational ones, in order: ${links.join(" | ")}`);
+    if (featured.querySelector("#featured-play, .featured-play, #featured-action, button, form, input, select") || /Jugar ahora|Play now/i.test(featured.textContent ?? "")) out.push("the featured card invites to play");
+    const chips = Array.from(featured.querySelectorAll("ul.ten-crests > li.crest-chip"));
+    const clubs = chips.map((li) => li.getAttribute("data-club"));
+    if (clubs.join("|") !== TEN_TEAMS.join("|")) out.push(`the strip of ten teams changed: ${clubs.join(", ")}`);
+    for (const li of chips) if ((li.querySelector(".crest-name")?.textContent ?? "") !== li.getAttribute("data-club")) out.push(`${li.getAttribute("data-club")} lost its written name`);
+    for (const img of Array.from(featured.querySelectorAll("img"))) {
+      if (!img.classList.contains("club-crest") || img.getAttribute("alt") !== "" || img.getAttribute("aria-hidden") !== "true") out.push("a crest is not decorative (empty alt, hidden from assistive technology)");
+    }
+    // the card makes no statement about prizes: the only words about them are the link to the person's own earlier prizes and the note under it
+    const prizeWords = Array.from(featured.querySelectorAll("*")).filter((el) => el.children.length === 0 && /premio|prize/i.test(el.textContent ?? "")).map((el) => el.id || el.className);
+    if (prizeWords.join("|") !== "featured-past|featured-access-note") out.push(`the featured card says something about prizes beyond the way to the person's own: ${prizeWords.join(", ")}`);
+    for (const list of Array.from(featured.querySelectorAll("ul.ten-crests, ul#upcoming-list"))) if (list.getAttribute("role") !== "list") out.push("a list of the card lost its role");
+    for (const row of Array.from(featured.querySelectorAll("#upcoming-list .upcoming-item[data-time='tbc']"))) {
+      const time = row.querySelector("time");
+      if (!/Horario por confirmar|Time to be confirmed/.test(time?.textContent ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(time?.getAttribute("datetime") ?? "")) out.push("a match without a confirmed hour does not say so");
+      if (row.getAttribute("data-state") !== "next" || row.querySelector(".upcoming-opens")) out.push("a match without a confirmed hour is not just announced");
+    }
+  }
   if (Array.from(doc.querySelectorAll("a[href]")).some((a) => /rutas|towers|race|pulse|competitions|quiz/i.test(a.getAttribute("href") ?? ""))) out.push("a link points at Rutas, Towers, Race, Pulse, Competitions or Quiz");
   const trivia = card("Trivia");
   if (!trivia || trivia.tagName !== "A" || trivia.getAttribute("href") !== "/trivia-playtest.html" || !/Playtest/i.test(trivia.textContent ?? "")) out.push("trivia access or Playtest label changed");
@@ -119,7 +173,7 @@ function violations(page: Page): string[] {
 describe("Home art — the photographs and the Trivia motif", () => {
   it("public/assets/home holds exactly the reviewed assets: two photographs and two code-drawn motifs; no Level 33 art, no stadium photograph, no multi-sport photograph, no PNG original", () => {
     expect(readdirSync(ASSET_DIR).sort()).toEqual(Object.keys(ASSETS).sort());
-    expect(readdirSync(path.join(ROOT, "public/assets")).sort()).toEqual(["clubs", "home"]); // clubs: the two crests, covered by clubCrests.test.ts
+    expect(readdirSync(path.join(ROOT, "public/assets")).sort()).toEqual(["clubs", "home"]); // clubs: the crests of the ten teams, covered by clubCrests.test.ts
     expect(readdirSync(ASSET_DIR).join(" ")).not.toMatch(/level|soccer-predictions|sports|stadium/i);
     expect(PHOTOS).toEqual(["halloween-community.webp", "urbano-poker.webp"]);
   });
@@ -158,8 +212,7 @@ describe("Home art — the photographs and the Trivia motif", () => {
 
   it("the stadium photograph without provenance is not published: not in the folder, not referenced by the page, the language module or any test fixture", () => {
     expect(readdirSync(ASSET_DIR)).not.toContain("urbano-score-stadium.webp");
-    // The WORD may appear as text (the card names the stadium, "Estadio: Spotify Camp Nou"); what must not appear is any reference to a
-    // stadium image: no asset path, no image file, no background.
+    // The WORD may appear as text; what must not appear is any reference to a stadium image: no asset path, no image file, no background.
     const IMAGE_OF_A_STADIUM = /urbano-score-stadium|stadium[\w-]*\.(webp|jpe?g|png|avif|gif)|url\([^)]*stadium/i;
     expect(INDEX_HTML).not.toMatch(IMAGE_OF_A_STADIUM);
     expect(I18N_SOURCE).not.toMatch(IMAGE_OF_A_STADIUM);
@@ -179,8 +232,8 @@ describe("Home art — the photographs and the Trivia motif", () => {
     expect(CODE).not.toMatch(/level[-_ ]?33/i);
   });
 
-  it("brings nothing from the prototype: no script, no illustrative data, no mockup class or navigation hook, no external script besides the three this page already loaded and the club crests module", () => {
-    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/urbanoAuth.js", "/hostAvailability.js"]);
+  it("brings nothing from the prototype: no script, no illustrative data, no mockup class or navigation hook, no external script besides the three this page already loaded, the club crests module and the two of the \"Próximos partidos\" card", () => {
+    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/homeUpcomingData.js", "/homeUpcoming.js", "/urbanoAuth.js", "/hostAvailability.js"]);
     expect(CODE).not.toMatch(/\bug-[a-z-]+|data-jump|data-view|data-panel|Founder Design Review|DESIGN PROTOTYPE|Illustrative data|ACRE8M|Community Cup|Community Soccer/);
   });
 });
@@ -287,19 +340,100 @@ describe("Home art — decoration never changes what is available", () => {
     for (const value of homeKeys) expect(value).not.toMatch(forbidden);
   });
 
-  it("the Predictions card keeps its art, never gains an element image, and the public matches list cannot change it (the announcement is static)", async () => {
+  it("the Predictions card keeps its art, never gains an element image of its own, and a server match that is not one of the announced matches cannot change it", async () => {
     const none = await loadHome();
-    expect(none.doc.getElementById("featured-predictions")!.className).toContain("art-card");
+    const featured = (page: Page) => page.doc.getElementById("featured-predictions")!;
+    expect(featured(none).className).toContain("art-card");
     expect(none.doc.querySelector("#featured-action")).toBeNull();
-    const kickoff = new Date(Date.now() + 3 * 3600_000).toISOString();
+    // five announced matches, every one only a preselection (the chip never says a match is NOT open); once the server's list has been READ and holds
+    // no match that accepts participation, the one sentence under the list says that nothing is open
+    expect(none.doc.querySelectorAll("#featured-predictions .upcoming-item")).toHaveLength(5);
+    expect(Array.from(none.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Preselección"));
+    expect(none.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar.");
+    expect((none.doc.getElementById("upcoming-status") as HTMLElement).hidden).toBe(false);
+    const kickoff = new Date(Date.parse(HOME_NOW) + 3 * 3600_000).toISOString(); // three hours after the page's own clock (not the host's)
     const open = await loadHome(INDEX_HTML, {
-      matches: [{ matchId: "m1", competition: "Liga", cancelledAt: null, finalized: false, kickoffAt: kickoff, homeTeam: { name: "A FC" }, awayTeam: { name: "B FC" }, venueActivations: [{ enabled: true, venue: { active: true } }] }],
+      matches: [{ matchId: "m1", competition: "Liga", cancelledAt: null, finalized: false, kickoffAt: kickoff, homeTeam: { name: "A FC" }, awayTeam: { name: "B FC" }, venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: true } }] }],
     });
-    expect(open.doc.getElementById("featured-predictions")!.className).toContain("art-card");
-    expect(open.doc.querySelector("#featured-predictions img, #featured-predictions svg")).toBeNull();
-    expect(open.doc.querySelector("#featured-predictions a:not(#featured-play)")).toBeNull();
-    expect(open.doc.getElementById("featured-predictions")!.outerHTML).toBe(none.doc.getElementById("featured-predictions")!.outerHTML);
-    expect(open.text("#featured-status")).toBe("Próximo partido");
+    expect(featured(open).className).toContain("art-card");
+    expect(open.doc.querySelector("#featured-predictions img:not(.club-crest), #featured-predictions svg")).toBeNull(); // the only images are the decorative crests
+    expect(Array.from(open.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("id"))).toEqual(["featured-past", "featured-lineup"]);
+    // the sentence follows the SERVER's list, not the rows: a match that accepts participation but is none of the announced ones changes the sentence and
+    // nothing else (not one row, chip, link or word of the card)
+    expect(open.text("#upcoming-status")).toBe("Hay partidos abiertos para participar. Los ves en la cartelera de Score.");
+    expect((open.doc.getElementById("upcoming-status") as HTMLElement).hidden).toBe(false);
+    const withoutSentence = (page: Page) => { const copy = featured(page).cloneNode(true) as HTMLElement; const status = copy.querySelector("#upcoming-status")!; status.textContent = ""; status.removeAttribute("hidden"); return copy.outerHTML; };
+    expect(withoutSentence(open)).toBe(withoutSentence(none));
+    expect(open.text("#featured-status")).toBe("Próximos partidos");
+    expect(Array.from(open.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Preselección"));
+    expect(violations(none)).toEqual([]);
+    expect(violations(open)).toEqual([]);
+  });
+
+  it("a match is opened only by the server's word, and even then the card offers no way to play; a match without a confirmed hour can never be opened", async () => {
+    const listed = (over: Record<string, unknown>) => ({ matchId: "s1", competition: "LaLiga", cancelledAt: null, finalized: false, venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: true } }], ...over });
+    const valencia = listed({ kickoffAt: "2026-11-07T20:00:00.000Z", homeTeam: { name: "Valencia" }, awayTeam: { name: "Real Madrid" } });
+    // the same two teams as the match with no hour, on that day, with an hour of the database's choosing: there is no instant to compare, so it is not the same match
+    const motagua = listed({ matchId: "s2", kickoffAt: "2026-11-20T01:00:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" } });
+    const page = await loadHome(INDEX_HTML, { matches: [valencia, motagua] });
+    const rows = Array.from(page.doc.querySelectorAll("#upcoming-list .upcoming-item"));
+    expect(rows.map((r) => [r.getAttribute("data-match"), r.getAttribute("data-state"), r.getAttribute("data-time")])).toEqual([
+      ["N26-26", "open", "set"], ["N26-27", "next", "set"], ["N26-46", "next", "tbc"], ["N26-22", "next", "set"], ["N26-24", "next", "set"],
+    ]);
+    expect(rows.map((r) => r.querySelector(".upcoming-chip")!.textContent)).toEqual(["Abierto para participar", "Preselección", "Preselección", "Preselección", "Preselección"]);
+    expect(rows[2].querySelector(".upcoming-time")!.textContent).toBe("jue 19 nov · Horario por confirmar");
+    expect(page.doc.querySelector("#upcoming-list .upcoming-opens")).toBeNull(); // no window hour: the server reported none
+    expect(page.text("#upcoming-status")).toBe("Hay partidos abiertos para participar. Los ves en la cartelera de Score.");
+    // what is said is said; nothing is offered: the same two informational links and no call to action, in either language
+    expect(violations(page)).toEqual([]);
+    expect(Array.from(page.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
+    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    // (the list is redrawn in place for the new language: the rows are read again)
+    expect(Array.from(page.doc.querySelectorAll("#upcoming-list .upcoming-chip")).map((c) => c.textContent)).toEqual(["Open to participate", "Shortlisted", "Shortlisted", "Shortlisted", "Shortlisted"]);
+    expect(page.text("#upcoming-status")).toBe("Some matches are open for participation. You can see them in the Score fixtures.");
+    expect(violations(page)).toEqual([]);
+  });
+
+  it("the list is informational: if it cannot start (a malformed editorial container), the card keeps its access links and ten crests, the failure is logged, and every catalog of the page still renders", async () => {
+    const errors: unknown[][] = [];
+    const broken = await loadHome(INDEX_HTML, { breakList: true, consoleErrors: errors });
+    const whole = await loadHome();
+    expect(errors.some((args) => String(args[0]).includes("the list of upcoming matches did not start"))).toBe(true);
+    // the catalogs after the list in the page's script are the same as on a page whose list works
+    for (const id of ["experiences-carousel", "games-carousel", "minigames-grid", "organizers-grid"]) {
+      expect(broken.doc.getElementById(id)!.children.length, id).toBeGreaterThan(0);
+      expect(broken.doc.getElementById(id)!.innerHTML, id).toBe(whole.doc.getElementById(id)!.innerHTML);
+    }
+    expect(Array.from(broken.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
+    expect(broken.doc.querySelectorAll("#featured-teams li.crest-chip")).toHaveLength(10);
+    expect(broken.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(0);
+    expect((broken.doc.getElementById("upcoming-status") as HTMLElement).hidden).toBe(true); // no list, so no sentence either
+    // the language selector still works on the rest of the page
+    (broken.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    expect(broken.text("#minigames .section-label")).toBe("Minigames");
+    expect(broken.text("#featured-past")).toBe("My participations and prizes");
+  });
+
+  it("the ten crests are decoration in the Founder's order: each team is named in text, its crest is an empty-alt image hidden from assistive technology, and the file exists", async () => {
+    for (const stored of ["es", "en"] as const) {
+      const page = await loadHome(INDEX_HTML, { stored });
+      const chips = Array.from(page.doc.querySelectorAll("#featured-teams ul.ten-crests > li.crest-chip")) as HTMLElement[];
+      expect(chips.map((li) => li.getAttribute("data-club")), stored).toEqual(TEN_TEAMS);
+      expect(page.doc.getElementById("featured-teams")!.querySelector("ul.ten-crests")!.getAttribute("aria-labelledby")).toBe("featured-teams-label");
+      expect(page.text("#featured-teams-label")).toBe(stored === "es" ? "Equipos que podrían aparecer en URBANO Score" : "Teams that may appear in URBANO Score"); // "may appear": the strip promises no match
+      for (const li of chips) {
+        const club = li.getAttribute("data-club")!;
+        expect(li.querySelector(".crest-name")!.textContent, club).toBe(club); // the written name is the accessible name, in both languages
+        const crest = li.querySelector("img.club-crest") as HTMLImageElement | null;
+        expect(crest, `${club} has its crest`).not.toBeNull(); // all ten are mandatory
+        expect(crest!.getAttribute("alt"), club).toBe("");
+        expect(crest!.getAttribute("aria-hidden"), club).toBe("true");
+        expect(crest!.getAttribute("src"), club).toMatch(/^\/assets\/clubs\/[a-z-]+\.(?:svg|png)$/);
+        expect(existsSync(path.join(ROOT, "public", crest!.getAttribute("src")!)), `${club} file`).toBe(true);
+        expect(li.firstElementChild, club).toBe(crest); // the crest comes before the name, which only the stylesheet hides while the crest is drawn
+      }
+      expect(new Set(chips.map((li) => li.querySelector("img")!.getAttribute("data-crest"))).size).toBe(10); // ten different crests
+    }
   });
 });
 
@@ -327,6 +461,192 @@ describe("Home art — Spanish and English", () => {
     expect(page.text("#minigames .section-label")).toBe("Minijuegos");
     expect(page.doc.querySelectorAll("img.art-img")).toHaveLength(2);
   });
+
+  it("the Score card says the same in both languages: five matches, Honduras time, 'Horario por confirmar' where there is no hour, the separate way to earlier participations and prizes, and no way to play", async () => {
+    const page = await loadHome();
+    const rows = () => Array.from(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).map((r) => ({
+      id: r.getAttribute("data-match"), time: r.getAttribute("data-time"), datetime: r.querySelector("time")!.getAttribute("datetime"), when: r.querySelector(".upcoming-time")!.textContent,
+      teams: Array.from(r.querySelectorAll(".upcoming-team")).map((t) => t.textContent), competition: r.querySelector(".upcoming-comp")!.textContent,
+    }));
+    expect(page.text("#featured-status")).toBe("Próximos partidos");
+    expect(page.text(".featured-descriptor")).toBe("Preselección de los próximos partidos de URBANO Score.");
+    expect(page.text("#featured-past")).toBe("Mis participaciones y premios");
+    expect(page.text(".featured-access-note")).toBe("Tus participaciones en partidos finalizados y el estado de tus premios.");
+    expect(page.text("#featured-lineup")).toBe("Ver cartelera de Score");
+    expect(page.text("#featured-note")).toBe("Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
+    expect((page.doc.getElementById("featured-note") as HTMLElement).hidden).toBe(false); // there are rows to which the note belongs
+    expect(page.doc.getElementById("featured-note")!.className).toBe("featured-note");
+    expect(page.text(".featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
+    expect(page.doc.getElementById("upcoming-list")!.getAttribute("aria-label")).toBe("Lista de próximos partidos");
+    expect(rows()).toEqual([
+      { id: "N26-26", time: "set", datetime: "2026-11-07T20:00:00Z", when: "sáb 7 nov · 🇭🇳 2:00 p. m.", teams: ["Valencia", "Real Madrid"], competition: "LaLiga" },
+      { id: "N26-27", time: "set", datetime: "2026-11-08T20:00:00Z", when: "dom 8 nov · 🇭🇳 2:00 p. m.", teams: ["Atlético de Madrid", "FC Barcelona"], competition: "LaLiga" },
+      { id: "N26-46", time: "tbc", datetime: "2026-11-19", when: "jue 19 nov · Horario por confirmar", teams: ["Motagua", "Olimpia"], competition: "Liga Nacional" },
+      { id: "N26-22", time: "set", datetime: "2026-11-22T16:30:00Z", when: "dom 22 nov · 🇭🇳 10:30 a. m.", teams: ["Liverpool", "Manchester United"], competition: "Premier League" },
+      { id: "N26-24", time: "set", datetime: "2026-11-29T16:30:00Z", when: "dom 29 nov · 🇭🇳 10:30 a. m.", teams: ["Arsenal", "Manchester City"], competition: "Premier League" },
+    ]);
+    expect(violations(page)).toEqual([]);
+    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    expect(page.text("#featured-status")).toBe("Upcoming matches");
+    expect(page.text(".featured-descriptor")).toBe("Shortlist of the upcoming URBANO Score matches.");
+    expect(page.text("#featured-past")).toBe("My participations and prizes");
+    expect(page.text(".featured-access-note")).toBe("Your participations in finished matches and the status of your prizes.");
+    expect(page.text("#featured-lineup")).toBe("See the Score fixtures");
+    expect(page.text("#featured-note")).toBe("Dates and times are informational and may change. Honduras time.");
+    expect(page.doc.getElementById("upcoming-list")!.getAttribute("aria-label")).toBe("List of upcoming matches");
+    expect(rows().map((r) => r.when)).toEqual(["Sat, Nov 7 · 🇭🇳 2:00 p.m.", "Sun, Nov 8 · 🇭🇳 2:00 p.m.", "Thu, Nov 19 · Time to be confirmed", "Sun, Nov 22 · 🇭🇳 10:30 a.m.", "Sun, Nov 29 · 🇭🇳 10:30 a.m."]);
+    expect(rows().map((r) => r.datetime)).toEqual(["2026-11-07T20:00:00Z", "2026-11-08T20:00:00Z", "2026-11-19", "2026-11-22T16:30:00Z", "2026-11-29T16:30:00Z"]); // the machine-readable time never depends on the language
+    expect(page.text("#upcoming-status")).toBe("No match is open for participation yet.");
+    expect(page.text(".featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
+    expect(violations(page)).toEqual([]);
+  });
+
+  it("the Score card has no state to show before there is something to say: with no match left in the list it says so and stays quiet, and the access to earlier participations remains", async () => {
+    const page = await loadHome(INDEX_HTML, { now: "2026-12-30T00:00:00Z" }); // every announced match has passed
+    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(0);
+    expect(page.text("#upcoming-list .upcoming-none")).toBe("Estamos preparando los próximos partidos.");
+    expect((page.doc.getElementById("upcoming-status") as HTMLElement).hidden).toBe(true);
+    expect((page.doc.getElementById("featured-note") as HTMLElement).hidden).toBe(true); // a note about the dates of the rows has nothing to say about no rows
+    expect(page.text("#featured-past")).toBe("Mis participaciones y premios");
+    expect(page.doc.querySelectorAll("#featured-teams li.crest-chip")).toHaveLength(10);
+    expect(violations(page)).toEqual([]);
+  });
+
+  it("the English card says 'Shortlist': the descriptor and the chips use it, the old English word 'Preselection' and the old chip 'Not open yet' are gone, and so is their Spanish twin 'Aún no abierto'", async () => {
+    const page = await loadHome(INDEX_HTML, { stored: "en" });
+    expect(page.text("#featured-status")).toBe("Upcoming matches"); // the pill names the card; the descriptor and the chips say what the matches are
+    expect(page.text(".featured-descriptor")).toMatch(/^Shortlist of the upcoming URBANO Score matches\.$/);
+    expect(Array.from(page.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Shortlisted"));
+    const featured = (p: Page) => (p.doc.getElementById("featured-predictions")!.textContent ?? "").replace(/\s+/g, " "); // (the Become a Host card says, about itself, that applications are "not open yet")
+    expect(featured(page)).not.toMatch(/Preselection|Not open yet|Aún no abierto/i);
+    // the same in Spanish after the switch back, in place
+    (page.doc.querySelector('[data-lang="es"]') as HTMLElement).click();
+    expect(Array.from(page.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Preselección"));
+    expect(featured(page)).not.toMatch(/Aún no abierto|Shortlist/);
+    // no chip, in any state, says that a match is NOT open: the dictionary's own words
+    const dictionary = page.win.UrbanoI18n.dictionary() as { es: Record<string, string>; en: Record<string, string> };
+    for (const lang of ["es", "en"] as const) for (const key of Object.keys(dictionary[lang]).filter((k) => k.startsWith("upcoming.state."))) expect(dictionary[lang][key], `${lang} ${key}`).not.toMatch(/no abierto|not open/i);
+  });
+
+  it("the card makes no statement about prizes: the sentence that said prizes are shown only when confirmed is gone from the page and from the language table, and the only words about prizes are the way to the person's own earlier prizes", async () => {
+    const REMOVED = ["Los premios de cada partido se muestran en URBANO Score solo cuando están confirmados", "The prizes of each match are shown in URBANO Score only when they are confirmed"];
+    expect(INDEX_HTML).not.toMatch(/premios de cada partido|prizes of each match|solo cuando están confirmados|only when they are confirmed/i);
+    expect(I18N_SOURCE).not.toMatch(/premios de cada partido|prizes of each match|solo cuando están confirmados|only when they are confirmed/i);
+    for (const stored of ["es", "en"] as const) {
+      const page = await loadHome(INDEX_HTML, { stored });
+      // no element of the page carries the removed sentence, whole or in part
+      const all = Array.from(page.doc.body.querySelectorAll("*")).filter((el) => !["SCRIPT", "STYLE"].includes(el.tagName));
+      for (const sentence of REMOVED) {
+        const carrying = all.filter((el) => (el.textContent ?? "").replace(/\s+/g, " ").includes(sentence));
+        expect(carrying.map((el) => el.tagName + (el.id ? "#" + el.id : "")), `${stored}: ${sentence}`).toEqual([]);
+      }
+      // inside the card, an element that speaks of prizes is one of the two that lead to the person's own earlier prizes (the link and the note under it)
+      const featured = page.doc.getElementById("featured-predictions")!;
+      const speaking = Array.from(featured.querySelectorAll("*")).filter((el) => el.children.length === 0 && /premio|prize/i.test(el.textContent ?? ""));
+      expect(speaking.map((el) => el.id || el.className), stored).toEqual(["featured-past", "featured-access-note"]);
+      // and the legal line, in particular, speaks of crests, clubs and leagues only
+      expect(page.text(".featured-legal"), stored).not.toMatch(/premio|prize/i);
+    }
+  });
+
+  it("the lists on the card are announced as lists (role=\"list\", so a list style that removes the bullets does not take the structure away from assistive technology), and the access arrow is decoration that never reaches a link's name", async () => {
+    for (const stored of ["es", "en"] as const) {
+      const page = await loadHome(INDEX_HTML, { stored });
+      const crests = page.doc.querySelector("#featured-teams ul.ten-crests")!;
+      const upcoming = page.doc.getElementById("upcoming-list")!;
+      expect([crests.tagName, crests.getAttribute("role")], stored).toEqual(["UL", "list"]);
+      expect([upcoming.tagName, upcoming.getAttribute("role")], stored).toEqual(["UL", "list"]);
+      expect(crests.getAttribute("aria-labelledby")).toBe("featured-teams-label");
+      expect(upcoming.getAttribute("aria-label")).toBe(stored === "es" ? "Lista de próximos partidos" : "List of upcoming matches");
+      // it stays a list of list items after every redraw (a language change is one)
+      for (const item of Array.from(upcoming.children)) expect(item.tagName, stored).toBe("LI");
+      for (const item of Array.from(crests.children)) expect(item.tagName, stored).toBe("LI");
+      // the arrow is not in the document at all (it is CSS content with an empty alternative text): neither the text nor any label of the access links carries it
+      for (const link of Array.from(page.doc.querySelectorAll("#featured-predictions a"))) {
+        expect(link.textContent, `${stored} ${link.id}`).not.toMatch(/[→›»>]/);
+        expect(link.getAttribute("aria-label"), `${stored} ${link.id}`).toBeNull(); // the name is the visible text, as written
+        expect(link.querySelector("svg, img, [aria-hidden]"), `${stored} ${link.id}`).toBeNull();
+      }
+      (page.doc.querySelector(`[data-lang="${stored === "es" ? "en" : "es"}"]`) as HTMLElement).click();
+      expect(page.doc.getElementById("upcoming-list")!.getAttribute("role")).toBe("list");
+      expect(page.doc.querySelector("#featured-teams ul.ten-crests")!.getAttribute("role")).toBe("list");
+    }
+  });
+
+  it("each row keeps its words in a fixed order and its 'vs' and away team together: teams (home, then 'vs' with the away team), then competition and time, then the state chip", async () => {
+    for (const stored of ["es", "en"] as const) {
+      const page = await loadHome(INDEX_HTML, { stored });
+      for (const li of Array.from(page.doc.querySelectorAll("#upcoming-list > li.upcoming-item"))) {
+        expect(Array.from(li.children).map((c) => c.className.split(" ")[0]), `${stored} ${li.getAttribute("data-match")}`).toEqual(["upcoming-teams", "upcoming-meta", "upcoming-chip"]);
+        const teams = li.querySelector(".upcoming-teams")!;
+        expect(Array.from(teams.children).map((c) => c.className), stored).toEqual(["upcoming-team", "upcoming-away"]);
+        expect(Array.from(teams.querySelector(".upcoming-away")!.children).map((c) => c.className), stored).toEqual(["upcoming-vs", "upcoming-team"]);
+        expect(teams.querySelector(".upcoming-vs")!.textContent, stored).toBe("vs"); // the same word in both languages, without a full stop
+        const names = Array.from(teams.querySelectorAll(".upcoming-team")).map((t) => t.textContent);
+        expect(names, stored).toHaveLength(2);
+        expect(names.every((n) => !!n && n.trim() === n), stored).toBe(true);
+        // every word of the block is one of the three (a name, "vs", a name); the descendant selectors the older tests use still find them
+        expect(teams.textContent, stored).toBe(names[0] + "vs" + names[1]);
+      }
+    }
+  });
+
+  it("the sentence under the list is shown only for a list the server really gave: while the read is pending, and when it fails in ANY way (an error status, a refused sign-in, no list in the body, an unreadable body, a network error), it is empty and hidden, and the rows stay a preselection", async () => {
+    const answers: Record<string, () => Promise<unknown>> = {
+      "never answers": () => new Promise(() => {}),
+      "HTTP 500": async () => ({ status: 500, json: async () => ({ matches: [] }) }),
+      "HTTP 401": async () => ({ status: 401, json: async () => ({ matches: [] }) }),
+      "a body that is not a list": async () => ({ status: 200, json: async () => ({ matches: "none" }) }),
+      "a body without the list": async () => ({ status: 200, json: async () => ({}) }),
+      "no body at all": async () => ({ status: 200, json: async () => null }),
+      "a body that is not JSON": async () => ({ status: 200, json: async () => { throw new SyntaxError("Unexpected token <"); } }),
+      "no answer object": async () => undefined,
+      "a network error": async () => { throw new TypeError("Failed to fetch"); },
+    };
+    for (const [name, fetchMatches] of Object.entries(answers)) {
+      const page = await loadHome(INDEX_HTML, { stored: "es", fetchMatches });
+      const status = page.doc.getElementById("upcoming-status") as HTMLElement;
+      const quiet = (lang: "es" | "en") => {
+        expect(status.textContent, `${name} (${lang})`).toBe("");
+        expect(status.hidden, `${name} (${lang})`).toBe(true);
+        const visible = page.doc.body.cloneNode(true) as HTMLElement;
+        visible.querySelectorAll("script, style").forEach((n) => n.remove()); // the page's own source holds the dictionary
+        expect(visible.textContent, `${name} (${lang})`).not.toMatch(/Todavía no hay partidos abiertos para participar|No match is open for participation|partidos abiertos para participar|matches are open for participation/);
+        // the card itself is the same: five rows, each a preselection, with the two informational links and the ten crests
+        expect(Array.from(page.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent), `${name} (${lang})`).toEqual(Array(5).fill(lang === "es" ? "Preselección" : "Shortlisted"));
+        expect(page.doc.querySelectorAll("#featured-teams li.crest-chip"), name).toHaveLength(10);
+        expect(violations(page), name).toEqual([]);
+      };
+      quiet("es");
+      (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click(); // a change of language redraws the list and keeps it quiet
+      quiet("en");
+    }
+  }, 30_000);
+
+  it("a list that WAS read and holds an open match shows the 'open' sentence even when that match is not one of the rows; a list read without any open match (cancelled, finished, started, window not yet open, activation off, venue off, offer gone) shows the 'none' sentence", async () => {
+    const at = (hours: number) => new Date(Date.parse(HOME_NOW) + hours * 3600_000).toISOString();
+    const base = { matchId: "x1", competition: "Liga", cancelledAt: null, finalized: false, participationOpensAt: null, kickoffAt: at(3), homeTeam: { name: "A FC" }, awayTeam: { name: "B FC" }, venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: true } }] };
+    const NONE = "Todavía no hay partidos abiertos para participar.";
+    const OPEN = "Hay partidos abiertos para participar. Los ves en la cartelera de Score.";
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ["open", {}, OPEN],
+      ["open with a window that has opened", { participationOpensAt: at(-1) }, OPEN],
+      ["cancelled", { cancelledAt: at(-5) }, NONE],
+      ["finalized", { finalized: true }, NONE],
+      ["already started", { kickoffAt: at(-1) }, NONE],
+      ["window not yet open", { participationOpensAt: at(1) }, NONE],
+      ["activation off", { venueActivations: [{ enabled: false, venue: { active: true }, offer: { available: true } }] }, NONE],
+      ["venue not active", { venueActivations: [{ enabled: true, venue: { active: false }, offer: { available: true } }] }, NONE],
+      ["offer not available", { venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: false } }] }, NONE],
+      ["no activation", { venueActivations: [] }, NONE],
+    ];
+    for (const [name, over, expected] of cases) {
+      const page = await loadHome(INDEX_HTML, { matches: [{ ...base, ...over }] });
+      expect(page.text("#upcoming-status"), name).toBe(expected);
+      expect((page.doc.getElementById("upcoming-status") as HTMLElement).hidden, name).toBe(false);
+      expect(Array.from(page.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent), name).toEqual(Array(5).fill("Preselección")); // none of these is one of the rows
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -337,7 +657,8 @@ describe("Home art — CSS contract", () => {
   const css = INDEX_HTML.slice(INDEX_HTML.indexOf("<style>"), INDEX_HTML.indexOf("</style>"));
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)\\s*${escape(selector)}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-  const phone = css.slice(css.indexOf("@media (max-width: 640px)"), css.indexOf("@media (max-width: 374px)"));
+  const phone = css.slice(css.indexOf("@media (max-width: 640px)"), css.indexOf("@media (max-width: 339px)"));
+  const narrow = css.slice(css.indexOf("@media (max-width: 339px)"), css.indexOf("@media (max-width: 374px)")); // a 320 px phone
   /** The layers of a `linear-gradient(...), linear-gradient(...)` value: direction and stops (alpha, position). */
   const photoStops = (value: string) =>
     value
@@ -399,14 +720,100 @@ describe("Home art — CSS contract", () => {
   it("text on a photograph is ivory with a shadow, pills are dark chips, and the Predictions pill uses the lighter purple (the contrast measurement depended on these)", () => {
     expect(rule(".art-card .exp-sub")).toMatch(/color:\s*rgba\(245,\s*241,\s*232,\s*0\.92\)/);
     expect(rule(".art-card .exp-sub")).toMatch(/text-shadow/);
-    // the card's own lines are ivory with a shadow, and its one action is the light button with dark ink (the same as the other cards')
-    expect(css).toMatch(/\.featured-when\s*\{[^}]*rgba\(245,\s*241,\s*232,\s*0\.95\)[^}]*text-shadow/);
-    expect(css).toMatch(/\.featured-play\s*\{[^}]*background:\s*var\(--primary-fill\)[^}]*color:\s*var\(--primary-ink\)/);
+    // the lines of the "Próximos partidos" card that sit directly on the picture (the descriptor, the note on the dates, the note
+    // under the access to earlier participations, the label of the ten crests, the sentence under the list)
+    for (const [selector, alpha] of [[".featured-descriptor", "0\\.95"], [".featured-note", "0\\.88"], [".featured-access-note", "0\\.86"], [".featured-teams-label", "0\\.78"], [".upcoming-status", "0\\.95"]] as const) {
+      expect(rule(selector), selector).toMatch(new RegExp(`color:\\s*rgba\\(245,\\s*241,\\s*232,\\s*${alpha}\\)`));
+      expect(rule(selector), selector).toMatch(/text-shadow:\s*0 1px 4px rgba\(0,\s*0,\s*0,\s*0\.8\)/);
+    }
+    // the rows of the list and the link to earlier participations are dark chips under ivory ink, so their text never depends on the picture
+    expect(rule(".upcoming-item")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.74\)/);
+    expect(rule(".upcoming-teams")).toMatch(/color:\s*var\(--ink\)/);
+    expect(rule(".featured-access-link")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.78\)/);
+    expect(rule(".featured-access-link")).toMatch(/color:\s*var\(--ink\)/);
     expect(rule(".art-card .status-pill")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.86\)/); // a deeper chip: the picture behind it is no longer dimmed
     expect(css).toMatch(/\.featured-card\.art-card \.status-pill\s*\{[^}]*background:\s*rgba\(10,\s*10,\s*10,\s*0\.86\)/);
     expect(rule(".game-tile .status-pill")).toMatch(/background:\s*rgba\(10,\s*10,\s*10,\s*0\.55\)/);
     expect(rule(".art-card .status-featured")).toMatch(/color:\s*var\(--exp-purple-soft\)/);
     expect(css).toMatch(/--exp-purple-soft:\s*#b57cff/i);
+  });
+
+  it("the rules added by the review: the note is .featured-note (the old classes are gone), the access arrow is decoration with an empty alternative text, 'vs' and the away team stay together, a row without an hour may wrap, the legal line and the label stay legible, the names have a layout of their own when no crest is drawn, and on a phone the pitch keeps its drawn size under an even dark layer", () => {
+    // the renamed note, and the classes that left
+    expect(rule(".featured-note")).not.toBe("");
+    expect(css).not.toMatch(/\.featured-(?:window|scope|when)\b/);
+    expect(CODE).not.toMatch(/featured-(?:window|scope|when)\b/);
+    expect(INDEX_HTML).toMatch(/<p class="featured-note" id="featured-note" data-i18n="home\.upcoming\.note">/);
+    // the arrow of the access link: a plain arrow first (for an engine that does not read the second declaration), then the same arrow with an EMPTY alternative text, so it is not part of the name
+    expect(rule(".featured-access-link::after")).toMatch(/content:\s*"→";\s*content:\s*"→"\s*\/\s*"";/);
+    expect(rule(".featured-access-link::after")).not.toMatch(/attr\(/);
+    // "vs" and the away team do not come apart when the pair wraps; a match with a set hour never breaks its time, one without may
+    expect(rule(".upcoming-away")).toMatch(/display:\s*inline-flex/);
+    expect(rule(".upcoming-away")).toMatch(/flex-wrap:\s*nowrap/);
+    expect(rule(".upcoming-teams")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule(".upcoming-time")).toMatch(/white-space:\s*nowrap/);
+    expect(css).toMatch(/\.upcoming-item\[data-time="tbc"\] \.upcoming-time\s*\{[^}]*white-space:\s*normal/);
+    // the small print is still readable: the legal line at least 12 px and alpha 0.8 (ivory on the dark card), the label of the ten crests 12 px
+    const legal = rule(".featured-legal");
+    expect(Number(legal.match(/font-size:\s*([\d.]+)px/)![1])).toBeGreaterThanOrEqual(12);
+    expect(Number(legal.match(/color:\s*rgba\(245,\s*241,\s*232,\s*([\d.]+)\)/)![1])).toBeGreaterThanOrEqual(0.8);
+    expect(rule(".featured-teams-label")).toMatch(/font-size:\s*12px/);
+    // the safety net: with no crest drawn, the names flow in columns of their own instead of running into each other
+    expect(rule(".ten-crests:not(:has(.club-crest))")).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(112px,\s*1fr\)\)/);
+    // a phone: the drawing is not stretched to the height of the (tall) card, and the layer over it is even: it does NOT fall away to nothing like the bottom-up scrim of the other picture cards
+    const before = Array.from(phone.matchAll(/\.featured-card\.art-card::before\s*\{([^}]*)\}/g)).map((m) => m[1]).join(" ");
+    expect(before).toMatch(/background-size:\s*auto min\(100%,\s*460px\)/);
+    expect(before).toMatch(/background-position:\s*right top/);
+    const after = phone.match(/\.featured-card\.art-card::after\s*\{([^}]*)\}/)![1];
+    expect(after).not.toMatch(/var\(--art-photo-scrim\)/);
+    const [layer, ...others] = photoStops(after.match(/background:\s*([^;]+);?/)![1]);
+    expect(others).toEqual([]);
+    expect(layer.direction).toBe("0deg");
+    expect(layer.stops.length).toBeGreaterThanOrEqual(2);
+    for (const stop of layer.stops) expect(stop.alpha).toBeGreaterThanOrEqual(0.8); // the least dark point is still dark: no line of the drawing crosses a line of text
+    const scrim = photoStops(phone.match(/--art-photo-scrim:\s*([^;]+);/)![1])[0];
+    expect(scrim.stops[scrim.stops.length - 1].alpha).toBe(0); // (the scrim the other picture cards keep on a phone does fall to nothing: the Score card must not use it)
+  });
+
+  it("the way into the lineup is an OUTLINED link, not the filled button an action gets: it informs, it does not invite (and the old 'Jugar ahora' button is gone from the stylesheet, the markup and the language table)", () => {
+    const lineup = rule(".featured-lineup");
+    expect(lineup).not.toBe(""); // the class exists
+    expect(lineup).toMatch(/background:\s*transparent/);
+    expect(lineup).toMatch(/border:\s*1px solid rgba\(245,\s*241,\s*232,\s*0\.4\)/); // a visible outline
+    expect(lineup).toMatch(/color:\s*var\(--ink\)/);
+    expect(lineup).not.toMatch(/--primary-fill|--primary-ink/); // not the filled primary pill the other cards use for an action
+    expect(lineup).toMatch(/min-height:\s*4[4-9]px/);
+    // the other way in (earlier participations and prizes) is a dark chip with a purple outline, not a filled button either
+    expect(rule(".featured-access-link")).toMatch(/border:\s*1\.5px solid var\(--exp-purple-soft\)/);
+    expect(rule(".featured-access-link")).not.toMatch(/--primary-fill|--primary-ink/);
+    expect(rule(".featured-access-link")).toMatch(/min-height:\s*4[4-9]px/);
+    // keyboard focus is visible on both
+    expect(css).toMatch(/\.featured-lineup:focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--gold\)/);
+    expect(css).toMatch(/\.featured-access-link:focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--gold\)/);
+    // the retired button, everywhere it lived
+    expect(CODE).not.toMatch(/featured-play|Jugar ahora|Play now/);
+    expect(css).not.toMatch(/\.featured-play|\.featured-past\b|\.featured-crests?\b|\.featured-crest-vs/);
+    expect(I18N_SOURCE).not.toMatch(/"home\.score\.|home\.upcoming\.pastLabel|Jugar ahora|Play now/);
+  });
+
+  it("the ten crests lay out as one row on a desktop and on a phone, and as two rows of five only on a 320 px phone; the written name is hidden only while its crest is drawn (never removed from the accessibility tree)", () => {
+    expect(rule(".ten-crests")).toMatch(/grid-template-columns:\s*repeat\(10,\s*1fr\)/);
+    expect(phone).toMatch(/\.ten-crests\s*\{[^}]*grid-template-columns:\s*repeat\(10,\s*minmax\(0,\s*1fr\)\)/); // still ONE row of ten on a 375 px phone ...
+    expect(narrow).toMatch(/\.ten-crests\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/); // ... and two rows of five below 340 px, where one row would make them about 21 px
+    expect(phone).toMatch(/\.ten-crests \.club-crest\s*\{[^}]*max-width:\s*30px/); // never larger than 30 px: the cell decides below that
+    const hidden = rule(".ten-crests .club-crest + .crest-name"); // only a name that FOLLOWS a drawn crest is visually hidden
+    expect(hidden).toMatch(/position:\s*absolute/);
+    expect(hidden).toMatch(/clip:\s*rect\(0 0 0 0\)/);
+    expect(hidden).not.toMatch(/display:\s*none|visibility:\s*hidden|font-size:\s*0/);
+    expect(rule(".ten-crests .crest-name")).toMatch(/color:\s*var\(--ink\)/); // without a crest, the name is plainly visible
+    expect(rule(".ten-crests .club-crest")).toMatch(/width:\s*34px;\s*height:\s*34px/);
+    // on a phone each match is three short lines (state and competition, teams, date and hour) in a grid whose second column may shrink, so nothing pushes the page sideways
+    expect(phone).toMatch(/\.upcoming-item\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
+    expect(phone).toMatch(/\.upcoming-chip\s*\{[^}]*grid-row:\s*1/);
+    expect(phone).toMatch(/\.upcoming-meta\s*\{[^}]*display:\s*contents/);
+    expect(phone).toMatch(/\.featured-access-note\s*\{[^}]*display:\s*none/); // the link names itself; its explanatory line is not shown on a phone
+    expect(rule(".upcoming-list")).toMatch(/max-width:\s*560px/);
+    expect(css).toMatch(/\.upcoming-item\[data-time="tbc"\] \.upcoming-time\s*\{[^}]*font-style:\s*italic/); // a match without an hour is set apart by more than colour
   });
 
   it("no informational card is faded: its state is carried by its pill and words, and its text keeps at least AA contrast on the card", () => {
@@ -506,5 +913,29 @@ describe("Home art — negative controls", () => {
   it("a photograph placed inside the Predictions card as an element is caught", async () => {
     const html = mutated('<span class="status-pill status-soon" id="featured-status"', '<img src="/assets/home/urbano-score-pitch.svg" alt=""><span class="status-pill status-soon" id="featured-status"');
     expect(violations(await loadHome(html)).join("|")).toMatch(/featured card contains an element image/);
+  });
+
+  it("a restored 'Jugar ahora' button, or the card losing its separate way to earlier participations and prizes, is caught", async () => {
+    const play = mutated('<a class="featured-lineup" id="featured-lineup" href="/soccer-predictions.html" data-i18n="home.upcoming.play">Ver cartelera de Score</a>', '<a class="featured-play" id="featured-play" href="/soccer-predictions.html">Jugar ahora</a>');
+    expect(violations(await loadHome(play)).join("|")).toMatch(/the featured card's links are not the two informational ones/);
+    expect(violations(await loadHome(play)).join("|")).toMatch(/the featured card invites to play/);
+    const noPast = mutated('      <a class="featured-access-link" id="featured-past" href="/soccer-predictions.html#historial" data-i18n="home.upcoming.past">Mis participaciones y premios</a>\n', "");
+    expect(violations(await loadHome(noPast)).join("|")).toMatch(/the featured card's links are not the two informational ones/);
+    const swapped = mutated('<a class="featured-lineup" id="featured-lineup" href="/soccer-predictions.html"', '<a class="featured-lineup" id="featured-lineup" href="/soccer-predictions.html#historial"');
+    expect(violations(await loadHome(swapped)).join("|")).toMatch(/the featured card's links are not the two informational ones/);
+  });
+
+  it("the removed sentence about prizes restored on the card, or a list that loses its role, is caught", async () => {
+    const prize = mutated('<p class="featured-legal" data-i18n="upcoming.disclaimer">', '<p class="featured-prizes">Los premios de cada partido se muestran en URBANO Score solo cuando están confirmados.</p><p class="featured-legal" data-i18n="upcoming.disclaimer">');
+    expect(violations(await loadHome(prize)).join("|")).toMatch(/says something about prizes beyond the way to the person's own/);
+    const plain = mutated('<ul class="upcoming-list" id="upcoming-list" role="list"', '<ul class="upcoming-list" id="upcoming-list"');
+    expect(violations(await loadHome(plain)).join("|")).toMatch(/a list of the card lost its role/);
+  });
+
+  it("a strip that loses one of the ten teams, or a crest whose written name is gone, is caught", async () => {
+    const noMotagua = mutated('        <li class="crest-chip" data-club="Motagua"><span class="crest-name">Motagua</span></li>\n', "");
+    expect(violations(await loadHome(noMotagua)).join("|")).toMatch(/the strip of ten teams changed/);
+    const nameless = mutated('<li class="crest-chip" data-club="Olimpia"><span class="crest-name">Olimpia</span></li>', '<li class="crest-chip" data-club="Olimpia"><span class="crest-name"></span></li>');
+    expect(violations(await loadHome(nameless)).join("|")).toMatch(/Olimpia lost its written name/);
   });
 });

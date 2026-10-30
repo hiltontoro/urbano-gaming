@@ -100,7 +100,7 @@
   .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
   [hidden] { display: none !important; }
   .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
-  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-play:focus-visible,
+  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-lineup:focus-visible, .featured-access-link:focus-visible,
   .exp-card.is-actionable:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
   .signin-btn {
@@ -173,12 +173,6 @@
   .featured-card h2 { font-size: 24px; margin: 6px 0 0; font-weight: 800; }
 
   .featured-card .status-pill { margin-bottom: 4px; }
-  /* The one action of the card: a button-shaped link to URBANO Score (the same shape as the other cards' actions). */
-  .featured-play {
-    display: inline-flex; align-items: center; justify-content: center; min-height: 46px; margin-top: 18px; padding: 11px 24px;
-    border-radius: 999px; background: var(--primary-fill); color: var(--primary-ink); font-size: 15px; font-weight: 700; text-decoration: none;
-  }
-
   /* Card grids (Experiences, Skill Games, Minigames, Organizers). The element ids keep the historical "-carousel" name that the pages'
      tests and evidence refer to; the cards are no longer a sideways-scrolling strip, so every card is visible without swiping. */
   .card-grid { display: grid; gap: 14px; }
@@ -265,18 +259,60 @@
   .featured-card.art-card h2 { font-size: 30px; line-height: 1.15; margin-top: 18px; }
   /* Club crests (decoration only): the team names are always written in text, so the crest is an addition that can be removed. */
   .club-crest { width: 24px; height: 24px; object-fit: contain; flex: none; }
-  .featured-crests { margin: 14px 0 0; display: flex; align-items: center; gap: 12px; }
-  .featured-crest { display: inline-flex; }
-  .featured-crest .club-crest { width: 34px; height: 34px; }
-  .featured-crest-vs { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.7); }
   .featured-descriptor { text-wrap: balance; margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-  .featured-scope {
-    margin: 10px 0 0; display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.4;
-    color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.72); padding: 4px 10px; border-radius: 6px;
+  .featured-note { margin: 6px 0 0; font-size: 13px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.88); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+
+  /* "Próximos partidos": the preselection (up to five matches), each with ONE state in words (colour never carries it alone). Before the list: the
+     separate, visible way into earlier participations and prizes, and the crests of the ten teams. */
+  .featured-access { margin: 16px 0 0; width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .featured-access-link {
+    display: inline-flex; align-items: center; min-height: 46px; padding: 10px 18px; border-radius: 999px; border: 1.5px solid var(--exp-purple-soft);
+    background: rgba(10, 10, 10, 0.78); color: var(--ink); font-size: 15px; font-weight: 700; text-decoration: none;
   }
-  .featured-when { margin: 8px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-  .featured-when span { display: block; }
-  .featured-window { margin: 6px 0 0; font-size: 13px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.88); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .featured-access-link::after { content: "→"; content: "→" / ""; margin-left: 10px; color: var(--exp-purple-soft); } /* the arrow is decoration: it is not part of the link's name */
+  .featured-access-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: rgba(245, 241, 232, 0.86); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); max-width: 46ch; }
+  .featured-teams { margin: 18px 0 0; width: 100%; max-width: 560px; }
+  .featured-teams-label { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.78); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  /* The ten crests: decoration drawn by /urbanoClubCrests.js. The team's NAME is in the markup (visually hidden while its crest is drawn, visible as a
+     small label when it is not), so the strip is never an unlabelled row of pictures. */
+  .ten-crests { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; align-items: center; justify-items: center; }
+  .ten-crests .crest-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 0; }
+  .ten-crests .club-crest { width: 34px; height: 34px; }
+  .ten-crests .crest-name { font-size: 11px; font-weight: 700; color: var(--ink); text-align: center; line-height: 1.2; }
+  /* the safety net: if no crest is drawn (withdrawn, or none loads) the names get room of their own instead of running into each other */
+  .ten-crests:not(:has(.club-crest)) { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px 12px; justify-items: start; }
+  .ten-crests .club-crest + .crest-name { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
+  .upcoming-list { list-style: none; margin: 16px 0 0; padding: 0; width: 100%; max-width: 560px; display: grid; gap: 10px; }
+  .upcoming-item {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+    padding: 10px 12px; border-radius: 10px; background: rgba(10, 10, 10, 0.74); border: 1px solid rgba(245, 241, 232, 0.14);
+  }
+  .upcoming-teams { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--ink); }
+  .upcoming-team { display: inline-flex; align-items: center; gap: 6px; }
+  /* "vs." stays with the away team when the pair has to wrap */
+  .upcoming-away { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 8px; }
+  .upcoming-team .club-crest { width: 20px; height: 20px; }
+  .upcoming-vs { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.62); }
+  .upcoming-meta { font-size: 12.5px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.86); }
+  .upcoming-comp { display: inline-block; margin-right: 8px; color: var(--exp-purple-soft); }
+  .upcoming-time { white-space: nowrap; }
+  .upcoming-item[data-time="tbc"] .upcoming-time { font-style: italic; white-space: normal; }
+  .upcoming-opens { grid-column: 1 / -1; font-size: 12.5px; font-weight: 700; color: var(--exp-purple-soft); }
+  .upcoming-none { font-size: 13px; color: rgba(245, 241, 232, 0.86); }
+  .upcoming-chip {
+    justify-self: end; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05); color: #d6d1c3; border: 1px solid #4a4a4a; white-space: nowrap;
+  }
+  .upcoming-chip.state-scheduled { color: var(--exp-purple-soft); border-color: var(--exp-purple); background: var(--exp-purple-bg); }
+  .upcoming-chip.state-open { color: #0a0a0a; background: #7bd88f; border-color: #7bd88f; }
+  .upcoming-chip.state-closed, .upcoming-chip.state-final { color: #b9b4a8; border-style: dashed; }
+  .upcoming-status { margin: 10px 0 0; font-size: 13px; font-weight: 700; line-height: 1.45; color: rgba(245, 241, 232, 0.95); max-width: 46ch; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  /* The way into the lineup is information, not an invitation to play: an outlined link, not the filled button the other cards use for an action. */
+  .featured-lineup {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 46px; margin-top: 14px; padding: 10px 20px; border-radius: 999px;
+    border: 1px solid rgba(245, 241, 232, 0.4); background: transparent; color: var(--ink); font-size: 14px; font-weight: 700; text-decoration: none;
+  }
+  .featured-legal { margin: 14px 0 0; max-width: 60ch; font-size: 12px; line-height: 1.5; color: rgba(245, 241, 232, 0.8); }
 
   /* Minigame tiles (Rutas, Towers): the mockup's compact game card — a tinted purple gradient, a line icon and a plain title. They are
      informational: a status pill and words, no link and no action. */
@@ -325,6 +361,37 @@
     .featured-card.art-card { min-height: 360px; }
     .featured-card.art-card h2 { font-size: 24px; }
     .featured-descriptor { font-size: 15px; }
+    /* "Próximos partidos" on a phone, compacted so the card is about twice the height of the one it replaced (not three times): the ten crests in
+       ONE row (two rows of five below 340 px, see the next block), the next three matches (the link under them says where the whole lineup is), the
+       way into earlier participations without its explanatory line (the link names itself), and each match in three short lines: its state and
+       competition, its teams, its date and hour. */
+    .featured-access { margin-top: 12px; }
+    .featured-access-note { display: none; }
+    .featured-teams { margin-top: 14px; }
+    .featured-teams-label { margin-bottom: 6px; font-size: 11.5px; letter-spacing: 0.02em; text-transform: none; font-weight: 600; }
+    .ten-crests { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; }
+    .ten-crests .crest-chip { width: 100%; }
+    .ten-crests .club-crest { width: 100%; max-width: 30px; height: auto; aspect-ratio: 1 / 1; }
+    .upcoming-list { margin-top: 12px; gap: 8px; }
+    .upcoming-item { grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; padding: 9px 11px; }
+    .upcoming-chip { grid-row: 1; grid-column: 1; justify-self: start; }
+    .upcoming-meta { display: contents; } /* its two parts (competition, time) become cells of the match's own grid */
+    .upcoming-comp { grid-row: 1; grid-column: 2; margin: 0; min-width: 0; }
+    .upcoming-teams { grid-row: 2; grid-column: 1 / -1; margin-top: 1px; font-size: 14.5px; }
+    .upcoming-time { grid-row: 3; grid-column: 1 / -1; }
+    .upcoming-opens { grid-row: 4; grid-column: 1 / -1; }
+    .upcoming-status { margin-top: 8px; }
+    .featured-lineup { margin-top: 12px; }
+    .featured-legal { margin-top: 12px; font-size: 11.5px; line-height: 1.45; }
+    /* this card is taller than the one it replaced: keep the pitch drawing at the size it was drawn for (its strokes would otherwise grow to
+       bars) and darken the picture evenly, so a line of the drawing never crosses a line of text */
+    .featured-card.art-card::before { background-position: right top; background-size: auto min(100%, 460px); }
+    .featured-card.art-card::after { background: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.88) 45%, rgba(10, 10, 10, 0.8) 100%); }
+  }
+
+  /* Below 340 px (a 320 px phone) ten crests in one row would be about 21 px each: two rows of five keep them at 30 px. */
+  @media (max-width: 339px) {
+    .ten-crests { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 6px; }
   }
 
   /* UG-CR-GATE-091 (320 px header). The wordmark, the Gaming badge and "Sign in with URBANO" need about 344 px side by side. At 375 px
@@ -374,24 +441,43 @@
 
 <div class="section">
   <div class="section-label" data-i18n="home.featured.label">Destacado</div>
-  <!-- URBANO Score announcement (historically "Soccer Predictions": the route /soccer-predictions.html and every identifier keep that name).
-       Static and informational: it announces El Clásico at The Pub by Beer Box, with the stadium. It makes no request, reads no match
-       and never says that predictions for it are open: the page does not look at the public matches list at all, so a past, test or
-       rehearsal match in the database cannot turn this card into an opening. Its one link, "Jugar ahora", goes to URBANO Score, which
-       is where the matches that are actually open (or the honest "none yet") are shown. Past participations are not here: they have
-       their own access, My profile → My participations. Date, time and stadium are as published by LaLiga and the two clubs. -->
+  <!-- URBANO Score — "Próximos partidos" (historically "Soccer Predictions": the route /soccer-predictions.html and every identifier keep that
+       name). The Clásico is NOT here any more: it is a finished event, found in the Score history ("Mis participaciones y premios", the separate
+       access just under the title). The matches in the list are an EDITORIAL PRESELECTION (/homeUpcomingData.js), only announced: a match without a
+       confirmed hour says "Horario por confirmar", and no participation window is written or invented. The card says that people can take part
+       only for a match the SERVER says is open, and it reads the public matches list once for that (see /homeUpcoming.js, which states the five
+       states and the rule that ties a server match to an announced one). Its one other link goes to the Score lineup and only informs: it is not
+       an invitation to play. The ten crests are decoration drawn by /urbanoClubCrests.js; the teams are always named in text. The card promises no
+       prize, and says that URBANO is not affiliated with any club or competition; showing the crests does not establish a licence for them (see the
+       registry). -->
   <div class="featured-card art-card" id="featured-predictions">
-    <span class="status-pill status-soon" id="featured-status" data-i18n="home.score.next">Próximo partido</span>
+    <span class="status-pill status-soon" id="featured-status" data-i18n="home.upcoming.pill">Próximos partidos</span>
     <h2 id="featured-title">URBANO Score</h2>
-    <!-- The two crests are decoration drawn by /urbanoClubCrests.js (home team first); the teams are named in the line below, in text. -->
-    <div class="featured-crests" aria-hidden="true"><span class="featured-crest" data-club="FC Barcelona"></span><span class="featured-crest-vs">vs</span><span class="featured-crest" data-club="Real Madrid CF"></span></div>
-    <p class="featured-descriptor" data-i18n="home.score.clasico">El Clásico: FC Barcelona vs. Real Madrid CF</p>
-    <p class="featured-scope" data-i18n="home.score.venue">Vivilo en The Pub by Beer Box</p>
-    <p class="featured-when"><time datetime="2026-10-25T20:00:00Z" data-i18n="home.score.when">Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.</time><span data-i18n="home.score.stadium">Estadio: Spotify Camp Nou</span></p>
-    <!-- The approved window, as INFORMATION: it opens 90 minutes before the planned start (12:30 p. m., Honduras) and closes when the match starts (2:00 p. m.).
-         It does not open anything: the server closes at the start of the match, but it has no opening time; opening is an operational act (see the record). -->
-    <p class="featured-window" data-i18n="home.score.window">Ventana de participación prevista: de 12:30 p. m. a 2:00 p. m. (hora de Honduras)</p>
-    <a class="featured-play" id="featured-play" href="/soccer-predictions.html" data-i18n="home.score.play">Jugar ahora</a>
+    <p class="featured-descriptor" data-i18n="home.upcoming.intro">Preselección de los próximos partidos de URBANO Score.</p>
+    <div class="featured-access">
+      <a class="featured-access-link" id="featured-past" href="/soccer-predictions.html#historial" data-i18n="home.upcoming.past">Mis participaciones y premios</a>
+      <p class="featured-access-note" data-i18n="home.upcoming.pastNote">Tus participaciones en partidos finalizados y el estado de tus premios.</p>
+    </div>
+    <div class="featured-teams" id="featured-teams">
+      <p class="featured-teams-label" id="featured-teams-label" data-i18n="home.upcoming.teamsLabel">Equipos que podrían aparecer en URBANO Score</p>
+      <ul class="ten-crests" role="list" aria-labelledby="featured-teams-label">
+        <li class="crest-chip" data-club="Real Madrid"><span class="crest-name">Real Madrid</span></li>
+        <li class="crest-chip" data-club="FC Barcelona"><span class="crest-name">FC Barcelona</span></li>
+        <li class="crest-chip" data-club="Manchester City"><span class="crest-name">Manchester City</span></li>
+        <li class="crest-chip" data-club="Manchester United"><span class="crest-name">Manchester United</span></li>
+        <li class="crest-chip" data-club="Arsenal"><span class="crest-name">Arsenal</span></li>
+        <li class="crest-chip" data-club="Olimpia"><span class="crest-name">Olimpia</span></li>
+        <li class="crest-chip" data-club="Motagua"><span class="crest-name">Motagua</span></li>
+        <li class="crest-chip" data-club="Inter de Milán"><span class="crest-name">Inter de Milán</span></li>
+        <li class="crest-chip" data-club="Bayern Múnich"><span class="crest-name">Bayern Múnich</span></li>
+        <li class="crest-chip" data-club="Paris Saint-Germain"><span class="crest-name">Paris Saint-Germain</span></li>
+      </ul>
+    </div>
+    <ul class="upcoming-list" id="upcoming-list" role="list" data-i18n-attr="aria-label:home.upcoming.listLabel" aria-label="Lista de próximos partidos"></ul>
+    <p class="upcoming-status" id="upcoming-status" aria-live="polite" hidden></p>
+    <p class="featured-note" id="featured-note" data-i18n="home.upcoming.note">Fechas y horarios informativos: pueden cambiar. Hora de Honduras.</p>
+    <a class="featured-lineup" id="featured-lineup" href="/soccer-predictions.html" data-i18n="home.upcoming.play">Ver cartelera de Score</a>
+    <p class="featured-legal" data-i18n="upcoming.disclaimer">Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.</p>
   </div>
 </div>
 
@@ -424,6 +510,8 @@
 
 <script src="/urbanoI18n.js"></script>
 <script src="/urbanoClubCrests.js"></script>
+<script src="/homeUpcomingData.js"></script>
+<script src="/homeUpcoming.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -452,13 +540,33 @@
     "home.hero.title": "Jugá, predecí y competí con tu comunidad.",
     "home.hero.sub": "Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.",
     "home.featured.label": "Destacado",
-    "home.score.clasico": "El Clásico: FC Barcelona vs. Real Madrid CF",
-    "home.score.venue": "Vivilo en The Pub by Beer Box",
-    "home.score.when": "Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.",
-    "home.score.window": "Ventana de participación prevista: de 12:30 p. m. a 2:00 p. m. (hora de Honduras)",
-    "home.score.next": "Próximo partido",
-    "home.score.stadium": "Estadio: Spotify Camp Nou",
-    "home.score.play": "Jugar ahora",
+    "home.upcoming.pill": "Próximos partidos",
+    "home.upcoming.intro": "Preselección de los próximos partidos de URBANO Score.",
+    "home.upcoming.listLabel": "Lista de próximos partidos",
+    "home.upcoming.teamsLabel": "Equipos que podrían aparecer en URBANO Score",
+    "home.upcoming.note": "Fechas y horarios informativos: pueden cambiar. Hora de Honduras.",
+    "home.upcoming.play": "Ver cartelera de Score",
+    "home.upcoming.playAll": "Ver los {total} partidos en la cartelera",
+    "home.upcoming.past": "Mis participaciones y premios",
+    "home.upcoming.pastNote": "Tus participaciones en partidos finalizados y el estado de tus premios.",
+    "upcoming.vs": "vs",
+    "upcoming.state.next": "Preselección",
+    "upcoming.state.scheduled": "Participación programada",
+    "upcoming.state.open": "Abierto para participar",
+    "upcoming.state.closed": "Cerrado",
+    "upcoming.state.final": "Finalizado",
+    "upcoming.opensAt": "Participación desde las {time} (hora de Honduras)",
+    "upcoming.opensAtOne": "Participación desde la {time} (hora de Honduras)",
+    "upcoming.weekdays": "dom|lun|mar|mié|jue|vie|sáb",
+    "upcoming.months": "ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic",
+    "upcoming.am": "a. m.",
+    "upcoming.pm": "p. m.",
+    "upcoming.when": "{weekday} {day} {month} · 🇭🇳 {time}",
+    "upcoming.whenTbc": "{weekday} {day} {month} · Horario por confirmar",
+    "upcoming.none": "Estamos preparando los próximos partidos.",
+    "upcoming.status.none": "Todavía no hay partidos abiertos para participar.",
+    "upcoming.status.open": "Hay partidos abiertos para participar. Los ves en la cartelera de Score.",
+    "upcoming.disclaimer": "Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.",
     "home.games.label": "Juegos de habilidad",
     "home.games.note": "Vienen más juegos competitivos en camino.",
     "home.minigames.label": "Minijuegos",
@@ -752,6 +860,39 @@
   // The crests on the Score announcement: decoration only, drawn by the central module (absent or switched off, the card is the same
   // without them: both teams are named in text).
   if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(document);
+  // The "Próximos partidos" list: announced matches, upgraded only by what the public matches list says (see /homeUpcoming.js).
+  try {
+    if (window.UrbanoHomeUpcoming) {
+      const note = document.getElementById("featured-note");
+      const lineup = document.getElementById("featured-lineup");
+      // A phone shows the next three matches; the link under them says that the whole lineup is in Score. Wider screens show all of them.
+      const PHONE_ROWS = 3;
+      const phone = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 480px)") : null;
+      const handle = window.UrbanoHomeUpcoming.init({
+        host: document.getElementById("upcoming-list"),
+        statusHost: document.getElementById("upcoming-status"),
+        limit: () => (phone && phone.matches ? PHONE_ROWS : undefined),
+        onPaint: (items, total) => {
+          if (note) note.hidden = items.length === 0;
+          if (lineup) {
+            const more = total > items.length;
+            const key = more ? "home.upcoming.playAll" : "home.upcoming.play";
+            lineup.setAttribute("data-i18n", key);
+            if (more) lineup.setAttribute("data-i18n-vars", JSON.stringify({ total })); else lineup.removeAttribute("data-i18n-vars");
+            lineup.textContent = UrbanoI18n.t(key, more ? { total } : undefined);
+          }
+        },
+      });
+      // turning the phone redraws the list with the number of rows that fits the new width
+      if (phone && handle) {
+        const redraw = () => handle.paint();
+        if (typeof phone.addEventListener === "function") phone.addEventListener("change", redraw);
+        else if (typeof phone.addListener === "function") phone.addListener(redraw);
+      }
+    }
+  } catch (err) {
+    console.error("Home: the list of upcoming matches did not start:", err); // informational: it must never take the rest of the page down
+  }
   renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
   renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
   renderCatalog(MINIGAMES_CATALOG, "minigames-grid");

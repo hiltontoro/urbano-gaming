@@ -271,6 +271,46 @@
 
   .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
 
+  /* The two parts of the page: the LINEUP (what is open or coming) and the HISTORY (finished matches, with the person's own participation and
+     prizes). The way into the history is a separate link under the heading, so nobody has to look for it below the upcoming matches. */
+  .score-access { max-width: 720px; margin: 16px auto 0; padding: 0 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .score-access-link {
+    display: inline-flex; align-items: center; min-height: 46px; padding: 10px 18px; border-radius: 999px; border: 1.5px solid var(--exp-purple);
+    background: var(--exp-purple-bg); color: var(--ink); font-size: 14.5px; font-weight: 700;
+  }
+  .score-access-link::after { content: "→"; content: "→" / ""; margin-left: 10px; color: #b57cff; } /* decoration: not part of the link's name */
+  .score-crests-note { margin: 28px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); max-width: 60ch; }
+  .score-access-link:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  .score-access-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); max-width: 52ch; }
+  .score-section { margin: 30px 0 0; scroll-margin-top: 16px; }
+  .score-section:first-child { margin-top: 0; }
+  .score-section > h2 { font-size: 21px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 6px; outline: none; }
+  .score-section-intro { margin: 0 0 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .score-section .empty-state { padding: 20px 12px; }
+  /* A list (or a person's own participation) that could not be loaded: the message and the way to try again, together. */
+  .load-error { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 8px 0 0; }
+  .load-error .msg { margin: 0; }
+  .load-error .btn-secondary { min-height: 46px; }
+  .lineup-upcoming { margin: 22px 0 0; }
+  .lineup-upcoming h3 { font-size: 16px; font-weight: 800; margin: 0 0 4px; }
+  .upcoming-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+  .upcoming-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+  .upcoming-teams { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 15px; font-weight: 700; line-height: 1.35; }
+  .upcoming-team { display: inline-flex; align-items: center; gap: 6px; }
+  .upcoming-team .club-crest { width: 20px; height: 20px; }
+  .upcoming-vs { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .upcoming-meta { font-size: 12.5px; font-weight: 600; line-height: 1.4; color: var(--muted); }
+  .upcoming-comp { display: inline-block; margin-right: 8px; color: #b57cff; }
+  .upcoming-time { white-space: nowrap; }
+  .upcoming-item[data-time="tbc"] .upcoming-time { font-style: italic; white-space: normal; }
+  .upcoming-away { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 8px; } /* "vs." stays with the away team when the pair wraps */
+  .upcoming-opens { grid-column: 1 / -1; font-size: 12.5px; font-weight: 700; color: #b57cff; }
+  .upcoming-none { font-size: 13px; color: var(--muted); }
+  .upcoming-chip {
+    justify-self: end; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05); color: var(--muted); border: 1px solid #4a4a4a; white-space: nowrap;
+  }
+
   footer {
     max-width: 720px; margin: 48px auto 0; padding: 20px; text-align: center;
     color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
@@ -288,7 +328,12 @@
     .brand-word { font-size: 15px; }
     .signin-btn { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
     .primary-nav { padding: 0 16px 2px; }
-    .back-link, .content, .score-heading { padding-left: 16px; padding-right: 16px; }
+    .back-link, .content, .score-heading, .score-access { padding-left: 16px; padding-right: 16px; }
+    .upcoming-item { grid-template-columns: minmax(0, 1fr); }
+    .upcoming-chip { grid-row: 1; justify-self: start; }
+    .upcoming-teams { grid-row: 2; grid-column: 1; margin-top: 4px; }
+    .upcoming-meta { grid-row: 3; }
+    .upcoming-opens { grid-row: 4; }
     .match-teams { font-size: 17px; flex-direction: column; gap: 6px; } /* on a phone the two teams stack, home team on top: crest and name never wrap apart */
   }
 </style>
@@ -332,6 +377,14 @@
   <p class="score-scope" data-i18n="pred.scope">Por ahora solo hay fútbol disponible.</p>
 </section>
 
+<!-- The separate, always visible way into the history: what the person sent and the prizes of FINISHED matches. It points to the history
+     section below, which exists once the list has been drawn (with or without matches). Chosen while the list is still loading, it takes the
+     person there as soon as it is; if the list cannot be loaded there is no history to go to, and the page says so instead. -->
+<nav class="score-access" aria-label="Accesos de URBANO Score" data-i18n-attr="aria-label:pred.access.label">
+  <a class="score-access-link" id="score-access-history" href="#historial" data-i18n="pred.access.history">Mis participaciones y premios</a>
+  <p class="score-access-note" data-i18n="pred.access.note">Tus participaciones en partidos finalizados y el estado de tus premios.</p>
+</nav>
+
 <div class="content" id="content">
   <div class="empty-state" data-i18n="pred.loading">Cargando URBANO Score…</div>
 </div>
@@ -344,6 +397,8 @@
 
 <script src="/urbanoI18n.js"></script>
 <script src="/urbanoClubCrests.js"></script>
+<script src="/homeUpcomingData.js"></script>
+<script src="/homeUpcoming.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -368,6 +423,24 @@
     "shell.footer.part": "URBANO Gaming — parte de URBANO",
     "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
     "shell.footer.legal": "Términos, privacidad y reglas",
+    "upcoming.vs": "vs",
+    "upcoming.state.next": "Preselección",
+    "upcoming.state.scheduled": "Participación programada",
+    "upcoming.state.open": "Abierto para participar",
+    "upcoming.state.closed": "Cerrado",
+    "upcoming.state.final": "Finalizado",
+    "upcoming.opensAt": "Participación desde las {time} (hora de Honduras)",
+    "upcoming.opensAtOne": "Participación desde la {time} (hora de Honduras)",
+    "upcoming.weekdays": "dom|lun|mar|mié|jue|vie|sáb",
+    "upcoming.months": "ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic",
+    "upcoming.am": "a. m.",
+    "upcoming.pm": "p. m.",
+    "upcoming.when": "{weekday} {day} {month} · 🇭🇳 {time}",
+    "upcoming.whenTbc": "{weekday} {day} {month} · Horario por confirmar",
+    "upcoming.none": "Estamos preparando los próximos partidos.",
+    "upcoming.status.none": "Todavía no hay partidos abiertos para participar.",
+    "upcoming.status.open": "Hay partidos abiertos para participar. Los ves en la cartelera de Score.",
+    "upcoming.disclaimer": "Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.",
     "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
     "auth.btn.finish": "Terminá de crear tu cuenta",
     "auth.btn.hi": "Hola, {name}",
@@ -455,9 +528,23 @@
     "pred.descriptor": "Tus predicciones deportivas",
     "pred.scope": "Por ahora solo hay fútbol disponible.",
     "pred.empty": "Todavía no hay partidos abiertos para predicciones — volvé pronto.",
+    "pred.access.label": "Accesos de URBANO Score",
+    "pred.access.history": "Mis participaciones y premios",
+    "pred.access.note": "Tus participaciones en partidos finalizados y el estado de tus premios.",
+    "pred.lineup.title": "Cartelera",
+    "pred.lineup.upcomingTitle": "Próximos partidos (preselección)",
+    "pred.lineup.upcomingNote": "Por ahora no están abiertos para participar. Fechas y horarios informativos: pueden cambiar. Hora de Honduras.",
+    "pred.lineup.upcomingLabel": "Lista de próximos partidos",
+    "pred.history.title": "Historial",
+    "pred.history.intro": "Partidos finalizados, con tu participación y tus premios.",
+    "pred.history.empty": "Todavía no hay partidos finalizados.",
     "pred.updating": "Actualizando…",
-    "pred.err.refresh": "No pudimos actualizar los partidos. Recargá la página para intentar de nuevo.",
-    "pred.err.load": "No pudimos cargar los partidos. Recargá la página para intentar de nuevo.",
+    "pred.err.refresh": "No pudimos actualizar los partidos. Intentá de nuevo.",
+    "pred.err.load": "No pudimos cargar los partidos. Intentá de nuevo.",
+    "pred.err.history": "No pudimos cargar tu historial de participaciones y premios. Intentá de nuevo.",
+    "pred.err.mine": "No pudimos cargar tu participación en este partido. Intentá de nuevo.",
+    "pred.retry": "Reintentar",
+    "pred.retrying": "Reintentando…",
     "pred.home": "Local",
     "pred.away": "Visitante",
     "pred.vs": "vs",
@@ -2587,6 +2674,13 @@ async function renderMatch(match) {
   }
 
   const mineRes = await authedFetch(`/api/gaming/predictions/matches/${match.matchId}/mine`);
+  // On a match that has started or finished, a missing answer would be read as "you sent nothing" ("No enviaste una predicción…") to someone who may
+  // have a result and a prize waiting. If the answer to "what did I send?" could not be read, the card says so and offers to try again.
+  const mineRead = mineRes.status >= 200 && mineRes.status < 300 && !!mineRes.json && typeof mineRes.json === "object";
+  if (!mineRead && (match.finalized || kickoffPassed)) {
+    body.appendChild(loadErrorBlock("pred.err.mine", false));
+    return card;
+  }
   const mine = mineRes.json || {};
 
   // Something already saved is still shown (the summary below); only a person with nothing saved meets the disabled action.
@@ -2842,6 +2936,10 @@ async function refresh() {
   const res = await fetch("/api/gaming/predictions/matches");
   const data = await res.json();
   if (generation !== renderGeneration) return false;
+  // A list that could not be read (an error answer, or no list in the answer) is a LOAD FAILURE, not "no matches": saying "no finished matches" to
+  // a person who is looking for their prize because the server failed would be false. The callers show the usual error.
+  const readable = res.ok === true || (typeof res.status === "number" && res.status >= 200 && res.status < 300);
+  if (!readable || !data || !Array.isArray(data.matches)) throw new Error("the list of matches could not be read");
 
   // Local drafts belong to the signed-in member only: nobody signed in (or a profile not finished) leaves none, and another person's
   // are removed. A draft for a match that is no longer open is removed as well.
@@ -2854,23 +2952,151 @@ async function refresh() {
   );
   purgeLadderDrafts(draftMember, openMatchIds);
 
-  if (!data.matches || data.matches.length === 0) {
-    content.replaceChildren(emptyState("pred.empty"));
-    return true;
-  }
-
-  const cards = [];
-  for (const match of data.matches) {
+  // Two parts, in this order: the LINEUP (everything that is not finished: open, closed, waiting for its result, plus the preselection of the
+  // matches that are only announced) and the HISTORY (finished matches). A finished match — the Clásico of 25 October is one — appears ONLY in the
+  // history, with its result, the person's own participation and the prize line, exactly as its card has always shown them. Both parts exist
+  // whether or not they have matches, so the access under the heading always has somewhere to go.
+  const matches = data.matches || [];
+  const lineupCards = [];
+  const historyCards = [];
+  for (const match of matches) {
     if (match.cancelledAt) continue;
     const card = await renderMatch(match);
     if (generation !== renderGeneration) return false;
-    cards.push(card);
+    (match.finalized ? historyCards : lineupCards).push(card);
   }
   if (generation !== renderGeneration) return false;
 
-  if (cards.length === 0) content.replaceChildren(emptyState("pred.empty"));
-  else content.replaceChildren(...cards);
+  stopUpcoming();
+  content.replaceChildren(buildLineup(lineupCards), buildHistory(historyCards), buildCrestsNote());
+  startUpcoming(matches);
+  goToHashSection();
   return true;
+}
+
+// What a list that could not be loaded looks like: the same two parts the list has (Cartelera and Historial), so the access under the heading still has
+// somewhere to go, each with its message and its own way to try again. It never says that there is no history, only that it could not be loaded.
+function loadErrorBlock(messageKey, alert) {
+  const box = el(`<div class="load-error"${alert ? ' role="alert"' : ""}><p class="msg error" ${ix(messageKey)}>${tx(messageKey)}</p></div>`);
+  const retry = el(`<button type="button" class="btn-secondary" data-retry ${ix("pred.retry")}>${tx("pred.retry")}</button>`);
+  retry.addEventListener("click", retryLoad);
+  box.appendChild(retry);
+  return box;
+}
+function showLoadError(messageKey) {
+  stopUpcoming();
+  const part = (id, titleKey, key, alert) => {
+    const section = el(`<section class="score-section" id="${id}" aria-labelledby="${id}-title"><h2 id="${id}-title" tabindex="-1" ${ix(titleKey)}>${tx(titleKey)}</h2></section>`);
+    section.appendChild(loadErrorBlock(key, alert));
+    return section;
+  };
+  content.replaceChildren(part("cartelera", "pred.lineup.title", messageKey, true), part("historial", "pred.history.title", "pred.err.history", false));
+  // the jump to the section the person asked for is a courtesy: if it fails, the error (and its way to try again) is what must stay on the page
+  try { goToHashSection(); } catch (err) { console.error("Soccer Predictions: the jump to the section failed:", err); }
+}
+let retrying = false;
+async function retryLoad(event) {
+  if (retrying) return;
+  retrying = true;
+  const from = event && event.currentTarget && event.currentTarget.closest ? event.currentTarget.closest("section") : null;
+  const fromId = from ? from.id : null;
+  for (const button of content.querySelectorAll("[data-retry]")) {
+    button.disabled = true;
+    setText(button, "pred.retrying");
+  }
+  try {
+    const drawn = await refresh();
+    // the page was redrawn (the retry button no longer exists, and the part the person was in is somewhere else now): take them back to that part
+    const section = drawn && fromId ? document.getElementById(fromId) : null;
+    const heading = section ? section.querySelector("h2") : null;
+    if (heading) {
+      try {
+        heading.focus({ preventScroll: true });
+        section.scrollIntoView({ block: "start" });
+      } catch (err) {
+        console.error("Soccer Predictions: the jump back to the section failed:", err); // the page IS drawn: this is not a load failure
+      }
+    }
+  } catch (err) {
+    console.error("Soccer Predictions: the retry failed:", err);
+    showLoadError("pred.err.load");
+    const again = content.querySelector("[data-retry]");
+    if (again) again.focus();
+  } finally {
+    retrying = false;
+  }
+}
+
+function buildLineup(cards) {
+  const section = el(`<section class="score-section" id="cartelera" aria-labelledby="cartelera-title">
+    <h2 id="cartelera-title" tabindex="-1" ${ix("pred.lineup.title")}>${tx("pred.lineup.title")}</h2>
+  </section>`);
+  if (cards.length) section.append(...cards);
+  else section.appendChild(emptyState("pred.empty"));
+  // The preselection (matches that are only announced). It stays hidden until the list has something to say, and it only ever lists matches the
+  // server does not have open: the others are cards above.
+  section.appendChild(el(`<div class="lineup-upcoming" id="lineup-upcoming" hidden>
+    <h3 ${ix("pred.lineup.upcomingTitle")}>${tx("pred.lineup.upcomingTitle")}</h3>
+    <p class="score-section-intro" ${ix("pred.lineup.upcomingNote")}>${tx("pred.lineup.upcomingNote")}</p>
+    <ul class="upcoming-list" id="score-upcoming" role="list" aria-label="${tx("pred.lineup.upcomingLabel")}" data-i18n-attr="aria-label:pred.lineup.upcomingLabel"></ul>
+  </div>`));
+  return section;
+}
+
+// The crests on this page (the preselection, the matches, the history) only identify the teams: say so, and that URBANO is not affiliated.
+function buildCrestsNote() {
+  return el(`<p class="score-crests-note" ${ix("upcoming.disclaimer")}>${tx("upcoming.disclaimer")}</p>`);
+}
+
+function buildHistory(cards) {
+  const section = el(`<section class="score-section" id="historial" aria-labelledby="historial-title">
+    <h2 id="historial-title" tabindex="-1" ${ix("pred.history.title")}>${tx("pred.history.title")}</h2>
+    <p class="score-section-intro" ${ix("pred.history.intro")}>${tx("pred.history.intro")}</p>
+  </section>`);
+  if (cards.length) section.append(...cards);
+  else section.appendChild(emptyState("pred.history.empty"));
+  return section;
+}
+
+// The preselection list is the same module as the Home card's (/homeUpcoming.js) and is handed what this page has already read: it makes no
+// request of its own. Without the module (or without the language table) the block simply stays hidden.
+let upcomingHandle = null;
+function stopUpcoming() {
+  if (upcomingHandle) upcomingHandle.stop();
+  upcomingHandle = null;
+}
+function startUpcoming(serverMatches) {
+  const host = document.getElementById("score-upcoming");
+  const block = document.getElementById("lineup-upcoming");
+  if (!host || !block || !window.UrbanoHomeUpcoming) return;
+  // The preselection is information and fails alone: if it cannot start, the lineup and the history (the person's prizes) stay as they are.
+  // Only matches the server does not have are listed (hideTwins): the server's own card, in the lineup above, is the one that counts.
+  try {
+    upcomingHandle = window.UrbanoHomeUpcoming.init({ host, serverMatches, only: ["next"], hideTwins: true, onPaint: (items) => { block.hidden = items.length === 0; } }) || null;
+  } catch (err) {
+    console.error("Soccer Predictions: the preselection did not start:", err);
+    upcomingHandle = null;
+    block.hidden = true;
+  }
+}
+
+// Arriving on #historial (from Home, "Mis participaciones y premios"), or choosing that access while the list is still loading: the sections only
+// exist once the list has been drawn, so the browser's own jump to the fragment cannot find them. The jump is made after every drawing until the
+// person moves the page themself (scrolls, taps, presses a key), so that the redrawing a sign-in causes does not undo it, and a person who has
+// moved never gets pulled back.
+let hashTarget = (() => {
+  const id = (window.location.hash || "").replace(/^#/, "");
+  return id === "historial" || id === "cartelera" ? id : null;
+})();
+for (const type of ["wheel", "touchstart", "keydown", "mousedown"]) window.addEventListener(type, () => { hashTarget = null; }, { passive: true, once: true });
+document.getElementById("score-access-history").addEventListener("click", () => { if (!document.getElementById("historial")) hashTarget = "historial"; });
+function goToHashSection() {
+  if (!hashTarget) return;
+  const section = document.getElementById(hashTarget);
+  if (!section) return;
+  const heading = section.querySelector("h2");
+  if (heading && typeof heading.focus === "function") heading.focus({ preventScroll: true });
+  if (typeof section.scrollIntoView === "function") section.scrollIntoView({ block: "start" });
 }
 
 // After a successful sign-in, take the person back to the match they came for.
@@ -2894,12 +3120,13 @@ function resumeIntent(state) {
 // Signing in, signing out, or a different person: nothing that belonged to the previous identity stays on screen, and the list is
 // rebuilt for the new one without a page reload.
 async function onIdentityChanged(state) {
+  stopUpcoming();
   content.replaceChildren(emptyState("pred.updating"));
   try {
     await refresh();
   } catch (err) {
     console.error("Soccer Predictions: refresh after sign-in change failed:", err);
-    content.replaceChildren(emptyState("pred.err.refresh"));
+    showLoadError("pred.err.refresh");
     return;
   }
   resumeIntent(state);
@@ -2907,7 +3134,7 @@ async function onIdentityChanged(state) {
 
 refresh().catch((err) => {
   console.error("Soccer Predictions: failed to load matches:", err);
-  content.replaceChildren(emptyState("pred.err.load"));
+  showLoadError("pred.err.load");
 });
 if (typeof UrbanoAuth.onIdentityReset === "function") {
   // The signed-in person changed: nothing of the previous person (their predictions, their forms) stays on screen while the list is
@@ -2917,6 +3144,7 @@ if (typeof UrbanoAuth.onIdentityReset === "function") {
     ladderUnsent.clear();
     ladderNotices.clear();
     renderGeneration += 1;
+    stopUpcoming();
     content.replaceChildren(emptyState("pred.updating"));
   }).catch(() => {});
 }
