@@ -187,7 +187,8 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text("#featured-status")).toBe("Upcoming matches");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
-    expect(page.card("Costume contest")!.textContent).toContain("Coming Soon");
+    expect(page.text("#halloween h2")).toBe("Costume contest"); // the announcement (a static section, not a catalog card) is redrawn in English too
+    expect(page.doc.querySelector("#halloween .exp-card")!.textContent).toContain("Coming Soon");
     expect(page.text(".featured-descriptor")).toBe("Shortlist of the upcoming URBANO Score matches.");
     expect(page.text("#featured-past")).toBe("My participations and prizes");
     expect(page.text(".featured-access-note")).toBe("Your participations in finished matches and the status of your prizes.");
@@ -279,11 +280,12 @@ describe("Home — header and footer", () => {
 describe("Home — honest cards", () => {
   it("the Founder's order; the playable cards keep their exact destinations; every other card is informational: no link, no operational action", async () => {
     const page = await loadHome();
-    const cards = Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.querySelector("h3")!.textContent);
-    expect(cards).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+    // (the catalog cards: the Halloween announcement is a static section above the Score card, tested below, no longer one of them)
+    const cards = Array.from(page.doc.querySelectorAll(".card-grid .exp-card")).map((c) => c.querySelector("h3")!.textContent);
+    expect(cards).toEqual(["URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
     const actionable = Array.from(page.doc.querySelectorAll(".exp-card.is-actionable")).map((c) => [c.querySelector("h3")!.textContent, c.getAttribute("href")]);
     expect(actionable).toEqual([["URBANO Poker", "/host.html?experience=poker"], ["Trivia", "/trivia-playtest.html"]]);
-    for (const title of ["Concurso de disfraces", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
+    for (const title of ["URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
       const card = page.card(title)!;
       expect(card.tagName, title).toBe("DIV");
       expect(card.className, title).toContain("is-locked");
@@ -291,7 +293,14 @@ describe("Home — honest cards", () => {
       expect(card.querySelector("a, button"), title).toBeNull();
       expect(card.textContent, title).toContain("Próximamente");
     }
-    // Quiz and Duel are not shown on the Home (their implementations are untouched); Community Voting is carried by the Halloween / Comunidad card.
+    // the Halloween announcement: informational too (no link, no control), in the Home's first section after the introduction
+    const halloween = page.doc.querySelector("#halloween .exp-card") as HTMLElement;
+    expect(halloween.tagName).toBe("DIV");
+    expect(halloween.className).toContain("is-locked");
+    expect(halloween.hasAttribute("href")).toBe(false);
+    expect(halloween.querySelector("a, button, input, form, [tabindex]")).toBeNull();
+    expect(halloween.textContent).toContain("Próximamente");
+    // Quiz and Duel are not shown on the Home (their implementations are untouched); there is no Community Voting card: the Halloween announcement only says that voting is not available yet.
     expect(visibleStrings(page.doc).join(" ")).not.toMatch(/\bQuiz\b|\bDuel\b/);
     expect(page.doc.querySelector('a[href*="quiz"], a[href*="competitions"]')).toBeNull();
   });

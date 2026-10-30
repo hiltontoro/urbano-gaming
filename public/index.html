@@ -179,6 +179,9 @@
   .games-grid { grid-template-columns: minmax(0, 1fr); }
   .experiences-grid, .organizers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .minigames-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  /* Experiences holds one card (URBANO Poker) now that the Halloween announcement is its own static card near the top: a lone card spans the
+     row instead of leaving an empty half. With a second experience the grid is two columns again, as before. */
+  .experiences-grid > .exp-card:only-child { grid-column: 1 / -1; }
   /* Two cards side by side need about 760 px; narrower than that they stack, so the text never gets squeezed into a sliver. */
   @media (max-width: 760px) { .experiences-grid, .organizers-grid { grid-template-columns: minmax(0, 1fr); } }
 
@@ -231,7 +234,7 @@
     font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.7); padding: 4px 8px; border-radius: 5px;
   }
-  .art-card h3 { font-size: 26px; line-height: 1.15; font-weight: 800; max-width: 16ch; }
+  .art-card h3, .art-halloween h2 { font-size: 26px; line-height: 1.15; font-weight: 800; max-width: 16ch; }
   .art-card .exp-sub { flex: none; max-width: 40ch; font-size: 14px; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
   .art-card .exp-action { align-self: flex-start; margin-top: 4px; }
   .art-card.is-actionable .exp-action { background: var(--primary-fill); color: var(--primary-ink); padding: 11px 20px; border-radius: 999px; font-size: 14px; }
@@ -242,6 +245,17 @@
   .art-trivia { min-height: 230px; padding: 24px; }
   .art-trivia::before { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; background: url("/assets/home/trivia-card.svg") right center / auto 100% no-repeat; }
   .art-trivia::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+
+  /* The Halloween costume-contest announcement: a static picture card near the top of the page. Its title is an h2 (it comes before the
+     featured Score card's h2), so it takes the picture cards' title style explicitly; its date and its availability line are plain text on the
+     photograph, ivory with the same shadow as the card's other lines. Nothing in it is a control, so nothing in it has a hover or focus state. */
+  #halloween { margin-top: 28px; }
+  .art-halloween h2 { margin: 0; }
+  /* The event chip takes the status pill's deeper fill (the same value as `.art-card .status-pill`): over this photograph's bright candles the
+     system's lighter chip left its purple text at 2.9:1 (measured in a real browser); with this fill it clears 4.5:1 at every width. */
+  .art-halloween .art-kicker { background: rgba(10, 10, 10, 0.86); }
+  .halloween-date { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .halloween-availability { margin: 4px 0 0; max-width: 40ch; font-size: 13px; font-weight: 600; line-height: 1.5; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 
   /* URBANO Score (historically "Soccer Predictions": the route, ids and code keep that name). The featured card is a static announcement:
      every word in it is written here and translated by the language table; nothing in it comes from a server answer or from match
@@ -356,8 +370,16 @@
     .art-halloween .art-img { object-position: 84% center; }
     .featured-card.art-card::before { background-position: 70% center; }
     .art-poker, .art-halloween { min-height: 320px; padding: 20px 18px; }
+    /* The Halloween announcement carries more words than the other picture cards. On a phone its words sit below a clear band of the
+       photograph instead of over it: the chips stay on the picture, the dark begins where the title does, and no word lies over a bright
+       part of the picture. (Its own scrim, so the shared one above is untouched. Measured in a real browser at 320, 375 and 390 px.) */
+    .art-halloween { --art-photo-scrim: linear-gradient(180deg, rgba(10, 10, 10, 0) 0, rgba(10, 10, 10, 0.12) 50px, rgba(10, 10, 10, 0.5) 96px, rgba(10, 10, 10, 0.9) 136px, rgba(10, 10, 10, 0.96) 100%); }
+    .art-halloween .exp-card-top { margin-bottom: 84px; flex-wrap: wrap; row-gap: 6px; }
+    /* The event chip is one label and is never broken in the middle ("BOX" alone on a line): where it and the status pill do not fit side
+       by side, the pill drops to its own row instead. */
+    .art-halloween .art-kicker { letter-spacing: 0.08em; white-space: nowrap; }
     .art-trivia { min-height: 250px; padding: 20px 18px; }
-    .art-card h3 { font-size: 24px; }
+    .art-card h3, .art-halloween h2 { font-size: 24px; }
     .featured-card.art-card { min-height: 360px; }
     .featured-card.art-card h2 { font-size: 24px; }
     .featured-descriptor { font-size: 15px; }
@@ -437,6 +459,26 @@
 <div class="hero">
   <h1 data-i18n="home.hero.title">Jugá, predecí y competí con tu comunidad.</h1>
   <p data-i18n="home.hero.sub">Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.</p>
+</div>
+
+<!-- Halloween costume-contest announcement (Founder gate of 2026-10-29). Static and informational, and in the first paint: every word is written
+     here and translated by the language table, so it needs no script, no session and no server. It says that the contest exists, where and
+     when, and that nothing about it can be done yet: it has no link, no button, no field, no countdown and no focusable element, and it
+     promises no prize, no sponsor, no capacity, no fee and no vote. The rules and the way to take part are published later, by the Founder,
+     in their own change; this card is not where registration or voting will live until that change says so. The photograph is the
+     reviewed Halloween derivative the page already carried (decoration only, empty alt text). -->
+<div class="section" id="halloween">
+  <div class="exp-card art-card art-halloween is-locked">
+    <img class="art-img" src="/assets/home/halloween-community.webp" alt="" width="1280" height="720" loading="lazy" decoding="async"><span class="art-scrim" aria-hidden="true"></span>
+    <div class="exp-card-top">
+      <span class="art-kicker" data-i18n="home.halloween.event">Halloween · Beer Box</span>
+      <span class="status-pill status-soon" data-i18n="home.status.soon">Próximamente</span>
+    </div>
+    <h2 data-i18n="home.halloween.title">Concurso de disfraces</h2>
+    <p class="halloween-date" data-i18n="home.halloween.date">Sábado 31 de octubre</p>
+    <p class="exp-sub" data-i18n="home.halloween.sub">Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.</p>
+    <p class="halloween-availability" data-i18n="home.halloween.availability">Las inscripciones y la votación todavía no están disponibles.</p>
+  </div>
 </div>
 
 <div class="section">
@@ -589,7 +631,10 @@
     "home.host.open": "Postulate para organizar un torneo privado, solo por invitación, en tu local, para adultos que conocés.",
     "home.host.action": "Postularme →",
     "home.halloween.title": "Concurso de disfraces",
-    "home.halloween.sub": "Disfrazate, sorprendé y conquistá los votos. Votá por tu favorito: ¡el disfraz más votado se lleva un premio!",
+    "home.halloween.event": "Halloween · Beer Box",
+    "home.halloween.date": "Sábado 31 de octubre",
+    "home.halloween.sub": "Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.",
+    "home.halloween.availability": "Las inscripciones y la votación todavía no están disponibles.",
     "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
     "auth.btn.finish": "Terminá de crear tu cuenta",
     "auth.btn.hi": "Hola, {name}",
@@ -714,13 +759,15 @@
   const t = (key, vars) => UrbanoI18n.t(key, vars);
   const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  // Member-facing catalogs, in the order the page shows them: Experiences (URBANO Poker, Halloween / Community), the Trivia skill game,
+  // Member-facing catalogs, in the order the page shows them: Experiences (URBANO Poker), the Trivia skill game,
   // the Minigames, and last the organizers' entries (Become a Host, URBANO Competitions). None is a rendering of the internal Interaction
   // Engine Taxonomy — see APPLICATION_SHELL_IMPLEMENTATION_RECORD.md. URBANO Score is deliberately not repeated below: it is already the
-  // Featured module above. Quiz and Duel are not shown on the Home (their implementations are untouched).
+  // Featured module above. The Halloween costume-contest announcement is not here either: it is static markup near the top of the page
+  // (#halloween), so it is in the first paint and does not wait for this script. Quiz and Duel are not shown on the Home (their
+  // implementations are untouched).
   //
   // Honest availability: a card is actionable ONLY when its status is "playtest" and it has a destination. "soon" is informational — no
-  // link, no operational action. Halloween, Rutas, Towers, Become a Host and URBANO Competitions are informational ("Próximamente") here
+  // link, no operational action. Rutas, Towers, Become a Host and URBANO Competitions are informational ("Próximamente") here
   // until their availability is established by functional evidence; a page merely answering is not that evidence. The "Level 33" card
   // was retired from this page; its implementation and documentation are untouched.
   const EXPERIENCES_CATALOG = [
@@ -737,13 +784,6 @@
       // no longer where this card sends a Host.
       href: "/host.html?experience=poker",
       actionKey: "home.poker.action",
-    },
-    {
-      // Informational art card ("Próximamente"): the photograph is decoration, there is no link and no action.
-      art: { src: "/assets/home/halloween-community.webp", className: "art-halloween", kickerKey: "home.art.community" },
-      titleKey: "home.halloween.title",
-      subKey: "home.halloween.sub",
-      status: "soon",
     },
   ];
 

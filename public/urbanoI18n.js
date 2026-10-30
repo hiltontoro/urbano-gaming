@@ -145,7 +145,10 @@
       "home.host.open": "Postulate para organizar un torneo privado, solo por invitación, en tu local, para adultos que conocés.",
       "home.host.action": "Postularme →",
       "home.halloween.title": "Concurso de disfraces",
-      "home.halloween.sub": "Disfrazate, sorprendé y conquistá los votos. Votá por tu favorito: ¡el disfraz más votado se lleva un premio!",
+      "home.halloween.event": "Halloween · Beer Box",
+      "home.halloween.date": "Sábado 31 de octubre",
+      "home.halloween.sub": "Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.",
+      "home.halloween.availability": "Las inscripciones y la votación todavía no están disponibles.",
 
       // ---- shared sign-in component (urbanoAuth.js) ----
       "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
@@ -657,7 +660,10 @@
       "home.host.open": "Apply to run a private, invite-only tournament at your venue, for adults you know.",
       "home.host.action": "Apply →",
       "home.halloween.title": "Costume contest",
-      "home.halloween.sub": "Dress up, surprise everyone and win the votes. Vote for your favorite: the most-voted costume wins a prize!",
+      "home.halloween.event": "Halloween · Beer Box",
+      "home.halloween.date": "Saturday, October 31",
+      "home.halloween.sub": "Show off your costume and get ready to choose your favorites. We will publish the rules and participation details soon.",
+      "home.halloween.availability": "Registration and voting are not available yet.",
 
       "auth.btn.signedOut": "Log in / Create account",
       "auth.btn.finish": "Finish creating your account",

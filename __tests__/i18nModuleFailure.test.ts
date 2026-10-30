@@ -269,8 +269,10 @@ function homeSnapshot(page: Page) {
       links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => [a.getAttribute("id"), a.getAttribute("href")]), hasAction: page.q("#featured-action, #featured-play") !== null,
     },
     cards: Array.from(doc.querySelectorAll(".exp-card")).map((c) => ({
-      title: norm(c.querySelector("h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
+      // (the Halloween announcement is a static section above the Score card: its title is an h2 and it carries a date and an availability line of its own)
+      title: norm(c.querySelector("h2, h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
       pill: norm(c.querySelector(".status-pill")?.textContent), kicker: norm(c.querySelector(".art-kicker")?.textContent), sub: norm(c.querySelector(".exp-sub")?.textContent), action: norm(c.querySelector(".exp-action")?.textContent),
+      date: norm(c.querySelector(".halloween-date")?.textContent), availability: norm(c.querySelector(".halloween-availability")?.textContent),
     })),
     footer: text("footer"),
     links: Array.from(doc.querySelectorAll("a[href]")).map((a) => a.getAttribute("href")),
@@ -349,13 +351,27 @@ describe("Home without the module: the same content, the same behaviour", () => 
     for (const mode of FAILURES) {
       const page = await open("index.html", mode);
       const cards = homeSnapshot(page).cards;
-      expect(cards.map((c) => c.title), mode).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+      // (the Halloween announcement, a static section, comes first in the page; the catalog cards follow in the Founder's order)
+      expect(cards.map((c) => c.title), mode).toEqual(["Concurso de disfraces", "URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
       expect(cards.filter((c) => !c.locked).map((c) => [c.title, c.href, c.pill]), mode).toEqual([["URBANO Poker", "/host.html?experience=poker", "Playtest"], ["Trivia", "/trivia-playtest.html", "Playtest"]]);
       for (const card of cards.filter((c) => c.locked)) {
         expect(card.tag).toBe("DIV");
         expect(card.href).toBeNull();
         expect(card.pill).toBe("Próximamente");
       }
+    }
+  });
+
+  it("the Halloween announcement reads the same without the module: the same Spanish words as with it, nothing to press, and no promise of a prize or a vote", async () => {
+    const reference = homeSnapshot(await open("index.html", "ok")).cards[0];
+    expect(reference.title).toBe("Concurso de disfraces");
+    for (const mode of FAILURES) {
+      const page = await open("index.html", mode);
+      const card = page.doc.querySelector("#halloween .exp-card")!;
+      expect(norm(card.textContent), mode).toBe("Halloween · Beer Box Próximamente Concurso de disfraces Sábado 31 de octubre Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación. Las inscripciones y la votación todavía no están disponibles.");
+      expect(card.querySelector("a, button, input, form, [tabindex], [onclick]"), mode).toBeNull();
+      expect(norm(card.textContent), mode).not.toMatch(/premio|conquist|más votado|ganá|se lleva/i);
+      expect(homeSnapshot(page).cards[0], mode).toEqual(reference);
     }
   });
 
@@ -925,7 +941,8 @@ describe("negative controls", () => {
   it("without the fallback block the Home draws no cards (the original defect)", async () => {
     const html = PAGE_HTML["index.html"].replace(block("index.html"), "");
     const page = await open("index.html", "missing", { html, matches: [futureMatch()] });
-    expect(page.doc.querySelectorAll(".exp-card")).toHaveLength(0);
+    expect(page.doc.querySelectorAll(".card-grid .exp-card")).toHaveLength(0); // the catalog cards are drawn by the page's script, which needs the module
+    expect(page.doc.querySelectorAll("#halloween .exp-card")).toHaveLength(1); // the Halloween announcement is static markup: it is there whatever the script does
     expect(page.errors.join(" ")).toMatch(/UrbanoI18n is not defined/);
   });
 

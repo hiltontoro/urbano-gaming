@@ -37,6 +37,30 @@ const TEN_TEAMS = ["Real Madrid", "FC Barcelona", "Manchester City", "Manchester
  *  pass, so nothing here may depend on today's date. */
 const HOME_NOW = "2026-10-29T15:00:00Z";
 
+// The Halloween costume-contest announcement: the exact public words, in the order the card reads. The Spanish is the Founder's text
+// (gate of 2026-10-29) and the English is its faithful rendering, approved. It announces that the contest exists and that nothing about it can
+// be done yet: no registration, no voting, no rules, no prize, no sponsor, no capacity, no fee. Every assertion about it below is BOUNDED to its
+// own section (#halloween): the Home legitimately carries dates, team names, numbers and a matches request elsewhere (the Score card).
+type HalloweenWords = { event: string; status: string; title: string; date: string; sub: string; availability: string };
+const HALLOWEEN: { es: HalloweenWords; en: HalloweenWords } = {
+  es: {
+    event: "Halloween · Beer Box",
+    status: "Próximamente",
+    title: "Concurso de disfraces",
+    date: "Sábado 31 de octubre",
+    sub: "Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.",
+    availability: "Las inscripciones y la votación todavía no están disponibles.",
+  },
+  en: {
+    event: "Halloween · Beer Box",
+    status: "Coming Soon",
+    title: "Costume contest",
+    date: "Saturday, October 31",
+    sub: "Show off your costume and get ready to choose your favorites. We will publish the rules and participation details soon.",
+    availability: "Registration and voting are not available yet.",
+  },
+};
+
 // Provenance.
 //  - Poker and Halloween: derivatives of original images generated for URBANO Gaming and archived with their prompt and hash in the
 //    Founder Design Review package (Assets/Artwork, "Artwork prompts and provenance.json", status PROPOSED_EDITORIAL_ART_NOT_PRODUCT_RULES):
@@ -116,8 +140,13 @@ function violations(page: Page): string[] {
   const { doc, card } = page;
   const poker = card("URBANO Poker");
   if (!poker || poker.tagName !== "A" || poker.getAttribute("href") !== "/host.html?experience=poker" || !/Playtest/i.test(poker.textContent ?? "")) out.push("poker access or Playtest label changed");
-  for (const title of ["Concurso de disfraces", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
-    if ((title === "Ser anfitrión" || title === "Concurso de disfraces") && !card(title)) continue; // (named in English in the English page; the Spanish tests pin them)
+  // The Halloween announcement is a static section of its own (not a catalog card): it must be there, informational and without a control. Its words
+  // are judged by halloweenViolations (they depend on the language); here only its nature, so every language of every page state is covered.
+  const hallo = doc.querySelector("#halloween .exp-card") as HTMLElement | null;
+  if (!hallo) out.push("the Halloween announcement is missing");
+  else if (hallo.tagName !== "DIV" || !hallo.className.includes("is-locked") || hallo.hasAttribute("href") || hallo.querySelector("a, button, [tabindex], [onclick], input, form")) out.push("the Halloween announcement is not informational");
+  for (const title of ["URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
+    if (title === "Ser anfitrión" && !card(title)) continue; // (named in English in the English page; the Spanish tests pin it)
     const c = card(title);
     if (!c) { out.push(`${title} card missing`); continue; }
     if (c.tagName !== "DIV" || !c.className.includes("is-locked") || c.hasAttribute("href")) out.push(`${title} is not informational`);
@@ -164,6 +193,32 @@ function violations(page: Page): string[] {
   if (!trivia || trivia.tagName !== "A" || trivia.getAttribute("href") !== "/trivia-playtest.html" || !/Playtest/i.test(trivia.textContent ?? "")) out.push("trivia access or Playtest label changed");
   if (trivia && trivia.querySelector("img, svg")) out.push("the Trivia card carries an element image (its art is a CSS background)");
   return out;
+}
+
+// What must stay true of the Halloween announcement, as a list of violations (empty = honest), for the words of one language. Bounded to the
+// section: only what is INSIDE #halloween is judged (the Score card above or below it has its own contract and its own legitimate numbers).
+function halloweenViolations(doc: Document, words: HalloweenWords): string[] {
+  const out: string[] = [];
+  const card = doc.querySelector("#halloween .exp-card") as HTMLElement | null;
+  if (!card) return ["the Halloween card is missing"];
+  if (card.tagName !== "DIV" || !card.className.includes("is-locked") || card.hasAttribute("href")) out.push("the Halloween card is not informational");
+  // (the card itself is checked too: a card that became focusable, clickable or a link is as interactive as one that holds a button)
+  const interactive = "a, button, input, select, textarea, form, label, [href], [tabindex], [onclick], [role], [contenteditable], summary, details, audio, video, iframe";
+  if (card.matches(interactive) || card.querySelector(interactive)) out.push("the Halloween card gained an interactive element");
+  if (Array.from(card.querySelectorAll("*")).concat(card).some((e) => Array.from(e.attributes).some((a) => /^on/i.test(a.name)))) out.push("the Halloween card carries an inline event handler");
+  if (card.querySelector("time, progress, meter, canvas, [aria-live]")) out.push("the Halloween card carries a countdown, a live region or a moment");
+  const text = (card.textContent ?? "").replace(/\s+/g, " ").trim();
+  if (text !== [words.event, words.status, words.title, words.date, words.sub, words.availability].join(" ")) out.push("the Halloween card says something other than the approved words");
+  if (/premio|prize|ganad|ganá|winner|\bwins?\b|conquist|patrocin|sponsor|cupo|capacity|gratis|\bfree\b|\$|\bL\.?\s?\d|HNL|USD|entrada|ticket/i.test(text)) out.push("the Halloween card makes a prize, sponsor, capacity or price claim");
+  if ((text.match(/\d+/g) ?? []).join(",") !== "31") out.push("the Halloween card carries a number other than the date");
+  return out;
+}
+
+// A page's first paint: its HTML parsed with no script run (the words the markup itself carries).
+function staticDoc(html: string): Document {
+  const dom = new JSDOM(html, { url: "http://localhost/" });
+  closers.push(() => dom.window.close());
+  return dom.window.document;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -262,20 +317,7 @@ describe("Home art — decoration never changes what is available", () => {
     expect(poker.textContent).not.toMatch(/apuest|bet|wager|prize|premio|dinero|money|cash|\$|L\.\s?\d|HNL|USD|rake/i);
   });
 
-  it("Halloween / Community: art and a Próximamente state, with no link, no action and no date, venue, reward or vote count", async () => {
-    const page = await loadHome();
-    const halloween = page.card("Concurso de disfraces")!;
-    expect(halloween.className).toContain("art-card");
-    expect(halloween.tagName).toBe("DIV");
-    expect(halloween.querySelector(".art-kicker")!.textContent).toBe("Comunidad");
-    expect(halloween.querySelector(".status-pill")!.textContent).toBe("Próximamente");
-    expect(halloween.querySelector(".exp-action")!.textContent).toBe("Próximamente");
-    expect(halloween.querySelector("a, button, [tabindex]")).toBeNull();
-    expect(halloween.textContent).not.toMatch(/\d/); // no date, time, count or amount: it says a prize exists, never what it is
-    expect(halloween.querySelector("h3")!.textContent).toBe("Concurso de disfraces");
-    expect(halloween.querySelector(".exp-sub")!.textContent).toBe("Disfrazate, sorprendé y conquistá los votos. Votá por tu favorito: ¡el disfraz más votado se lleva un premio!");
-    expect(halloween.querySelector("img")!.getAttribute("src")).toBe("/assets/home/halloween-community.webp");
-  });
+  // (Halloween is no longer a catalog card: its announcement is the static section tested in "the Halloween announcement" below.)
 
   it("Trivia: a visual card of its own whose art is a CSS background (no element), with its destination and Playtest label unchanged", async () => {
     const page = await loadHome();
@@ -445,13 +487,11 @@ describe("Home art — Spanish and English", () => {
   it("every new word follows the selector, in place: the cards are redrawn, never duplicated", async () => {
     const page = await loadHome();
     expect(page.text("#minigames .section-label")).toBe("Minijuegos");
-    expect(page.card("Concurso de disfraces")!.querySelector(".art-kicker")!.textContent).toBe("Comunidad");
+    expect(halloweenViolations(page.doc, HALLOWEEN.es)).toEqual([]);
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(page.text("#minigames .section-label")).toBe("Minigames");
-    expect(page.card("Costume contest")!.querySelector(".art-kicker")!.textContent).toBe("Community");
-    expect(page.card("Costume contest")!.querySelector(".status-pill")!.textContent).toBe("Coming Soon");
-    expect(page.card("Costume contest")!.querySelector(".exp-sub")!.textContent).toBe("Dress up, surprise everyone and win the votes. Vote for your favorite: the most-voted costume wins a prize!");
-    expect(page.card("Costume contest")!.querySelector("a, button, [tabindex]")).toBeNull(); // the contest is not enabled in either language
+    expect(halloweenViolations(page.doc, HALLOWEEN.en)).toEqual([]); // the announcement is redrawn in English, in place, and is not enabled in either language
+    expect(page.doc.querySelectorAll("#halloween")).toHaveLength(1);
     expect(page.card("URBANO Poker")!.querySelector(".status-pill")!.textContent).toBe("Playtest");
     expect(page.card("URBANO Poker")!.querySelector(".exp-action")!.textContent).toBe("Host →");
     expect(page.doc.querySelectorAll("img.art-img")).toHaveLength(2);
@@ -874,13 +914,13 @@ describe("Home art — negative controls", () => {
     return INDEX_HTML.replace(from, to);
   }
 
-  it("Halloween turned into an actionable card is caught", async () => {
-    const html = mutated(
-      'art: { src: "/assets/home/halloween-community.webp", className: "art-halloween", kickerKey: "home.art.community" },\n      titleKey: "home.halloween.title",\n      subKey: "home.halloween.sub",\n      status: "soon",',
-      'art: { src: "/assets/home/halloween-community.webp", className: "art-halloween", kickerKey: "home.art.community" },\n      titleKey: "home.halloween.title",\n      subKey: "home.halloween.sub",\n      status: "playtest", href: "/rutas.html",'
-    );
-    const found = violations(await loadHome(html));
-    expect(found.join("|")).toMatch(/Halloween is not informational|link points at Rutas/);
+  it("the Halloween announcement made actionable, or removed, is caught by the shared honesty check too", async () => {
+    // (its own negative controls, bounded to its markup, are in "the Halloween announcement's negative controls")
+    const actionable = mutated('class="exp-card art-card art-halloween is-locked"', 'class="exp-card art-card art-halloween is-actionable" tabindex="0"');
+    expect(violations(await loadHome(actionable)).join("|")).toMatch(/Halloween announcement is not informational/);
+    const removed = INDEX_HTML.replace(/<div class="section" id="halloween">[\s\S]*?\n<\/div>\n/, "");
+    expect(removed).not.toBe(INDEX_HTML);
+    expect(violations(await loadHome(removed)).join("|")).toMatch(/Halloween announcement is missing/);
   });
 
   it("a Rutas tile that links anywhere is caught", async () => {
@@ -889,10 +929,12 @@ describe("Home art — negative controls", () => {
   });
 
   it("an art image that is announced, eager or unsized is caught", async () => {
-    expect(violations(await loadHome(mutated('alt="" width="1280" height="720" loading="lazy" decoding="async"', 'alt="Poker table" width="1280" height="720" loading="lazy" decoding="async"'))).join("|")).toMatch(/not decorative/);
-    expect(violations(await loadHome(mutated('alt="" width="1280" height="720" loading="lazy" decoding="async"', 'alt="" width="1280" height="720" decoding="async"'))).join("|")).toMatch(/not lazy-loaded/);
-    expect(violations(await loadHome(mutated('alt="" width="1280" height="720" loading="lazy" decoding="async"', 'alt="" loading="lazy" decoding="async"'))).join("|")).toMatch(/no intrinsic size/);
-    expect(violations(await loadHome(mutated('<span class="art-scrim" aria-hidden="true"></span>', '<span class="art-scrim"></span>'))).join("|")).toMatch(/scrim is announced/);
+    // (the anchors are the catalog renderer's own image template: the Halloween announcement carries the same attributes as static markup, and has its own controls)
+    const template = 'src="${item.art.src}" alt="" width="1280" height="720" loading="lazy" decoding="async">';
+    expect(violations(await loadHome(mutated(template, 'src="${item.art.src}" alt="Poker table" width="1280" height="720" loading="lazy" decoding="async">'))).join("|")).toMatch(/not decorative/);
+    expect(violations(await loadHome(mutated(template, 'src="${item.art.src}" alt="" width="1280" height="720" decoding="async">'))).join("|")).toMatch(/not lazy-loaded/);
+    expect(violations(await loadHome(mutated(template, 'src="${item.art.src}" alt="" loading="lazy" decoding="async">'))).join("|")).toMatch(/no intrinsic size/);
+    expect(violations(await loadHome(mutated('<span class="art-scrim" aria-hidden="true"></span>`', '<span class="art-scrim"></span>`'))).join("|")).toMatch(/scrim is announced/);
   });
 
   it("a Poker card whose destination or Playtest label changed is caught", async () => {
@@ -937,5 +979,205 @@ describe("Home art — negative controls", () => {
     expect(violations(await loadHome(noMotagua)).join("|")).toMatch(/the strip of ten teams changed/);
     const nameless = mutated('<li class="crest-chip" data-club="Olimpia"><span class="crest-name">Olimpia</span></li>', '<li class="crest-chip" data-club="Olimpia"><span class="crest-name"></span></li>');
     expect(violations(await loadHome(nameless)).join("|")).toMatch(/Olimpia lost its written name/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The Halloween announcement: a static section between the hero and the Score card (rebuilt on the released base a619eb6; every assertion
+// below is bounded to #halloween — the Score card above/below it keeps its own contract, tested elsewhere in this file and in the other suites)
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+describe("Home art — the Halloween announcement (a static section above the Score card)", () => {
+  const OPEN_MATCH = () => ({ matchId: "m1", competition: "Liga", cancelledAt: null, finalized: false, kickoffAt: new Date(Date.parse(HOME_NOW) + 3 * 3600_000).toISOString(), homeTeam: { name: "A FC" }, awayTeam: { name: "B FC" }, venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: true } }] });
+
+  it("is an informational announcement with the approved words, the event and the date — no link, action, form, focusable control, countdown or prize promise", async () => {
+    const page = await loadHome();
+    const card = page.doc.querySelector("#halloween .exp-card") as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.tagName).toBe("DIV");
+    for (const cls of ["art-card", "art-halloween", "is-locked"]) expect(card.className).toContain(cls);
+    expect(card.querySelector(".art-kicker")!.textContent).toBe("Halloween · Beer Box");
+    expect(card.querySelector(".status-pill")!.textContent).toBe("Próximamente"); // shown in capitals by the pill's own style
+    expect(card.querySelector("h2")!.textContent).toBe("Concurso de disfraces");
+    expect(card.querySelector(".halloween-date")!.textContent).toBe("Sábado 31 de octubre");
+    expect(card.querySelector(".exp-sub")!.textContent).toBe(HALLOWEEN.es.sub);
+    expect(card.querySelector(".halloween-availability")!.textContent).toBe("Las inscripciones y la votación todavía no están disponibles.");
+    expect(card.querySelector("img")!.getAttribute("src")).toBe("/assets/home/halloween-community.webp");
+    expect(card.querySelector("img")!.getAttribute("alt")).toBe("");
+    expect(halloweenViolations(page.doc, HALLOWEEN.es)).toEqual([]);
+    // it is its own section: it holds nothing of the Score card, and the Score card holds nothing of it
+    expect(card.closest("#featured-predictions")).toBeNull();
+    expect(page.doc.querySelector("#halloween #featured-predictions, #featured-predictions #halloween")).toBeNull();
+  });
+
+  it("is in the page's first paint, with no script, no session and no server", () => {
+    // The HTML alone, scripts not run: what a visitor sees before anything loads (or with scripts disabled), and what a link preview reads.
+    expect(halloweenViolations(staticDoc(INDEX_HTML), HALLOWEEN.es)).toEqual([]);
+    // and the section's own markup depends on nothing: no script, no request, no session, no stored state
+    const section = CODE.slice(CODE.indexOf('id="halloween"'), CODE.indexOf('<div class="section">', CODE.indexOf('id="halloween"')));
+    expect(section.length).toBeGreaterThan(300);
+    expect(section).not.toMatch(/<script|fetch\(|UrbanoAuth|localStorage|supabase|data-i18n-vars|\bonclick\b/i);
+  });
+
+  it("does not depend on the Score card or on any answer: the same card whether the matches list is empty, has an open match, fails, answers 500 or the editorial list is malformed", async () => {
+    const none = await loadHome();
+    const variants: Array<[string, Page, number]> = [
+      ["no match open", none, 5],
+      ["an open match", await loadHome(INDEX_HTML, { matches: [OPEN_MATCH()] }), 5],
+      ["the list request fails", await loadHome(INDEX_HTML, { fetchMatches: async () => { throw new Error("offline"); } }), 5],
+      ["the list answers HTTP 500", await loadHome(INDEX_HTML, { fetchMatches: async () => ({ status: 500, json: async () => ({ matches: [] }) }) }), 5],
+      ["the editorial list is malformed (the Score list cannot start)", await loadHome(INDEX_HTML, { breakList: true }), 0],
+    ];
+    const reference = none.doc.querySelector("#halloween")!.outerHTML;
+    for (const [label, page, rows] of variants) {
+      expect(page.doc.querySelector("#halloween")!.outerHTML, label).toBe(reference);
+      expect(halloweenViolations(page.doc, HALLOWEEN.es), label).toEqual([]);
+      // and the Score card is exactly as its own contract says in each of those states (failure isolation: neither card affects the other)
+      expect(page.doc.querySelectorAll("#featured-predictions .upcoming-item"), label).toHaveLength(rows);
+      expect(Array.from(page.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), label).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
+    }
+  });
+
+  it("says the same in English, in place, and again in Spanish: the card is redrawn, never duplicated, and starts in English when English is stored", async () => {
+    const page = await loadHome();
+    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
+    expect(page.doc.querySelectorAll("#halloween")).toHaveLength(1);
+    expect(halloweenViolations(page.doc, HALLOWEEN.en)).toEqual([]);
+    expect(page.doc.querySelector("#halloween .status-pill")!.textContent).toBe("Coming Soon");
+    (page.doc.querySelector('[data-lang="es"]') as HTMLElement).click();
+    expect(halloweenViolations(page.doc, HALLOWEEN.es)).toEqual([]);
+    const stored = await loadHome(INDEX_HTML, { stored: "en" });
+    expect(halloweenViolations(stored.doc, HALLOWEEN.en)).toEqual([]);
+    expect(stored.doc.querySelectorAll("#halloween")).toHaveLength(1);
+  });
+
+  it("every word comes from the language tables: the module's two dictionaries, the Spanish fallback and the markup carry the same Spanish words, and the English is the approved rendering", () => {
+    const pick = (key: string) => Array.from(I18N_SOURCE.matchAll(new RegExp(`"${key.replace(/\./g, "\\.")}":\\s*"([^"]*)"`, "g"))).map((m) => m[1]);
+    const fallback = INDEX_HTML.match(/<script id="i18n-fallback">([\s\S]*?)<\/script>/)![1];
+    for (const [field, key] of [["event", "home.halloween.event"], ["title", "home.halloween.title"], ["date", "home.halloween.date"], ["sub", "home.halloween.sub"], ["availability", "home.halloween.availability"], ["status", "home.status.soon"]] as const) {
+      const [es, en] = pick(key);
+      expect(pick(key), key).toHaveLength(2); // one entry per language
+      expect(es, `${key} (es)`).toBe(HALLOWEEN.es[field]);
+      expect(en, `${key} (en)`).toBe(HALLOWEEN.en[field]);
+      expect(fallback, `${key} (Spanish fallback)`).toContain(`"${key}": "${HALLOWEEN.es[field]}"`);
+      expect(INDEX_HTML, `${key} (markup default)`).toContain(`data-i18n="${key}"`);
+    }
+  });
+
+  it("comes after the introduction and directly before the Score section; the order of everything else is unchanged and no navigation was removed", async () => {
+    const page = await loadHome();
+    const at = (selector: string) => page.doc.querySelector(selector)!;
+    const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & 4 /* DOCUMENT_POSITION_FOLLOWING */);
+    for (const [first, second] of [[".primary-nav", ".hero"], [".hero", "#halloween"], ["#halloween", "#featured-predictions"], ["#featured-predictions", "#experiences"], ["#experiences", "#play"], ["#play", "#minigames"], ["#minigames", "#organizers"]]) {
+      expect(before(at(first), at(second)), `${first} comes before ${second}`).toBe(true);
+    }
+    expect(at(".hero").nextElementSibling).toBe(at("#halloween")); // directly after the hero
+    expect(at("#halloween").nextElementSibling).toBe(at("#featured-predictions").closest(".section")); // directly before the Score section
+    expect(page.doc.querySelectorAll("#halloween")).toHaveLength(1);
+    expect(page.doc.querySelectorAll(".section")).toHaveLength(6); // the announcement + the five sections the page already had
+    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.getAttribute("href"))).toEqual(["/", "/#play", "/#experiences", "/leaderboards.html", "/rewards.html"]);
+  });
+
+  it("reads in the visual order and the title is a real heading, ahead of the Score card's: event, status, title, date, explanation, availability", async () => {
+    const page = await loadHome();
+    const card = page.doc.querySelector("#halloween .exp-card")!;
+    const order = Array.from(card.querySelectorAll(".art-kicker, .status-pill, h2, .halloween-date, .exp-sub, .halloween-availability")).map((e) => (e.textContent ?? "").trim());
+    expect(order).toEqual([HALLOWEEN.es.event, HALLOWEEN.es.status, HALLOWEEN.es.title, HALLOWEEN.es.date, HALLOWEEN.es.sub, HALLOWEEN.es.availability]);
+    expect(page.doc.querySelectorAll("h1")).toHaveLength(1);
+    const h2s = Array.from(page.doc.querySelectorAll("h2")).map((h) => h.textContent);
+    expect(h2s.indexOf("Concurso de disfraces")).toBeGreaterThanOrEqual(0);
+    expect(h2s.indexOf("Concurso de disfraces")).toBeLessThan(h2s.indexOf("URBANO Score")); // the announcement's heading comes first
+    expect(card.querySelector("[tabindex], a, button, input, select, textarea")).toBeNull(); // nothing in it can take focus
+  });
+
+  it("the old catalog card, with its prize and voting promise, is gone: Poker is alone in Experiences and spans the row; Poker and Trivia keep their access", async () => {
+    const page = await loadHome();
+    const experiences = Array.from(page.doc.querySelectorAll("#experiences-carousel > .exp-card"));
+    expect(experiences.map((c) => c.querySelector("h3")!.textContent)).toEqual(["URBANO Poker"]);
+    expect(page.doc.querySelectorAll("#experiences-carousel .art-halloween")).toHaveLength(0);
+    expect(INDEX_HTML).not.toMatch(/titleKey:\s*"home\.halloween\.title"/); // no catalog entry for the contest any more
+    // the old promise is in no word the page or its language module ships (the exact old sentences, not a global word ban)
+    for (const source of [INDEX_HTML, I18N_SOURCE]) expect(source).not.toMatch(/conquistá los votos|Votá por tu favorito|más votado|se lleva un premio|win the votes|Vote for your favorite|most-voted|wins a prize/);
+    // Poker alone on its row: the rule that makes a lone card span both columns (with a second experience the grid is two columns again)
+    expect(INDEX_HTML).toMatch(/\.experiences-grid > \.exp-card:only-child\s*\{\s*grid-column:\s*1 \/ -1;\s*\}/);
+    const poker = page.card("URBANO Poker")!;
+    expect(poker.tagName).toBe("A");
+    expect(poker.getAttribute("href")).toBe("/host.html?experience=poker");
+    const trivia = page.card("Trivia")!;
+    expect(trivia.tagName).toBe("A");
+    expect(trivia.getAttribute("href")).toBe("/trivia-playtest.html");
+  });
+});
+
+describe("Home art — the Halloween announcement's CSS contract", () => {
+  const css = INDEX_HTML.slice(INDEX_HTML.indexOf("<style>"), INDEX_HTML.indexOf("</style>"));
+  const phone = css.slice(css.indexOf("@media (max-width: 640px)"), css.indexOf("@media (max-width: 339px)"));
+
+  it("its own rules: a title as large as a picture card's, lines in ivory with a shadow over the photograph, a deeper chip fill, and nothing that fixes a width", () => {
+    expect(css).toMatch(/\.art-card h3,\s*\.art-halloween h2\s*\{[^}]*font-size:\s*26px;[^}]*line-height:\s*1\.15;[^}]*font-weight:\s*800;[^}]*max-width:\s*16ch;/);
+    expect(css).toMatch(/\.art-halloween h2\s*\{\s*margin:\s*0;\s*\}/);
+    expect(css).toMatch(/#halloween\s*\{\s*margin-top:\s*28px;\s*\}/); // a section without a label needs its own gap under the introduction
+    expect(css).toMatch(/\.art-halloween \.art-kicker\s*\{\s*background:\s*rgba\(10,\s*10,\s*10,\s*0\.86\);\s*\}/); // the chip's small text clears 4.5:1 over the candles
+    expect(css).toMatch(/\.halloween-date\s*\{[^}]*font-weight:\s*700;[^}]*rgba\(245,\s*241,\s*232,\s*0\.95\)[^}]*text-shadow/);
+    expect(css).toMatch(/\.halloween-availability\s*\{[^}]*rgba\(245,\s*241,\s*232,\s*0\.92\)[^}]*text-shadow/);
+    expect(css).not.toMatch(/(?:#halloween|\.art-halloween|\.halloween-date|\.halloween-availability)\s*\{[^}]*(?:^|[;\s])width\s*:/m); // no width on it or its lines, so nothing can overflow
+    expect(css).not.toMatch(/(?:#halloween|\.art-halloween|\.halloween-date|\.halloween-availability)[^{]*:(?:hover|focus|active)/); // nothing to hover, focus or press
+  });
+
+  it("on a phone the words sit below a clear band of the photograph with the card's OWN scrim; the chips never break mid-label; the shared scrim and every other card are untouched", () => {
+    expect(phone).toMatch(/\.art-card h3,\s*\.art-halloween h2\s*\{\s*font-size:\s*24px;\s*\}/);
+    expect(phone).toMatch(/\.art-halloween\s*\{\s*--art-photo-scrim:\s*linear-gradient\(180deg,\s*rgba\(10,\s*10,\s*10,\s*0\)\s*0,\s*rgba\(10,\s*10,\s*10,\s*0\.12\)\s*50px,\s*rgba\(10,\s*10,\s*10,\s*0\.5\)\s*96px,\s*rgba\(10,\s*10,\s*10,\s*0\.9\)\s*136px,\s*rgba\(10,\s*10,\s*10,\s*0\.96\)\s*100%\);\s*\}/);
+    expect(phone).toMatch(/\.art-halloween \.exp-card-top\s*\{\s*margin-bottom:\s*84px;\s*flex-wrap:\s*wrap;\s*row-gap:\s*6px;\s*\}/);
+    expect(phone).toMatch(/\.art-halloween \.art-kicker\s*\{\s*letter-spacing:\s*0\.08em;\s*white-space:\s*nowrap;\s*\}/);
+    // the shared picture-card scrim on a phone is exactly what it was (the Halloween card overrides it only on itself)
+    expect(phone.match(/:root\s*\{[^}]*--art-photo-scrim:\s*([^;]+);/)![1]).toMatch(/^linear-gradient\(0deg,\s*rgba\(10,\s*10,\s*10,\s*0\.96\)\s*0%/);
+    // and the existing shared rules the section relies on are still there, unchanged
+    expect(css).toMatch(/\.art-poker,\s*\.art-halloween\s*\{\s*min-height:\s*300px;\s*padding:\s*24px;\s*\}/);
+    expect(phone).toMatch(/\.art-poker,\s*\.art-halloween\s*\{\s*min-height:\s*320px;\s*padding:\s*20px 18px;\s*\}/);
+    expect(phone).toMatch(/\.art-halloween \.art-img\s*\{\s*object-position:\s*84% center;\s*\}/);
+  });
+});
+
+describe("Home art — the Halloween announcement's negative controls", () => {
+  // The section's own markup, changed in a COPY of the page; checked on the first paint, where the markup's own words show (once the language
+  // module runs it writes the dictionary's words over the markup's, and the drift tests pin that the two are the same words).
+  const SECTION = /<div class="section" id="halloween">[\s\S]*?\n<\/div>\n/;
+  function mutatedSection(change: (section: string) => string): string {
+    const found = INDEX_HTML.match(SECTION);
+    expect(found, "the announcement section").not.toBeNull();
+    const changed = change(found![0]);
+    expect(changed, "the mutation changed something").not.toBe(found![0]);
+    return INDEX_HTML.replace(found![0], changed);
+  }
+  const fp = (html: string) => halloweenViolations(staticDoc(html), HALLOWEEN.es);
+
+  it("given a link, a button, a form, a focusable card or an inline handler, it is caught", () => {
+    for (const add of ['<a class="halloween-vote" href="/vote.html">Votar</a>', '<button type="button">Inscribirme</button>', '<form action="/x"><input name="n"></form>', '<span tabindex="0">x</span>']) {
+      expect(fp(mutatedSection((s) => s.replace('<p class="halloween-availability"', `${add}<p class="halloween-availability"`))).join("|"), add).toMatch(/interactive element/);
+    }
+    expect(fp(mutatedSection((s) => s.replace('class="exp-card art-card art-halloween is-locked"', 'class="exp-card art-card art-halloween is-locked" tabindex="0"'))).join("|")).toMatch(/interactive element/);
+    expect(fp(mutatedSection((s) => s.replace('<h2 ', '<h2 onclick="go()" '))).join("|")).toMatch(/inline event handler/);
+  });
+
+  it("turned into an actionable card, or given a countdown, a prize, a price, a capacity, a sponsor, a number or other words, it is caught", () => {
+    expect(fp(mutatedSection((s) => s.replace("art-halloween is-locked", "art-halloween is-actionable"))).join("|")).toMatch(/not informational/);
+    expect(fp(mutatedSection((s) => s.replace('<p class="halloween-date"', '<time datetime="2026-10-31T20:00:00Z">cuenta regresiva</time><p class="halloween-date"'))).join("|")).toMatch(/countdown, a live region or a moment/);
+    expect(fp(mutatedSection((s) => s.replace("Mostrá tu disfraz y preparate para elegir tus favoritos.", "Mostrá tu disfraz y ganá un premio de L 500."))).join("|")).toMatch(/prize, sponsor, capacity or price claim/);
+    expect(fp(mutatedSection((s) => s.replace("Sábado 31 de octubre", "Sábado 31 de octubre, 40 cupos"))).join("|")).toMatch(/capacity or price claim/);
+    expect(fp(mutatedSection((s) => s.replace("Sábado 31 de octubre", "Sábado 31 de octubre, 8:00 p. m."))).join("|")).toMatch(/number other than the date/);
+    expect(fp(mutatedSection((s) => s.replace("Halloween · Beer Box</span>", "Halloween · Beer Box, patrocinado por una marca</span>"))).join("|")).toMatch(/sponsor|other than the approved words/);
+    expect(fp(mutatedSection((s) => s.replace("Las inscripciones y la votación todavía no están disponibles.", "Inscribite ya y votá por tu favorito."))).join("|")).toMatch(/other than the approved words/);
+  });
+
+  it("its photograph announced, eager or unsized, or the announcement removed or moved out of its place, is caught", () => {
+    const img = (change: (tag: string) => string) => staticDoc(mutatedSection((s) => s.replace(/<img [^>]*>/, change)));
+    expect(img((t) => t.replace('alt=""', 'alt="Calabaza"')).querySelector("#halloween img")!.getAttribute("alt")).not.toBe("");
+    expect(img((t) => t.replace(' loading="lazy"', "")).querySelector("#halloween img")!.getAttribute("loading")).not.toBe("lazy");
+    expect(img((t) => t.replace(' width="1280" height="720"', "")).querySelector("#halloween img")!.hasAttribute("width")).toBe(false);
+    expect(fp(INDEX_HTML.replace(SECTION, ""))).toEqual(["the Halloween card is missing"]);
+    // moved below the Score section, it is no longer where the gate put it
+    const moved = staticDoc(mutatedSection((s) => "") .replace(/<div class="section" id="experiences">/, `${INDEX_HTML.match(SECTION)![0]}<div class="section" id="experiences">`));
+    expect(moved.querySelector("#halloween")!.nextElementSibling!.id).toBe("experiences");
+    expect(moved.querySelector(".hero")!.nextElementSibling!.id).not.toBe("halloween");
   });
 });
