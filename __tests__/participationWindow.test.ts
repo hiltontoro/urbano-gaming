@@ -10,7 +10,8 @@ import { buildLadderWorld, submitAs, type LadderEnv } from "./helpers/progressiv
  * THE PARTICIPATION WINDOW OF EL CLÁSICO — what the system can and cannot impose.
  *
  * Approved window: 25 October 2026, 12:30 p. m. to 2:00 p. m. Honduras time — it opens 90 minutes before the planned start and closes when the match
- * starts. The Home announces it as INFORMATION. The database closes a match at its start (a participation is refused from the instant of kickoff) and has
+ * starts. The Home announced it as INFORMATION while the match was ahead; the match is past and the Home no longer carries the window, the date or
+ * the time (Founder's Home correction of 2026-10-29: the Score entry is now a neutral link). The database closes a match at its start (a participation is refused from the instant of kickoff) and has
  * no opening time: a match accepts participations from the moment it is classified, has a valid prize offer and its venue activation is enabled — and a new
  * activation is enabled by default. The opening restriction is added where members' requests arrive, in the API route (rule and tests in
  * participationWindowServer.test.ts): before 12:30 the server refuses with 409 "not yet"; from 12:30 the window alone opens nothing, because the activation
@@ -25,12 +26,12 @@ const kickoffMs = new Date(KICKOFF).getTime();
 const MIN = 60_000;
 
 describe("the window, in numbers", () => {
-  it("12:30 p. m. is exactly 90 minutes before the 2:00 p. m. start, in Honduras, and 2:00 p. m. is the start the announcement states", () => {
+  it("12:30 p. m. is exactly 90 minutes before the 2:00 p. m. start, in Honduras, and 2:00 p. m. is the start the rule is written for", () => {
     const honduras = (ms: number) => new Intl.DateTimeFormat("en-GB", { timeZone: "America/Tegucigalpa", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
     expect(honduras(kickoffMs)).toBe("14:00");
     expect(honduras(kickoffMs - 90 * MIN)).toBe("12:30");
     expect(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Tegucigalpa", day: "numeric", month: "long", year: "numeric" }).format(new Date(kickoffMs - 90 * MIN))).toBe("25 October 2026");
-    expect(read("public/index.html")).toMatch(/<time datetime="2026-10-25T20:00:00Z"/);
+    expect(read("public/index.html")).not.toMatch(/<time\b|2026-10-25/); // the Home no longer states that moment anywhere
   });
 });
 
@@ -93,15 +94,16 @@ describe("the server closes at the start and has no opening time", () => {
 });
 
 describe("the page does not pretend to enforce it", () => {
-  it("no page and no client script keeps a clock for the opening: the Score page only SHOWS the opening time the server sends and never computes one, its only time rule is the closing at the start, and the window is a static line on the Home", () => {
+  it("no page and no client script keeps a clock for the opening: the Score page only SHOWS the opening time the server sends and never computes one, its only time rule is the closing at the start, and the Home carries no window at all", () => {
     const score = read("public/soccer-predictions.html");
     const code = score.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/opens_at|12:30|windowOpens|90 \* 60|5400000|kickoffAt[^;\n]*[-+]\s*\d+\s*\*/); // no arithmetic on the start, no hard-coded hour
     expect(code).toMatch(/match\.participationOpensAt/); // what it shows is what the server says
     expect(code).toMatch(/new Date\(\) >= new Date\(match\.kickoffAt\)/); // closing: the one time rule
     const home = read("public/index.html");
-    expect(home).toMatch(/<p class="featured-window" data-i18n="home\.score\.window">/);
+    expect(home).not.toMatch(/featured-window|home\.score\.window|12:30|Ventana de participación|participation window/i); // no window on the Home, in markup, language table or fallback
     const homeCode = home.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "");
-    expect(homeCode).not.toMatch(/featured-window[^;{}]*\.(hidden|disabled)|\.disabled\s*=|setTimeout\(|setInterval\(/);
+    expect(homeCode).not.toMatch(/\.disabled\s*=|setTimeout\(|setInterval\(/); // and the Home keeps no clock and disables nothing
+    expect(read("public/urbanoI18n.js")).not.toMatch(/"home\.score\.window"|Ventana de participación prevista|Planned participation window/);
   });
 });

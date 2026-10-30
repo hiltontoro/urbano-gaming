@@ -94,7 +94,8 @@ async function loadHome(opts: StorageOpts & { matches?: unknown[] } = {}) {
   const win = dom.window as any;
   const doc = win.document as Document;
   await tick();
-  const card = (title: string) => Array.from(doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h3")?.textContent === title) as HTMLElement | undefined;
+  // (the Halloween announcement is a static card near the top, so its title is an h2; every catalog card's is an h3)
+  const card = (title: string) => Array.from(doc.querySelectorAll(".exp-card")).find((c) => c.querySelector("h2, h3")?.textContent === title) as HTMLElement | undefined;
   return { win, doc, attach, card, text: (sel: string) => (doc.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim() };
 }
 
@@ -105,12 +106,11 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.text(".hero h1")).toBe("Jugá, predecí y competí con tu comunidad.");
     expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
     expect(Array.from(page.doc.querySelectorAll(".section-label")).map((e) => e.textContent)).toEqual(["Destacado", "Experiencias", "Juegos de habilidad", "Minijuegos", "Para organizadores"]);
-    expect(page.text("#featured-status")).toBe("Próximo partido");
+    expect(page.doc.querySelector("#featured-status")).toBeNull(); // no status pill: the "next match" pill went with the expired promotion, and nothing replaced it
     expect(page.text("#featured-title")).toBe("URBANO Score");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
-    expect(page.text(".featured-scope")).toBe("Vivilo en The Pub by Beer Box");
-    expect(page.text(".featured-when")).toBe("Domingo 25 de octubre · 🇭🇳 2:00 p. m. · 🇪🇸 9:00 p. m.Estadio: Spotify Camp Nou");
-    expect(page.text("#featured-play")).toBe("Jugar ahora");
+    expect(page.text(".featured-descriptor")).toBe("Tus predicciones deportivas");
+    expect(page.text("#featured-play")).toBe("Abrir URBANO Score");
+    expect(page.doc.querySelector(".featured-scope, .featured-when, .featured-window, .featured-crests")).toBeNull(); // no venue, date, window or crests
     expect(page.doc.querySelector("#featured-note")).toBeNull(); // no "predictions coming soon" line
     expect(page.doc.querySelector("#featured-history")).toBeNull(); // history has its own access (My profile)
     expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
@@ -142,14 +142,13 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.win.localStorage.getItem("urbano.lang")).toBe("en");
     expect(page.text(".hero h1")).toBe("Play, predict, and compete with your community.");
     expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
-    expect(page.text("#featured-status")).toBe("Next match");
+    expect(page.doc.querySelector("#featured-status")).toBeNull();
     expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
     expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
     expect(page.card("Costume contest")!.textContent).toContain("Coming Soon");
-    expect(page.text(".featured-descriptor")).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
-    expect(page.text(".featured-scope")).toBe("Watch it at The Pub by Beer Box");
-    expect(page.text("#featured-play")).toBe("Play now");
-    expect(page.text(".featured-when")).toContain("Stadium: Spotify Camp Nou");
+    expect(page.text(".featured-descriptor")).toBe("Your sports predictions");
+    expect(page.text("#featured-play")).toBe("Open URBANO Score");
+    expect(page.doc.querySelector(".featured-scope, .featured-when, .featured-window, .featured-crests")).toBeNull();
     expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
   });
 
@@ -231,8 +230,8 @@ describe("Home — header and footer", () => {
 describe("Home — honest cards", () => {
   it("the Founder's order; the playable cards keep their exact destinations; every other card is informational: no link, no operational action", async () => {
     const page = await loadHome();
-    const cards = Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.querySelector("h3")!.textContent);
-    expect(cards).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+    const cards = Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.querySelector("h2, h3")!.textContent);
+    expect(cards).toEqual(["Concurso de disfraces", "URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]); // the Halloween announcement first, near the top
     const actionable = Array.from(page.doc.querySelectorAll(".exp-card.is-actionable")).map((c) => [c.querySelector("h3")!.textContent, c.getAttribute("href")]);
     expect(actionable).toEqual([["URBANO Poker", "/host.html?experience=poker"], ["Trivia", "/trivia-playtest.html"]]);
     for (const title of ["Concurso de disfraces", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
@@ -243,7 +242,7 @@ describe("Home — honest cards", () => {
       expect(card.querySelector("a, button"), title).toBeNull();
       expect(card.textContent, title).toContain("Próximamente");
     }
-    // Quiz and Duel are not shown on the Home (their implementations are untouched); Community Voting is carried by the Halloween / Comunidad card.
+    // Quiz and Duel are not shown on the Home (their implementations are untouched); the Halloween announcement names voting only to say it is not available yet.
     expect(visibleStrings(page.doc).join(" ")).not.toMatch(/\bQuiz\b|\bDuel\b/);
     expect(page.doc.querySelector('a[href*="quiz"], a[href*="competitions"]')).toBeNull();
   });
@@ -262,12 +261,14 @@ describe("Home — honest cards", () => {
     expect(page.doc.querySelector("#featured-predictions h2")!.textContent).toBe("URBANO Score");
   });
 
-  it("the Predictions entry is an announcement in both languages and stays one even when the database holds an eligible match: no opening, no play button, no request", async () => {
+  it("the Predictions entry is a neutral link in both languages and stays one even when the database holds an eligible match: no opening, no status, no match, no request", async () => {
     const page = await loadHome({ matches: [hostileSafeMatch()] });
-    for (const [lang, pill, play] of [["es", "Próximo partido", "Jugar ahora"], ["en", "Next match", "Play now"]] as const) {
+    for (const [lang, descriptor, open] of [["es", "Tus predicciones deportivas", "Abrir URBANO Score"], ["en", "Your sports predictions", "Open URBANO Score"]] as const) {
       if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-      expect(page.text("#featured-status"), lang).toBe(pill);
-      expect(page.text("#featured-play"), lang).toBe(play);
+      expect(page.doc.querySelector("#featured-status"), lang).toBeNull();
+      expect(page.text(".featured-descriptor"), lang).toBe(descriptor);
+      expect(page.text("#featured-play"), lang).toBe(open);
+      expect(page.doc.querySelector("#featured-predictions a")!.getAttribute("href"), lang).toBe("/soccer-predictions.html");
       expect(page.doc.querySelector("#featured-action"), lang).toBeNull();
       expect(page.doc.querySelector("#featured-match"), lang).toBeNull();
       expect(page.doc.querySelectorAll("#featured-predictions a"), lang).toHaveLength(1);
@@ -275,13 +276,16 @@ describe("Home — honest cards", () => {
     }
   });
 
-  it("no eligible match keeps the entry unavailable in both languages", async () => {
+  it("no eligible match leaves the entry exactly the same in both languages: no status, no action, the one link", async () => {
     const page = await loadHome({ matches: [hostileSafeMatch({ finalized: true }), hostileSafeMatch({ cancelledAt: "2026-10-01T00:00:00Z" })] });
-    expect(page.text("#featured-status")).toBe("Próximo partido");
+    expect(page.doc.querySelector("#featured-status")).toBeNull();
     expect(page.doc.querySelector("#featured-action a")).toBeNull();
+    expect(page.text("#featured-play")).toBe("Abrir URBANO Score");
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(page.text("#featured-status")).toBe("Next match");
+    expect(page.doc.querySelector("#featured-status")).toBeNull();
     expect(page.doc.querySelector("#featured-action a")).toBeNull();
+    expect(page.text("#featured-play")).toBe("Open URBANO Score");
+    expect(page.doc.querySelectorAll("#featured-predictions a")).toHaveLength(1);
   });
 });
 

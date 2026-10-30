@@ -16,6 +16,10 @@ const ROOT = process.cwd();
 const MODULE_SOURCE = readFileSync(path.join(ROOT, "public/urbanoClubCrests.js"), "utf8");
 const CLUBS_DIR = path.join(ROOT, "public/assets/clubs");
 const PAGES = ["index.html", "soccer-predictions.html", "profile.html"].map((file) => [file, readFileSync(path.join(ROOT, "public", file), "utf8")] as const);
+// The Home drew the two crests on its El Clásico announcement until the Founder's Home correction of 2026-10-29 (the Score entry is now a
+// neutral link with no match on it). The module and the two files stay, for the pages that still show a match: URBANO Score and the profile.
+const HOME_HTML = PAGES.find(([file]) => file === "index.html")![1];
+const CREST_PAGES = PAGES.filter(([file]) => file !== "index.html");
 
 /** A minimal decoder for what the crest file is (non-interlaced, 8-bit RGBA): enough to read its pixels without a dependency. */
 function decodePng(buffer: Buffer) {
@@ -140,10 +144,16 @@ describe("withdrawing the crests", () => {
   });
 
   it("every page that draws crests degrades to text without the module: it asks for the module only if it is there", () => {
-    for (const [file, html] of PAGES) {
+    for (const [file, html] of CREST_PAGES) {
       expect(html, file).toMatch(/<script src="\/urbanoClubCrests\.js"><\/script>/);
       expect(html, file).toMatch(/if \(window\.UrbanoClubCrests\)|window\.UrbanoClubCrests\s*&&/);
     }
+  });
+
+  it("the Home draws no crest and so does not load the module at all: no script, no call, no holder, no style — the module and its two files are untouched", () => {
+    expect(HOME_HTML).not.toMatch(/urbanoClubCrests|UrbanoClubCrests|data-club|club-crest|featured-crest|assets\/clubs/);
+    expect(new JSDOM(HOME_HTML).window.document.querySelectorAll("[data-club], img.club-crest, script[src*='Crests']")).toHaveLength(0);
+    expect(CREST_PAGES.map(([file]) => file)).toEqual(["soccer-predictions.html", "profile.html"]); // the pages that still show a match keep the module
   });
 });
 
@@ -243,7 +253,9 @@ describe("the files and where they came from", () => {
   });
 
   it("nothing in any page turns a crest into a silhouette or dims it: no filter, blend mode, mask, clip or opacity on a crest or its holders", () => {
-    for (const [file, html] of PAGES) {
+    const homeCss = HOME_HTML.slice(HOME_HTML.indexOf("<style>"), HOME_HTML.indexOf("</style>"));
+    expect(homeCss).not.toMatch(/club-crest|featured-crest|part-crests/); // the Home has no crest to style
+    for (const [file, html] of CREST_PAGES) {
       const css = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
       const rules = [...css.matchAll(/([^{}]*(?:club-crest|featured-crest|part-crests)[^{}]*)\{([^}]*)\}/g)];
       expect(rules.length, `${file} styles its crests`).toBeGreaterThan(0);
@@ -261,12 +273,10 @@ describe("the files and where they came from", () => {
     expect(words).toMatch(/no photograph of a player/i);
   });
 
-  it("the home card draws the two crests home team first as decoration (aria-hidden), and names both teams in text beside them", () => {
-    const index = PAGES.find(([file]) => file === "index.html")![1];
-    const card = new JSDOM(index).window.document.querySelector("#featured-predictions")!;
-    const holders = [...card.querySelectorAll(".featured-crests [data-club]")].map((node) => node.getAttribute("data-club"));
-    expect(holders).toEqual(["FC Barcelona", "Real Madrid CF"]);
-    expect(card.querySelector(".featured-crests")!.getAttribute("aria-hidden")).toBe("true");
-    expect(card.querySelector(".featured-descriptor")!.textContent).toBe("El Clásico: FC Barcelona vs. Real Madrid CF");
+  it("the home card no longer draws crests or names a team: its entry into URBANO Score is a name, a descriptor and one link", () => {
+    const card = new JSDOM(HOME_HTML).window.document.querySelector("#featured-predictions")!;
+    expect(card.querySelectorAll("[data-club], .featured-crests, .featured-crest, img, svg")).toHaveLength(0);
+    expect(card.textContent).not.toMatch(/Barcelona|Madrid|Cl[aá]sico|\bvs\b/i);
+    expect(card.querySelector(".featured-descriptor")!.textContent).toBe("Tus predicciones deportivas");
   });
 });

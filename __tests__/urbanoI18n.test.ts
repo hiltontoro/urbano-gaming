@@ -171,7 +171,8 @@ describe("the two languages carry the same table", () => {
 
   it("Spanish is real Spanish: no entry is an unchanged copy of the English one unless it is a name or a symbol", () => {
     const SAME_ON_PURPOSE = new Set([
-      "home.title", "home.score.clasico", "pred.title", "pred.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "El Clásico: FC Barcelona vs. Real Madrid CF" is the fixture's name, the same in both languages
+      "home.title", "pred.title", "pred.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match",
+      "home.halloween.event", // "Halloween · Beer Box" is the event's name and its venue's, the same in both languages
     ]);
     for (const key of Object.keys(en)) {
       if (SAME_ON_PURPOSE.has(key)) continue;

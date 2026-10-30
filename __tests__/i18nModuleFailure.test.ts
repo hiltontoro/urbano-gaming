@@ -185,10 +185,12 @@ function homeSnapshot(page: Page) {
     hero: [text(".hero h1"), text(".hero p")],
     nav: Array.from(doc.querySelectorAll(".primary-nav a")).map((a) => [a.textContent, a.getAttribute("href")]),
     labels: Array.from(doc.querySelectorAll(".section-label")).map((e) => e.textContent),
-    featured: { title: text("#featured-title"), descriptor: text(".featured-descriptor"), scope: text(".featured-scope"), when: text(".featured-when"), status: text("#featured-status"), play: text("#featured-play"), links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), hasAction: page.q("#featured-action") !== null },
+    featured: { title: text("#featured-title"), descriptor: text(".featured-descriptor"), pill: doc.querySelector("#featured-status") !== null, promotionLines: doc.querySelectorAll("#featured-predictions .featured-scope, #featured-predictions .featured-when, #featured-predictions .featured-window, #featured-predictions .featured-crests, #featured-predictions time").length, play: text("#featured-play"), links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), hasAction: page.q("#featured-action") !== null },
     cards: Array.from(doc.querySelectorAll(".exp-card")).map((c) => ({
-      title: norm(c.querySelector("h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
+      title: norm(c.querySelector("h2, h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
       pill: norm(c.querySelector(".status-pill")?.textContent), kicker: norm(c.querySelector(".art-kicker")?.textContent), sub: norm(c.querySelector(".exp-sub")?.textContent), action: norm(c.querySelector(".exp-action")?.textContent),
+      // (the Halloween announcement is static and carries a date and an availability line of its own)
+      date: norm(c.querySelector(".halloween-date")?.textContent), availability: norm(c.querySelector(".halloween-availability")?.textContent),
     })),
     footer: text("footer"),
     links: Array.from(doc.querySelectorAll("a[href]")).map((a) => a.getAttribute("href")),
@@ -255,11 +257,22 @@ describe("Home without the module: the same content, the same behaviour", () => 
     });
   }
 
+  it("the Halloween announcement reads exactly the same without the module (it is static Spanish), offers nothing to press, and says nothing about a prize", async () => {
+    for (const mode of FAILURES) {
+      const page = await open("index.html", mode);
+      const card = page.doc.querySelector("#halloween .exp-card")!;
+      expect(norm(card.textContent), mode).toBe("Halloween · Beer Box Próximamente Concurso de disfraces Sábado 31 de octubre Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación. Las inscripciones y la votación todavía no están disponibles.");
+      expect(card.querySelector("a, button, input, [tabindex], [href]"), mode).toBeNull();
+      expect(visible(page.doc), mode).not.toMatch(/conquistá los votos|más votado|se lleva un premio/i); // (the old card's promise; the nav link "Premios" is a different thing)
+      expect(norm(card.textContent), mode).not.toMatch(/premio|prize/i);
+    }
+  });
+
   it("every card is drawn, in the Founder's order, with the access each one had: only URBANO Poker and Trivia are links", async () => {
     for (const mode of FAILURES) {
       const page = await open("index.html", mode);
       const cards = homeSnapshot(page).cards;
-      expect(cards.map((c) => c.title), mode).toEqual(["URBANO Poker", "Concurso de disfraces", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
+      expect(cards.map((c) => c.title), mode).toEqual(["Concurso de disfraces", "URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
       expect(cards.filter((c) => !c.locked).map((c) => [c.title, c.href, c.pill]), mode).toEqual([["URBANO Poker", "/host.html?experience=poker", "Playtest"], ["Trivia", "/trivia-playtest.html", "Playtest"]]);
       for (const card of cards.filter((c) => c.locked)) {
         expect(card.tag).toBe("DIV");
@@ -269,12 +282,15 @@ describe("Home without the module: the same content, the same behaviour", () => 
     }
   });
 
-  it("a language failure enables nothing: Become a Host stays closed until the server says open, URBANO Score stays an announcement with no way in even when the database holds an open match, and no request is made that the working page would not make", async () => {
+  it("a language failure enables nothing: Become a Host stays closed until the server says open, URBANO Score stays a neutral link with no status and no match even when the database holds an open match, and no request is made that the working page would not make", async () => {
     for (const mode of FAILURES) {
       const closed = await open("index.html", mode, { hostOpen: false, matches: [futureMatch()] });
       expect(closed.doc.querySelector('a[href="/become-a-host.html"]')).toBeNull();
-      expect(closed.text("#featured-status")).toBe("Próximo partido");
-      expect(closed.text("#featured-play")).toBe("Jugar ahora");
+      // the Spanish fallback says exactly the entry — a name, a descriptor and one link — and nothing of the expired El Clásico promotion
+      expect(closed.text("#featured-predictions"), mode).toBe("URBANO Score Tus predicciones deportivas Abrir URBANO Score");
+      expect(closed.text("#featured-predictions"), mode).not.toMatch(/Pr[óo]ximo partido|Next match|Barcelona|Madrid|Cl[aá]sico|The Pub|octubre|October|Camp Nou|Estadio|Ventana|Jugar ahora|Play now|\d/i);
+      expect(closed.doc.querySelector("#featured-status"), mode).toBeNull();
+      expect(closed.text("#featured-play")).toBe("Abrir URBANO Score");
       expect(closed.doc.querySelector("#featured-action")).toBeNull();
       expect(Array.from(closed.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html"]);
       expect(closed.requests.some((r) => r.url.includes("/api/gaming/predictions"))).toBe(false);
@@ -541,7 +557,8 @@ describe("negative controls", () => {
   it("without the fallback block the Home draws no cards (the original defect)", async () => {
     const html = PAGE_HTML["index.html"].replace(block("index.html"), "");
     const page = await open("index.html", "missing", { html, matches: [futureMatch()] });
-    expect(page.doc.querySelectorAll(".exp-card")).toHaveLength(0);
+    expect(page.doc.querySelectorAll(".card-grid .exp-card")).toHaveLength(0); // the cards the script draws
+    expect(page.doc.querySelectorAll("#halloween .exp-card")).toHaveLength(1); // the Halloween announcement is not drawn by script: it is in the HTML, in Spanish
     expect(page.errors.join(" ")).toMatch(/UrbanoI18n is not defined/);
   });
 

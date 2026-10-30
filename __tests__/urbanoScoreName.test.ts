@@ -8,7 +8,8 @@ import path from "node:path";
  *
  * What is pinned: the old name is gone from every PUBLIC text of the current journey — Home, the public page, the profile and the shared
  * sign-in panel — in both languages, including titles, accessibility labels and the language table; the name is the heading of the Home
- * announcement (El Clásico at The Pub by Beer Box) and the name, its descriptor ("Tus predicciones deportivas" / "Your sports
+ * entry (a neutral card: the name, the same descriptor and one link "Abrir URBANO Score" / "Open URBANO Score" — no match, team, venue or date,
+ * since the Founder's Home correction of 2026-10-29) and the name, its descriptor ("Tus predicciones deportivas" / "Your sports
  * predictions") and the honest scope ("Por ahora solo hay fútbol disponible." / "For now, only soccer is available.") are shown on the
  * public page; the name does not suggest any other sport; and nothing that is
  * identity rather than text was renamed: the route, the file, the API paths and the code keep their historical names and every existing
@@ -125,17 +126,19 @@ describe("the old public name is gone from every public text of the current jour
 
 describe("URBANO Score is named, described and bounded where a person meets it", () => {
   const COPY = {
-    es: { descriptor: "Tus predicciones deportivas", scope: "Por ahora solo hay fútbol disponible.", loading: "Cargando URBANO Score…", profileLink: "Mis predicciones en URBANO Score →", homeLine: "El Clásico: FC Barcelona vs. Real Madrid CF", homeVenue: "Vivilo en The Pub by Beer Box" },
-    en: { descriptor: "Your sports predictions", scope: "For now, only soccer is available.", loading: "Loading URBANO Score…", profileLink: "My predictions in URBANO Score →", homeLine: "El Clásico: FC Barcelona vs. Real Madrid CF", homeVenue: "Watch it at The Pub by Beer Box" },
+    es: { descriptor: "Tus predicciones deportivas", scope: "Por ahora solo hay fútbol disponible.", loading: "Cargando URBANO Score…", profileLink: "Mis predicciones en URBANO Score →", homeOpen: "Abrir URBANO Score" },
+    en: { descriptor: "Your sports predictions", scope: "For now, only soccer is available.", loading: "Loading URBANO Score…", profileLink: "My predictions in URBANO Score →", homeOpen: "Open URBANO Score" },
   } as const;
 
   for (const lang of ["es", "en"] as const) {
-    it(`Home (${lang}): the featured card is "URBANO Score", announcing El Clásico at The Pub by Beer Box, in a heading the card is named by`, async () => {
+    it(`Home (${lang}): the featured card is "URBANO Score", with its descriptor and one link into it, in a heading the card is named by — and no match, team, venue, date or status`, async () => {
       const page = await open("index.html", lang);
       expect(page.text("#featured-title")).toBe("URBANO Score");
       expect(page.doc.querySelector("#featured-predictions h2")!.id).toBe("featured-title");
-      expect(page.text("#featured-predictions .featured-descriptor")).toBe(COPY[lang].homeLine);
-      expect(page.text("#featured-predictions .featured-scope")).toBe(COPY[lang].homeVenue);
+      expect(page.text("#featured-predictions .featured-descriptor")).toBe(COPY[lang].descriptor);
+      expect(page.text("#featured-play")).toBe(COPY[lang].homeOpen);
+      expect(page.doc.querySelector("#featured-predictions .featured-scope, #featured-predictions .featured-when, #featured-predictions .featured-window, #featured-status")).toBeNull();
+      expect(page.text("#featured-predictions").replace(/\s+/g, " ").trim()).toBe(`URBANO Score ${COPY[lang].descriptor} ${COPY[lang].homeOpen}`); // nothing else is written on the card
     });
 
     it(`the public page (${lang}): title, one heading, descriptor, scope and the loading text carry the name`, async () => {
@@ -156,8 +159,8 @@ describe("URBANO Score is named, described and bounded where a person meets it",
     });
   }
 
-  it("the name and the announcement (Home), and the name, descriptor and scope (public page), are static markup: on screen before any script runs and whatever happens to the list", () => {
-    expect(HTML["index.html"]).toMatch(/<h2 id="featured-title">URBANO Score<\/h2>\s*(?:<!--[\s\S]*?-->\s*)?<div class="featured-crests" aria-hidden="true">[\s\S]*?<\/div>\s*<p class="featured-descriptor" data-i18n="home\.score\.clasico">El Clásico: FC Barcelona vs\. Real Madrid CF<\/p>\s*<p class="featured-scope" data-i18n="home\.score\.venue">Vivilo en The Pub by Beer Box<\/p>/);
+  it("the name and the entry (Home), and the name, descriptor and scope (public page), are static markup: on screen before any script runs and whatever happens to the list", () => {
+    expect(HTML["index.html"]).toMatch(/<h2 id="featured-title">URBANO Score<\/h2>\s*<p class="featured-descriptor" data-i18n="home\.score\.descriptor">Tus predicciones deportivas<\/p>\s*<a class="featured-play" id="featured-play" href="\/soccer-predictions\.html" data-i18n="home\.score\.open">Abrir URBANO Score<\/a>\s*<\/div>/);
     expect(HTML["soccer-predictions.html"]).toMatch(/<h1 id="score-title">URBANO Score<\/h1>\s*<p class="score-descriptor" data-i18n="pred\.descriptor">Tus predicciones deportivas<\/p>\s*<p class="score-scope" data-i18n="pred\.scope">Por ahora solo hay fútbol disponible\.<\/p>/);
   });
 
@@ -180,7 +183,7 @@ describe("URBANO Score is named, described and bounded where a person meets it",
     expect(doc.querySelector("#featured-predictions .featured-cta")).toBeNull();
     const links = Array.from(doc.querySelectorAll("#featured-predictions a")) as HTMLAnchorElement[];
     expect(links.map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html"]);
-    expect(links[0].textContent).toBe("Jugar ahora");
+    expect(links[0].textContent).toBe("Abrir URBANO Score");
   });
 });
 
@@ -213,7 +216,9 @@ describe("the name does not enable other sports or a multi-sport architecture", 
     for (const lang of ["es", "en"] as const) {
       const mentions = Object.entries(dictionary[lang]).filter(([key, value]) => /^(home|pred|profile)\./.test(key) && /f[uú]tbol|soccer|deport|sport/i.test(value) && !/^pred\.(f\.|dim\.|geo\.)/.test(key));
       const keys = mentions.map(([key]) => key).sort();
-      expect(keys, lang).toEqual(["home.hero.sub", "pred.descriptor", "pred.scope"].filter((k) => keys.includes(k)).sort());
+      expect(keys, lang).toEqual(["home.hero.sub", "home.score.descriptor", "pred.descriptor", "pred.scope"].filter((k) => keys.includes(k)).sort());
+      // the Home entry's descriptor is the page's own descriptor, word for word: the two cannot drift apart
+      expect(dictionary[lang]["home.score.descriptor"], lang).toBe(dictionary[lang]["pred.descriptor"]);
     }
   });
 });
@@ -222,7 +227,7 @@ describe("what is identity, not text, kept its historical name", () => {
   it("the route and the file are unchanged, and every existing link to them still points there", () => {
     expect(existsSync(path.join(ROOT, "public/soccer-predictions.html"))).toBe(true);
     expect(existsSync(path.join(ROOT, "public/score.html"))).toBe(false);
-    expect(HTML["index.html"].match(/href="\/soccer-predictions\.html"/g)!.length).toBeGreaterThanOrEqual(1); // the link to the past predictions and results
+    expect(HTML["index.html"].match(/href="\/soccer-predictions\.html"/g)).toHaveLength(1); // the Home's one link into URBANO Score
     expect(HTML["profile.html"]).toContain('link.href = "/soccer-predictions.html"');
   });
 
@@ -231,6 +236,8 @@ describe("what is identity, not text, kept its historical name", () => {
     for (const dir of ["app/api/gaming/predictions", "lib/gaming/predictions", "supabase/migrations"]) expect(existsSync(path.join(ROOT, dir)), dir).toBe(true);
     expect(existsSync(path.join(ROOT, "lib/gaming/predictions/types.ts"))).toBe(true);
     expect(HTML["index.html"]).toContain('id="featured-predictions"'); // the element ids keep their names too
-    expect(HTML["index.html"]).toContain('id="featured-status"');
+    expect(HTML["index.html"]).toContain('id="featured-title"');
+    expect(HTML["index.html"]).toContain('id="featured-play"');
+    expect(HTML["index.html"]).not.toContain('id="featured-status"'); // the "next match" pill went with the expired promotion; nothing replaced it
   });
 });

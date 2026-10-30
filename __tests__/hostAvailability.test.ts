@@ -459,13 +459,14 @@ describe("public/index.html — the Become a Host card fails closed", () => {
     const page = await loadLanding(() => "reject");
     await page.settle(30);
     const titles = (selector: string) => Array.from(page.doc.querySelectorAll(selector)).map((h) => h.textContent);
-    // Order of the page: URBANO Poker and Halloween / Community (Experiences), Trivia, the Minigames, and last the organizers' entries.
-    expect(titles("#experiences-carousel h3")).toEqual(["URBANO Poker", "Costume contest"]);
+    // Order of the page: the Halloween costume-contest announcement (static, near the top), URBANO Poker (Experiences), Trivia, the Minigames, and last the organizers' entries.
+    expect(titles("#halloween h2")).toEqual(["Costume contest"]);
+    expect(titles("#experiences-carousel h3")).toEqual(["URBANO Poker"]);
     expect(titles("#games-carousel h3")).toEqual(["Trivia"]); // Quiz and Duel are not shown on the Home (their implementations are untouched)
     expect(titles("#minigames-grid h3")).toEqual(["URBANO Rutas", "URBANO Towers"]);
     expect(titles("#organizers-grid h3")).toEqual(["Become a Host", "URBANO Competitions"]);
-    expect(Array.from(page.doc.querySelectorAll(".exp-card h3")).map((h) => h.textContent)).toEqual(["URBANO Poker", "Costume contest", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
-    expect(page.text().match(/Level\s*33|\bQuiz\b|\bDuel\b/i)?.[0] ?? null).toBeNull(); // (the Halloween card's own words may say "community voting")
+    expect(Array.from(page.doc.querySelectorAll(".exp-card h2, .exp-card h3")).map((h) => h.textContent)).toEqual(["Costume contest", "URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Become a Host", "URBANO Competitions"]);
+    expect(page.text().match(/Level\s*33|\bQuiz\b|\bDuel\b/i)?.[0] ?? null).toBeNull();
     expect(page.doc.querySelectorAll("#organizers-grid .exp-card.is-locked").length).toBe(2); // both informational while closed
     expect(page.doc.querySelectorAll('a[href*="competitions"]').length).toBe(0); // URBANO Competitions activates no journey
   });
