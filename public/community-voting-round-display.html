@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Concurso de Disfraces — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Halloween Community Voting, two-round pilot — the public display (a screen at the venue). Its job is EXPOSURE: every shown costume, in turn,
+   * in a fresh random order. It receives no count, rank, total or "trending" signal from the server, so it cannot show standing even
+   * by accident. It needs no sign-in: nothing here is private.
+   */
+  :root { --bg-page: #000; --ink: #f5f1e8; --muted: #b5afa0; --halloween: #ff7a1a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg-page); color: var(--ink); font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; cursor: none; }
+  #stage { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #photoWrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; padding: 3vh 4vw 0; min-height: 0; }
+  #photo { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 18px; opacity: 0; transition: opacity 0.6s ease; box-shadow: 0 0 80px rgba(255, 122, 26, 0.25); }
+  #photo.show { opacity: 1; }
+  #number { position: absolute; left: 5vw; top: 5vh; background: rgba(0, 0, 0, 0.72); border: 2px solid var(--halloween); border-radius: 999px; padding: 0.6vh 1.6vw; font-size: clamp(22px, 4vw, 64px); font-weight: 800; }
+  #prompt { padding: 2.4vh 4vw 3.4vh; text-align: center; font-size: clamp(20px, 3.2vw, 52px); font-weight: 800; letter-spacing: 0.01em; }
+  #when { padding: 0 4vw 2vh; text-align: center; font-size: clamp(14px, 1.8vw, 28px); color: var(--muted); min-height: 1.4em; }
+  #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 8vw; font-size: clamp(24px, 4vw, 64px); font-weight: 800; }
+  #empty.show { display: flex; }
+  #testBanner { position: absolute; top: 0; left: 0; right: 0; z-index: 5; background: #b91c1c; color: #fff; text-align: center; font-weight: 800; letter-spacing: 0.08em; padding: 1.2vh 3vw; font-size: clamp(18px, 3vw, 46px); border-bottom: 0.6vh solid #fecaca; }
+  #testBanner[hidden] { display: none; }
+  body.is-test #photoWrap { padding-top: 12vh; }
+  body.is-test #number { top: 13vh; }
+</style>
+</head>
+<body>
+<div id="stage" aria-live="off">
+  <div id="testBanner" hidden></div>
+  <div id="photoWrap"><img id="photo" alt="" decoding="async" /></div>
+  <div id="number" hidden></div>
+  <div id="prompt"></div>
+  <div id="when"></div>
+  <div id="empty"></div>
+</div>
+
+<script src="/communityVotingSlideshow.js"></script>
+<script src="/communityVotingRound.js"></script>
+<script>
+(() => {
+  "use strict";
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get("e") || "";
+  const photo = document.getElementById("photo");
+  const number = document.getElementById("number");
+  const promptEl = document.getElementById("prompt");
+  const whenEl = document.getElementById("when");
+  const emptyEl = document.getElementById("empty");
+  const testBanner = document.getElementById("testBanner");
+  const BASE_TITLE = document.title;
+  const PREFIX = "/api/gaming/community-voting/rounds/";
+  const DEFAULT_PROMPT = "Elige tu disfraz favorito.";
+  const rotation = CommunityVotingSlideshow.createRotation();
+  let rotationSeconds = 8;
+  let timer = null;
+
+  const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const base = `${PREFIX}${id}`;
+
+  async function getJson(path) {
+    try {
+      const r = await window.fetch(`${base}${path}`);
+      if (r.status !== 200) return null;
+      return await r.json();
+    } catch (e) { return null; }
+  }
+
+  function show(item) {
+    if (!item || typeof item.imageUrl !== "string" || !item.imageUrl.startsWith(PREFIX)) return;
+    photo.classList.remove("show");
+    const next = new Image();
+    next.onload = () => { photo.src = item.imageUrl; photo.alt = `Disfraz número ${item.alias}`; number.textContent = `#${item.alias}`; number.hidden = false; photo.classList.add("show"); };
+    next.onerror = () => { /* a picture that fails to load is skipped; the next tick shows the next one */ };
+    next.src = item.imageUrl;
+  }
+
+  async function refreshList() {
+    const slide = await getJson("/slideshow");
+    if (!slide) return false; // keep cycling the last list rather than going blank
+    promptEl.textContent = slide.prompt || DEFAULT_PROMPT;
+    if (Number.isFinite(slide.rotationSeconds) && slide.rotationSeconds >= 3) rotationSeconds = slide.rotationSeconds;
+    rotation.load(slide.items || []);
+    return true;
+  }
+
+  // The line under the photograph comes from the SERVER's answer: the remaining time is derived from the server clock it reports (and advanced
+  // by this page's monotonic clock), never from this screen's wall clock, and every time shown is the EVENT's (America/Tegucigalpa).
+  // A round that is only SCHEDULED is announced as scheduled, never as open. After publication the announcement replaces it.
+  const R = CommunityVotingRound;
+  let remainingAtFetch = null;
+  let fetchedAt = 0;
+  let lastInfo = null;
+  let announcement = null;
+  function paintWhen() {
+    const i = lastInfo;
+    if (!i) return;
+    if (announcement) { whenEl.textContent = announcement; return; }
+    let line = "";
+    if (i.phase === "NOT_OPEN") {
+      const planned = R.formatEventTime(i.votingOpensAt);
+      line = planned ? `${i.roundRole === "FINAL" ? "La final" : "La votación"} está programada para las ${planned} (hora de Honduras) y aún no está abierta${i.tentative ? " · horario tentativo" : ""}` : "La votación aún no está abierta";
+    } else if (i.phase === "OPEN" && remainingAtFetch !== null) {
+      const left = remainingAtFetch - (performance.now() - fetchedAt);
+      line = left > 0 ? `${i.roundRole === "FINAL" ? "Final abierta" : "Votación abierta"} · quedan ${R.formatCountdown(left)}` : "El tiempo de votación terminó. ¡Gracias por participar!";
+    } else if (i.phase === "OPEN") line = "Votación abierta";
+    else if (i.phase === "CLOSED" || i.phase === "ENDED") line = "La votación está cerrada. ¡Gracias por participar!";
+    whenEl.textContent = line;
+  }
+  // A rehearsal is labelled on the venue screen for as long as it is shown, in the same words as every other page.
+  function paintTestEvent(isTest) {
+    testBanner.hidden = !isTest;
+    if (isTest) testBanner.textContent = `${R.TEST_EVENT_LABEL} — ${R.TEST_EVENT_NOTICE}`;
+    document.body.classList.toggle("is-test", isTest);
+    document.title = isTest ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
+  }
+  async function refreshWhen() {
+    const info = await getJson("/info");
+    if (!info) return;
+    lastInfo = info.info;
+    paintTestEvent(lastInfo.isTest === true);
+    remainingAtFetch = Number.isFinite(lastInfo.deadlineRemainingMs) ? lastInfo.deadlineRemainingMs : null;
+    fetchedAt = performance.now();
+    paintWhen();
+    if (lastInfo.published) {
+      const res = await getJson("/results");
+      if (res && res.published && res.items.length > 0) {
+        const names = res.items.map((x) => `#${x.alias}`).join(" · ");
+        announcement = res.kind === "WINNERS" ? `${res.items.length > 1 ? "Ganadores" : "Ganador"}: ${names}` : `Finalistas: ${names}`;
+        whenEl.textContent = announcement;
+      }
+    }
+  }
+
+  async function tick() {
+    if (rotation.needsRefresh()) await refreshList();
+    const item = rotation.next();
+    if (item) { emptyEl.classList.remove("show"); show(item); }
+    else { emptyEl.textContent = promptEl.textContent || DEFAULT_PROMPT; emptyEl.classList.add("show"); photo.classList.remove("show"); number.hidden = true; }
+    clearTimeout(timer);
+    timer = setTimeout(tick, rotationSeconds * 1000);
+  }
+
+  async function boot() {
+    promptEl.textContent = DEFAULT_PROMPT;
+    if (!validId) { emptyEl.textContent = "Enlace de pantalla no válido."; emptyEl.classList.add("show"); return; }
+    await refreshList();
+    await refreshWhen();
+    setInterval(refreshWhen, 15000);
+    setInterval(paintWhen, 1000);
+    tick();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

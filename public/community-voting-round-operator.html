@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<title>Operador — Concurso de Disfraces (dos rondas) — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Halloween Community Voting, two-round pilot — the operator's tablet. Only the designated operator (a signed-in Gaming Member who also
+   * holds the round's host token) can do anything here; every control calls a server route that checks both again, and the database checks
+   * the member against the one recorded on the round. Text from the server is placed with textContent, never as markup. The per-contestant
+   * totals exist only after a round has closed; while it is open this page shows aggregate counters and nothing else.
+   */
+  :root { --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c; --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a; --halloween: #ff7a1a; --halloween-bg: rgba(255,122,26,.12); --good: #4ade80; --bad: #f87171; }
+  * { box-sizing: border-box; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 48px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input, textarea, select { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 16px; }
+  .top { display: flex; align-items: center; gap: 12px; padding: 14px 20px; max-width: 980px; margin: 0 auto; }
+  .top h1 { font-size: 16px; margin: 0; flex: 1; }
+  main { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 16px; margin: 0 0 8px; }
+  .card p { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 6px 0; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .stack > * + * { margin-top: 10px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-weight: 700; font-size: 14px; min-height: 46px; }
+  .btn.primary { background: var(--halloween); color: #1a0d00; border-color: var(--halloween); }
+  .btn.good { background: var(--good); color: #052e16; border-color: var(--good); }
+  .btn.bad { background: var(--bad); color: #450a0a; border-color: var(--bad); }
+  .msg { font-size: 13px; padding: 10px 12px; border-radius: 10px; line-height: 1.45; margin-bottom: 10px; }
+  .msg.err { background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.4); color: #fecaca; }
+  .msg.ok { background: rgba(74,222,128,.12); border: 1px solid rgba(74,222,128,.4); color: #bbf7d0; }
+  .msg.warn { background: var(--halloween-bg); border: 1px solid rgba(255,122,26,.4); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; background: var(--bg-page); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; color: var(--ink); overflow-wrap: anywhere; }
+  .chip { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; background: var(--surface-2); }
+  .chip.live { background: var(--halloween-bg); color: var(--halloween); }
+  .chip.done { background: rgba(74,222,128,.14); color: var(--good); }
+  .counters { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .counter { background: var(--surface-2); border-radius: 12px; padding: 10px; text-align: center; }
+  .counter b { display: block; font-size: 22px; }
+  .counter span { font-size: 11px; color: var(--muted); }
+  .clock { font-size: 28px; font-weight: 800; letter-spacing: .05em; }
+  .entry { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 10px; background: var(--surface-2); }
+  .entry header { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .entry header .no { font-weight: 800; font-size: 18px; flex: 1; }
+  .entry img.preview { width: 100%; max-height: 340px; object-fit: contain; background: #000; border-radius: 10px; }
+  .code-big { font-size: 30px; font-weight: 800; letter-spacing: .12em; text-align: center; padding: 12px; background: var(--bg-card); border-radius: 10px; }
+  .consent-text { background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 14px; line-height: 1.5; }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+  .check input { width: 24px; height: 24px; flex: 0 0 24px; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  ol.steps li .what { flex: 1; min-width: 200px; }
+  ol.steps li small { display: block; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.cut td { background: var(--halloween-bg); }
+  .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  .modal { background: var(--bg-card); border: 1px solid var(--line); border-radius: 16px; width: 100%; max-width: 520px; padding: 18px; }
+  .hidden { display: none !important; }
+  .chip.warn { background: rgba(250,204,21,.16); color: #fde68a; }
+  .chip.bad { background: rgba(248,113,113,.16); color: #fecaca; }
+  /* a rehearsal says so, loudly, for as long as the page is showing it */
+  #bannerSlot { position: sticky; top: 0; z-index: 6; }
+  .test-banner { background: #b91c1c; color: #fff; padding: 10px 20px; font-size: 14px; font-weight: 700; line-height: 1.4; text-align: center; border-bottom: 3px solid #fecaca; }
+  .test-banner strong { letter-spacing: .08em; font-weight: 800; }
+  .field small { display: block; color: var(--muted); font-size: 12px; line-height: 1.4; margin-top: 4px; }
+  .field small.err { color: #fecaca; }
+  .geo-result { border: 1px solid var(--line); border-left-width: 6px; border-radius: 10px; padding: 12px; background: var(--surface-2); }
+  .geo-result[data-tone="good"] { border-left-color: var(--good); }
+  .geo-result[data-tone="bad"] { border-left-color: var(--bad); }
+  .geo-result[data-tone="warn"] { border-left-color: var(--halloween); }
+  .geo-result p { margin: 6px 0 0; }
+  .geo-schematic-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  #geo-schematic { width: 100%; max-width: 320px; height: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
+  details.help > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="bannerSlot"></div>
+<header class="top">
+  <img src="/urbano-mark.svg" alt="" width="24" height="26" />
+  <h1>Operador · Concurso de Disfraces</h1>
+  <button class="btn" id="signInButton" type="button">Iniciar sesión</button>
+  <span id="signInStatus" class="chip"></span>
+</header>
+<main id="main"><div id="app" aria-busy="true" aria-live="polite"></div></main>
+<div id="modalRoot"></div>
+
+<script src="/urbanoAuth.js"></script>
+<script src="/communityVotingRoundOperator.js"></script>
+<script>
+(() => {
+  "use strict";
+  const P = CommunityVotingRoundOperator;
+  const app = document.getElementById("app");
+  const modalRoot = document.getElementById("modalRoot");
+  const EVENT_KEY = "cvop2:round";
+  const FULL_LONG_SIDE = 1600;
+  const THUMB_LONG_SIDE = 320;
+  const CLAIM_TTL_SECONDS = 3600;
+
+  const store = {
+    get(k) { try { return window.sessionStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { window.sessionStorage.setItem(k, v); } catch (e) { /* ignore */ } },
+    remove(k) { try { window.sessionStorage.removeItem(k); } catch (e) { /* ignore */ } },
+  };
+  // the schedule form, in the EVENT's own date and time (America/Tegucigalpa), never the tablet's
+  const freshSchedule = () => ({ registration: { date: "", time: "" }, cutoff: { date: "", time: "" }, opens: { date: "", time: "" }, closes: { date: "", time: "" }, confirmed: false });
+  const freshRegister = () => ({ sessionId: "", hostToken: "", role: "PRELIMINARY", source: "", lat: "", lon: "", radius: "", accuracy: "", inside: "1", outside: "1", test: false });
+  // The final's geofence form and everything private to testing it: the typed values, the proposal taken from this device, the last test and the
+  // reading it used. Held in this page's memory ONLY (never stored, never logged) and dropped with the person, the round or the result.
+  const freshGeo = () => ({ form: null, baseline: null, proposal: null, result: null, reading: null, resultWasDirty: false, error: null, fieldErrors: {}, locating: false });
+  const BASE_TITLE = document.title;
+  const state = {
+    auth: { status: "unauthenticated" },
+    // Who the page is showing it for. `epoch` goes up every time the signed-in person changes or signs out; whatever was started under an
+    // older epoch is dropped when it finishes (a late answer must never restore a previous person's round). `identityKey` is the
+    // identity contract's own "who, and how far their account is", so a repeated notification for the same state does nothing.
+    epoch: 0, identityKey: "",
+    // the round this person connected to (its id and host token). Never read from storage until the person it belongs to is known.
+    round: null,
+    overview: null, results: null, claims: {}, previews: {}, consentChecked: {}, texts: null,
+    tick: 0, fetchedAtMono: 0,
+    error: null, notice: null, busy: false,
+    promptText: "Elige tu disfraz favorito",
+    schedule: freshSchedule(),
+    policyRefs: {}, policyAcks: {}, taskNotes: {},
+    register: freshRegister(),
+    geo: freshGeo(),
+  };
+  const mono = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  /** HH:MM in the event's zone, from an ISO instant. */
+  const eventTime = (iso) => { const t = P.fromEventInstant(iso); return t ? t.time : ""; };
+
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "text") el.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+      else if (v === true) el.setAttribute(k, "");
+      else el.setAttribute(k, String(v));
+    }
+    for (const kid of kids.flat()) {
+      if (kid === null || kid === undefined || kid === false) continue;
+      el.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    }
+    return el;
+  }
+  const say = (code) => P.describeError(code);
+  // Every call is tied to the epoch it started in: if the person changed meanwhile, the answer is replaced by a marker nobody acts on.
+  const STALE = Object.freeze({ status: -1, json: { code: "IDENTITY_CHANGED" }, stale: true });
+  const api = () => {
+    const epoch = state.epoch;
+    const raw = P.buildOperatorApi((...a) => window.fetch(...a), () => UrbanoAuth.getAccessToken(), () => (state.round && state.round.hostToken) || "", state.round.instanceId);
+    return new Proxy(raw, { get: (target, name) => (typeof target[name] !== "function" ? target[name] : async (...args) => { const r = await target[name](...args); return epoch === state.epoch ? r : STALE; }) });
+  };
+  // The round is remembered for THIS tab only and together with the person it belongs to; a different person never inherits it.
+  const saveRound = () => {
+    if (state.round && state.auth.authUserId) store.set(EVENT_KEY, JSON.stringify({ instanceId: state.round.instanceId, hostToken: state.round.hostToken, ownerUserId: state.auth.authUserId }));
+    else store.remove(EVENT_KEY);
+  };
+  function loadStoredRound(auth) {
+    let stored = null;
+    try { stored = JSON.parse(store.get(EVENT_KEY) || "null"); } catch (e) { stored = null; }
+    if (stored && auth.status === "authenticated" && auth.authUserId && stored.ownerUserId === auth.authUserId && stored.instanceId && stored.hostToken) return { instanceId: stored.instanceId, hostToken: stored.hostToken };
+    store.remove(EVENT_KEY);
+    return null;
+  }
+  const clearMessages = () => { state.error = null; state.notice = null; };
+  function fail(r) {
+    if (r && r.stale) return;
+    state.error = r.status === 0 ? "No hay conexión con el servidor. Inténtalo de nuevo." : say(r.json && r.json.code);
+    state.notice = null;
+  }
+  async function act(fn) {
+    const epoch = state.epoch;
+    state.error = null; state.notice = null; state.busy = true; render();
+    try { await fn(); } finally { if (epoch === state.epoch) state.busy = false; }
+    if (epoch !== state.epoch) return;
+    await refresh();
+    if (epoch === state.epoch) render();
+  }
+
+  // ---- data ------------------------------------------------------------------------------------------------------------------
+  async function refresh() {
+    if (!state.round) return;
+    const epoch = state.epoch;
+    const [ov, info] = await Promise.all([api().overview(), api().info()]);
+    if (epoch !== state.epoch) return; // the person changed while this was on its way: nothing of it may be shown or stored
+    if (ov.status === 200) {
+      state.overview = ov.json; state.fetchedAtMono = mono();
+      syncGeofenceForm(ov.json);
+      const s = ov.json.schedule;
+      const part = (iso) => P.fromEventInstant(iso) || { date: "", time: "" };
+      if (s) state.schedule = { registration: part(s.registrationOpensAt), cutoff: part(s.contestantCutoffAt), opens: part(s.votingOpensAt), closes: part(s.votingClosesAt), confirmed: s.status === "CONFIRMED" };
+      if (ov.json.closed) {
+        const res = await api().results();
+        if (epoch !== state.epoch) return;
+        state.results = res.status === 200 ? res.json : null;
+      } else state.results = null;
+    } else if (ov.status !== 0) fail(ov);
+    if (info.status === 200) state.texts = info.json.texts;
+  }
+
+  /** What the server holds for the final's geofence, as the six numbers (the overview also says whether it is still editable and when it was saved). */
+  const savedVenue = (gf) => ({ venueLatitude: gf.venueLatitude, venueLongitude: gf.venueLongitude, venueRadiusMeters: gf.venueRadiusMeters, maxAccuracyMeters: gf.maxAccuracyMeters, insideMarginFactor: gf.insideMarginFactor, outsideMarginFactor: gf.outsideMarginFactor });
+  /** The form follows the server until the operator has edits of their own; their edits are never overwritten by a refresh. */
+  function syncGeofenceForm(ov) {
+    const g = state.geo;
+    if (!ov || !ov.geofence) { state.geo = freshGeo(); return; }
+    const saved = savedVenue(ov.geofence);
+    if (g.form === null || (g.baseline && !P.geofenceDirty(g.baseline, g.form))) g.form = P.geofenceToForm(saved);
+    g.baseline = saved;
+  }
+
+  // ---- the image pipeline: resize in the browser, but the SERVER re-validates and strips metadata anyway ----------------------
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = () => reject(new Error("read"));
+      reader.readAsDataURL(blob);
+    });
+  }
+  async function defaultImagePipeline(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => reject(new Error("decode")); i.src = url; });
+      const encode = async (longSide) => {
+        const plan = P.planResize(img.naturalWidth, img.naturalHeight, longSide);
+        const canvas = document.createElement("canvas");
+        canvas.width = plan.width; canvas.height = plan.height;
+        canvas.getContext("2d").drawImage(img, 0, 0, plan.width, plan.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+        return { base64: await blobToBase64(blob), dataUrl: canvas.toDataURL("image/jpeg", 0.85) };
+      };
+      const full = await encode(FULL_LONG_SIDE);
+      const thumb = await encode(THUMB_LONG_SIDE);
+      return { fullImage: full.base64, thumbImage: thumb.base64, previewUrl: full.dataUrl };
+    } finally { URL.revokeObjectURL(url); }
+  }
+  const imagePipeline = (file) => (typeof window.CV_OPERATOR_IMAGE_PIPELINE === "function" ? window.CV_OPERATOR_IMAGE_PIPELINE(file) : defaultImagePipeline(file));
+
+  // ---- confirmations ---------------------------------------------------------------------------------------------------------
+  function confirmDialog(title, text, confirmLabel, onConfirm, extra) {
+    const close = () => { modalRoot.textContent = ""; };
+    const go = h("button", { class: "btn bad", id: "dialogConfirm", text: confirmLabel, onclick: async () => { go.disabled = true; const keep = await onConfirm(); if (keep !== false) close(); } });
+    modalRoot.textContent = "";
+    modalRoot.appendChild(h("div", { class: "modal-back" }, h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": title },
+      h("h2", { text: title }), h("p", { text }), extra || null,
+      h("div", { class: "row" }, h("button", { class: "btn", id: "dialogCancel", text: "Cancelar", onclick: close }), go))));
+    go.focus();
+  }
+
+  // ---- connect / register ----------------------------------------------------------------------------------------------------
+  function renderConnect() {
+    const id = h("input", { id: "instanceId", placeholder: "Id de la ronda", "aria-label": "Id de la ronda", autocomplete: "off" });
+    const token = h("input", { id: "hostToken", placeholder: "Token del anfitrión de la sesión", "aria-label": "Token del anfitrión", autocomplete: "off" });
+    const go = h("button", { class: "btn primary", id: "connect", text: "Conectar", onclick: async () => {
+      const epoch = state.epoch;
+      state.round = { instanceId: id.value.trim(), hostToken: token.value.trim() }; state.geo = freshGeo(); saveRound();
+      clearMessages(); await refresh(); if (epoch === state.epoch) render();
+    } });
+    const r = state.register;
+    const field = (key, label, extra) => h("label", { class: "stack" }, h("span", { class: "chip", text: label }), h("input", Object.assign({ id: `reg-${key}`, value: r[key], autocomplete: "off", oninput: (e) => { r[key] = e.target.value; } }, extra || {})));
+    const role = h("select", { id: "reg-role", "aria-label": "Rol de la ronda", onchange: (e) => { r.role = e.target.value; render(); } },
+      h("option", { value: "PRELIMINARY", text: "Preliminar (desde cualquier lugar)", selected: r.role === "PRELIMINARY" }),
+      h("option", { value: "FINAL", text: "Final (solo en el evento, con tiempo limitado)", selected: r.role === "FINAL" }));
+    const reg = h("button", { class: "btn", id: "register", text: "Registrar esta ronda", onclick: async () => {
+      const epoch = state.epoch;
+      clearMessages();
+      const body = { sessionId: r.sessionId.trim(), roundRole: r.role };
+      if (r.role === "FINAL") {
+        body.sourceInstanceId = r.source.trim();
+        body.venue = { venueLatitude: Number(r.lat), venueLongitude: Number(r.lon), venueRadiusMeters: Number(r.radius), maxAccuracyMeters: Number(r.accuracy), insideMarginFactor: Number(r.inside), outsideMarginFactor: Number(r.outside) };
+      }
+      if (r.test === true) body.testMode = true;
+      const token = await UrbanoAuth.getAccessToken();
+      const res = await window.fetch("/api/gaming/community-voting/rounds", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-host-token": r.hostToken.trim() }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, json: await x.json().catch(() => null) })).catch(() => ({ status: 0, json: { code: "NETWORK" } }));
+      if (epoch !== state.epoch) return; // another person is signed in now: this answer is not theirs
+      if (res.status === 201) { state.round = { instanceId: res.json.instance.instanceId, hostToken: r.hostToken.trim() }; state.geo = freshGeo(); saveRound(); state.error = null; state.notice = "Ronda registrada."; await refresh(); } else fail(res);
+      if (epoch === state.epoch) render();
+    } });
+    return h("div", null,
+      h("section", { class: "card stack", id: "connectCard" }, h("h2", { text: "Conectar a una ronda" }), h("p", { text: "Pega el id de la ronda y el token del anfitrión de su sesión." }), id, token, go),
+      h("section", { class: "card stack", id: "registerCard" }, h("h2", { text: "Registrar una ronda" }),
+        h("p", { text: "Una ronda por sesión. La preliminar no lleva lugar. La final lleva su preliminar y los datos del lugar; su ventana es de cinco minutos desde que la abres." }),
+        field("sessionId", "Id de la sesión"), field("hostToken", "Token del anfitrión"), role,
+        h("label", { class: "check" }, h("input", { type: "checkbox", id: "reg-test", checked: r.test, onchange: (e) => { r.test = e.target.checked; } }),
+          h("span", { text: `Es un ensayo: registrar esta ronda como ${P.TEST_EVENT_LABEL}.` })),
+        h("p", { id: "reg-test-help", text: `Un evento de prueba se marca al registrar la ronda y no se puede cambiar después: no se puede convertir una ronda real en prueba ni una de prueba en real. Las páginas de operador, votantes y pantalla mostrarán «${P.TEST_EVENT_LABEL}». Usa una sesión nueva para el ensayo; la final debe ser de prueba si su preliminar lo es, y real si no.` }),
+        r.role === "FINAL" ? [field("source", "Id de la preliminar"), field("lat", "Latitud del lugar"), field("lon", "Longitud del lugar"), field("radius", "Radio (metros)"), field("accuracy", "Precisión máxima (metros)"), field("inside", "Margen interior"), field("outside", "Margen exterior")] : null,
+        reg));
+  }
+
+  // ---- the round ------------------------------------------------------------------------------------------------------------
+  function counters() {
+    const c = state.overview.counters;
+    const box = (n, label) => h("div", { class: "counter" }, h("b", { text: String(n) }), h("span", { text: label }));
+    return h("div", { class: "counters" }, box(c.boundVoters, "Votantes dentro"), box(c.votes, "Votos recibidos"), box(c.entries, "Participantes"), box(c.withdrawn, "Retirados"));
+  }
+
+  function header() {
+    const ov = state.overview;
+    const final = ov.roundRole === "FINAL";
+    const label = P.deadlineLabel(ov, mono() - state.fetchedAtMono);
+    return h("section", { class: "card stack", id: "roundHeader" },
+      h("div", { class: "row" },
+        h("h2", { text: final ? "Final" : "Preliminar" }),
+        h("span", { class: `chip ${ov.opened && !ov.closed ? "live" : ov.closed ? "done" : ""}`, text: ov.published ? "Publicada" : ov.closed ? "Cerrada" : ov.opened ? "Abierta" : "En preparación" })),
+      ov.opened && !ov.closed && label ? h("div", { class: "clock", id: "windowClock", text: label }) : null,
+      ov.opened && !ov.closed ? h("p", { text: final ? "El tiempo de la final lo mide el servidor desde que la abriste; esta pantalla solo lo muestra." : `La votación se cierra sola para votar a las ${eventTime(ov.deadlineAt)} (hora de Honduras): el servidor lo mide; esta pantalla solo lo muestra. Aun así, tú cierras la ronda.` }) : null,
+      ov.publishedAffected && ov.publishedAffected.length > 0
+        ? h("div", { class: "msg warn", role: "alert", id: "publishedAffected", text: `Lo publicado no se modifica, pero ya se retiró: ${ov.publishedAffected.map((a) => a.alias).join(", ")}. Decide qué comunicar.` })
+        : null,
+      // A closed final with no valid vote: said plainly, with no control of its own — the system does not cancel, reopen, extend or pick.
+      ov.closed && ov.noValidResult === true ? h("div", { class: "msg warn", role: "alert", id: "noValidResult", text: P.NO_VALID_RESULT_NOTICE }) : null,
+      counters());
+  }
+
+  function checklist() {
+    const steps = P.nextSteps(state.overview);
+    const handlers = {
+      PREPARE: () => act(async () => { const r = await api().prepareFinal(); if (r.status === 200) state.notice = "La final quedó preparada con los finalistas."; else fail(r); }),
+      OPEN: () => confirmDialog(state.overview.roundRole === "FINAL" ? "Abrir la final" : "Abrir la votación", state.overview.roundRole === "FINAL" ? "El tiempo de cinco minutos empieza ahora y se mide en el servidor. Después de abrir ya no se puede cambiar la preparación ni los horarios." : `Después de abrir ya no se puede cambiar la preparación ni los horarios. Se podrá votar hasta las ${eventTime(state.overview.deadlineAt)} (hora de Honduras) aunque abras más tarde; podrás cerrarla antes si quieres.`, "Abrir ahora", async () => {
+        await act(async () => { const r = await api().open(state.promptText); if (r.status === 201) state.notice = "Votación abierta."; else fail(r); });
+      }),
+      CLOSE: () => confirmDialog("Cerrar la votación", "Nadie podrá votar ni cambiar su voto después. Los totales se verán al cerrar.", "Cerrar ahora", async () => {
+        await act(async () => { const r = await api().close(); if (r.status === 200) state.notice = "Votación cerrada."; else fail(r); });
+      }),
+      FINALISTS: () => act(async () => { const r = await api().finalists(); if (r.status === 200) state.notice = "Corte hecho: avanzan los diez primeros y todos los empatados con el décimo."; else fail(r); }),
+      REVIEW: () => act(async () => { const r = await api().review(); if (r.status === 201) state.notice = "Revisión registrada para los resultados actuales."; else fail(r); }),
+      PUBLISH: () => confirmDialog("Publicar", "Se anunciará públicamente. Solo se publica si los resultados no cambiaron desde la revisión.", "Publicar", async () => {
+        await act(async () => { const r = await api().publish(); if (r.status === 201) state.notice = "Publicado."; else fail(r); });
+      }),
+    };
+    const lobby = P.lobbyStatus(state.overview);
+    return h("section", { class: "card", id: "checklist" }, h("h2", { text: "Pasos de la ronda" }),
+      // The Session's lobby is locked by the HOST, outside this page. The page explains it, offers to look again, and never does it for them.
+      lobby.pending ? h("div", { class: "msg warn", id: "lobbyNotice", role: "note" }, h("p", { text: lobby.text }),
+        h("button", { class: "btn", id: "lobby-recheck", type: "button", disabled: state.busy, text: "Volver a revisar el lobby", onclick: () => act(async () => {}) })) : null,
+      h("ol", { class: "steps" }, steps.map((s) => h("li", { "data-step": s.key },
+        h("span", { class: `chip ${s.done ? "done" : ""}`, text: s.done ? "Hecho" : s.enabled ? "Disponible" : "Pendiente" }),
+        h("div", { class: "what" }, h("b", { text: s.label }), s.reason && !s.done ? h("small", { text: s.reason }) : null),
+        h("button", { class: `btn ${s.enabled ? "primary" : ""}`, id: `step-${s.key}`, disabled: !s.enabled || state.busy, text: "Hacer", onclick: handlers[s.key] })))));
+  }
+
+  function renderSchedule() {
+    const ov = state.overview;
+    const final = ov.roundRole === "FINAL";
+    const s = state.schedule;
+    // Once the round has opened the schedule decided what was accepted, so it is shown and no longer edited (the server refuses it too).
+    if (ov.opened) {
+      const sc = ov.schedule || {};
+      const when = (iso) => { const t = P.fromEventInstant(iso); return t ? `${t.date} ${t.time}` : "—"; };
+      return h("section", { class: "card stack", id: "scheduleCard" }, h("h2", { text: "Horarios (hora de Honduras)" }),
+        h("p", { text: "La ronda ya abrió: los horarios ya no se pueden cambiar." }),
+        h("p", { id: "scheduleSummary", text: `Registro: ${when(sc.registrationOpensAt)} → ${when(sc.contestantCutoffAt)} · Cierre para votar: ${final ? "5 minutos desde la apertura" : when(sc.votingClosesAt)}` }));
+    }
+    const field = (key, label) => h("div", { class: "stack" }, h("span", { class: "chip", text: label }),
+      h("div", { class: "row" },
+        h("input", { type: "date", id: `sched-${key}-date`, value: s[key].date, "aria-label": `${label}: fecha`, oninput: (e) => { s[key].date = e.target.value; } }),
+        h("input", { type: "time", id: `sched-${key}-time`, value: s[key].time, "aria-label": `${label}: hora`, oninput: (e) => { s[key].time = e.target.value; } })));
+    const inst = (key) => (s[key].date && s[key].time ? P.toEventInstant(s[key].date, s[key].time) : null);
+    const useTemplate = () => {
+      const t = P.EVENT_SCHEDULE_TEMPLATE;
+      s.registration = { date: t.date, time: t.registrationOpens }; s.cutoff = { date: t.date, time: t.registrationCloses };
+      s.opens = { date: t.date, time: t.preliminaryOpens }; s.closes = final ? { date: "", time: "" } : { date: t.date, time: t.preliminaryCloses };
+      render();
+    };
+    return h("section", { class: "card stack", id: "scheduleCard" }, h("h2", { text: "Horarios (hora de Honduras)" }),
+      h("p", { text: "Todas las horas son las del evento (America/Tegucigalpa), no las de esta tablet. El límite de participantes y fotos y, en la preliminar, la hora de cierre OBLIGAN: pasada esa hora el servidor no acepta nada más, aunque no hayas cerrado. La apertura prevista solo se muestra al público; abrir la ronda siempre lo haces tú. Puedes ajustarlos hasta abrir la ronda." }),
+      h("button", { class: "btn", id: "useTemplate", type: "button", text: "Usar los horarios iniciales del 31 de octubre (solo rellena el formulario)", onclick: useTemplate }),
+      h("div", { class: "grid2" },
+        field("registration", "Registro y fotos desde"), field("cutoff", "Hora límite de participantes y fotos"), field("opens", "Apertura prevista"),
+        final ? null : field("closes", "Cierre: límite para votar")),
+      final ? h("p", { text: "La final no lleva hora de cierre: su tiempo cuenta desde el instante en que la abres." }) : null,
+      h("label", { class: "check" }, h("input", { type: "checkbox", id: "sched-confirmed", checked: s.confirmed, onchange: (e) => { s.confirmed = e.target.checked; } }), h("span", { text: "Horarios confirmados" })),
+      h("button", { class: "btn", id: "saveSchedule", disabled: state.busy, text: "Guardar horarios", onclick: () => act(async () => {
+        const r = await api().schedule({ registrationOpensAt: inst("registration"), contestantCutoffAt: inst("cutoff"), votingOpensAt: inst("opens"), votingClosesAt: final ? null : inst("closes"), status: s.confirmed ? "CONFIRMED" : "TENTATIVE" });
+        if (r.status === 200) state.notice = "Horarios guardados."; else fail(r);
+      }) }));
+  }
+
+  // -- the final's venue geofence: set up, test and save by the operator, until the final opens (then it is frozen for good)
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs, ...kids) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) { if (v === undefined || v === null || v === false) continue; if (k === "text") el.textContent = v; else el.setAttribute(k, String(v)); }
+    for (const kid of kids.flat()) if (kid) el.appendChild(kid);
+    return el;
+  }
+  const TONE_COLOR = { good: "#4ade80", bad: "#f87171", warn: "#facc15" };
+  const round6 = (n) => String(Math.round(n * 1e6) / 1e6);
+
+  /** The numbers the drawing uses: a test reading is drawn against the SAVED values it was tested with; otherwise the form as it stands (a field that is not a number yet keeps its saved value). */
+  function geofenceSubject() {
+    const g = state.geo;
+    const gf = state.overview.geofence;
+    const saved = savedVenue(gf);
+    if (g.reading) return { venue: g.reading.config, reading: g.reading.reading, fromTest: true };
+    if (gf.editable === true && g.form) {
+      const num = (id, fallback) => { const t = String(g.form[id] === undefined ? "" : g.form[id]).trim().replace(",", "."); const n = Number(t); return t !== "" && Number.isFinite(n) ? n : fallback; };
+      return { venue: Object.assign({}, saved, { venueLatitude: num("lat", saved.venueLatitude), venueLongitude: num("lon", saved.venueLongitude), venueRadiusMeters: num("radius", saved.venueRadiusMeters) }), reading: null, fromTest: false };
+    }
+    return { venue: saved, reading: null, fromTest: false };
+  }
+
+  function geofenceDrawing() {
+    const gf = state.overview.geofence;
+    const subject = geofenceSubject();
+    const draw = (v, reading) => P.schematic({ radiusMeters: v.venueRadiusMeters, centre: { latitude: v.venueLatitude, longitude: v.venueLongitude }, reading, size: 240 });
+    let used = subject;
+    let geometry = draw(subject.venue, subject.reading);
+    if (!geometry) { used = { venue: savedVenue(gf), reading: null, fromTest: false }; geometry = draw(used.venue, null); }
+    const tone = state.geo.result ? P.describeTestResult(state.geo.result).tone : "warn";
+    const color = TONE_COLOR[tone] || TONE_COLOR.warn;
+    const parts = [
+      svgEl("line", { x1: 0, y1: geometry.centre.y, x2: geometry.size, y2: geometry.centre.y, stroke: "#2a2a2a", "stroke-width": 1 }),
+      svgEl("line", { x1: geometry.centre.x, y1: 0, x2: geometry.centre.x, y2: geometry.size, stroke: "#2a2a2a", "stroke-width": 1 }),
+      svgEl("circle", { cx: geometry.centre.x, cy: geometry.centre.y, r: geometry.radiusPx, fill: "rgba(255,122,26,.14)", stroke: "#ff7a1a", "stroke-width": 2, "data-part": "radius" }),
+      svgEl("circle", { cx: geometry.centre.x, cy: geometry.centre.y, r: 3, fill: "#f5f1e8", "data-part": "centre" }),
+      svgEl("text", { x: 10, y: 16, "text-anchor": "start", fill: "#9b9689", "font-size": 12, "font-weight": 700, text: "N ↑" }),
+    ];
+    const r = geometry.reading;
+    if (r) {
+      if (!r.outOfFrame && r.accuracyPx > 0) parts.push(svgEl("circle", { cx: r.x, cy: r.y, r: r.accuracyPx, fill: color, "fill-opacity": 0.14, stroke: color, "stroke-dasharray": "4 3", "stroke-width": 1.5, "data-part": "accuracy" }));
+      parts.push(svgEl("circle", { cx: r.x, cy: r.y, r: 5, fill: color, stroke: "#0a0a0a", "stroke-width": 1.5, "data-part": "reading" }));
+      if (r.outOfFrame) parts.push(svgEl("text", { x: Math.min(Math.max(r.x, 40), geometry.size - 40), y: Math.min(Math.max(r.y + (r.y < geometry.size / 2 ? 20 : -10), 12), geometry.size - 6), "text-anchor": "middle", fill: color, "font-size": 11, text: `a ${meters(r.distanceMeters)} m` }));
+    }
+    parts.push(svgEl("line", { x1: 12, y1: 224, x2: 12 + geometry.scaleBar.px, y2: 224, stroke: "#f5f1e8", "stroke-width": 2 }));
+    parts.push(svgEl("text", { x: 12, y: 218, fill: "#f5f1e8", "font-size": 11, text: geometry.scaleBar.label }));
+    return svgEl("svg", {
+      id: "geo-schematic", viewBox: `0 0 ${geometry.size} ${geometry.size}`, role: "img", "aria-label": "Esquema local de la geocerca: el centro, el radio y, si hay una prueba, la posición probada",
+      "data-radius-meters": String(used.venue.venueRadiusMeters), "data-has-reading": r ? "true" : "false",
+    }, parts);
+  }
+  const meters = (n) => (Number.isFinite(n) ? (Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toFixed(1)) : "—");
+
+  /** The part of the card that follows every keystroke: the unsaved-changes mark, the save button and the drawing. Rebuilt in place so typing keeps its focus. */
+  function geofenceLive() {
+    const gf = state.overview.geofence;
+    const g = state.geo;
+    const editable = gf.editable === true;
+    const dirty = editable && !!g.form && P.geofenceDirty(savedVenue(gf), g.form);
+    const subject = geofenceSubject();
+    return [
+      editable ? h("div", { class: "row" },
+        dirty ? h("span", { class: "chip live", id: "geo-dirty", text: "Cambios sin guardar" }) : null,
+        h("button", { class: "btn primary", id: "geo-save", type: "button", disabled: state.busy || !dirty, text: "Guardar geocerca", onclick: saveGeofence })) : null,
+      h("div", { class: "geo-schematic-wrap" }, geofenceDrawing(),
+        h("p", { id: "geo-schematic-note", text: subject.fromTest
+          ? "Esquema local (no es un mapa): muestra los valores guardados con los que se hizo la prueba. El punto es la posición probada y el círculo punteado su precisión."
+          : "Esquema local (no es un mapa): el centro, el radio y la escala, dibujados a partir de los números. Con «Probar mi ubicación» aparece tu posición." })),
+    ];
+  }
+  function refreshGeofenceLive() {
+    const slot = document.getElementById("geo-live");
+    if (!slot || !state.overview || !state.overview.geofence) return;
+    slot.textContent = "";
+    for (const n of geofenceLive()) if (n) slot.appendChild(n);
+  }
+
+  /** Reads this device's position once. The reading goes where the caller sends it and is kept nowhere else. */
+  async function deviceReading() {
+    return P.readDevicePosition(window.navigator.geolocation);
+  }
+
+  async function useMyLocation() {
+    const epoch = state.epoch;
+    const g = state.geo;
+    g.error = null; g.locating = "use"; render();
+    let reading;
+    try { reading = await deviceReading(); } catch (e) {
+      if (epoch !== state.epoch) return;
+      g.locating = false; g.error = P.describeLocationError(e && e.code); render(); return;
+    }
+    if (epoch !== state.epoch) return;
+    g.locating = false;
+    const typed = P.parseGeofenceForm(g.form || {});
+    const limit = typed.ok ? typed.venue.maxAccuracyMeters : state.overview.geofence.maxAccuracyMeters;
+    const proposal = P.proposeCenter(reading, limit);
+    if (!proposal.ok) {
+      g.error = proposal.code === "ACCURACY_INSUFFICIENT"
+        ? `${P.describeLocationError(proposal.code)} Esta lectura reportó ±${meters(reading.accuracyMeters)} m y el máximo aceptado es ${meters(limit)} m.`
+        : P.describeLocationError(proposal.code);
+      render(); return;
+    }
+    // A PROPOSAL only: it fills the two centre fields. Nothing is saved, tested or opened by it.
+    g.form.lat = round6(proposal.latitude);
+    g.form.lon = round6(proposal.longitude);
+    g.fieldErrors = {};
+    g.proposal = { accuracyMeters: proposal.accuracyMeters };
+    render();
+  }
+
+  async function testMyLocation() {
+    const epoch = state.epoch;
+    const g = state.geo;
+    // a new attempt retires the previous answer: whatever stays on screen is the outcome of the LAST attempt only
+    g.error = null; g.result = null; g.reading = null; g.locating = "test"; render();
+    let reading;
+    try { reading = await deviceReading(); } catch (e) {
+      if (epoch !== state.epoch) return;
+      g.locating = false; g.error = P.describeLocationError(e && e.code); render(); return;
+    }
+    if (epoch !== state.epoch) return;
+    const gf = state.overview.geofence;
+    const wasDirty = gf.editable === true && !!g.form && P.geofenceDirty(savedVenue(gf), g.form);
+    const r = await api().testGeofence(reading);
+    if (r.stale || epoch !== state.epoch) return; // the person changed meanwhile: nothing of this answer may be shown
+    g.locating = false;
+    if (r.status === 200 && r.json && r.json.test) {
+      g.result = r.json.test; g.resultWasDirty = wasDirty;
+      g.reading = { reading, config: savedVenue(gf) };
+    } else fail(r);
+    render();
+  }
+
+  function saveGeofence() {
+    const g = state.geo;
+    const parsed = P.parseGeofenceForm(g.form || {});
+    if (!parsed.ok) { g.fieldErrors = parsed.errors; state.error = "Revisa los datos de la geocerca: hay campos que no son válidos."; state.notice = null; render(); return; }
+    g.fieldErrors = {};
+    act(async () => {
+      const r = await api().geofence(parsed.venue);
+      if (r.status === 200) { state.notice = "Geocerca guardada."; g.proposal = null; g.result = null; g.reading = null; } else fail(r);
+    });
+  }
+
+  function renderGeofence() {
+    const ov = state.overview;
+    const gf = ov.geofence;
+    if (!gf) return null;
+    const g = state.geo;
+    const saved = savedVenue(gf);
+    if (!g.form) g.form = P.geofenceToForm(saved);
+    const editable = gf.editable === true;
+    const summary = `Guardada: centro ${saved.venueLatitude}, ${saved.venueLongitude} · radio ${saved.venueRadiusMeters} m · precisión máxima ${saved.maxAccuracyMeters} m · margen interior ${saved.insideMarginFactor} · margen exterior ${saved.outsideMarginFactor}`
+      + (gf.savedAt ? ` · guardada a las ${eventTime(gf.savedAt)} (hora de Honduras)` : " · son los valores del registro: todavía no guardaste cambios");
+    const field = (f) => h("label", { class: "stack field" },
+      h("span", { class: "chip", text: f.label }),
+      h("input", { id: `geo-${f.id}`, inputmode: "decimal", autocomplete: "off", value: g.form[f.id], "aria-label": f.label, oninput: (e) => {
+        g.form[f.id] = e.target.value;
+        if (f.id === "lat" || f.id === "lon") { g.proposal = null; const note = document.getElementById("geo-proposal"); if (note) note.remove(); }
+        delete g.fieldErrors[f.id];
+        const err = document.querySelector(`[data-field-error="${f.id}"]`); if (err) err.remove();
+        refreshGeofenceLive();
+      } }),
+      g.fieldErrors[f.id] ? h("small", { class: "err", "data-field-error": f.id, text: g.fieldErrors[f.id] }) : null,
+      P.GEOFENCE_HELP[f.id] ? h("small", { id: `geo-help-${f.id}`, text: P.GEOFENCE_HELP[f.id] }) : null);
+    const locating = !!g.locating;
+    return h("section", { class: "card stack", id: "geofenceCard" },
+      h("div", { class: "row" }, h("h2", { text: "Geocerca del lugar (la final)" }),
+        h("span", { class: `chip ${editable ? "live" : "done"}`, id: "geo-status", text: editable ? "Editable hasta abrir la final" : "Congelada: la final ya abrió" })),
+      h("p", { text: "La geocerca decide quién puede votar en la final: solo se acepta el voto de quien está dentro del círculo, según la ubicación que informa su navegador. Puedes ajustarla las veces que quieras hasta que abras la final; al abrirla queda congelada y no vuelve a cambiar." }),
+      h("p", { id: "geo-privacy-note", text: "Lo que guardes queda registrado en la auditoría de la ronda (centro, radio y márgenes, quién lo guardó y cuándo). Guarda solo la ubicación del lugar del evento, nunca la de una casa o la de una persona. Las posiciones que pruebes no se guardan en ningún lado." }),
+      h("p", { id: "geo-saved-summary", text: summary }),
+      editable
+        ? h("div", { class: "grid2" }, P.GEOFENCE_FIELDS.map(field))
+        : h("div", { id: "geo-frozen-values", class: "msg warn" },
+            `Centro: ${saved.venueLatitude}, ${saved.venueLongitude} · Radio: ${saved.venueRadiusMeters} m · Precisión máxima: ${saved.maxAccuracyMeters} m · Margen interior: ${saved.insideMarginFactor} · Margen exterior: ${saved.outsideMarginFactor}. La final ya abrió: estos valores quedaron congelados.`),
+      g.proposal ? h("p", { id: "geo-proposal", class: "msg warn", text: `Propuesta tomada de la ubicación de este dispositivo (±${meters(g.proposal.accuracyMeters)} m): todavía no está guardada. Revisa el centro y pulsa «Guardar geocerca» si es correcto.` }) : null,
+      g.error ? h("div", { class: "msg err", id: "geo-error", role: "alert", text: g.error }) : null,
+      h("div", { class: "row" },
+        editable ? h("button", { class: "btn", id: "geo-use-location", type: "button", disabled: state.busy || locating, text: "Usar mi ubicación", onclick: useMyLocation }) : null,
+        h("button", { class: "btn", id: "geo-test", type: "button", disabled: state.busy || locating, text: "Probar mi ubicación", onclick: testMyLocation })),
+      h("p", { id: "geo-actions-help", text: (editable ? "«Usar mi ubicación» solo propone el centro con la posición de este dispositivo: no guarda nada. " : "") +
+        "«Probar mi ubicación» pide al servidor que evalúe tu posición con la misma regla que se usa para votar: no guarda tu posición ni emite ningún voto." +
+        (editable ? " Solo «Guardar geocerca» cambia la geocerca." : "") }),
+      g.result ? (() => {
+        const d = P.describeTestResult(g.result);
+        return h("div", { class: "geo-result", id: "geo-result", role: "status", "data-decision": g.result.decision, "data-tone": d.tone },
+          h("strong", { text: d.title }), h("p", { text: d.detail }),
+          g.resultWasDirty ? h("p", { text: "La prueba usó los valores guardados; los cambios sin guardar del formulario no se tuvieron en cuenta." }) : null,
+          h("button", { class: "btn", id: "geo-clear", type: "button", text: "Borrar el resultado de la prueba", onclick: () => { g.result = null; g.reading = null; render(); } }));
+      })() : null,
+      h("div", { id: "geo-live", class: "stack" }, geofenceLive()),
+      h("p", { id: "geo-help-browser", text: P.GEOFENCE_HELP.browser }));
+  }
+
+  // -- Policies that need the Founder's approval. The operator cannot approve one: they can only record that the approval exists.
+  function renderPolicies() {
+    const ov = state.overview;
+    const pending = new Set((ov.pendingResolutions || []).map((p) => p.key));
+    const rows = P.POLICY_ORDER.map((key) => (ov.policies || []).find((p) => p.key === key) || { key, approved: false, value: null, approvalReference: null });
+    const line = (field, label, text) => h("p", { "data-field": field }, h("strong", { text: label }), text);
+    return h("section", { class: "card stack", id: "policiesCard" }, h("h2", { text: "Políticas que requieren aprobación del Founder" }),
+      h("p", { text: "Cada política tiene un único valor que el sistema puede ejecutar; otro valor sería un cambio de código, no una elección de esta pantalla. La aprueba el Founder fuera de la aplicación. El sistema no las decide, no las preselecciona y no las registra por su cuenta: mientras falte el registro, la operación que depende de ella se rechaza. Se registra una sola vez y no se puede cambiar." }),
+      rows.map((row) => {
+        const key = row.key;
+        const info = P.POLICY_INFO[key];
+        const keyLine = h("p", null, "Política: ", h("code", { "data-field": "key", text: key }));
+        if (row.approved) {
+          // the stored value and reference exactly as the server holds them; the page claims no verification and no approval of its own
+          return h("div", { class: "entry", "data-policy": key, "data-policy-state": "recorded" },
+            h("header", null, h("span", { class: "no", text: info.title }), h("span", { class: "chip done", "data-field": "status", text: P.POLICY_STATUS_RECORDED })),
+            keyLine,
+            h("p", null, "Valor registrado: ", h("code", { "data-field": "value", text: row.value })),
+            h("p", null, "Referencia citada por el operador: ", h("span", { "data-field": "reference", text: row.approvalReference })),
+            h("p", { "data-field": "recordedNotice", text: P.POLICY_RECORDED_NOTICE }),
+            row.value === info.value ? line("inForce", "Efecto en vigor: ", info.ifRecorded) : null);
+        }
+        const ref = h("input", { id: `policy-ref-${key}`, placeholder: "Dónde consta la aprobación del Founder (obligatorio)", maxlength: "200", autocomplete: "off", "aria-label": `Referencia de la aprobación: ${info.title}`, value: state.policyRefs[key] || "", oninput: (e) => { state.policyRefs[key] = e.target.value; } });
+        const ack = h("input", { type: "checkbox", id: `policy-ack-${key}`, checked: !!state.policyAcks[key], onchange: (e) => { state.policyAcks[key] = e.target.checked; } });
+        return h("div", { class: "entry", "data-policy": key, "data-policy-state": "pending" },
+          h("header", null, h("span", { class: "no", text: info.title }),
+            h("span", { class: "chip", "data-field": "status", text: P.POLICY_STATUS_PENDING }),
+            pending.has(key) ? h("span", { class: "chip live", "data-field": "blocking", text: "Bloquea ahora" }) : null),
+          keyLine,
+          h("p", null, "Único valor que el sistema puede ejecutar: ", h("code", { "data-field": "value", text: info.value })),
+          h("p", { "data-field": "applies", text: info.applies }),
+          line("ifRecorded", "Si se registra: ", info.ifRecorded),
+          line("whilePending", "Mientras no se registre: ", info.whilePending),
+          h("div", { class: "msg warn", role: "note", "data-field": "authority", text: P.POLICY_OPERATOR_NOTICE }),
+          ref,
+          h("label", { class: "check" }, ack, h("span", { text: P.POLICY_ACK_TEXT })),
+          h("button", { class: "btn", id: `policy-${key}`, disabled: state.busy, text: P.POLICY_ACTION_LABEL, onclick: () => {
+            const reference = (state.policyRefs[key] || "").trim();
+            if (!state.policyAcks[key]) { state.error = P.POLICY_MISSING_ACK; state.notice = null; render(); return; }
+            if (reference.length < 3) { state.error = P.POLICY_MISSING_REFERENCE; state.notice = null; render(); return; }
+            confirmDialog(P.POLICY_ACTION_LABEL, `Política ${key} con el valor ${info.value}. Referencia que citas: «${reference}». Quedas como el operador que registra esta constancia: la aplicación no verifica que el Founder haya aprobado este valor. Se registra una sola vez y no se puede cambiar.`, P.POLICY_ACTION_LABEL, async () => {
+              await act(async () => {
+                const r = await api().policy(key, reference);
+                if (r.status === 201) { state.policyRefs[key] = ""; state.policyAcks[key] = false; state.notice = "Constancia registrada por el operador. La revisión de los resultados debe hacerse de nuevo."; } else fail(r);
+              });
+            });
+          } }));
+      }));
+  }
+
+  // -- pending operational work (for example, taking an external publication down by hand)
+  function renderTasks() {
+    const tasks = (state.overview.tasks || []);
+    if (tasks.length === 0) return null;
+    return h("section", { class: "card stack", id: "tasksCard" }, h("h2", { text: "Tareas pendientes del equipo" }),
+      tasks.map((t) => {
+        const note = h("input", { id: `task-note-${t.taskId}`, placeholder: "Qué se hizo (obligatorio)", maxlength: "300", "aria-label": "Nota de resolución", value: state.taskNotes[t.taskId] || "", oninput: (e) => { state.taskNotes[t.taskId] = e.target.value; } });
+        return h("div", { class: "entry", "data-task": t.taskId },
+          h("header", null, h("span", { class: "no", text: "Retirar una publicación externa" }), h("span", { class: `chip ${t.status === "DONE" ? "done" : "live"}`, text: t.status === "DONE" ? "Hecha" : "Pendiente" })),
+          h("p", { text: t.description }),
+          t.status === "DONE" ? h("p", { text: `Resuelta: ${t.resolutionNote}` })
+            : [note, h("button", { class: "btn good", id: `task-done-${t.taskId}`, disabled: state.busy, text: "Marcar como hecha", onclick: () => { const n = (state.taskNotes[t.taskId] || "").trim(); if (!n) return; act(async () => { const r = await api().resolveTask(t.taskId, n); if (r.status !== 200) fail(r); else state.notice = "Tarea resuelta."; }); } })]);
+      }));
+  }
+
+  // -- one entry
+  function entryCard(entry) {
+    const step = P.entryNextStep(entry);
+    const claim = state.claims[entry.entryId];
+    const body = [];
+    if (step === "WITHDRAWN") body.push(h("p", { text: "Este participante retiró su candidatura en ambas rondas." }));
+    if (step === "PHOTO") {
+      const file = h("input", { type: "file", accept: "image/*", capture: "environment", id: `file-${entry.entryId}`, "aria-label": "Tomar o elegir la fotografía" });
+      file.addEventListener("change", async () => {
+        if (!file.files || !file.files[0]) return;
+        await act(async () => {
+          let pipeline;
+          try { pipeline = await imagePipeline(file.files[0]); } catch (e) { state.error = say("PHOTO_INVALID"); return; }
+          const r = await api().photo(entry.entryId, pipeline.fullImage, pipeline.thumbImage);
+          if (r.status === 201) { state.previews[entry.entryId] = { photoId: r.json.photoId, url: pipeline.previewUrl }; state.notice = `Fotografía de #${entry.label.slice(1)} cargada.`; } else fail(r);
+        });
+      });
+      body.push(h("p", { text: "Toma la fotografía de la persona." }), file);
+    }
+    if (step === "CONSENT" || step === "REVIEW") {
+      const preview = state.previews[entry.entryId];
+      const photoId = entry.photoId || (preview && preview.photoId);
+      if (preview && preview.url) body.push(h("img", { class: "preview", src: preview.url, alt: `Fotografía del participante ${entry.label}` }));
+      if (step === "CONSENT" && state.texts) {
+        const checked = !!state.consentChecked[entry.entryId];
+        body.push(
+          h("div", { class: "consent-text", id: `consent-text-${entry.entryId}`, text: state.texts.galleryConsent.text }),
+          h("label", { class: "check" }, h("input", { type: "checkbox", id: `consent-${entry.entryId}`, checked, onchange: (e) => { state.consentChecked[entry.entryId] = e.target.checked; render(); } }), h("span", { text: "La persona confirma que es mayor de edad y acepta esta autorización (galería y concurso)." })),
+          h("button", { class: "btn good", id: `record-consent-${entry.entryId}`, disabled: !checked || state.busy, text: "Registrar consentimiento", onclick: () => act(async () => {
+            const r = await api().consent(entry.entryId, photoId, state.texts.galleryConsent.version);
+            if (r.status === 201) { state.consentChecked[entry.entryId] = false; state.notice = "Consentimiento registrado."; } else fail(r);
+          }) }));
+      }
+      if (step === "REVIEW") {
+        body.push(h("div", { class: "row" },
+          h("button", { class: "btn good", id: `approve-${entry.entryId}`, disabled: state.busy, text: "Aprobar fotografía", onclick: () => act(async () => { const r = await api().decision(entry.entryId, photoId, "APPROVED"); if (r.status !== 200) fail(r); }) }),
+          h("button", { class: "btn bad", id: `reject-${entry.entryId}`, disabled: state.busy, text: "Rechazar", onclick: () => act(async () => { const r = await api().decision(entry.entryId, photoId, "REJECTED", "No cumple"); if (r.status !== 200) fail(r); }) })));
+      }
+    }
+    if (step === "ASSOCIATION") {
+      const code = h("input", { id: `confirm-code-${entry.entryId}`, placeholder: "Código que muestra el teléfono de la persona", autocomplete: "off", "aria-label": "Código de confirmación" });
+      body.push(
+        claim ? h("div", null, h("p", { text: "Entrega este código a la persona participante (se muestra una sola vez):" }), h("div", { class: "code-big", id: `claim-${entry.entryId}`, text: P.formatClaimCode(claim) })) : null,
+        h("p", { text: "La persona entra con su cuenta, escribe su código y el teléfono le muestra otro: escríbelo aquí." }), code,
+        h("button", { class: "btn good", id: `confirm-${entry.entryId}`, disabled: state.busy, text: "Confirmar asociación", onclick: () => act(async () => {
+          const r = await api().association(entry.entryId, code.value);
+          if (r.status !== 200) fail(r); else state.notice = "Asociación confirmada.";
+        }) }));
+    }
+    // the promotional decision: optional, separate, never a condition to compete
+    if (step !== "WITHDRAWN" && state.texts && !entry.carried) {
+      const set = (decision) => act(async () => { const r = await api().promo(entry.entryId, state.texts.promoConsent.version, decision); if (r.status !== 201) fail(r); });
+      body.push(h("details", { id: `promo-${entry.entryId}` }, h("summary", { text: `Uso promocional: ${P.promoLabel(entry.promotional)}` }),
+        h("div", { class: "consent-text", text: state.texts.promoConsent.text }),
+        h("div", { class: "row" },
+          h("button", { class: "btn", id: `promo-accept-${entry.entryId}`, disabled: state.busy || entry.promotional === "ACCEPTED", text: "Autoriza", onclick: () => set("ACCEPTED") }),
+          h("button", { class: "btn", id: `promo-decline-${entry.entryId}`, disabled: state.busy || entry.promotional === "DECLINED" || entry.promotional === "ACCEPTED", text: "No autoriza", onclick: () => set("DECLINED") }),
+          h("button", { class: "btn", id: `promo-withdraw-${entry.entryId}`, disabled: state.busy || entry.promotional !== "ACCEPTED", text: "Retira la autorización", onclick: () => set("WITHDRAWN") }))));
+    }
+    // Photograph visibility is its own act: it hides the picture everywhere and decides nothing about the competition.
+    if (step !== "WITHDRAWN" && entry.media !== "HIDDEN" && entry.media !== "NONE" && !entry.carried) {
+      body.push(h("button", { class: "btn", id: `hide-${entry.entryId}`, text: "La persona pide ocultar su fotografía", onclick: () => {
+        const reason = h("input", { id: "hideReason", placeholder: "Motivo (obligatorio)", maxlength: "300" });
+        confirmDialog("Ocultar la fotografía", `La fotografía de ${entry.label} deja de mostrarse en las dos rondas y se borra ahora. Su participación, sus votos y los resultados no cambian.`, "Ocultar fotografía", async () => {
+          if (!reason.value.trim()) return false;
+          await act(async () => { const r = await api().hidePhoto(entry.entryId, reason.value.trim()); if (r.status === 201) state.notice = "Fotografía oculta."; else fail(r); });
+        }, reason);
+      } }));
+    }
+    if (entry.media === "HIDDEN" && step !== "WITHDRAWN") body.push(h("p", { class: "chip", id: `hidden-${entry.entryId}`, text: "Fotografía oculta a petición de la persona" }));
+    if (step !== "WITHDRAWN") {
+      body.push(h("button", { class: "btn bad", id: `withdraw-${entry.entryId}`, text: "Retirar de la votación", onclick: () => {
+        const reason = h("input", { id: "withdrawReason", placeholder: "Motivo (obligatorio)", maxlength: "300" });
+        const hide = h("input", { type: "checkbox", id: "withdrawHidePhoto" });
+        const extra = h("div", { class: "stack" }, reason, h("label", { class: "check" }, hide, h("span", { text: "También ocultar y borrar su fotografía ahora" })));
+        confirmDialog("Retirar participante", `La persona ${entry.label} sale de los resultados, de la galería y de las dos rondas. Los votos que ya recibió se conservan como evidencia; la fotografía solo se borra si lo marcas.`, "Retirar", async () => {
+          if (!reason.value.trim()) return false;
+          await act(async () => { const r = await api().withdraw(entry.entryId, reason.value.trim(), hide.checked); if (r.status === 201) state.notice = "Participante retirado."; else fail(r); });
+        }, extra);
+      } }));
+    }
+    return h("div", { class: "entry", "data-entry": entry.entryId, "data-step": step },
+      h("header", null, h("span", { class: "no", text: entry.label }),
+        h("span", { class: `chip ${step === "READY" ? "done" : ""}`, text: step === "READY" ? "Listo" : step === "WITHDRAWN" ? "Retirado" : "Pendiente" })),
+      body);
+  }
+
+  function renderEntries() {
+    const ov = state.overview;
+    const canAdd = ov.roundRole === "PRELIMINARY" && !ov.opened;
+    return h("section", { class: "card", id: "entries" }, h("h2", { text: ov.roundRole === "FINAL" ? "Finalistas" : "Participantes" }),
+      canAdd ? h("button", { class: "btn primary", id: "addEntry", disabled: state.busy, text: "Agregar participante", onclick: () => act(async () => {
+        const r = await api().createEntry(CLAIM_TTL_SECONDS);
+        if (r.status === 201) { state.claims[r.json.entry.entryId] = r.json.entry.claimCode; state.notice = `Participante ${r.json.entry.label} creado. Entrega su código.`; } else fail(r);
+      }) }) : null,
+      ov.entries.length === 0 ? h("p", { text: ov.roundRole === "FINAL" ? "Todavía no hay finalistas: prepara la final después del corte de la preliminar." : "Todavía no hay participantes." }) : null,
+      ov.entries.map(entryCard));
+  }
+
+  // -- results (after the close only)
+  function renderResults() {
+    const res = state.results;
+    if (!res) return null;
+    const final = state.overview.roundRole === "FINAL";
+    return h("section", { class: "card stack", id: "results" }, h("h2", { text: final ? "Resultados de la final" : "Resultados de la preliminar" }),
+      h("table", null,
+        h("thead", null, h("tr", null, h("th", { text: "Participante" }), h("th", { text: "Votos" }), h("th", { text: "Puesto" }), h("th", { text: final ? "Ganador" : "Finalista" }))),
+        h("tbody", null, res.rows.map((r) => h("tr", { class: r.finalist || r.winner ? "cut" : "", "data-label": r.label },
+          h("td", { text: r.withdrawn ? `${r.label} (retirado)` : r.label }), h("td", { text: String(r.votes) }), h("td", { text: r.competitionRank === null ? "—" : String(r.competitionRank) }),
+          h("td", { text: (final ? r.winner : r.finalist) ? "Sí" : "" }))))),
+      h("p", { text: final ? "Si hay empate en el primer puesto, los ganadores son compartidos." : "Avanzan los diez primeros y todos los empatados con el décimo." }));
+  }
+
+  function renderRound() {
+    return [header(), checklist(), renderGeofence(), renderPolicies(), renderTasks(), renderSchedule(), renderEntries(), renderResults()];
+  }
+
+  /** A rehearsal is announced for as long as it is on screen: the banner above everything and the title of the tab. Nothing on screen = no label. */
+  function paintTestEvent() {
+    const slot = document.getElementById("bannerSlot");
+    const test = state.auth.status === "authenticated" && !!state.round && !!state.overview && state.overview.isTest === true;
+    document.title = test ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
+    slot.textContent = "";
+    if (test) slot.appendChild(h("div", { class: "test-banner", id: "testBanner", role: "status" }, h("strong", { text: P.TEST_EVENT_LABEL }), ` — ${P.TEST_EVENT_NOTICE}`));
+  }
+
+  function render() {
+    app.setAttribute("aria-busy", "false");
+    paintTestEvent();
+    const parts = [
+      state.error ? h("div", { class: "msg err", role: "alert", text: state.error }) : null,
+      state.notice ? h("div", { class: "msg ok", role: "status", text: state.notice }) : null,
+    ];
+    if (state.auth.status !== "authenticated") {
+      parts.push(h("div", { class: "msg warn", role: "status", id: "needSignIn", text: state.auth.status === "profile_incomplete" ? "Completa tu perfil de URBANO Gaming para operar." : "Inicia sesión con la cuenta del operador." }));
+    } else if (!state.round) parts.push(renderConnect());
+    else if (!state.overview) parts.push(h("div", { class: "card" }, h("p", { text: "Conectando…" })), h("button", { class: "btn", id: "disconnect", text: "Cambiar de ronda", onclick: () => { state.round = null; state.geo = freshGeo(); saveRound(); clearMessages(); render(); } }));
+    else parts.push(...renderRound(), h("button", { class: "btn", id: "disconnect", text: "Cambiar de ronda", onclick: () => { state.round = null; state.overview = null; state.results = null; state.geo = freshGeo(); saveRound(); clearMessages(); render(); } }));
+    app.textContent = "";
+    for (const p of parts.flat()) if (p) app.appendChild(p);
+  }
+
+  setInterval(() => { const clock = document.getElementById("windowClock"); if (clock && state.overview) clock.textContent = P.deadlineLabel(state.overview, mono() - state.fetchedAtMono) || ""; }, 1000);
+
+  // ---- who is signed in: the destination's identity contract (public/urbanoAuth.js) -----------------------------------------------
+  // onIdentityReset runs synchronously, BEFORE anything is looked up, the moment the person changes or signs out: everything that
+  // belonged to the previous person goes at once, including the round and its host token (the authority). onIdentityChange says who is
+  // signed in, or how far their account is (a first-time member finishing the profile), whenever that changes. Raw Auth events (token
+  // refreshes, repeated sign-ins) are not what this page reacts to, and a repeated notification for the same state does nothing.
+  function dropPreviousPerson() {
+    state.epoch += 1;
+    state.identityKey = "";
+    state.auth = { status: "unauthenticated" };
+    state.round = null; state.overview = null; state.results = null; state.texts = null;
+    state.claims = {}; state.previews = {}; state.consentChecked = {}; state.policyRefs = {}; state.policyAcks = {}; state.taskNotes = {};
+    state.schedule = freshSchedule(); state.register = freshRegister(); state.geo = freshGeo();
+    state.busy = false; state.error = null; state.notice = null;
+    modalRoot.textContent = "";
+    store.remove(EVENT_KEY);
+  }
+  async function showIdentity(next) {
+    const key = [next.status, next.authUserId || "", next.gamingMemberId || ""].join("|");
+    if (key === state.identityKey) return;
+    state.identityKey = key;
+    state.auth = next;
+    state.round = loadStoredRound(next);
+    const epoch = state.epoch;
+    render();
+    if (state.round) { await refresh(); if (epoch === state.epoch) render(); }
+  }
+
+  let identityWired = false;
+  (async () => {
+    UrbanoAuth.attachSignInButton(document.getElementById("signInButton"), document.getElementById("signInStatus"));
+    if (!identityWired) {
+      identityWired = true;
+      UrbanoAuth.onIdentityReset(() => { dropPreviousPerson(); render(); });
+      UrbanoAuth.onIdentityChange((next) => showIdentity(next));
+    }
+    let first;
+    try { first = await UrbanoAuth.getState(); } catch (e) { first = { status: "unauthenticated" }; }
+    await showIdentity(first);
+  })();
+})();
+</script>
+</body>
+</html>
