@@ -102,8 +102,10 @@ describe("the operator is told plainly what happened and what the system does NO
   });
 
   it("is unchanged for a final that has a result", () => {
+    // GATE-014: a review the server holds for the current results is shown as DONE (and nothing is left to do there); before any review the step is open
     const steps = O.nextSteps(closedFinal({ noValidResult: false, review: { reviewedAt: "x", digest: "d", current: true } }));
-    expect(stepOf(steps, "REVIEW").enabled).toBe(true);
+    expect(stepOf(steps, "REVIEW")).toMatchObject({ done: true, enabled: false });
     expect(stepOf(steps, "PUBLISH")).toMatchObject({ enabled: true, reason: null });
+    expect(stepOf(O.nextSteps(closedFinal({ noValidResult: false, review: null })), "REVIEW")).toMatchObject({ done: false, enabled: true });
   });
 });

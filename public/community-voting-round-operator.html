@@ -82,6 +82,16 @@
   .geo-schematic-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
   #geo-schematic { width: 100%; max-width: 320px; height: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
   details.help > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  /* UG-IV-GATE-014: how fresh the data on screen is, and the unresolved policies kept off the routine path (collapsed unless one blocks something) */
+  .live-status { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+  .live-status[data-tone="stale"] { color: #fde68a; font-weight: 700; }
+  .live-status[data-tone="refreshing"] { color: var(--halloween); }
+  .counters[data-stale="true"] { opacity: .55; }
+  details.card > summary { cursor: pointer; list-style: none; }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary h2 { display: inline; }
+  details.card > summary::after { content: "  ▾"; color: var(--muted); }
+  details.card[open] > summary::after { content: "  ▴"; }
 </style>
 </head>
 <body>
@@ -92,7 +102,7 @@
   <button class="btn" id="signInButton" type="button">Iniciar sesión</button>
   <span id="signInStatus" class="chip"></span>
 </header>
-<main id="main"><div id="app" aria-busy="true" aria-live="polite"></div></main>
+<main id="main"><div id="liveStatus" class="live-status" role="status" aria-live="off" hidden></div><div id="app" aria-busy="true" aria-live="polite"></div></main>
 <div id="modalRoot"></div>
 
 <script src="/urbanoAuth.js"></script>
@@ -136,6 +146,8 @@
     policyRefs: {}, policyAcks: {}, taskNotes: {},
     register: freshRegister(),
     geo: freshGeo(),
+    // GATE-014: a click that claims something (the review) is only believed once the refreshed overview agrees; where the schedule form came from; the totals' key
+    claim: null, identityNote: null, scheduleBaseline: null, resultsKey: "", deferred: 0,
   };
   const mono = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
   /** HH:MM in the event's zone, from an ISO instant. */
@@ -170,11 +182,28 @@
     if (state.round && state.auth.authUserId) store.set(EVENT_KEY, JSON.stringify({ instanceId: state.round.instanceId, hostToken: state.round.hostToken, ownerUserId: state.auth.authUserId }));
     else store.remove(EVENT_KEY);
   };
-  function loadStoredRound(auth) {
+  const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /** The stored connection, or null when there is none or it is malformed, incomplete or in an older format: nothing is guessed from such a value. */
+  function readStoredRound() {
     let stored = null;
     try { stored = JSON.parse(store.get(EVENT_KEY) || "null"); } catch (e) { stored = null; }
-    if (stored && auth.status === "authenticated" && auth.authUserId && stored.ownerUserId === auth.authUserId && stored.instanceId && stored.hostToken) return { instanceId: stored.instanceId, hostToken: stored.hostToken };
-    store.remove(EVENT_KEY);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+    if (typeof stored.instanceId !== "string" || !UUID_LIKE.test(stored.instanceId)) return null;
+    if (typeof stored.hostToken !== "string" || stored.hostToken.trim() === "") return null;
+    if (typeof stored.ownerUserId !== "string" || stored.ownerUserId === "") return null;
+    return stored;
+  }
+  /**
+   * Restores ONLY the connection of the person who is signed in now. A connection that is not valid is removed; another person's is removed on
+   * the spot and never used; one that cannot be judged yet (the person is not resolved: a failed lookup, a profile gap, no session) is left in
+   * the tab for its owner — and used for nobody until the owner is resolved.
+   */
+  function loadStoredRound(auth) {
+    const stored = readStoredRound();
+    if (!stored) { store.remove(EVENT_KEY); return null; }
+    const known = auth && typeof auth.authUserId === "string" && auth.authUserId !== "" ? auth.authUserId : null;
+    if (known && stored.ownerUserId !== known) { store.remove(EVENT_KEY); return null; }
+    if (known && auth.status === "authenticated") return { instanceId: stored.instanceId, hostToken: stored.hostToken };
     return null;
   }
   const clearMessages = () => { state.error = null; state.notice = null; };
@@ -189,28 +218,182 @@
     try { await fn(); } finally { if (epoch === state.epoch) state.busy = false; }
     if (epoch !== state.epoch) return;
     await refresh();
-    if (epoch === state.epoch) render();
+    if (epoch === state.epoch) { settleClaim(); render(); }
   }
 
   // ---- data ------------------------------------------------------------------------------------------------------------------
+  /**
+   * Reads the round's authoritative state — the overview, the texts, and (once it is closed) the totals — unless the person or the round changed
+   * meanwhile. It does NOT apply anything: whoever called it applies the answer if it is still wanted. `live` is the poll's lighter read.
+   */
+  async function readRound(opts) {
+    const live = !!(opts && opts.live);
+    if (!state.round || state.auth.status !== "authenticated") return { ok: false };
+    const epoch = state.epoch;
+    const instanceId = state.round.instanceId;
+    const current = () => epoch === state.epoch && !!state.round && state.round.instanceId === instanceId;
+    const [ov, info] = await Promise.all([api().overview(), live && state.texts ? Promise.resolve({ status: 0 }) : api().info()]);
+    if (!current() || ov.stale) return { ok: false };
+    if (ov.status !== 200) return { ok: false, reply: ov };
+    let results;
+    if (ov.json.closed && (!live || state.results === null || state.resultsKey !== resultsKeyOf(ov.json))) {
+      const r = await api().results();
+      if (!current() || r.stale) return { ok: false };
+      results = r.status === 200 ? r.json : null;
+    }
+    return { ok: true, overview: ov.json, results, texts: info.status === 200 && info.json ? info.json.texts : undefined };
+  }
+  /** What the closed round's totals depend on: when it changes the totals are read again. */
+  const resultsKeyOf = (ov) => [ov.counters && ov.counters.votes, ov.counters && ov.counters.withdrawn, (ov.entries || []).length, ov.review && ov.review.digest, ov.published].join("|");
+
+  function applyRound(read) {
+    state.overview = read.overview; state.fetchedAtMono = mono();
+    syncGeofenceForm(read.overview);
+    syncSchedule(read.overview);
+    if (read.overview.closed) {
+      if (read.results !== undefined) { state.results = read.results; state.resultsKey = resultsKeyOf(read.overview); }
+    } else { state.results = null; state.resultsKey = ""; }
+    if (read.texts) state.texts = read.texts;
+  }
+
+  /** The server does not accept this connection for this person (403) or the round is gone (404): it is dropped from the tab, never kept. */
+  function handleRefusal(reply) {
+    if (!reply || reply.status === 0) return; // no connection: the freshness line says so; nothing is invented
+    fail(reply);
+    if (reply.status === 403 || reply.status === 404) { state.round = null; state.overview = null; state.results = null; state.geo = freshGeo(); saveRound(); }
+  }
+
+  /** The authoritative read after an operator action, a connection or a sign-in. It makes any poll still in flight older than itself. */
   async function refresh() {
     if (!state.round) return;
-    const epoch = state.epoch;
-    const [ov, info] = await Promise.all([api().overview(), api().info()]);
-    if (epoch !== state.epoch) return; // the person changed while this was on its way: nothing of it may be shown or stored
-    if (ov.status === 200) {
-      state.overview = ov.json; state.fetchedAtMono = mono();
-      syncGeofenceForm(ov.json);
-      const s = ov.json.schedule;
-      const part = (iso) => P.fromEventInstant(iso) || { date: "", time: "" };
-      if (s) state.schedule = { registration: part(s.registrationOpensAt), cutoff: part(s.contestantCutoffAt), opens: part(s.votingOpensAt), closes: part(s.votingClosesAt), confirmed: s.status === "CONFIRMED" };
-      if (ov.json.closed) {
-        const res = await api().results();
-        if (epoch !== state.epoch) return;
-        state.results = res.status === 200 ? res.json : null;
-      } else state.results = null;
-    } else if (ov.status !== 0) fail(ov);
-    if (info.status === 200) state.texts = info.json.texts;
+    poller.invalidate();
+    const read = await readRound({ live: false });
+    if (read.ok) { applyRound(read); poller.markFresh(); }
+    else if (read.reply) handleRefusal(read.reply);
+  }
+
+  /** The schedule form follows the server until the operator has edits of their own: those are never overwritten by a refresh. */
+  function syncSchedule(ov) {
+    const s = ov.schedule;
+    if (!s || !state.round) return;
+    const part = (iso) => P.fromEventInstant(iso) || { date: "", time: "" };
+    const fromServer = { registration: part(s.registrationOpensAt), cutoff: part(s.contestantCutoffAt), opens: part(s.votingOpensAt), closes: part(s.votingClosesAt), confirmed: s.status === "CONFIRMED" };
+    const base = state.scheduleBaseline;
+    const untouched = !base || base.id !== state.round.instanceId || JSON.stringify(state.schedule) === JSON.stringify(base.form);
+    state.scheduleBaseline = { id: state.round.instanceId, form: fromServer };
+    if (untouched) state.schedule = JSON.parse(JSON.stringify(fromServer));
+  }
+
+  /** A button that claims success (the review) is believed only when the state read AFTER it agrees. */
+  function settleClaim() {
+    const claim = state.claim;
+    state.claim = null;
+    if (!claim) return;
+    if (claim.kind === "review") {
+      const ok = !!state.overview && !!state.overview.review && state.overview.review.current === true;
+      if (ok) state.notice = "Revisión registrada para los resultados actuales.";
+      else state.error = "La revisión se envió, pero ya no corresponde a los resultados actuales. Regístrala de nuevo.";
+    }
+  }
+
+  // ---- live state (UG-IV-GATE-014): the panel follows the server by itself -------------------------------------------------------
+  // A poll of the (uncached) operator overview — one at a time, quick while voting is open, paused while the page is hidden and refreshed the moment
+  // it is visible again, backed off after failures — whose answer is applied only if it is still the newest and the person and the round are still
+  // the ones it was asked for. It replaces only the sections of the page that CHANGED and never one the operator is typing in. The page says how fresh
+  // its data is, and says so plainly when it is not. The public tally boundary is untouched: this reads only the operator routes.
+
+  let pollingRound = null;
+  const poller = P.createPoller({
+    now: mono,
+    setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimer: (handle) => window.clearTimeout(handle),
+    isVisible: () => !document.hidden,
+    random: () => Math.random(),
+    delayFor: () => P.livePollDelayMs({ overview: state.overview }),
+    staleAfterMs: P.LIVE_POLL.staleAfterMs,
+    maxBackoffMs: P.LIVE_POLL.maxBackoffMs,
+    onStatus: () => paintLive(),
+    fetchOnce: async () => {
+      const read = await readRound({ live: true });
+      if (read.ok) return { ok: true, apply: () => { applyRound(read); renderLive(); } };
+      if (read.reply && (read.reply.status === 403 || read.reply.status === 404)) { handleRefusal(read.reply); render(); return { ok: false, terminal: true }; }
+      return { ok: false };
+    },
+  });
+  function syncPolling() {
+    const want = state.auth.status === "authenticated" && state.round ? state.round.instanceId : null;
+    if (want === pollingRound) return;
+    pollingRound = want;
+    if (want) poller.start(); else poller.stop();
+  }
+  document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));
+  window.addEventListener("pageshow", (e) => { if (e && e.persisted) poller.refreshNow(); });
+  window.addEventListener("online", () => poller.refreshNow());
+
+  function paintLive() {
+    const el = document.getElementById("liveStatus");
+    if (!el) return;
+    const view = P.liveStatus(poller.status());
+    el.hidden = view.tone === "off";
+    // fresh data may be waiting behind a section the operator is typing in: never present that section as current without saying so
+    el.textContent = state.deferred > 0 && view.tone !== "off" ? `${view.text} Hay cambios nuevos que se mostrarán cuando termines de editar.` : view.text;
+    el.setAttribute("data-tone", view.tone);
+    const counters = document.querySelector("#roundSections .counters");
+    if (counters) { if (view.tone === "stale") counters.setAttribute("data-stale", "true"); else counters.removeAttribute("data-stale"); }
+  }
+
+  /** Do two sections show the same thing? Opening or closing a card is the operator's own doing, not a change in the data. */
+  function sameSection(a, b) {
+    const plain = (node) => {
+      const copy = node.cloneNode(true);
+      copy.removeAttribute("open");
+      copy.querySelectorAll("details").forEach((d) => d.removeAttribute("open"));
+      return copy;
+    };
+    return plain(a).isEqualNode(plain(b));
+  }
+  /** True while the operator is typing in a section, has changed one of its controls, or holds an unsaved geofence proposal: it is left alone. */
+  function beingEdited(node) {
+    const active = document.activeElement;
+    if (active && active !== document.body && node.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
+    for (const el of node.querySelectorAll("input, textarea")) {
+      if (el.type === "file") { if (el.files && el.files.length > 0) return true; continue; }
+      if (el.type === "checkbox" || el.type === "radio") { if (el.checked !== el.defaultChecked) return true; continue; }
+      if (el.value !== el.defaultValue) return true;
+    }
+    if (node.id === "geofenceCard" && (state.geo.proposal || state.geo.locating || (state.geo.form && state.geo.baseline && P.geofenceDirty(state.geo.baseline, state.geo.form)))) return true;
+    return false;
+  }
+  function reconcile(slot, next) {
+    const existing = new Map(Array.from(slot.children).map((el) => [el.id, el]));
+    const keep = [];
+    let held = 0;
+    for (const el of next) {
+      const mine = existing.get(el.id);
+      existing.delete(el.id);
+      if (!mine) { keep.push(el); continue; }
+      if (sameSection(mine, el)) { mine.removeAttribute("data-deferred"); keep.push(mine); continue; }
+      if (beingEdited(mine)) { mine.setAttribute("data-deferred", "true"); held += 1; keep.push(mine); continue; } // newer data exists, but the operator is typing here: it waits
+      if (mine.tagName === "DETAILS" && el.tagName === "DETAILS" && mine.open) el.open = true; // the operator opened it: it stays open
+      slot.replaceChild(el, mine);
+      keep.push(el);
+    }
+    existing.forEach((node) => { if (!beingEdited(node)) node.remove(); });
+    let ref = slot.firstChild;
+    for (const node of keep) {
+      if (node === ref) { ref = ref.nextSibling; continue; }
+      slot.insertBefore(node, ref);
+    }
+    return held;
+  }
+  /** Shows fresh data without rebuilding the page: only the sections that changed are replaced. Anything else (the connect form, a sign-in notice) is a full render. */
+  function renderLive() {
+    const slot = document.getElementById("roundSections");
+    if (!slot || !state.round || !state.overview || state.auth.status !== "authenticated") { render(); return; }
+    paintTestEvent();
+    state.deferred = reconcile(slot, renderRound().filter(Boolean));
+    syncPolling();
+    paintLive();
   }
 
   /** What the server holds for the final's geofence, as the six numbers (the overview also says whether it is still editable and when it was saved). */
@@ -340,7 +523,7 @@
         await act(async () => { const r = await api().close(); if (r.status === 200) state.notice = "Votación cerrada."; else fail(r); });
       }),
       FINALISTS: () => act(async () => { const r = await api().finalists(); if (r.status === 200) state.notice = "Corte hecho: avanzan los diez primeros y todos los empatados con el décimo."; else fail(r); }),
-      REVIEW: () => act(async () => { const r = await api().review(); if (r.status === 201) state.notice = "Revisión registrada para los resultados actuales."; else fail(r); }),
+      REVIEW: () => act(async () => { const r = await api().review(); if (r.status === 201) state.claim = { kind: "review" }; else fail(r); }),
       PUBLISH: () => confirmDialog("Publicar", "Se anunciará públicamente. Solo se publica si los resultados no cambiaron desde la revisión.", "Publicar", async () => {
         await act(async () => { const r = await api().publish(); if (r.status === 201) state.notice = "Publicado."; else fail(r); });
       }),
@@ -596,7 +779,7 @@
     const pending = new Set((ov.pendingResolutions || []).map((p) => p.key));
     const rows = P.POLICY_ORDER.map((key) => (ov.policies || []).find((p) => p.key === key) || { key, approved: false, value: null, approvalReference: null });
     const line = (field, label, text) => h("p", { "data-field": field }, h("strong", { text: label }), text);
-    return h("section", { class: "card stack", id: "policiesCard" }, h("h2", { text: "Políticas que requieren aprobación del Founder" }),
+    return h("details", { class: "card stack", id: "policiesCard", open: pending.size > 0 }, h("summary", null, h("h2", { text: "Políticas que requieren aprobación del Founder" })),
       h("p", { text: "Cada política tiene un único valor que el sistema puede ejecutar; otro valor sería un cambio de código, no una elección de esta pantalla. La aprueba el Founder fuera de la aplicación. El sistema no las decide, no las preselecciona y no las registra por su cuenta: mientras falte el registro, la operación que depende de ella se rechaza. Se registra una sola vez y no se puede cambiar." }),
       rows.map((row) => {
         const key = row.key;
@@ -789,41 +972,73 @@
       state.notice ? h("div", { class: "msg ok", role: "status", text: state.notice }) : null,
     ];
     if (state.auth.status !== "authenticated") {
-      parts.push(h("div", { class: "msg warn", role: "status", id: "needSignIn", text: state.auth.status === "profile_incomplete" ? "Completa tu perfil de URBANO Gaming para operar." : "Inicia sesión con la cuenta del operador." }));
+      parts.push(h("div", { class: "msg warn", role: "status", id: "needSignIn", text: state.identityNote || (state.auth.status === "profile_incomplete" ? "Completa tu perfil de URBANO Gaming para operar." : "Inicia sesión con la cuenta del operador.") }));
     } else if (!state.round) parts.push(renderConnect());
     else if (!state.overview) parts.push(h("div", { class: "card" }, h("p", { text: "Conectando…" })), h("button", { class: "btn", id: "disconnect", text: "Cambiar de ronda", onclick: () => { state.round = null; state.geo = freshGeo(); saveRound(); clearMessages(); render(); } }));
-    else parts.push(...renderRound(), h("button", { class: "btn", id: "disconnect", text: "Cambiar de ronda", onclick: () => { state.round = null; state.overview = null; state.results = null; state.geo = freshGeo(); saveRound(); clearMessages(); render(); } }));
+    else parts.push(h("div", { id: "roundSections" }, ...renderRound()), h("button", { class: "btn", id: "disconnect", text: "Cambiar de ronda", onclick: () => { state.round = null; state.overview = null; state.results = null; state.geo = freshGeo(); saveRound(); clearMessages(); render(); } }));
     app.textContent = "";
     for (const p of parts.flat()) if (p) app.appendChild(p);
+    state.deferred = 0;
+    syncPolling();
+    paintLive();
   }
 
-  setInterval(() => { const clock = document.getElementById("windowClock"); if (clock && state.overview) clock.textContent = P.deadlineLabel(state.overview, mono() - state.fetchedAtMono) || ""; }, 1000);
+  setInterval(() => { const clock = document.getElementById("windowClock"); if (clock && state.overview) clock.textContent = P.deadlineLabel(state.overview, mono() - state.fetchedAtMono) || ""; paintLive(); }, 1000);
 
   // ---- who is signed in: the destination's identity contract (public/urbanoAuth.js) -----------------------------------------------
   // onIdentityReset runs synchronously, BEFORE anything is looked up, the moment the person changes or signs out: everything that
   // belonged to the previous person goes at once, including the round and its host token (the authority). onIdentityChange says who is
   // signed in, or how far their account is (a first-time member finishing the profile), whenever that changes. Raw Auth events (token
   // refreshes, repeated sign-ins) are not what this page reacts to, and a repeated notification for the same state does nothing.
-  function dropPreviousPerson() {
+  function dropPreviousPerson(next) {
+    poller.stop(); pollingRound = null;
+    const incoming = next && typeof next.userId === "string" ? next.userId : null;
+    const wasShowing = state.auth.status === "authenticated";
+    const stored = readStoredRound();
     state.epoch += 1;
     state.identityKey = "";
     state.auth = { status: "unauthenticated" };
     state.round = null; state.overview = null; state.results = null; state.texts = null;
     state.claims = {}; state.previews = {}; state.consentChecked = {}; state.policyRefs = {}; state.policyAcks = {}; state.taskNotes = {};
     state.schedule = freshSchedule(); state.register = freshRegister(); state.geo = freshGeo();
+    state.claim = null; state.identityNote = null; state.scheduleBaseline = null; state.resultsKey = "";
     state.busy = false; state.error = null; state.notice = null;
     modalRoot.textContent = "";
-    store.remove(EVENT_KEY);
+    // The connection leaves the tab on every sign-out and every change of person. The only exception: nobody was on screen and the person who is
+    // announced now is the very owner of the stored connection (a session that was still recovering when the page loaded).
+    if (!(stored && incoming && !wasShowing && stored.ownerUserId === incoming)) store.remove(EVENT_KEY);
   }
   async function showIdentity(next) {
     const key = [next.status, next.authUserId || "", next.gamingMemberId || ""].join("|");
     if (key === state.identityKey) return;
     state.identityKey = key;
     state.auth = next;
+    state.identityNote = null;
     state.round = loadStoredRound(next);
     const epoch = state.epoch;
     render();
-    if (state.round) { await refresh(); if (epoch === state.epoch) render(); }
+    if (state.round) { await refresh(); if (epoch === state.epoch) render(); return; }
+    // A profile gap for the very person who owns a stored connection is not a verdict (an operator already has a profile; the shared client keeps
+    // a failed lookup's answer until its next Auth event). The connection stays in the tab for them, and the page says so.
+    const stored = readStoredRound();
+    if (stored && next.status === "profile_incomplete" && next.authUserId === stored.ownerUserId) {
+      state.identityNote = "No pudimos confirmar tu perfil por ahora. La ronda sigue conectada en esta pestaña: recarga la página para retomarla.";
+      render();
+    }
+  }
+  /** The identity could not be read at all (the request itself failed): nothing stored is touched, and the check is repeated a few times before giving up. */
+  const IDENTITY_RETRY_MS = [2000, 5000, 12000];
+  function retryIdentity(attempt) {
+    if (attempt >= IDENTITY_RETRY_MS.length) { state.identityNote = "No pudimos comprobar tu sesión. Recarga la página."; render(); return; }
+    const epoch = state.epoch;
+    window.setTimeout(async () => {
+      if (epoch !== state.epoch) return; // another person or a sign-out came meanwhile
+      let next = null;
+      try { next = await UrbanoAuth.getState(); } catch (e) { next = null; }
+      if (epoch !== state.epoch) return;
+      if (next) { await showIdentity(next); return; }
+      retryIdentity(attempt + 1);
+    }, IDENTITY_RETRY_MS[attempt]);
   }
 
   let identityWired = false;
@@ -831,12 +1046,14 @@
     UrbanoAuth.attachSignInButton(document.getElementById("signInButton"), document.getElementById("signInStatus"));
     if (!identityWired) {
       identityWired = true;
-      UrbanoAuth.onIdentityReset(() => { dropPreviousPerson(); render(); });
+      UrbanoAuth.onIdentityReset((event) => { dropPreviousPerson(event); render(); });
       UrbanoAuth.onIdentityChange((next) => showIdentity(next));
     }
-    let first;
-    try { first = await UrbanoAuth.getState(); } catch (e) { first = { status: "unauthenticated" }; }
-    await showIdentity(first);
+    let first = null;
+    try { first = await UrbanoAuth.getState(); } catch (e) { first = null; }
+    // If WHO is signed in could not be read (a network failure, say), nothing is known about the person: the stored connection is left alone and the check repeats.
+    if (first) await showIdentity(first);
+    else { state.identityNote = "No pudimos comprobar tu sesión; reintentando…"; render(); retryIdentity(0); }
   })();
 })();
 </script>

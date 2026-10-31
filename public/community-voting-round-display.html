@@ -111,6 +111,7 @@
     } else if (i.phase === "OPEN" && remainingAtFetch !== null) {
       const left = remainingAtFetch - (performance.now() - fetchedAt);
       line = left > 0 ? `${i.roundRole === "FINAL" ? "Final abierta" : "Votación abierta"} · quedan ${R.formatCountdown(left)}` : "El tiempo de votación terminó. ¡Gracias por participar!";
+      if (left <= 0 && !deadlineAsked) { deadlineAsked = true; poller.refreshNow(); } // the clock reached zero: ask the server at once
     } else if (i.phase === "OPEN") line = "Votación abierta";
     else if (i.phase === "CLOSED" || i.phase === "ENDED") line = "La votación está cerrada. ¡Gracias por participar!";
     whenEl.textContent = line;
@@ -122,23 +123,40 @@
     document.body.classList.toggle("is-test", isTest);
     document.title = isTest ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
   }
-  async function refreshWhen() {
-    const info = await getJson("/info");
-    if (!info) return;
+  // UG-IV-GATE-014: the same poller as the voter page (one request at a time, adaptive, refreshed when the screen is visible again) instead of a
+  // fixed 15-second timer that could pile requests up and was blind to the final's five minutes. Only what the server answers is shown.
+  let phaseSeenAt = 0;
+  let deadlineAsked = false;
+  function applyWhen(info, res) {
+    const previousPhase = lastInfo ? lastInfo.phase : null;
     lastInfo = info.info;
+    if (lastInfo.phase !== previousPhase) phaseSeenAt = performance.now();
+    deadlineAsked = false;
     paintTestEvent(lastInfo.isTest === true);
     remainingAtFetch = Number.isFinite(lastInfo.deadlineRemainingMs) ? lastInfo.deadlineRemainingMs : null;
     fetchedAt = performance.now();
     paintWhen();
-    if (lastInfo.published) {
-      const res = await getJson("/results");
-      if (res && res.published && res.items.length > 0) {
-        const names = res.items.map((x) => `#${x.alias}`).join(" · ");
-        announcement = res.kind === "WINNERS" ? `${res.items.length > 1 ? "Ganadores" : "Ganador"}: ${names}` : `Finalistas: ${names}`;
-        whenEl.textContent = announcement;
-      }
+    if (lastInfo.published && res && res.published && res.items.length > 0) {
+      const names = res.items.map((x) => `#${x.alias}`).join(" · ");
+      announcement = res.kind === "WINNERS" ? `${res.items.length > 1 ? "Ganadores" : "Ganador"}: ${names}` : `Finalistas: ${names}`;
+      whenEl.textContent = announcement;
     }
   }
+  const poller = R.createPoller({
+    now: () => performance.now(),
+    setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimer: (handle) => window.clearTimeout(handle),
+    isVisible: () => !document.hidden,
+    random: () => Math.random(),
+    delayFor: () => (lastInfo ? R.pollDelayMs({ roundRole: lastInfo.roundRole, phase: lastInfo.phase, published: !!lastInfo.published, sinceChangeMs: performance.now() - phaseSeenAt }) : R.POLL.settledMs),
+    staleAfterMs: R.POLL.staleAfterMs,
+    fetchOnce: async () => {
+      const info = await getJson("/info");
+      if (!info) return { ok: false };
+      const res = info.info.published ? await getJson("/results") : null;
+      return { ok: true, apply: () => applyWhen(info, res) };
+    },
+  });
 
   async function tick() {
     if (rotation.needsRefresh()) await refreshList();
@@ -153,8 +171,13 @@
     promptEl.textContent = DEFAULT_PROMPT;
     if (!validId) { emptyEl.textContent = "Enlace de pantalla no válido."; emptyEl.classList.add("show"); return; }
     await refreshList();
-    await refreshWhen();
-    setInterval(refreshWhen, 15000);
+    const first = await getJson("/info");
+    if (first) applyWhen(first, first.info.published ? await getJson("/results") : null);
+    phaseSeenAt = performance.now();
+    poller.start();
+    document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));
+    window.addEventListener("pageshow", (e) => { if (e && e.persisted) poller.refreshNow(); });
+    window.addEventListener("online", () => poller.refreshNow());
     setInterval(paintWhen, 1000);
     tick();
   }

@@ -126,6 +126,9 @@
     countdown: R.createCountdown(null),
     claimResult: null, retry: null,
     busy: false, error: null, notice: null, fatal: null,
+    // GATE-014: `epoch` goes up whenever the signed-in person changes or signs out, `castSeq` with every vote tap: a location answer that arrives
+    // after either moved on must send nothing.
+    epoch: 0, castSeq: 0,
   };
 
   // ---- tiny DOM builder: text only, never markup from data
@@ -155,11 +158,17 @@
 
   // ---- identity -------------------------------------------------------------------------------------------------------------
 
+  /** Every change of WHO is signed in (or of how far their account is) goes through here, so anything started for the previous person can tell. */
+  function setAuth(next) {
+    if (state.auth.status !== next.status || state.auth.email !== next.email) state.epoch += 1;
+    state.auth = next;
+  }
+
   async function refreshAuth() {
     try {
       const s = await UrbanoAuth.getState();
-      state.auth = { status: (s && s.status) || "unauthenticated", email: (s && s.email) || "" };
-    } catch (e) { state.auth = { status: "unauthenticated", email: "" }; }
+      setAuth({ status: (s && s.status) || "unauthenticated", email: (s && s.email) || "" });
+    } catch (e) { setAuth({ status: "unauthenticated", email: "" }); }
   }
 
   /** Called once the person is a full voter (verified email + profile): bind, read their own state, and come back to the contestant they had chosen. */
@@ -194,29 +203,43 @@
     else state.countdown.resync(null);
   }
 
-  // ---- polling: cheap public info, jittered so a crowd does not call in step; the final polls faster to keep its clock honest ---
+  // ---- polling: cheap public info (UG-IV-GATE-014) -----------------------------------------------------------------------------
+  // ONE request at a time, adaptive to what the round is doing (R.pollDelayMs: quick around the final's five minutes and after a close, slow
+  // once published), jittered so a crowd does not call in step, refreshed the moment the page is visible (or online) again, and never trusting
+  // an answer older than the newest. The page only ever SHOWS what the server answered: it invents no phase, no publication and no result.
 
-  let pollTimer = null;
-  function schedulePoll() {
-    clearTimeout(pollTimer);
-    const p = phase();
-    if (p === "ENDED") return;
-    const base = isFinal() && p === "OPEN" ? 10000 : p === "OPEN" ? 30000 : 20000;
-    pollTimer = setTimeout(poll, base + Math.floor(Math.random() * 5000));
-  }
-  async function poll() {
+  let phaseSeenAt = 0; // when this page last saw the phase change: the quick "waiting for the publication" window counts from here
+  const poller = R.createPoller({
+    now: () => performance.now(),
+    setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimer: (handle) => window.clearTimeout(handle),
+    isVisible: () => !document.hidden,
+    random: () => Math.random(),
+    delayFor: () => {
+      const info = infoNow();
+      if (phase() === "ENDED") return null; // the event is over: nothing more to learn
+      return R.pollDelayMs({ roundRole: info && info.roundRole, phase: phase(), published: !!(info && info.published), sinceChangeMs: performance.now() - phaseSeenAt });
+    },
+    staleAfterMs: R.POLL.staleAfterMs,
+    fetchOnce: async () => {
+      const r = await state.api.info();
+      if (r.status !== 200) return { ok: false };
+      return { ok: true, apply: () => applyInfo(r.json) };
+    },
+  });
+  async function applyInfo(next) {
     const before = phase();
-    const r = await state.api.info();
-    if (r.status === 200) {
-      state.info = r.json;
-      applyServerTime(infoNow());
-      const after = phase();
-      if (after !== before && state.bound) await refreshVoterData();
-      if ((after === "CLOSED" || after === "ENDED") && infoNow().published) await loadResults();
-      if (after !== before) render();
-    }
-    schedulePoll();
+    state.info = next;
+    applyServerTime(infoNow());
+    const after = phase();
+    if (after !== before) phaseSeenAt = performance.now();
+    if (after !== before && state.bound) await refreshVoterData();
+    if ((after === "CLOSED" || after === "ENDED") && infoNow().published) await loadResults();
+    if (after !== before) render();
   }
+  document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));
+  window.addEventListener("pageshow", (e) => { if (e && e.persisted) poller.refreshNow(); });
+  window.addEventListener("online", () => poller.refreshNow());
   async function loadResults() {
     const r = await state.api.results();
     if (r.status === 200 && r.json.published) { state.results = r.json; render(); }
@@ -229,7 +252,7 @@
     if (!clockEl) return;
     const left = state.countdown.remaining();
     clockEl.textContent = left === null ? "" : R.formatCountdown(left);
-    if (left !== null && left <= 0 && phase() === "OPEN") { state.info.info.phase = "CLOSED"; render(); }
+    if (left !== null && left <= 0 && phase() === "OPEN") { state.info.info.phase = "CLOSED"; phaseSeenAt = performance.now(); render(); poller.refreshNow(); }
   }
   setInterval(tickClock, 1000);
 
@@ -329,6 +352,7 @@
         h("button", { class: "btn", id: "switchCancel", text: "Cancelar", onclick: close }),
         h("button", { class: "btn primary", id: "switchConfirm", text: "Cerrar sesión", onclick: async () => {
           close();
+          state.epoch += 1; state.castSeq += 1; state.busy = false; // a vote still waiting for the browser's position belongs to the person who is leaving
           try { await UrbanoAuth.signOut(); } catch (e) { /* the page re-reads the state below */ }
           state.bound = false; state.status = null; state.gallery = null; state.myCandidateId = null;
           await refreshAuth(); render();
@@ -415,11 +439,16 @@
     const locationNote = R.locationRequired(infoNow()) ? h("p", { id: "locationNote", text: "Para votar en la final usaremos tu ubicación solo para confirmar que estás en el evento. No la guardamos." }) : null;
     const revising = !!state.myCandidateId && state.myCandidateId !== item.candidateId;
     const go = h("button", { class: "btn primary", id: "confirmVote", text: revising ? "Cambiar mi voto" : "Confirmar mi voto", onclick: async () => {
-      go.disabled = true; state.error = null; state.notice = null; close(); state.busy = true; render();
+      go.disabled = true; state.error = null; state.notice = null; close();
+      const cast = ++state.castSeq;
+      const epoch = state.epoch;
+      state.busy = true; render();
       const result = await R.castFavorite({
         api: state.api, geolocation: window.navigator.geolocation, info: infoNow(),
         candidateId: item.candidateId, interactionInstanceId: state.gallery.interactionInstanceId, retry: state.retry,
+        isCurrent: () => cast === state.castSeq && epoch === state.epoch && state.auth.status === "authenticated",
       });
+      if (result.stale) { if (cast === state.castSeq) { state.busy = false; render(); } return; } // the page moved on: nothing was sent and nothing is shown
       state.busy = false;
       if (result.ok) {
         state.retry = null; state.myCandidateId = item.candidateId; pending.clear();
@@ -430,7 +459,7 @@
         if (back) { pending.set(item.alias); state.auth = { status: back === "PROFILE" ? "profile_incomplete" : "unauthenticated", email: state.auth.email }; }
         state.error = say(result.code);
         if (result.code === "STALE_INTENT" || result.code === "INTERACTION_MISMATCH") await refreshVoterData();
-        if (result.code === "VOTING_WINDOW_ELAPSED" || result.code === "VOTING_NOT_OPEN") { await poll(); }
+        if (result.code === "VOTING_WINDOW_ELAPSED" || result.code === "VOTING_NOT_OPEN") poller.refreshNow();
       }
       render();
     } });
@@ -554,7 +583,8 @@
     if (step() === "READY") await enterRound();
     if ((phase() === "CLOSED" || phase() === "ENDED") && infoNow().published) await loadResults();
     render();
-    schedulePoll();
+    phaseSeenAt = performance.now();
+    poller.start();
   })();
 })();
 </script>

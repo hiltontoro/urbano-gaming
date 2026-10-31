@@ -879,3 +879,194 @@ describe("operator: the pending policies are unapproved technical options, said 
     ]);
   });
 });
+
+// ---------------------------------------------------------------- UG-IV-GATE-014
+
+describe("operator (GATE-014): 'Registrar la revisión' reflects the server's CURRENT review, not a click", () => {
+  const closedAndCut = { opened: true, closed: true, finalistsSelected: true };
+  const REVIEW_CURRENT = { reviewedAt: "2026-10-31T21:40:00.000Z", digest: "d1", current: true };
+
+  it("is available and not done before any review, with nothing to explain", () => {
+    expect(stepOf(O.nextSteps(overviewOf(closedAndCut)), "REVIEW")).toMatchObject({ done: false, enabled: true, reason: null });
+  });
+
+  it("is DONE when the server says the current results were reviewed — and then there is nothing left to do there, while the publication opens", () => {
+    const steps = O.nextSteps(overviewOf({ ...closedAndCut, review: REVIEW_CURRENT }));
+    expect(stepOf(steps, "REVIEW")).toMatchObject({ done: true, enabled: false });
+    expect(stepOf(steps, "PUBLISH")).toMatchObject({ done: false, enabled: true, reason: null });
+  });
+
+  it("identifies a STALE review after a relevant change: not done, available again, and it says the old review is no longer valid", () => {
+    const steps = O.nextSteps(overviewOf({ ...closedAndCut, review: { ...REVIEW_CURRENT, current: false } }));
+    expect(stepOf(steps, "REVIEW")).toMatchObject({ done: false, enabled: true, reason: expect.stringMatching(/quedó vieja/) });
+    expect(stepOf(steps, "PUBLISH")).toMatchObject({ enabled: false });
+  });
+
+  it("is done once the results are published, whatever the review row says afterwards", () => {
+    for (const review of [REVIEW_CURRENT, { ...REVIEW_CURRENT, current: false }, null]) {
+      const steps = O.nextSteps(overviewOf({ ...closedAndCut, published: true, review }));
+      expect(stepOf(steps, "REVIEW"), JSON.stringify(review)).toMatchObject({ done: true, enabled: false });
+      expect(stepOf(steps, "PUBLISH")).toMatchObject({ done: true, enabled: false });
+    }
+  });
+
+  it("depends on nothing but the overview: the same overview gives the same step however many times a button was pressed", () => {
+    const overview = overviewOf(closedAndCut);
+    expect(O.nextSteps(overview)).toEqual(O.nextSteps(overview));
+    expect(stepOf(O.nextSteps(overview), "REVIEW").done).toBe(false);
+    expect(stepOf(O.nextSteps({ ...overview, review: REVIEW_CURRENT }), "REVIEW").done).toBe(true);
+  });
+
+  it("the publication stays guarded by the authoritative CURRENT review: enabled only with review.current === true", () => {
+    for (const [review, enabled] of [[null, false], [{ ...REVIEW_CURRENT, current: false }, false], [{ ...REVIEW_CURRENT, current: "yes" }, false], [REVIEW_CURRENT, true]] as const) {
+      expect(stepOf(O.nextSteps(overviewOf({ ...closedAndCut, review: review as never })), "PUBLISH").enabled, JSON.stringify(review)).toBe(enabled);
+    }
+  });
+
+  it("a final behaves the same, and one that closed with no valid vote has no review to do at all", () => {
+    const finalClosed = { roundRole: "FINAL", opened: true, closed: true, windowSeconds: 300, entries: [entry()], schedule: { registrationOpensAt: null, contestantCutoffAt: null, votingOpensAt: null, votingClosesAt: null, status: "CONFIRMED" } };
+    expect(stepOf(O.nextSteps(overviewOf(finalClosed)), "REVIEW")).toMatchObject({ done: false, enabled: true });
+    expect(stepOf(O.nextSteps(overviewOf({ ...finalClosed, review: REVIEW_CURRENT })), "REVIEW")).toMatchObject({ done: true, enabled: false });
+    expect(stepOf(O.nextSteps(overviewOf({ ...finalClosed, review: { ...REVIEW_CURRENT, current: false } })), "REVIEW")).toMatchObject({ done: false, enabled: true, reason: expect.stringMatching(/quedó vieja/) });
+    expect(stepOf(O.nextSteps(overviewOf({ ...finalClosed, noValidResult: true, review: REVIEW_CURRENT })), "REVIEW")).toMatchObject({ done: false, enabled: false });
+  });
+});
+
+describe("voter (GATE-014): the final asks for a position with EVERY vote and EVERY revision", () => {
+  /** the sensor answers the readings in order; a browser that remembers the permission answers without any prompt */
+  function sensor(readings: Array<Json | { error: { code: number } }>) {
+    let i = 0;
+    return {
+      getCurrentPosition: vi.fn((ok: (p: Json) => void, err: (e: Json) => void, options: Json) => {
+        void options;
+        const r = readings[Math.min(i, readings.length - 1)] as Json;
+        i += 1;
+        if (r.error) err(r.error);
+        else ok({ coords: r });
+      }),
+    };
+  }
+  const HERE = { latitude: 14.0723, longitude: -87.1921, accuracy: 9 };
+  const MOVED = { latitude: 14.0731, longitude: -87.1915, accuracy: 7 };
+  const OTHER = "aaaaaaaa-bbbb-4ccc-8ddd-000000000009";
+
+  it("a NEW vote reads one fresh position and a REVISION reads another one: the second vote carries the second reading, not the first", async () => {
+    const geo = sensor([HERE, MOVED]);
+    const api = fakeApi();
+    await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION });
+    await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: OTHER, interactionInstanceId: INTERACTION });
+    expect(geo.getCurrentPosition).toHaveBeenCalledTimes(2);
+    for (const call of geo.getCurrentPosition.mock.calls) expect(call[2]).toMatchObject({ maximumAge: 0, enableHighAccuracy: true });
+    expect(api.vote.mock.calls[0][0].location).toEqual({ latitude: 14.0723, longitude: -87.1921, accuracyMeters: 9 });
+    expect(api.vote.mock.calls[1][0].location).toEqual({ latitude: 14.0731, longitude: -87.1915, accuracyMeters: 7 });
+    expect(api.intent).toHaveBeenCalledTimes(2); // each revision is a NEW intent
+  });
+
+  it("choosing the SAME contestant again is still a new intent with its own reading (the server answers UNCHANGED after evaluating it)", async () => {
+    const geo = sensor([HERE, HERE]);
+    const api = fakeApi({ vote: [{ status: 200, json: { outcome: "APPLIED", candidateId: CAND } }, { status: 200, json: { outcome: "UNCHANGED", candidateId: CAND } }] });
+    await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION });
+    const again = await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION });
+    expect(again).toMatchObject({ ok: true, outcome: "UNCHANGED" });
+    expect(geo.getCurrentPosition).toHaveBeenCalledTimes(2);
+    expect(api.intent).toHaveBeenCalledTimes(2);
+  });
+
+  it("a refusal for the changed position (outside the area) is shown as a refusal, confirms nothing and leaves nothing to retry", async () => {
+    const geo = sensor([MOVED]);
+    const api = fakeApi({ vote: { status: 403, json: { code: "LOCATION_OUTSIDE" } } });
+    const result = await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: OTHER, interactionInstanceId: INTERACTION });
+    expect(result).toMatchObject({ ok: false, code: "LOCATION_OUTSIDE" });
+    expect(result.retry ?? null).toBeNull();
+  });
+
+  it("a denied or unavailable reading on a revision sends NOTHING: no bind, no intent, no vote — the earlier vote is untouched and the person is told why", async () => {
+    for (const [error, code] of [[{ code: 1 }, "LOCATION_DENIED"], [{ code: 2 }, "LOCATION_UNAVAILABLE"], [{ code: 3 }, "LOCATION_TIMEOUT"]] as const) {
+      const api = fakeApi();
+      const result = await R.castFavorite({ api, geolocation: sensor([{ error }]), info: FINAL, candidateId: OTHER, interactionInstanceId: INTERACTION });
+      expect(result, code).toMatchObject({ ok: false, code });
+      expect(api.bind).not.toHaveBeenCalled();
+      expect(api.intent).not.toHaveBeenCalled();
+      expect(api.vote).not.toHaveBeenCalled();
+    }
+  });
+
+  it("recovering a lost response re-reads the position (the server may not have applied it) but REUSES the same intent: it is a replay, never a new revision", async () => {
+    const geo = sensor([HERE, MOVED]);
+    const api = fakeApi({ vote: [{ status: 0, json: { code: "NETWORK" } }, { status: 200, json: { outcome: "REPLAYED", candidateId: CAND } }] });
+    const first = await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION });
+    expect(first).toMatchObject({ ok: false, code: "NETWORK", retry: { candidateId: CAND, intentNo: 3 } });
+    const second = await R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION, retry: first.retry });
+    expect(second).toMatchObject({ ok: true, outcome: "REPLAYED" });
+    expect(api.bind).toHaveBeenCalledTimes(1);
+    expect(api.intent).toHaveBeenCalledTimes(1); // no second intent: the retry is the SAME one
+    expect(api.vote.mock.calls[1][0].intentNo).toBe(api.vote.mock.calls[0][0].intentNo);
+    expect(geo.getCurrentPosition).toHaveBeenCalledTimes(2);
+  });
+
+  it("a recovery whose reading fails keeps the retry state, so the same intent can still be recovered later", async () => {
+    const api = fakeApi();
+    const retry = { bindingId: BINDING, intentNo: 3, candidateId: CAND, interactionInstanceId: INTERACTION };
+    const result = await R.castFavorite({ api, geolocation: sensor([{ error: { code: 1 } }]), info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION, retry });
+    expect(result).toMatchObject({ ok: false, code: "LOCATION_DENIED", retry });
+    expect(api.vote).not.toHaveBeenCalled();
+  });
+
+  it("a STALE callback: when the page moved on (another person, a signed-out session, a newer tap) by the time the position arrives, nothing is sent", async () => {
+    let current = true;
+    const api = fakeApi();
+    let deliver: (() => void) | null = null;
+    const geo = { getCurrentPosition: vi.fn((ok: (p: Json) => void) => { deliver = () => ok({ coords: HERE }); }) };
+    const pending = R.castFavorite({ api, geolocation: geo, info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION, isCurrent: () => current } as never);
+    current = false; // the person signed out / changed while the browser was still asking for the position
+    deliver!();
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, code: "STALE_ACTION" });
+    expect(api.bind).not.toHaveBeenCalled();
+    expect(api.intent).not.toHaveBeenCalled();
+    expect(api.vote).not.toHaveBeenCalled();
+  });
+
+  it("the page also stops between the steps: a context change after the bind sends no intent and no vote", async () => {
+    let current = true;
+    const api = fakeApi();
+    api.bind.mockImplementation(async () => { current = false; return { status: 200, json: { bindingId: BINDING, created: false } }; });
+    const result = await R.castFavorite({ api, geolocation: sensor([HERE]), info: FINAL, candidateId: CAND, interactionInstanceId: INTERACTION, isCurrent: () => current } as never);
+    expect(result).toMatchObject({ ok: false, code: "STALE_ACTION" });
+    expect(api.intent).not.toHaveBeenCalled();
+    expect(api.vote).not.toHaveBeenCalled();
+  });
+
+  it("readPosition gives up by ITSELF when the browser never answers (an ignored permission prompt), and a callback that arrives later changes nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      let late: (() => void) | null = null;
+      const geo = { getCurrentPosition: vi.fn((ok: (p: Json) => void) => { late = () => ok({ coords: HERE }); }) };
+      const outcome = R.readPosition(geo, { timeoutMs: 5000, promptGraceMs: 20_000 } as never).then(() => "resolved", (e: Json) => e.code);
+      await vi.advanceTimersByTimeAsync(24_999);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      await expect(outcome).resolves.toBe("LOCATION_TIMEOUT");
+      late!(); // the person finally pressed "Allow": too late, the vote that asked for it is long gone
+      await Promise.resolve();
+      await expect(outcome).resolves.toBe("LOCATION_TIMEOUT");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("readPosition passes the same options as before to the browser and never leaves a timer behind after an answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const geo = sensor([HERE]);
+      await expect(R.readPosition(geo, { timeoutMs: 7000 })).resolves.toEqual({ latitude: 14.0723, longitude: -87.1921, accuracyMeters: 9 });
+      expect(geo.getCurrentPosition.mock.calls[0][2]).toEqual({ enableHighAccuracy: true, timeout: 7000, maximumAge: 0 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

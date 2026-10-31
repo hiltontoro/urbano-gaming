@@ -408,11 +408,13 @@ const CommunityVotingRoundOperator = (() => {
     const noResult = role === "FINAL" && !!closed && overview.noValidResult === true;
     const reviewReady = !!closed && (role === "FINAL" || !!overview.finalistsSelected);
     const publishHeld = waiting(["FINALIST_WITHDRAWAL_AFTER_SELECTION"]);
-    const reviewCurrent = !!(overview.review && overview.review.current);
+    // GATE-014: only a review the SERVER holds for exactly the current results counts — never a button that was pressed, and never a loose truthy value.
+    const reviewCurrent = !!overview.review && overview.review.current === true;
     steps.push({
-      key: "REVIEW", label: "Registrar la revisión de los resultados", done: false,
-      enabled: reviewReady && !published && !noResult,
-      reason: published ? "Ya se publicaron." : noResult ? "La final no tiene ningún voto válido: no hay resultado que revisar." : reviewReady ? (overview.review && !overview.review.current ? "La revisión anterior quedó vieja: regístrala de nuevo." : null) : role === "PRELIMINARY" ? "Primero hay que cerrar y hacer el corte." : "Primero hay que cerrar la votación.",
+      key: "REVIEW", label: "Registrar la revisión de los resultados",
+      done: !!published || (reviewCurrent && !noResult),
+      enabled: reviewReady && !published && !noResult && !reviewCurrent,
+      reason: published ? "Ya se publicaron." : noResult ? "La final no tiene ningún voto válido: no hay resultado que revisar." : reviewCurrent ? null : reviewReady ? (overview.review ? "La revisión anterior quedó vieja: regístrala de nuevo." : null) : role === "PRELIMINARY" ? "Primero hay que cerrar y hacer el corte." : "Primero hay que cerrar la votación.",
     });
     steps.push({
       key: "PUBLISH", label: role === "FINAL" ? "Publicar al ganador (o ganadores)" : "Publicar a los finalistas", done: !!published,
@@ -434,6 +436,192 @@ const CommunityVotingRoundOperator = (() => {
     const total = Math.ceil(left / 1000);
     const pad = (n) => String(n).padStart(2, "0");
     return total >= 3600 ? `${Math.floor(total / 3600)}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}` : `${Math.floor(total / 60)}:${pad(total % 60)}`;
+  }
+
+  // ---------------------------------------------------------------- live state (UG-IV-GATE-014)
+
+  // ---- createPoller:begin (the SAME text in communityVotingRoundOperator.js and communityVotingRound.js: a test pins that the two copies are identical)
+  /**
+   * A self-scheduling poll with every guarantee a live page needs and none of its DOM. Every collaborator is an ARGUMENT (the clock, the
+   * timers, the page's visibility, the request itself), so the timing is unit-tested without waiting.
+   *   - ONE request at a time. A timer, a return to the page and refreshNow() that arrive while one is out make ONE follow-up, never two requests.
+   *   - The next poll is scheduled only AFTER the previous one finished, so polls can never pile up.
+   *   - An answer is used only while it is still the newest: invalidate() (an authoritative read made elsewhere) and stop() (another person,
+   *     another round, a sign-out) make whatever is in flight unusable — it is dropped when it arrives, never applied.
+   *   - Nothing runs while the page is hidden; becoming visible again refreshes at once.
+   *   - Failures back off (x2, capped) and data older than staleAfterMs is reported stale, so a page can SAY so instead of presenting it as current.
+   * fetchOnce() resolves { ok, apply?, terminal? }. apply() runs ONLY if the answer is still wanted; terminal ends the loop (the connection itself was refused).
+   */
+  function createPoller(deps) {
+    const staleAfterMs = deps.staleAfterMs === undefined ? 15000 : deps.staleAfterMs;
+    const jitter = deps.jitter === undefined ? 0.2 : deps.jitter;
+    const maxBackoffMs = deps.maxBackoffMs === undefined ? 30000 : deps.maxBackoffMs;
+    let running = false;
+    let terminal = false;
+    let generation = 0;
+    let sequence = 0;
+    let timer = null;
+    let flight = null;
+    let queued = false;
+    let failures = 0;
+    let startedAt = 0;
+    let lastOkAt = null;
+
+    function notify() {
+      if (typeof deps.onStatus !== "function") return;
+      try {
+        deps.onStatus();
+      } catch (e) {
+        /* a listener never stops the loop */
+      }
+    }
+    function cancelTimer() {
+      if (timer === null) return;
+      deps.clearTimer(timer);
+      timer = null;
+    }
+    function schedule() {
+      cancelTimer();
+      if (!running || flight !== null || !deps.isVisible()) return;
+      const base = deps.delayFor({ failures });
+      if (base === null || base === undefined) return;
+      const backedOff = Math.min(maxBackoffMs, base * Math.pow(2, Math.min(failures, 4)));
+      const factor = 1 + (deps.random() * 2 - 1) * jitter;
+      timer = deps.setTimer(() => {
+        timer = null;
+        run();
+      }, Math.round(backedOff * factor));
+    }
+    async function run() {
+      if (!running) return;
+      if (flight !== null) {
+        queued = true;
+        return;
+      }
+      cancelTimer();
+      queued = false;
+      sequence += 1;
+      const mine = { generation, sequence };
+      flight = mine;
+      notify();
+      let result;
+      try {
+        result = await deps.fetchOnce();
+      } catch (e) {
+        result = { ok: false };
+      }
+      settle(mine, result || { ok: false });
+    }
+    function settle(mine, result) {
+      if (flight === mine) flight = null;
+      if (mine.generation !== generation) return; // stopped (and perhaps started again) meanwhile: this answer is no longer ours
+      if (mine.sequence === sequence) {
+        // still the newest request: its answer is wanted
+        if (result.ok) {
+          failures = 0;
+          lastOkAt = deps.now();
+          if (typeof result.apply === "function") {
+            try {
+              const applied = result.apply();
+              if (applied && typeof applied.then === "function") applied.then(null, () => {});
+            } catch (e) {
+              /* the page's own error handling decides what to show */
+            }
+          }
+        } else {
+          failures += 1;
+          if (result.terminal) {
+            terminal = true;
+            running = false;
+          }
+        }
+      }
+      notify();
+      if (!running) return;
+      if (queued) {
+        queued = false;
+        run();
+        return;
+      }
+      schedule();
+    }
+    return {
+      start() {
+        generation += 1;
+        sequence += 1;
+        running = true;
+        terminal = false;
+        flight = null;
+        queued = false;
+        failures = 0;
+        startedAt = deps.now();
+        lastOkAt = null;
+        cancelTimer();
+        notify();
+        schedule();
+      },
+      stop() {
+        generation += 1;
+        running = false;
+        flight = null;
+        queued = false;
+        cancelTimer();
+        notify();
+      },
+      refreshNow() {
+        run();
+      },
+      invalidate() {
+        sequence += 1;
+      },
+      markFresh() {
+        lastOkAt = deps.now();
+        failures = 0;
+        if (running && flight === null) schedule(); // the next delay follows the state that was just read
+        notify();
+      },
+      onVisibility(visible) {
+        if (!running) return;
+        if (visible) {
+          run();
+          return;
+        }
+        cancelTimer();
+        notify();
+      },
+      status() {
+        const age = running ? deps.now() - (lastOkAt === null ? startedAt : lastOkAt) : null;
+        return { running, refreshing: flight !== null, failures, stale: running && age > staleAfterMs, ageMs: age, terminal, hidden: !deps.isVisible() };
+      },
+    };
+  }
+  // ---- createPoller:end
+
+  /** How often the operator's panel asks the server (before jitter and backoff). Bounded: never faster than 4 s, and the backoff never exceeds 30 s. */
+  const LIVE_POLL = { openMs: 4000, awaitingMs: 6000, activeMs: 8000, publishedMs: 20000, staleAfterMs: 15000, maxBackoffMs: 30000 };
+
+  /** The base delay of the next poll from the overview the panel holds: quick while voting is open (the counters move), slow once everything is published. */
+  function livePollDelayMs(ctx) {
+    const ov = ctx && ctx.overview;
+    if (!ov) return LIVE_POLL.activeMs;
+    if (ov.published) return LIVE_POLL.publishedMs;
+    if (ov.opened && !ov.closed) return LIVE_POLL.openMs;
+    if (ov.closed) return LIVE_POLL.awaitingMs; // closed, waiting for the cut, the review and the publication
+    return LIVE_POLL.activeMs; // in preparation
+  }
+
+  /** What the panel says about the freshness of what it shows. A stale status is NEVER "ok", even while a new request is out. */
+  function liveStatus(status) {
+    const s = status || {};
+    if (!s.running && !s.terminal) return { tone: "off", text: "" };
+    if (s.terminal) return { tone: "stale", text: "Sin conexión con la ronda: vuelve a conectarla." };
+    const age = Number.isFinite(s.ageMs) ? Math.max(0, s.ageMs) : 0;
+    const seconds = Math.floor(age / 1000);
+    const how = age >= 90_000 ? `${Math.floor(age / 60_000)} min` : `${seconds} s`;
+    if (s.stale) return { tone: "stale", text: `Sin actualizar: estos datos son de hace ${how}.` };
+    if (s.refreshing) return { tone: "refreshing", text: "Actualizando…" };
+    if (s.hidden) return { tone: "paused", text: "En pausa mientras esta pantalla está oculta." };
+    return { tone: "ok", text: age < 1500 ? "Actualizado ahora" : `Actualizado hace ${how}` };
   }
 
   const PROMO_LABEL = {
@@ -598,6 +786,10 @@ const CommunityVotingRoundOperator = (() => {
     lobbyStatus,
     LOBBY_LOCK_NOTICE,
     nextSteps,
+    createPoller,
+    LIVE_POLL,
+    livePollDelayMs,
+    liveStatus,
     deadlineLabel,
     promoLabel,
     describeError,

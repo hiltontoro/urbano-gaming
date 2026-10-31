@@ -66,6 +66,12 @@ interface Options {
   holdFirstOverview?: boolean;
   /** answers of the registration route, in order (default: 201) */
   registerReplies?: Array<{ status: number; json: unknown }>;
+  /** GATE-014: answers of GET /api/gaming/member consumed in order BEFORE the normal one — a transient 5xx, or "throw" for a network failure */
+  memberReplies?: Array<{ status: number; json?: unknown } | "throw">;
+  /** GATE-014: answers of the operator overview consumed in order before the normal one (a server that refuses the stored connection) */
+  overviewReplies?: Array<{ status: number; json: unknown }>;
+  /** GATE-014: the page's timers (identity retries) run almost at once instead of after seconds */
+  fastTimers?: boolean;
 }
 
 async function createStack(options: Options = {}) {
@@ -79,6 +85,9 @@ async function createStack(options: Options = {}) {
   const firstHold = options.holdFirstOverview ? deferred() : null;
   if (firstHold) holds.push(firstHold);
   const registerReplies = [...(options.registerReplies ?? [])];
+  const memberReplies = [...(options.memberReplies ?? [])];
+  const overviewReplies = [...(options.overviewReplies ?? [])];
+  const consoleLines: string[] = [];
 
   const client = {
     auth: {
@@ -111,6 +120,9 @@ async function createStack(options: Options = {}) {
         members[who] = { gamingMemberId: PEOPLE[who].memberId, displayName, createdAt: "2026-10-01T00:00:00.000Z" };
         return reply(201, { gamingMember: members[who] });
       }
+      const forced = memberReplies.shift();
+      if (forced === "throw") throw new TypeError("Failed to fetch");
+      if (forced) return reply(forced.status, forced.json ?? {});
       return reply(200, { gamingMember: members[who] });
     }
     state.requests.push({ url: target, method: init.method ?? "GET", bearer, host: headers["x-host-token"] ?? "", body: init.body ? JSON.parse(init.body) : undefined });
@@ -119,6 +131,8 @@ async function createStack(options: Options = {}) {
     if (route === "/operator/overview") {
       const gate = holds.shift();
       if (gate) await gate.promise;
+      const forced = overviewReplies.shift();
+      if (forced) return reply(forced.status, forced.json);
       return reply(200, OVERVIEW);
     }
     if (route === "/info") return reply(200, { info: {}, texts: { galleryConsent: { version: "v", text: "t" }, promoConsent: { version: "v", text: "t" } } });
@@ -150,6 +164,8 @@ async function createStack(options: Options = {}) {
       w.supabase = { createClient: () => client };
       w.fetch = fetchFake;
       w.setInterval = () => 0;
+      if (options.fastTimers) w.setTimeout = (fn: () => void, ms?: number) => setTimeout(fn, Math.min(ms ?? 0, 5));
+      for (const level of ["log", "info", "warn", "error", "debug"]) (window.console as unknown as Record<string, unknown>)[level] = (...args: unknown[]) => { consoleLines.push(args.map((a) => String(a)).join(" ")); };
     },
   });
   closers.push(() => dom.window.close());
@@ -157,7 +173,7 @@ async function createStack(options: Options = {}) {
   const doc = win.document;
   await tick(30);
   return {
-    win, doc, state, emit, members, holds, firstHold,
+    win, doc, state, emit, members, holds, firstHold, consoleLines,
     hold: () => { const d = deferred(); holds.push(d); return d; },
     $: (sel: string) => doc.querySelector(sel) as HTMLElement | null,
     text: () => doc.getElementById("app")?.textContent ?? "",
@@ -303,5 +319,124 @@ describe("obsolete messages", () => {
     await s.click(s.$("#disconnect"));
     await tick(10);
     expect(s.text()).not.toMatch(/Ronda registrada/);
+  });
+});
+
+// ---------------------------------------------------------------- UG-IV-GATE-014: restoring the connected round after a reload
+
+/** polls a condition for up to ~1.5 s of real time (the page's retry timers run at once under `fastTimers`) */
+async function until(cond: () => boolean, label: string) {
+  for (let i = 0; i < 150; i += 1) {
+    if (cond()) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`timed out waiting for: ${label}`);
+}
+const NO_TOKENS = (s: { allStorage: () => string; consoleLines: string[]; win: Window }) => {
+  const seen = `${s.allStorage()}\n${s.consoleLines.join("\n")}\n${s.win.location.href}`;
+  return seen;
+};
+
+describe("restoring the round after a reload (GATE-014)", () => {
+  it("ordinary reload, SAME person: the round and its overview come back with one request, and no token is ever written to the console or the address", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A });
+    expect(roundOnScreen(s)).toBe(true);
+    expect(s.overviewRequests()).toHaveLength(1);
+    expect(s.overviewRequests()[0]).toMatchObject({ bearer: PEOPLE.A.token, host: HOST_TOKEN });
+    expect(JSON.parse(s.stored() as string)).toEqual({ instanceId: INSTANCE, hostToken: HOST_TOKEN, ownerUserId: PEOPLE.A.id });
+    const leaked = [s.consoleLines.join("\n"), s.win.location.href, s.win.location.search, s.win.location.hash].join("\n");
+    expect(leaked).not.toContain(HOST_TOKEN);
+    expect(leaked).not.toContain(PEOPLE.A.token);
+  });
+
+  it("a transient failure of the member lookup (the shared client reports a profile gap): the stored round survives, nothing is sent with it, the page says so, and it comes back when the SAME person resolves", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A, memberReplies: [{ status: 503, json: {} }] });
+    expect(roundOnScreen(s)).toBe(false);
+    expect(s.overviewRequests()).toHaveLength(0);
+    expect(s.text()).toMatch(/No pudimos confirmar tu perfil/);
+    expect(s.text()).not.toMatch(/Completa tu perfil/);
+    expect(JSON.parse(s.stored() as string)).toMatchObject({ instanceId: INSTANCE, ownerUserId: PEOPLE.A.id });
+    s.emit("A", "TOKEN_REFRESHED"); // the shared client forgets a finished lookup at its next Auth event and asks again
+    await until(() => roundOnScreen(s), "the round to come back once the same person resolves");
+    expect(s.overviewRequests().every((r) => r.bearer === PEOPLE.A.token && r.host === HOST_TOKEN)).toBe(true);
+    expect(s.text()).not.toMatch(/No pudimos confirmar tu perfil/);
+    expect(JSON.parse(s.stored() as string)).toMatchObject({ instanceId: INSTANCE, ownerUserId: PEOPLE.A.id });
+  });
+
+  it("a profile gap for ANOTHER person than the connection's owner does not keep it: it is removed", async () => {
+    const s = await createStack({ initial: "B", stored: STORED_FOR_A, members: { B: false } });
+    expect(roundOnScreen(s)).toBe(false);
+    expect(s.stored()).toBeNull();
+  });
+
+  it("a network failure while reading who is signed in: the stored round is NOT destroyed, the page says it could not check the session, and it comes back when the check succeeds", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A, memberReplies: ["throw"], fastTimers: true });
+    await until(() => roundOnScreen(s), "the round to come back after the retry");
+    expect(JSON.parse(s.stored() as string)).toMatchObject({ instanceId: INSTANCE, ownerUserId: PEOPLE.A.id });
+    expect(s.overviewRequests().every((r) => r.bearer === PEOPLE.A.token)).toBe(true);
+  });
+
+  it("while the identity cannot be checked the page keeps the credential only in the tab, and shows no operator content and sends nothing with the host token", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A, memberReplies: ["throw", "throw", "throw", "throw", "throw", "throw"], fastTimers: true });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(roundOnScreen(s)).toBe(false);
+    expect(s.overviewRequests()).toHaveLength(0);
+    expect(s.text()).toMatch(/No pudimos comprobar tu sesión|Inicia sesión|Completa tu perfil/);
+  });
+
+  it("another person at load: the previous person's credential is removed from the tab (never kept for later) and is never used for them", async () => {
+    const s = await createStack({ initial: "B", stored: STORED_FOR_A });
+    expect(roundOnScreen(s)).toBe(false);
+    expect(s.stored()).toBeNull();
+    expect(NO_TOKENS(s)).not.toContain(HOST_TOKEN);
+    expect(s.overviewRequests()).toHaveLength(0);
+  });
+
+  it("signing out removes the credential for good: the same person signing in again does not get the round back and must connect it again", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A });
+    expect(roundOnScreen(s)).toBe(true);
+    s.emit(null);
+    await tick();
+    expect(s.stored()).toBeNull();
+    s.emit("A");
+    await tick();
+    expect(roundOnScreen(s)).toBe(false);
+    expect(s.$("#connectCard")).toBeTruthy();
+    expect(s.overviewRequests()).toHaveLength(1); // only the one made before the sign-out
+    expect(NO_TOKENS(s)).not.toContain(HOST_TOKEN);
+  });
+
+  it("raw Auth events for the same person (a token refresh, a repeated sign-in) neither drop the round nor ask for it again", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A });
+    for (const event of ["TOKEN_REFRESHED", "SIGNED_IN", "USER_UPDATED", "INITIAL_SESSION"]) { s.emit("A", event); await tick(); }
+    expect(roundOnScreen(s)).toBe(true);
+    expect(s.overviewRequests()).toHaveLength(1);
+    expect(JSON.parse(s.stored() as string)).toMatchObject({ ownerUserId: PEOPLE.A.id });
+  });
+
+  it("a stored connection that is malformed, incomplete or in an old format restores nothing and is removed", async () => {
+    for (const stored of ["{not json", JSON.stringify({ instanceId: INSTANCE, hostToken: HOST_TOKEN }), JSON.stringify({ instanceId: INSTANCE, ownerUserId: PEOPLE.A.id }), JSON.stringify({ hostToken: HOST_TOKEN, ownerUserId: PEOPLE.A.id }), JSON.stringify({ instanceId: 7, hostToken: HOST_TOKEN, ownerUserId: PEOPLE.A.id }), "null", "[]"]) {
+      const s = await createStack({ initial: "A", stored: { "cvop2:round": stored } });
+      expect(roundOnScreen(s), stored).toBe(false);
+      expect(s.$("#connectCard"), stored).toBeTruthy();
+      expect(s.stored(), stored).toBeNull();
+      expect(s.overviewRequests(), stored).toHaveLength(0);
+    }
+  });
+
+  it("a connection the SERVER no longer accepts for this person (403 or 404) is dropped from the tab, and the page returns to the connect card and says why", async () => {
+    for (const [status, code] of [[403, "OPERATOR_REQUIRED"], [404, "INSTANCE_NOT_FOUND"]] as const) {
+      const s = await createStack({ initial: "A", stored: STORED_FOR_A, overviewReplies: [{ status, json: { code } }] });
+      expect(roundOnScreen(s), String(status)).toBe(false);
+      expect(s.$("#connectCard"), String(status)).toBeTruthy();
+      expect(s.stored(), String(status)).toBeNull();
+      expect(s.$(".msg.err")?.textContent ?? "", String(status)).not.toBe("");
+      expect(NO_TOKENS(s)).not.toContain(HOST_TOKEN);
+    }
+  });
+
+  it("a 401 (the session may simply be refreshing) does NOT discard the connection: it stays stored for the retry", async () => {
+    const s = await createStack({ initial: "A", stored: STORED_FOR_A, overviewReplies: [{ status: 401, json: { code: "AUTHENTICATION_REQUIRED" } }] });
+    expect(JSON.parse(s.stored() as string)).toMatchObject({ instanceId: INSTANCE, ownerUserId: PEOPLE.A.id });
   });
 });
