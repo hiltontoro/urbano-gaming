@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as jsdomModule from "jsdom";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 
@@ -39,6 +39,8 @@ const PUBLIC = path.join(ROOT, "public");
 const read = (file: string) => readFileSync(path.join(PUBLIC, file), "utf8");
 
 const EXPERIENCES = ["voting", "score", "trivia", "poker"] as const;
+// The order of the panels on the Home (Founder, 2026-10-31): Voting is LAST because the featured card above it is already its Halloween experience.
+const PANEL_ORDER = ["score", "trivia", "poker", "voting"] as const;
 type Experience = (typeof EXPERIENCES)[number];
 const PAGE_FILE: Record<Experience, string> = { voting: "voting.html", score: "score.html", trivia: "trivia.html", poker: "poker.html" };
 const ALL_PAGES = ["index.html", ...EXPERIENCES.map((k) => PAGE_FILE[k])];
@@ -69,15 +71,15 @@ describe("the Home: a featured card, then four experiences with one way into eac
   const doc = dom("index.html");
   const panels = Array.from(doc.querySelectorAll("ul.xp-grid > li > article.xp"));
 
-  it("shows exactly four panels, in the Founder's order: URBANO Voting, URBANO Score, URBANO Trivia, URBANO Poker (every name uniform)", () => {
-    expect(panels.map((p) => EXPERIENCES.find((k) => p.classList.contains(`xp-${k}`)))).toEqual([...EXPERIENCES]);
-    expect(panels.map((p) => visibleText(p.querySelector(".xp-title")!))).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+  it("shows exactly four panels, in the Founder's order: URBANO Score, URBANO Trivia, URBANO Poker, URBANO Voting (Voting last, since the featured card is already its Halloween experience; every name uniform)", () => {
+    expect(panels.map((p) => EXPERIENCES.find((k) => p.classList.contains(`xp-${k}`)))).toEqual([...PANEL_ORDER]);
+    expect(panels.map((p) => visibleText(p.querySelector(".xp-title")!))).toEqual(["URBANO Score", "URBANO Trivia", "URBANO Poker", "URBANO Voting"]);
     for (const lang of [ES, EN]) for (const k of EXPERIENCES) expect(lang[`home.xp.${k}.title`], k).toMatch(/^URBANO [A-Z][a-z]+$/);
   });
 
   it("each panel has exactly ONE link, to that experience's own page, and its words are 'Descubrí más' (and the experience's name for a screen reader)", () => {
     for (const [i, panel] of panels.entries()) {
-      const k = EXPERIENCES[i];
+      const k = PANEL_ORDER[i];
       const anchors = Array.from(panel.querySelectorAll("a"));
       expect(anchors, k).toHaveLength(1);
       expect(anchors[0].getAttribute("href"), k).toBe("/" + PAGE_FILE[k]);
@@ -89,14 +91,17 @@ describe("the Home: a featured card, then four experiences with one way into eac
     }
   });
 
-  it("the featured card (Destacado) says Halloween, The Pub by Beer Box and 31 de octubre, is an URBANO Voting experience, and has TWO buttons instead of 'Descubrí más'", () => {
+  it("the featured card (Destacado) says Halloween: La última noche, Concurso de disfraces, The Pub by Beer Box and Sábado 31 de octubre, promises prizes for the winners delivered by The Pub, is an URBANO Voting experience, and has TWO buttons instead of 'Descubrí más'", () => {
     const card = doc.getElementById("featured-contest")!;
     expect(card).not.toBeNull();
     expect(visibleText(card.querySelector(".xf-label")!)).toBe("Destacado");
     expect(visibleText(card.querySelector(".xp-kicker")!)).toBe("URBANO Voting");
-    expect(visibleText(card.querySelector(".xf-title")!)).toBe("Halloween");
+    expect(visibleText(card.querySelector(".xf-title")!)).toBe("Halloween: La última noche"); // the colon between the two parts is for screen readers
     expect(card.querySelector(".xf-title")!.tagName).toBe("H2");
-    expect(visibleText(card.querySelector(".xf-meta")!)).toBe("Concurso de disfraces · The Pub by Beer Box · 31 de octubre");
+    expect(visibleText(card.querySelector(".xf-title .xf-tagline")!)).toBe("La última noche"); // the motto of the party: it is The Pub's last night
+    expect(doc.querySelector("section.xf-section")!.getAttribute("aria-labelledby")).toBe(card.querySelector(".xf-title")!.id);
+    expect(visibleText(card.querySelector(".xf-meta")!)).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
+    expect(visibleText(card.querySelector(".xf-prizes")!)).toBe("Habrá premios para los ganadores, entregados por The Pub.");
     expect(Array.from(card.querySelectorAll("[data-feat]")).map((b) => [b.getAttribute("data-feat"), visibleText(b)])).toEqual([["vote", "Votar por tu disfraz favorito"], ["join", "Participar como concursante"]]);
     expect(card.textContent).not.toMatch(/Descubrí más|Discover more/);
     expect(visibleText(card.querySelector("[data-feat-status]")!)).toBe("Las inscripciones y la votación todavía no están disponibles.");
@@ -104,7 +109,9 @@ describe("the Home: a featured card, then four experiences with one way into eac
     expect(card.querySelector("img")!.getAttribute("alt")).toBe("");
     expect(EN["home.feat.vote"]).toBe("Vote for your favorite costume");
     expect(EN["home.feat.join"]).toBe("Take part as a contestant");
-    expect(EN["home.feat.date"]).toBe("October 31");
+    expect(EN["home.feat.date"]).toBe("Saturday, October 31");
+    expect(EN["home.feat.tagline"]).toBe("The Last Night");
+    expect(EN["home.feat.prizes"]).toBe("There will be prizes for the winners, delivered by The Pub.");
   });
 
   it("in the first HTML the featured card's two buttons are NOT links (words in a dashed outline), so nobody can press a link that leads nowhere", () => {
@@ -120,7 +127,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
 
   it("has no 'play' control and no link into a flow: the only links in the page body are the four panels', the only buttons are the language selector and the account control, and there is no form", () => {
     const main = doc.querySelector("main")!;
-    expect(links(main)).toEqual(EXPERIENCES.map((k) => "/" + PAGE_FILE[k]));
+    expect(links(main)).toEqual(PANEL_ORDER.map((k) => "/" + PAGE_FILE[k]));
     expect(Array.from(doc.querySelectorAll("button")).map((b) => b.id || b.getAttribute("data-lang"))).toEqual(["es", "en", "btn-signin"]);
     expect(doc.querySelectorAll("form, input, select, textarea, [role='button'], [onclick]").length).toBe(0);
     for (const lang of [ES, EN]) {
@@ -145,7 +152,19 @@ describe("the Home: a featured card, then four experiences with one way into eac
     expect(doc.documentElement.getAttribute("lang")).toBe("es");
   });
 
-  it("keeps both navigation anchors alive: #experiences and #play (every page's navigation points at them) land on the four panels", () => {
+  it("the navigation has FOUR items on every page of the product — Inicio, Experiencias, Clasificaciones, Premios — and no 'Jugar' (the minigames it led to are not on the Home any more); nothing links to /#play", () => {
+    const withoutFallback = (html: string) => html.replace(/<script id="i18n-fallback">[\s\S]*?<\/script>/, "");
+    for (const file of ALL_PAGES) {
+      const nav = Array.from(dom(file).querySelectorAll("nav.primary-nav a"));
+      expect(nav.map((a) => a.getAttribute("href")), file).toEqual(["/", "/#experiences", "/leaderboards.html", "/rewards.html"]);
+      expect(nav.map((a) => visibleText(a)), file).toEqual(["Inicio", "Experiencias", "Clasificaciones", "Premios"]);
+      expect(withoutFallback(HTML[file]), file).not.toMatch(/shell\.nav\.play|href="\/#play"/);
+    }
+    // every other page of public/ that carries the shell's navigation (and the two playtest pages with their own) agrees: no link to #play anywhere
+    for (const file of readdirSync(PUBLIC).filter((n) => n.endsWith(".html"))) expect(withoutFallback(read(file)), file).not.toMatch(/<a\b[^>]*href="\/#play"/);
+  });
+
+  it("keeps #experiences (what the navigation points at) and #play (kept for old links) alive: both land on the four panels", () => {
     const section = doc.getElementById("experiences")!;
     const play = doc.getElementById("play")!;
     expect(section).not.toBeNull();
@@ -370,13 +389,20 @@ describe("the four experience pages", () => {
   });
 
   it("the URBANO Voting page states what is true and nothing more: no prize, sponsor, fee, capacity or rule is invented; the Halloween block repeats the featured card's two buttons", () => {
-    const all = Object.entries(ES).filter(([key]) => key.startsWith("lp.voting.") || key.startsWith("home.feat.") || key.startsWith("home.xp.voting.")).map(([, v]) => v).join(" | ");
+    const mentioning = (key: string) => key.startsWith("lp.voting.") || key.startsWith("home.feat.") || key.startsWith("home.xp.voting.");
+    // the ONE sentence about prizes is the Founder's (2026-10-31), word for word; everything else here says nothing about prizes, sponsors, fees or capacity
+    expect(ES["home.feat.prizes"]).toBe("Habrá premios para los ganadores, entregados por The Pub.");
+    expect(EN["home.feat.prizes"]).toBe("There will be prizes for the winners, delivered by The Pub.");
+    expect(ES["home.feat.prizes"] + EN["home.feat.prizes"]).not.toMatch(/\d|\$|lempira|gratis|free|patrocin|sponsor|capacidad|capacity/i); // no amount, no number of prizes, no sponsor
+    const all = Object.entries(ES).filter(([key]) => mentioning(key) && key !== "home.feat.prizes").map(([, v]) => v).join(" | ");
     expect(all).not.toMatch(/premio|prize|gratis|free|\$|L\.\s?\d|lempira|patrocin|sponsor|capacidad|capacity/i);
     const doc = dom("voting.html");
     const block = doc.getElementById("featured-live")!;
     expect(block).not.toBeNull();
     expect(Array.from(block.querySelectorAll("[data-feat]")).map((b) => [b.tagName, b.getAttribute("data-feat"), visibleText(b)])).toEqual([["SPAN", "vote", ES["home.feat.vote"]], ["SPAN", "join", ES["home.feat.join"]]]);
     expect(block.querySelectorAll("a")).toHaveLength(0);
+    expect(visibleText(block.querySelector(".lp-live-title")!)).toBe("Halloween: La última noche · Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
+    expect(visibleText(block.querySelector(".lp-live-prizes")!)).toBe(ES["home.feat.prizes"]);
     expect(visibleText(block.querySelector("[data-feat-status]")!)).toBe(ES["home.feat.status.default"]);
     expect(HTML["voting.html"]).toContain('<script src="/featuredContest.js"></script>');
   });
@@ -741,6 +767,15 @@ describe("the layout contract (experience.css)", () => {
     expect(off).not.toMatch(/(^|[;\s])opacity\s*:/);
     expect(block(CSS, ".xf-status {")).toMatch(/color:\s*rgba\(245,\s*241,\s*232,\s*0\.9/);
     expect(block(CSS, ".xf-label {")).toMatch(/background:\s*var\(--accent\)/); // the one place an accent is a fill: a label, not a control
+  });
+
+  it("the featured card's motto and prize line are legible: the motto is the accent colour on the dark scrim, the prize line is ivory with a shadow and an accent bar", () => {
+    expect(block(CSS, ".xf-title .xf-tagline {")).toMatch(/color:\s*var\(--accent\)/);
+    expect(block(CSS, ".xf-title .xf-tagline {")).toMatch(/display:\s*block/);
+    expect(block(CSS, ".xf-prizes {")).toMatch(/color:\s*var\(--ink\)/);
+    expect(block(CSS, ".xf-prizes {")).toMatch(/text-shadow:/);
+    expect(block(CSS, ".xf-prizes {")).toMatch(/border-left:\s*3px solid var\(--accent\)/);
+    expect(block(CSS, ".lp-live-prizes {")).toMatch(/color:\s*var\(--ink\)/);
   });
 
   it("the strip in the Score panel: two rows of five in a wide card, one row of ten in a stacked card (a phone), five again at 320 px, and the names' own layout still wins when no crest is drawn", () => {

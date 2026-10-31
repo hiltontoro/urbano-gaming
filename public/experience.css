@@ -214,8 +214,10 @@ footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
   padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--primary-ink);
 }
 .xf-title { margin: 0; font-size: clamp(38px, 6vw, 62px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; }
+.xf-title .xf-tagline { display: block; margin-top: 6px; font-size: 0.4em; font-weight: 700; letter-spacing: 0.01em; line-height: 1.15; color: var(--accent); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 .xf-meta { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.45; color: rgba(245, 241, 232, 0.96); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 .xf-desc { margin: 0; max-width: 48ch; font-size: 15px; line-height: 1.55; color: rgba(245, 241, 232, 0.94); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.xf-prizes { margin: 0; max-width: 48ch; border-left: 3px solid var(--accent); padding-left: 12px; font-size: 14.5px; font-weight: 700; line-height: 1.5; color: var(--ink); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 .xf-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
 .xf-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 24px; border-radius: 999px;
@@ -285,6 +287,7 @@ span.xf-btn { cursor: default; color: #d6d1c3; border: 1.5px dashed rgba(245, 24
 .lp-live { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 14px; background: var(--bg-card); padding: 20px 20px 22px; }
 .lp-live-title { margin: 0 0 10px; font-size: 17px; font-weight: 600; line-height: 1.45; color: var(--ink); }
 .lp-live-title strong { font-weight: 800; }
+.lp-live-prizes { margin: 0 0 10px; max-width: 60ch; font-size: 15px; font-weight: 700; line-height: 1.5; color: var(--ink); }
 .lp-live-status { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink); max-width: 60ch; }
 .lp-live .xf-btn { min-height: 46px; }
 .lp-chips { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
