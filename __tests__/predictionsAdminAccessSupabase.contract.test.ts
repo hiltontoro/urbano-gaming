@@ -255,7 +255,8 @@ async function oneTimeCodeFor(email: string, since: number): Promise<string> {
     const fresh = (listed.messages ?? []).find((m) => new Date(m.Created).getTime() >= since - 2000);
     if (fresh) {
       const detail = (await (await fetch(`${MAILPIT}/api/v1/message/${fresh.ID}`)).json()) as { Text?: string };
-      const match = /\b(\d{6})\b/.exec(detail.Text ?? "");
+      // Local/hosted Auth may issue six- or eight-digit OTPs; never truncate either.
+      const match = /\b(\d{6}|\d{8})\b/.exec(detail.Text ?? "");
       if (match) return match[1]!;
     }
     await new Promise((r) => setTimeout(r, 250));
