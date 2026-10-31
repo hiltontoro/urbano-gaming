@@ -2,15 +2,15 @@
  * URBANO Gaming — the featured contest ("Destacado").
  *
  * The Home's featured card and the URBANO Voting page show the same two buttons for the contest the operator has chosen to show:
- * "Votar por tu disfraz favorito" and "Participar como concursante". This module is the ONLY place that decides whether they are links.
+ * "Votar por tu disfraz favorito" and "Participar como concursante". Before a contest is listed they link to fixed, read-only entry pages.
  *
  * It asks the server ONE question, once: has the operator listed a contest? (GET /api/gaming/community-voting/contests/featured; { featured: null }
  * means no.) The answer is checked strictly against the documented shape — { featured: { voteUrl, registerUrl, phase, registration?, categories } },
  * where voteUrl is "/community-voting-round.html?c=<id>" and registerUrl is the same page with "&participar=1" for the SAME id. Anything that is not
  * exactly that — an error status, a 404 (the endpoint is not deployed), a late or malformed body, a url that is not the contest page of this site,
- * extra parameters, two different ids, an unknown phase, a contest with no category — changes NOTHING: the two buttons stay what the markup wrote
- * (words in a dashed outline, not links), the sentence under them says that nothing is available yet, and there is no link at all. When the answer
- * is exactly right the two buttons become real links, the sentence says where registration and voting stand, and the categories are listed. What
+ * extra parameters, two different ids, an unknown phase, a contest with no category — never enables contest-specific links. The two fixed entry
+ * pages explain the closed journey without collecting data. When the answer is exactly right the links point to that contest,
+ * the sentence says where registration and voting stand, and the categories are listed. What
  * the server sends is only ever drawn as text.
  *
  * It sends nothing (a plain GET without credentials), stores nothing, and never blocks the page: the markup is complete before this script runs.
@@ -81,11 +81,11 @@
       }
     }
 
-    function activate() {
-      var dest = destinations(current);
+    function activate(dest) {
       ["vote", "join"].forEach(function (kind) {
         var el = root.querySelector('[data-feat="' + kind + '"]');
-        if (!el || el.tagName === "A") return;
+        if (!el) return;
+        if (el.tagName === "A") { el.setAttribute("href", dest[kind]); return; }
         var a = document.createElement("a");
         a.className = "xf-btn " + (kind === "vote" ? "is-primary" : "is-secondary");
         a.setAttribute("href", dest[kind]);
@@ -96,13 +96,15 @@
       });
     }
 
+    // Public entry points explain the closed journey; they never grant registration or voting.
+    activate({ vote: "/community-voting-round.html", join: "/community-voting-round.html?participar=1" });
     if (w.UrbanoI18n && typeof w.UrbanoI18n.onChange === "function") w.UrbanoI18n.onChange(paint);
     if (typeof w.fetch !== "function") return { stop: function () {} };
     var controller = typeof w.AbortController === "function" ? new w.AbortController() : null;
     var timer = controller ? w.setTimeout(function () { controller.abort(); }, 8000) : null;
     w.fetch(ENDPOINT, { method: "GET", headers: { accept: "application/json" }, cache: "no-store", credentials: "omit", signal: controller ? controller.signal : undefined })
       .then(function (res) { return res && res.ok ? res.json() : null; })
-      .then(function (data) { current = validate(data); if (current) { activate(); paint(); } })
+      .then(function (data) { current = validate(data); if (current) { activate(destinations(current)); paint(); } })
       .catch(function () { /* the card stays informational */ })
       .then(function () { if (timer) w.clearTimeout(timer); });
     return { stop: function () { if (controller) controller.abort(); } };

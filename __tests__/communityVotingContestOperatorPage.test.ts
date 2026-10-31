@@ -127,9 +127,9 @@ describe("the station: who may use it, and what this browser keeps", () => {
   it("shows the four categories' state at a glance: where each stands, how many are ready and how many still need something", async () => {
     const p = await station(readyWorld());
     const strip = p.spaced("#strip");
-    expect(strip).toContain("Disfraz más elaborado Preparando 2 listas · 0 por completar");
-    expect(strip).toContain("Mejor disfraz en grupo Preparando 1 lista · 0 por completar");
-    expect(strip).toContain("Disfraz más chistoso Preparando 1 lista · 1 por completar");
+    expect(strip).toContain("Más Elaborado Preparando 2 listas · 0 por completar");
+    expect(strip).toContain("Dúo o Grupo Preparando 1 lista · 0 por completar");
+    expect(strip).toContain("Más Divertido Preparando 1 lista · 1 por completar");
   });
 
   it("a refusal of the server is told in plain words and never repeats a technical text", async () => {
@@ -352,7 +352,7 @@ describe("tracking: what keeps a category from opening, and the explicit acts th
     expect(p.text("#openAll")).toContain("2 categorías están listas para abrir.");
     await p.clickSel("#openAllBtn");
     expect(p.modal()).toContain("¿Abrir las categorías listas?");
-    expect(p.modal()).toContain("Se abren: Disfraz más elaborado, Disfraz más sexy.");
+    expect(p.modal()).toContain("Se abren: Más Elaborado, Más Sexy.");
     expect(p.posts()).toEqual([]);
     await p.clickSel("#modalCancel");
     expect(p.posts()).toEqual([]);
@@ -361,7 +361,7 @@ describe("tracking: what keeps a category from opening, and the explicit acts th
   it("opening a category locks its lobby with ITS host token, then opens it with the category's own prompt — in that order, and not before the operator confirms", async () => {
     const p = await tracking();
     await p.clickSel('[data-open="MOST_ELABORATE"]');
-    expect(p.modal()).toContain("¿Abrir «Disfraz más elaborado»?");
+    expect(p.modal()).toContain("¿Abrir «Más Elaborado»?");
     expect(p.modal()).toContain("A partir de ese momento no se pueden inscribir más personas");
     expect(p.posts()).toEqual([]);
     await p.clickSel("#modalConfirm");
@@ -465,7 +465,7 @@ describe("configuration: creating the contest and its schedule, away from the st
     fail = false;
     await p.clickSel("#createContest");
     expect(registered).toEqual(["MOST_ELABORATE", "SEXIEST", "BEST_GROUP", "FUNNIEST"]);
-    expect(p.text("#setupLog")).toContain("Disfraz más elaborado: ya existía");
+    expect(p.text("#setupLog")).toContain("Más Elaborado: ya existía");
   });
 
   it("saves the Halloween schedule into all four categories as the instants the server stores — and a nonsense order is refused before anything is sent", async () => {

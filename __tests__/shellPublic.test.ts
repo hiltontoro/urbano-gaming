@@ -77,8 +77,8 @@ function visibleStrings(doc: Document): string[] {
   }
   return out;
 }
-// A venue's own name is a proper noun, not a sentence: "The Pub by Beer Box" is written in English and stays so in Spanish.
-const PROPER_NAMES = /The Pub by Beer Box/g;
+// A venue's own name is a proper noun, not a sentence: "The Pub by Beer Box" (and "The Pub" for short) is written in English and stays so in Spanish.
+const PROPER_NAMES = /The Pub by Beer Box|The Pub/g;
 const englishLeft = (doc: Document) => visibleStrings(doc).map((t) => t.replace(PROPER_NAMES, "")).filter((t) => ENGLISH_WORDS.test(t));
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -128,7 +128,7 @@ type HomePage = Awaited<ReturnType<typeof loadHome>>;
  *  says a contest is listed: see /featuredContest.js and __tests__/experienceHome.test.ts.) */
 function expectNoCallToPlay(page: HomePage, label: string) {
   expect(visibleStrings(page.doc).filter((t) => /Jugar ahora|Play now/i.test(t)), label).toEqual([]);
-  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/voting.html", "/score.html", "/trivia.html", "/poker.html"]);
+  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/score.html", "/trivia.html", "/poker.html", "/voting.html"]);
   expect(page.doc.querySelectorAll("main button, main form, main input"), label).toHaveLength(0);
 }
 
@@ -138,16 +138,17 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.doc.documentElement.lang).toBe("es");
     expect(page.text(".hero h1")).toBe("Jugá, predecí y competí con tu comunidad.");
     expect(page.text(".hero p")).toBe("Votaciones, predicciones, trivia y poker: experiencias hechas para vivir juntos.");
-    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
+    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Experiencias", "Clasificaciones", "Premios"]);
     expect(page.text(".xp-choose")).toBe("Elegí tu experiencia");
-    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Score", "URBANO Trivia", "URBANO Poker", "URBANO Voting"]);
     expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
-      "Descubrí más: URBANO Voting", "Descubrí más: URBANO Score", "Descubrí más: URBANO Trivia", "Descubrí más: URBANO Poker",
+      "Descubrí más: URBANO Score", "Descubrí más: URBANO Trivia", "Descubrí más: URBANO Poker", "Descubrí más: URBANO Voting",
     ]);
     // the featured card: Halloween, an URBANO Voting experience, with its two buttons (words, not links, until the server says a contest is listed)
     expect(page.text("#featured-contest .xf-label")).toBe("Destacado");
-    expect(page.text("#featured-contest .xf-title")).toBe("Halloween");
-    expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · 31 de octubre");
+    expect(page.text("#featured-contest .xf-title")).toBe("Halloween: La última noche");
+    expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("Habrá premios para los ganadores, entregados por The Pub.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, e.textContent])).toEqual([["SPAN", "Votar por tu disfraz favorito"], ["SPAN", "Participar como concursante"]]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Las inscripciones y la votación todavía no están disponibles.");
     expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
@@ -185,12 +186,14 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text(".hero p")).toBe("Voting, predictions, trivia and poker: experiences made to enjoy together.");
     expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
     expect(page.text(".xp-choose")).toBe("Choose your experience");
-    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Score", "URBANO Trivia", "URBANO Poker", "URBANO Voting"]);
     expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
-      "Discover more: URBANO Voting", "Discover more: URBANO Score", "Discover more: URBANO Trivia", "Discover more: URBANO Poker",
+      "Discover more: URBANO Score", "Discover more: URBANO Trivia", "Discover more: URBANO Poker", "Discover more: URBANO Voting",
     ]);
     expect(page.text("#featured-contest .xf-label")).toBe("Featured");
-    expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · October 31");
+    expect(page.text("#featured-contest .xf-title")).toBe("Halloween: The Last Night");
+    expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · Saturday, October 31");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("There will be prizes for the winners, delivered by The Pub.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => e.textContent)).toEqual(["Vote for your favorite costume", "Take part as a contestant"]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Registration and voting are not available yet.");
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
@@ -262,7 +265,7 @@ describe("Home — header and footer", () => {
     const focusable = Array.from(page.doc.querySelectorAll("header a[href], header button, nav a[href]")).filter((e) => !e.closest("[hidden]") && !(e as HTMLElement).hasAttribute("hidden"));
     expect(focusable.map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual([
       "URBANO — ir a urbanohn.com", "URBANO Gaming — inicio", "Cambiar a español", "Cambiar a inglés", "Iniciar sesión / Crear cuenta",
-      "Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios",
+      "Inicio", "Experiencias", "Clasificaciones", "Premios",
     ]);
     expect(page.doc.querySelector("nav.primary-nav")!.getAttribute("aria-label")).toBe("Navegación principal");
     expect(page.doc.querySelector('nav a[aria-current="page"]')!.textContent).toBe("Inicio");
@@ -270,7 +273,7 @@ describe("Home — header and footer", () => {
 
   it("the internal navigation still reaches the same places", async () => {
     const page = await loadHome();
-    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.getAttribute("href"))).toEqual(["/", "/#play", "/#experiences", "/leaderboards.html", "/rewards.html"]);
+    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.getAttribute("href"))).toEqual(["/", "/#experiences", "/leaderboards.html", "/rewards.html"]);
   });
 });
 
@@ -278,7 +281,7 @@ describe("Home — honest panels", () => {
   it("the Founder's order; every panel is informational: its one control is the link to its own page, and nothing on a panel is a status that promises availability", async () => {
     const page = await loadHome();
     const panels = Array.from(page.doc.querySelectorAll("article.xp"));
-    expect(panels.map((c) => c.querySelector(".xp-title")!.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    expect(panels.map((c) => c.querySelector(".xp-title")!.textContent)).toEqual(["URBANO Score", "URBANO Trivia", "URBANO Poker", "URBANO Voting"]);
     for (const panel of panels) {
       expect(panel.querySelectorAll("a"), panel.className).toHaveLength(1);
       expect(panel.querySelector("button, form, input, select, [tabindex]"), panel.className).toBeNull();
@@ -437,7 +440,7 @@ describe("Predictions — Spanish first, header, footer and navigation", () => {
     const page = await loadPredictions({ authenticated: false });
     expect(page.doc.documentElement.lang).toBe("es");
     expect(page.doc.title).toBe("URBANO Score — URBANO Gaming");
-    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
+    expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Experiencias", "Clasificaciones", "Premios"]);
     expect(page.text(".back-link")).toBe("← Volver a URBANO Gaming");
     expect(page.q(".back-link")!.getAttribute("href")).toBe("/");
     expect(page.doc.querySelector("a.brand-link")!.getAttribute("href")).toBe("https://urbanohn.com/");

@@ -27,25 +27,25 @@ export const CATEGORIES: Readonly<Record<CategoryKey, CategoryDefinition>> = {
   MOST_ELABORATE: {
     key: "MOST_ELABORATE",
     kind: "INDIVIDUAL",
-    name: { es: "Disfraz más elaborado", en: "Most elaborate costume" },
+    name: { es: "Más Elaborado", en: "Most Elaborate" },
     prompt: { es: "Elegí el disfraz más elaborado. Podés cambiar tu voto hasta que cierre la votación.", en: "Pick the most elaborate costume. You can change your vote until voting closes." },
   },
   SEXIEST: {
     key: "SEXIEST",
     kind: "INDIVIDUAL",
-    name: { es: "Disfraz más sexy", en: "Sexiest costume" },
+    name: { es: "Más Sexy", en: "Sexiest" },
     prompt: { es: "Elegí el disfraz más sexy. Podés cambiar tu voto hasta que cierre la votación.", en: "Pick the sexiest costume. You can change your vote until voting closes." },
   },
   BEST_GROUP: {
     key: "BEST_GROUP",
     kind: "GROUP",
-    name: { es: "Mejor disfraz en grupo", en: "Best group costume" },
+    name: { es: "Dúo o Grupo", en: "Duo or Group" },
     prompt: { es: "Elegí el mejor disfraz en grupo. Podés cambiar tu voto hasta que cierre la votación.", en: "Pick the best group costume. You can change your vote until voting closes." },
   },
   FUNNIEST: {
     key: "FUNNIEST",
     kind: "INDIVIDUAL",
-    name: { es: "Disfraz más chistoso", en: "Funniest costume" },
+    name: { es: "Más Divertido", en: "Funniest" },
     prompt: { es: "Elegí el disfraz más chistoso. Podés cambiar tu voto hasta que cierre la votación.", en: "Pick the funniest costume. You can change your vote until voting closes." },
   },
 };

@@ -48,7 +48,10 @@ interface Person { authUserId: string; memberId: string | null; token: string }
 async function signInToken(email: string): Promise<string> {
   const link = await admin.auth.admin.generateLink({ type: "magiclink", email });
   if (!link.data.properties) throw new Error("generateLink did not return properties.");
-  const verified = await admin.auth.verifyOtp({ token_hash: link.data.properties.hashed_token, type: "email" });
+  // A login must not replace the shared service-role client's session: hosted RLS
+  // correctly hides authority_grants from that ordinary user's subsequent reads.
+  const login = createClient(supabaseUrl, anonKey ?? serviceKey!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const verified = await login.auth.verifyOtp({ token_hash: link.data.properties.hashed_token, type: "email" });
   if (!verified.data.session) throw new Error("verifyOtp returned no session.");
   return verified.data.session.access_token;
 }

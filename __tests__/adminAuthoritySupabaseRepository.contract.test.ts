@@ -67,7 +67,9 @@ async function createRealGamingMemberWithToken(
   if (!linkResponse.data.properties) {
     throw new Error("generateLink did not return properties.");
   }
-  const verified = await cleanupClient.auth.verifyOtp({
+  // Keep the cleanup/service client privileged; verifying an OTP signs that client in.
+  const login = createClient(supabaseUrl, supabaseServiceRoleKey!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const verified = await login.auth.verifyOtp({
     token_hash: linkResponse.data.properties.hashed_token,
     type: "email",
   });
@@ -121,11 +123,21 @@ afterAll(async () => {
 });
 
 describe("SupabaseAuthorityRepository contract — Admin Control Plane A0 against live Postgres", () => {
-  it("bootstrap creates the first Governance grant, and a second bootstrap is rejected", async () => {
+  it("bootstrap creates the first Governance grant only when absent, and every subsequent bootstrap is rejected", async () => {
     const founder = await createRealGamingMember("ContractFounder");
-    const result = await bootstrapGovernanceAuthority(authorityRepo, founder, "Founder bootstrap.");
-    expect(result.authorityClass).toBe("PRODUCT_GOVERNANCE");
-    expect(await authorityRepo.hasActiveAuthority(founder, "PRODUCT_GOVERNANCE")).toBe(true);
+    const before = await cleanupClient.from("authority_grants").select("gaming_member_id").eq("authority_class", "PRODUCT_GOVERNANCE").is("revoked_at", null);
+    expect(before.error).toBeNull();
+    if (before.data!.length === 0) {
+      const result = await bootstrapGovernanceAuthority(authorityRepo, founder, "Founder bootstrap.");
+      expect(result.authorityClass).toBe("PRODUCT_GOVERNANCE");
+      expect(await authorityRepo.hasActiveAuthority(founder, "PRODUCT_GOVERNANCE")).toBe(true);
+    } else {
+      await expect(bootstrapGovernanceAuthority(authorityRepo, founder, "Founder bootstrap.")).rejects.toBeInstanceOf(GovernanceAlreadyBootstrappedError);
+      expect(await authorityRepo.hasActiveAuthority(founder, "PRODUCT_GOVERNANCE")).toBe(false);
+      const after = await cleanupClient.from("authority_grants").select("gaming_member_id").eq("authority_class", "PRODUCT_GOVERNANCE").is("revoked_at", null);
+      expect(after.error).toBeNull();
+      expect(after.data).toEqual(before.data);
+    }
 
     const other = await createRealGamingMember("ContractSecondBootstrapAttempt");
     await expect(bootstrapGovernanceAuthority(authorityRepo, other, "Trying again.")).rejects.toBeInstanceOf(

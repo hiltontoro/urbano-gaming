@@ -67,8 +67,8 @@ const read = (rel: string) => readFileSync(rel, "utf8");
 describe("the contest's fixed facts are the approved contract, one by one", () => {
   it("has exactly four categories: three for one person's costume, one for a group", () => {
     expect([...CATEGORY_KEYS]).toEqual(["MOST_ELABORATE", "SEXIEST", "BEST_GROUP", "FUNNIEST"]);
-    expect(CATEGORY_KEYS.map((k) => CATEGORIES[k].name.es)).toEqual(["Disfraz más elaborado", "Disfraz más sexy", "Mejor disfraz en grupo", "Disfraz más chistoso"]);
-    expect(CATEGORY_KEYS.map((k) => CATEGORIES[k].name.en)).toEqual(["Most elaborate costume", "Sexiest costume", "Best group costume", "Funniest costume"]);
+    expect(CATEGORY_KEYS.map((k) => CATEGORIES[k].name.es)).toEqual(["Más Elaborado", "Más Sexy", "Dúo o Grupo", "Más Divertido"]);
+    expect(CATEGORY_KEYS.map((k) => CATEGORIES[k].name.en)).toEqual(["Most Elaborate", "Sexiest", "Duo or Group", "Funniest"]);
     expect(CATEGORY_KEYS.map((k) => CATEGORIES[k].kind)).toEqual(["INDIVIDUAL", "INDIVIDUAL", "GROUP", "INDIVIDUAL"]);
     expect(isCategoryKey("SEXIEST")).toBe(true);
     expect(isCategoryKey("BEST_COUPLE")).toBe(false);
@@ -302,7 +302,7 @@ describe("a person's own candidacy, and a candidacy's public ficha", () => {
     const { repo, raw } = fakeRepo({ readMyCandidacy: vi.fn(async () => mine) });
     const out = await getMyCandidacy(repo, voterDeps(), "Bearer good", ID);
     expect(raw.readMyCandidacy).toHaveBeenCalledWith(ID, AUTH_USER);
-    expect(out.candidacy).toMatchObject({ publicCode: "HAL-K7M2Q", categoryName: { es: "Disfraz más sexy" }, ficheUrl: `/community-voting-round.html?c=${ID}&codigo=HAL-K7M2Q` });
+    expect(out.candidacy).toMatchObject({ publicCode: "HAL-K7M2Q", categoryName: { es: "Más Sexy" }, ficheUrl: `/community-voting-round.html?c=${ID}&codigo=HAL-K7M2Q` });
     expect(JSON.stringify(out)).not.toMatch(/whatsapp|\+504|authUser|email/i);
     expect((await getMyCandidacy(fakeRepo().repo, voterDeps(), "Bearer good", ID)).candidacy).toBeNull();
     await rejectsWith(getMyCandidacy(fakeRepo().repo, voterDeps(), null, ID), "AUTHENTICATION_REQUIRED");
@@ -356,7 +356,7 @@ describe("the station: search a code, confirm the person, rename, read the deliv
     const { repo, raw } = fakeRepo({ findCandidacyByCode: vi.fn(async () => ({ entryId: ENTRY, instanceId: INSTANCE, categoryKey: "SEXIEST", kind: "INDIVIDUAL", publicCode: "HAL-K7M2Q", publicName: "V", selfRegistered: true, hasWhatsapp: true, deliveryStatus: "PENDING", withdrawn: false, createdAt: "x" })) });
     const hit = await findStationCandidacy(repo, CTX, " hal-k7m2q ");
     expect(raw.findCandidacyByCode).toHaveBeenCalledWith({ ...CTX, code: "HAL-K7M2Q" });
-    expect(hit).toMatchObject({ valid: true, candidacy: { categoryName: { es: "Disfraz más sexy" }, hasWhatsapp: true } });
+    expect(hit).toMatchObject({ valid: true, candidacy: { categoryName: { es: "Más Sexy" }, hasWhatsapp: true } });
     expect(JSON.stringify(hit)).not.toMatch(/\+504|99887766/);
     expect(await findStationCandidacy(repo, CTX, "HAL-0OIL1")).toEqual({ valid: false, candidacy: null });
     expect(await findStationCandidacy(repo, CTX, undefined)).toEqual({ valid: false, candidacy: null });

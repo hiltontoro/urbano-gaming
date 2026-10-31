@@ -18,6 +18,47 @@ const voter = (world: World = {}, extra: { auth?: Parameters<typeof loadPage>[0]
   loadPage({ html: PAGES.voter, respond: contestServer(world), auth: extra.auth, query: extra.query, session: extra.session });
 const signedIn = { status: "authenticated", email: "persona@ensayo.invalid" } as const;
 
+describe("public pre-opening entry without a configured contest", () => {
+  for (const query of ["?participar=1", ""]) {
+    it(`shows a read-only journey, never captures data or votes (${query || "vote"})`, async () => {
+      const p = await loadPage({ html: PAGES.voter, query, respond: () => ({ status: 200, json: { featured: null } }) });
+      expect(p.$("#preopenEntry")).toBeTruthy();
+      expect(p.text()).toContain("The Pub by Beer Box");
+      expect(p.text()).toContain("8:00–11:00 p. m.");
+      expect(p.text()).toContain("11:00 p. m.–medianoche");
+      expect(p.posts()).toEqual([]);
+      expect(p.authed()).toEqual([]);
+      expect(p.geo.getCurrentPosition).not.toHaveBeenCalled();
+      expect(p.$("#regSubmit")).toBeNull();
+      if (query) {
+        expect(p.$("#previewName")).toBeTruthy();
+        expect(p.$("#previewWhatsapp")).toBeTruthy();
+        expect(p.$("#previewCategory")!.querySelectorAll("option")).toHaveLength(5);
+        expect(p.$("#previewFields")!.hasAttribute("disabled")).toBe(true);
+        expect(p.$$("#previewFields input[type=checkbox]")).toHaveLength(3);
+        expect(p.$$("#previewFields input[type=checkbox]").every(el => !(el as HTMLInputElement).checked)).toBe(true);
+      }
+    });
+  }
+  it("keeps the pre-opening entry usable if the provider fails", async () => {
+    const p = await loadPage({ html: PAGES.voter, query: "?participar=1", respond: () => ({ status: 503, json: {} }) });
+    expect(p.$("#preopenEntry")).toBeTruthy();
+    expect(p.posts()).toEqual([]);
+  });
+  for (const external of [false, true]) {
+    it(`only offers a validated local continuation (${external ? "reject external" : "accept local"})`, async () => {
+      const voteUrl = `/community-voting-round.html?c=${CONTEST}`;
+      const p = await loadPage({ html: PAGES.voter, query: "?participar=1", respond: () => ({ status: 200, json: { featured: {
+        voteUrl: external ? `https://evil.example${voteUrl}` : voteUrl,
+        registerUrl: `${voteUrl}&participar=1`, phase: "NOT_OPEN", categories: [{ name: { es: "Categoría", en: "Category" } }],
+      } } }) });
+      expect(p.$("#continueContest")?.getAttribute("href") ?? null).toBe(external ? null : `${voteUrl}&participar=1`);
+      expect(p.posts()).toEqual([]);
+      expect(p.authed()).toEqual([]);
+    });
+  }
+});
+
 // ---------------------------------------------------------------- the front door
 
 describe("the contest's front door: public, truthful, and it asks nothing of anyone", () => {
@@ -64,7 +105,7 @@ describe("the contest's front door: public, truthful, and it asks nothing of any
   });
 
   it("a search by a code that cannot be a code says so without asking the server; a good one opens the ficha", async () => {
-    const p = await voter({ ficha: { "HAL-K7M2Q": { status: 200, json: { candidacy: { code: "HAL-K7M2Q", name: "Drácula", category: { key: "MOST_ELABORATE", name: { es: "Disfraz más elaborado" }, instanceId: INST.MOST_ELABORATE }, imageUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/1001?v=full`, thumbUrl: "", ficheUrl: "/x" }, voting: { phase: "NOT_OPEN", votingOpensAt: "2026-11-01T05:00:00.000Z" } } } } });
+    const p = await voter({ ficha: { "HAL-K7M2Q": { status: 200, json: { candidacy: { code: "HAL-K7M2Q", name: "Drácula", category: { key: "MOST_ELABORATE", name: { es: "Más Elaborado" }, instanceId: INST.MOST_ELABORATE }, imageUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/1001?v=full`, thumbUrl: "", ficheUrl: "/x" }, voting: { phase: "NOT_OPEN", votingOpensAt: "2026-11-01T05:00:00.000Z" } } } } });
     await p.type(p.$("#codeSearch"), "HAL-0OIL1");
     await p.clickSel("#searchGo");
     expect(p.text()).toContain("Ese código no es válido");
@@ -180,7 +221,7 @@ describe("registration: a person registers THEMSELVES, through their own account
     expect(p.$("#registerForm")).toBeNull();
     expect(p.text("#myCode")).toBe("HAL-K7M2Q");
     expect(p.text("#myCandidacy")).toContain("Drácula");
-    expect(p.text("#myCandidacy")).toContain("Disfraz más elaborado");
+    expect(p.text("#myCandidacy")).toContain("Más Elaborado");
     expect(p.text("#myCandidacyText")).toContain("Pasá por la estación del concurso con tu código");
     expect(p.text("#deliveryText")).toContain("Te enviaremos tu foto y tu código por WhatsApp");
     expect(p.text(".msg.ok")).toContain("Tu candidatura quedó inscrita");
@@ -271,7 +312,7 @@ describe("a candidacy's ficha: public, no session, casts nothing", () => {
     status: 200,
     json: {
       contestId: CONTEST,
-      candidacy: { code: "HAL-K7M2Q", name: "Drácula de Tegucigalpa", category: { key: "MOST_ELABORATE", name: { es: "Disfraz más elaborado" }, kind: "INDIVIDUAL", instanceId: INST.MOST_ELABORATE }, thumbUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=thumb`, imageUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=full`, ficheUrl: `/community-voting-round.html?c=${CONTEST}&codigo=HAL-K7M2Q` },
+      candidacy: { code: "HAL-K7M2Q", name: "Drácula de Tegucigalpa", category: { key: "MOST_ELABORATE", name: { es: "Más Elaborado" }, kind: "INDIVIDUAL", instanceId: INST.MOST_ELABORATE }, thumbUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=thumb`, imageUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=full`, ficheUrl: `/community-voting-round.html?c=${CONTEST}&codigo=HAL-K7M2Q` },
       voting: { phase, published: false, votingOpensAt: "2026-11-01T05:00:00.000Z", votingClosesAt: VOTE_CLOSES, deadlineAt: VOTE_CLOSES, ...over },
     },
   });
@@ -280,7 +321,7 @@ describe("a candidacy's ficha: public, no session, casts nothing", () => {
     const p = await voter({ ficha: { "HAL-K7M2Q": ficha("NOT_OPEN") } }, { query: `?c=${CONTEST}&codigo=hal-k7m2q` });
     expect(p.text("#fichaName")).toBe("Drácula de Tegucigalpa");
     expect(p.text("#fichaCode")).toBe("HAL-K7M2Q");
-    expect(p.text("#fichaCategory")).toBe("Disfraz más elaborado");
+    expect(p.text("#fichaCategory")).toBe("Más Elaborado");
     expect(p.$("#fichaCard img.ficha-photo")!.getAttribute("src")).toBe(`${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=full`);
     expect(p.authed()).toEqual([]);
     expect(p.posts()).toEqual([]);
@@ -391,7 +432,7 @@ describe("voting: names and codes, a search, one vote per category — and no po
   it("asks for confirmation naming the candidate, then binds, takes an intent and votes — with no position — and confirms only on the server's 200", async () => {
     const p = await into(open());
     await p.clickSel("#choose");
-    expect(p.modal()).toContain("¿Votar por Frankenstein en «Disfraz más elaborado»?");
+    expect(p.modal()).toContain("¿Votar por Frankenstein en «Más Elaborado»?");
     expect(p.modal()).toContain("Código HAL-22222");
     expect(p.posts().filter((c) => /votes/.test(c.url))).toHaveLength(0); // nothing is sent before the person confirms
     await p.clickSel("#confirmVote");
@@ -400,7 +441,7 @@ describe("voting: names and codes, a search, one vote per category — and no po
     expect(votes[0].url).toBe(`${ROUNDS}/${INST.MOST_ELABORATE}/votes`);
     expect(votes[0].body).toEqual({ bindingId: uuid(900), intentNo: 5, interactionInstanceId: uuid(700), candidateId: galleryItem("MOST_ELABORATE", 1).candidateId });
     expect(JSON.stringify(votes[0].body)).not.toMatch(/location|latitude|longitude|accuracy/i);
-    expect(p.text(".msg.ok")).toBe("Tu voto por Frankenstein en «Disfraz más elaborado» quedó registrado. Podés cambiarlo hasta que cierre la votación.");
+    expect(p.text(".msg.ok")).toBe("Tu voto por Frankenstein en «Más Elaborado» quedó registrado. Podés cambiarlo hasta que cierre la votación.");
     expect(p.geo.getCurrentPosition).not.toHaveBeenCalled();
   });
 
@@ -418,7 +459,7 @@ describe("voting: names and codes, a search, one vote per category — and no po
     const p = await into(open({ voteReply: async () => (++n === 1 ? { status: 0, json: { code: "NETWORK" } } : { status: 200, json: { outcome: "REPLAYED", candidateId: galleryItem("MOST_ELABORATE", 1).candidateId } }) }));
     await p.clickSel("#choose");
     await p.clickSel("#confirmVote");
-    expect(p.text(".msg.err")).toContain("No pudimos confirmar tu voto en «Disfraz más elaborado». Si ya había llegado, no se duplica.");
+    expect(p.text(".msg.err")).toContain("No pudimos confirmar tu voto en «Más Elaborado». Si ya había llegado, no se duplica.");
     await p.clickSel("#retryVote");
     const votes = p.posts().filter((c) => /votes$/.test(c.url));
     expect(votes).toHaveLength(2);
@@ -524,7 +565,7 @@ describe("the venue display: exposure only, truthful about the moment", () => {
     const closed = await display({ phases: { MOST_ELABORATE: "CLOSED", SEXIEST: "CLOSED", BEST_GROUP: "CLOSED", FUNNIEST: "CLOSED" } });
     expect(closed.text("#when")).toBe("La votación cerró. ¡Gracias por participar! Los ganadores se anuncian después de revisar los resultados.");
     const done = await display({ phases: { MOST_ELABORATE: "CLOSED", SEXIEST: "CLOSED" }, published: { MOST_ELABORATE: true, SEXIEST: true }, results: { MOST_ELABORATE: { published: true, kind: "WINNERS", items: [{ alias: "1001", name: "Frankenstein", code: "HAL-22222" }] }, SEXIEST: { published: true, kind: "WINNERS", items: [] } } });
-    expect(done.text("#when")).toBe("Sin ganador: Disfraz más sexy.");
+    expect(done.text("#when")).toBe("Sin ganador: Más Sexy.");
   });
 });
 

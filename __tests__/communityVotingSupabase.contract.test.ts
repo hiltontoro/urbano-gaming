@@ -552,7 +552,10 @@ describe("Authoritative ordinary-join guard and registration serialization", () 
       p_participant_id: randomUUID(), p_session_id: ev.session.sessionId, p_display_name: "Anon", p_normalized_display_name: "anon",
       p_participant_token: `anon-token-${randomUUID()}`, p_joined_at: new Date().toISOString(), p_event_type: "PARTICIPANT_JOINED", p_event_payload: {}, p_gaming_member_id: null,
     });
-    expect(viaRest.error?.message ?? "").toMatch(/EVENT_BOUND/);
+    const visible = await anon.from("sessions").select("session_id").eq("session_id", ev.session.sessionId);
+    expect(visible.error).toBeNull();
+    // Hosted RLS may hide the Session before the invoker reaches the event guard.
+    expect(viaRest.error?.message ?? "").toMatch(visible.data?.length ? /^EVENT_BOUND_SESSION:/ : /^SESSION_NOT_FOUND:/);
     expect(await q("select 1 from participants where session_id = $1", [ev.session.sessionId])).toHaveLength(0);
   });
 
@@ -619,13 +622,14 @@ describe("Authoritative ordinary-join guard and registration serialization", () 
         await setSessionCapabilities(sessionRepo, s.sessionId, s.hostToken, ["VOTING"]);
         const outcome = await c.query("select join_participant_atomically($1,$2,'Role Check','role check',$3,now(),'PARTICIPANT_JOINED','{}'::jsonb,null)", [randomUUID(), s.sessionId, `role-${randomUUID()}`]).then(() => "ok", (e: Error) => e.message);
         expect(String(outcome)).not.toMatch(/community_voting|EVENT_BOUND/);
-        // ... and the same role IS refused for an event-bound Session, by the guard, not by a privilege error.
+        // The same role is refused by the event guard, or by pre-existing Session RLS first.
         const ev = await newEvent();
         await c.query("rollback");
         await c.query("begin");
         await c.query(`set local role ${role}`);
+        const visible = await c.query("select session_id from sessions where session_id = $1", [ev.session.sessionId]);
         const refused = await c.query("select join_participant_atomically($1,$2,'Role Check','role check',$3,now(),'PARTICIPANT_JOINED','{}'::jsonb,null)", [randomUUID(), ev.session.sessionId, `role-${randomUUID()}`]).then(() => "ok", (e: Error) => e.message);
-        expect(String(refused)).toMatch(/EVENT_BOUND/);
+        expect(String(refused)).toMatch(visible.rows.length ? /^EVENT_BOUND_SESSION:/ : /^SESSION_NOT_FOUND:/);
       } finally {
         await c.query("rollback").catch(() => {});
         await c.end();
@@ -1342,7 +1346,9 @@ describe("Ordinary start cannot open an event-bound Session", () => {
     const asAnon = await anon.rpc("start_session_atomically", {
       p_session_id: ev.session.sessionId, p_host_token: ev.session.hostToken, p_prompt_text: "Q", p_voting_source_type: "HOST_AUTHORED", p_voting_candidates: ["Uno", "Dos"],
     });
-    expect(asAnon.error?.message ?? "").toMatch(/EVENT_BOUND/);
+    const visible = await anon.from("sessions").select("session_id").eq("session_id", ev.session.sessionId);
+    expect(visible.error).toBeNull();
+    expect(asAnon.error?.message ?? "").toMatch(visible.data?.length ? /^EVENT_BOUND_SESSION:/ : /^SESSION_NOT_FOUND:/);
     expect(await ballotCounts(ev)).toEqual(before);
   });
 

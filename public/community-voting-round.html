@@ -172,6 +172,7 @@
 
 <script src="/urbanoAuth.js"></script>
 <script src="/communityVotingRound.js"></script>
+<script src="/featuredContest.js"></script>
 <script>
 (() => {
   "use strict";
@@ -673,6 +674,18 @@
   function field(label, control, hint, bad, id, errKey) {
     return h("div", { class: "field" }, id ? h("label", { class: "lbl", for: id, text: label }) : h("div", { class: "lbl", text: label }), control, hint ? h("div", { class: "hint", text: hint }) : null, bad ? h("div", { class: "bad", role: "alert", id: `err_${errKey}`, text: bad }) : null);
   }
+  function registrationPreviewFields() {
+    const names = ["Más Elaborado", "Más Sexy", "Dúo o Grupo", "Más Divertido"];
+    return h("fieldset", { disabled: true, id: "previewFields" },
+      h("legend", { text: "Vista previa de la inscripción — todavía cerrada" }),
+      field("Nombre público", h("input", { id: "previewName", type: "text", placeholder: "Cómo querés aparecer en el concurso" }), null, null, "previewName"),
+      field("WhatsApp con código de país", h("input", { id: "previewWhatsapp", type: "tel", placeholder: "+504 …" }), null, null, "previewWhatsapp"),
+      field("Categoría", h("select", { id: "previewCategory" }, h("option", { text: "Elegí una categoría", value: "" }), names.map(n => h("option", { text: n }))), null, null, "previewCategory"),
+      h("label", { class: "check" }, h("input", { type: "checkbox", id: "previewGallery" }), h("span", { text: "Participación y permiso para mostrar mi fotografía en el concurso." })),
+      h("label", { class: "check" }, h("input", { type: "checkbox", id: "previewContact" }), h("span", { text: "Contacto de URBANO Gaming y The Pub para entregarme mi foto, código, enlace y premios." })),
+      h("label", { class: "check" }, h("input", { type: "checkbox", id: "previewPromotion" }), h("span", { text: "Opcional: permito a The Pub y URBANO Gaming usar mi fotografía con fines comerciales y de marketing. Rechazarlo no impide concursar." })),
+      h("p", { class: "hint", text: "Estos controles muestran el recorrido; no registran consentimientos. Los textos y el aviso de privacidad se presentan antes de la inscripción real." }));
+  }
   /** An error stays only until the person touches what it is about: it is removed in place (the form is not rebuilt under their hand). */
   function clearError(key) {
     if (state.formErrors[key] === undefined) return;
@@ -768,6 +781,7 @@
     const stage = R.registrationStage(reg, state.mine);
     const parts = [back(), h("div", { class: "card", id: "registerIntro" }, h("h2", { text: "Participar como concursante" }), h("p", { id: "registrationNotice", text: R.registrationNotice(reg) }))];
     if (state.mine) { parts.push(renderMine()); return parts; }
+    if (stage !== "FORM" && stage !== "CLOSED") parts.push(registrationPreviewFields());
     if (step() !== "READY" || !state.entered) {
       if (stage === "FORM") parts.push(h("p", { class: "sub", text: "Para inscribirte entrás con tu correo y tu perfil de URBANO Gaming." }), ...identityCards());
       else parts.push(h("div", { class: "card stack" }, h("p", { text: "Si ya te inscribiste, entrá con tu correo para ver tu candidatura." }), h("button", { class: "btn", id: "signInToSee", text: "Entrar", onclick: () => requireIdentity(() => go("register")) })));
@@ -1148,7 +1162,35 @@
   }
 
   // ---- start -----------------------------------------------------------------------------------------------------------------
+  async function showPublicEntry() {
+    const joining = params.get("participar") === "1";
+    const names = ["Más Elaborado", "Más Sexy", "Dúo o Grupo", "Más Divertido"];
+    const preview = h("section", { class: "card stack", id: "preopenEntry" },
+      h("a", { href: "/", text: "← Volver a URBANO Gaming" }),
+      h("h2", { text: joining ? "Participar como concursante" : "Votar por tu disfraz favorito" }),
+      h("p", { text: "Concurso de disfraces · The Pub by Beer Box" }),
+      h("p", { text: "Sábado 31 de octubre de 2026 · Hora de Honduras" }),
+      h("p", { text: "Inscripciones y fotos: 8:00–11:00 p. m. · Votación: 11:00 p. m.–medianoche." }),
+      h("p", { role: "status", text: "El concurso todavía no está disponible. Podés conocer el recorrido; esta vista no guarda ni envía datos." }),
+      h("p", { text: PRIZE_PROMISE + ". The Pub by Beer Box define y entrega los premios." }));
+    if (joining) {
+      const fields = registrationPreviewFields();
+      preview.append(fields, h("p", { text: "Al inscribirte necesitarás tu cuenta, confirmar que sos mayor de edad y aceptar las reglas y el permiso de uso de la foto para el concurso. El uso promocional se decide aparte y es opcional." }),
+        h("p", { text: "Después recibís un código; en la estación lo usamos para asociar tu foto. Te entregamos manualmente la foto y el enlace por WhatsApp." }));
+    } else preview.append(h("ul", null, names.map(n => h("li", { text: n }))), h("p", { text: "Con tu cuenta podés votar por un disfraz en cada categoría y cambiarlo hasta medianoche. No necesitás estar en el local. No se permite votar por tu propia candidatura ni por tu grupo." }));
+    preview.append(h("a", { class: "btn block", href: joining ? "/community-voting-round.html" : "/community-voting-round.html?participar=1", text: joining ? "Ver cómo votar" : "Ver cómo participar" }));
+    app.textContent = ""; app.append(preview); app.setAttribute("aria-busy", "false");
+    try {
+      const response = await window.fetch(API + "contests/featured", { method: "GET", credentials: "omit", cache: "no-store" });
+      const active = response.status === 200 ? window.UrbanoFeaturedContest.validate(await response.json()) : null;
+      if (active) {
+        preview.querySelector('[role="status"]').textContent = "El concurso ya está disponible para consultar. La inscripción y el voto dependen de su horario y estado.";
+        preview.append(h("a", { class: "btn primary block", id: "continueContest", href: joining ? active.join : active.vote, text: joining ? "Continuar a la inscripción" : "Continuar al concurso" }));
+      }
+    } catch (e) { /* Informational entry stays usable without the provider. */ }
+  }
   async function start() {
+    if (!params.has("c")) { await showPublicEntry(); return; }
     if (!/^[0-9a-f-]{36}$/i.test(contestId)) { state.fatal = say("CONTEST_NOT_FOUND"); render(); return; }
     const first = await loadContest();
     if (!first.ok) {

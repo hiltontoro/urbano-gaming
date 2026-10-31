@@ -254,7 +254,7 @@ describe("self-registration at the HTTP edge: the identity is the verified token
     expect(other.json.code).toBe("ALREADY_CANDIDATE");
     const mine = await get(mineRoute, { contestId: contest.contestId }, person.bearer);
     expect(mine.status).toBe(200);
-    expect(mine.json.candidacy).toMatchObject({ publicCode: res.json.candidacy.publicCode, state: "REGISTERED", role: "INDIVIDUAL", categoryName: { es: "Disfraz más elaborado" } });
+    expect(mine.json.candidacy).toMatchObject({ publicCode: res.json.candidacy.publicCode, state: "REGISTERED", role: "INDIVIDUAL", categoryName: { es: "Más Elaborado" } });
     expect(mine.text).not.toMatch(/9988|whatsapp|authUser|email/i);
     expect((await get(mineRoute, { contestId: contest.contestId })).status).toBe(401);
   });

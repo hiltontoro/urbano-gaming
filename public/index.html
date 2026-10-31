@@ -35,7 +35,6 @@
 
 <nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
   <a class="nav-link is-active" href="/" aria-current="page" data-i18n="shell.nav.home">Inicio</a>
-  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
   <a class="nav-link" href="/#experiences" data-i18n="shell.nav.experiences">Experiencias</a>
   <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
   <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
@@ -61,9 +60,10 @@
           <span class="xf-label" data-i18n="home.feat.label">Destacado</span>
           <span class="xp-kicker" data-i18n="home.feat.product">URBANO Voting</span>
         </div>
-        <h2 class="xf-title" id="featured-title" data-i18n="home.feat.title">Halloween</h2>
-        <p class="xf-meta"><span data-i18n="home.feat.sub">Concurso de disfraces</span> · <span data-i18n="home.feat.venue">The Pub by Beer Box</span> · <span data-i18n="home.feat.date">31 de octubre</span></p>
+        <h2 class="xf-title" id="featured-title"><span data-i18n="home.feat.title">Halloween</span><span class="sr-only">: </span><span class="xf-tagline" data-i18n="home.feat.tagline">La última noche</span></h2>
+        <p class="xf-meta"><span data-i18n="home.feat.sub">Concurso de disfraces</span> · <span data-i18n="home.feat.venue">The Pub by Beer Box</span> · <span data-i18n="home.feat.date">Sábado 31 de octubre</span></p>
         <p class="xf-desc" data-i18n="home.feat.desc">Elegí a tus favoritos de la noche o sumate como concursante.</p>
+        <p class="xf-prizes" data-i18n="home.feat.prizes">Habrá premios para los ganadores, entregados por The Pub.</p>
         <ul class="xf-cats" data-feat-cats hidden></ul>
         <div class="xf-actions">
           <span class="xf-btn" data-feat="vote" data-i18n="home.feat.vote">Votar por tu disfraz favorito</span>
@@ -74,7 +74,7 @@
     </article>
   </section>
 
-  <!-- The four experiences of URBANO Gaming, in this order: Voting, Score, Trivia, Poker. The four panels are static: every word is written here
+  <!-- The four experiences of URBANO Gaming, in this order: Score, Trivia, Poker, Voting (Voting is last because the featured card above is already its Halloween experience). The four panels are static: every word is written here
        (and translated by the language table), every picture is decoration (empty alt text), and nothing in them is read from a server, so they are the
        same for the first visitor and for the thousandth (the only answer this page asks a server for is the featured card's, above). Each panel has
        ONE control: "Descubrí más", a link to that experience's own page (/voting.html, /score.html, /trivia.html, /poker.html), where the information
@@ -84,20 +84,6 @@
     <h2 class="sr-only" id="experiences-title" data-i18n="home.exp.label">Experiencias</h2>
     <p class="xp-choose" aria-hidden="true" data-i18n="home.xp.choose">Elegí tu experiencia</p>
     <ul class="xp-grid" id="play" role="list">
-      <li>
-        <article class="xp xp-voting" aria-labelledby="xp-voting-title">
-          <img class="xp-art" src="/assets/home/urbano-voting.webp" alt="" width="1280" height="720" decoding="async">
-          <span class="xp-scrim" aria-hidden="true"></span>
-          <div class="xp-top">
-            <span class="xp-kicker" data-i18n="home.xp.voting.kicker">Votaciones</span>
-          </div>
-          <div class="xp-body">
-            <h3 class="xp-title" id="xp-voting-title" data-i18n="home.xp.voting.title">URBANO Voting</h3>
-            <p class="xp-desc" data-i18n="home.xp.voting.desc">Elegí a tus favoritos en las votaciones de tu comunidad.</p>
-            <a class="xp-cta" href="/voting.html"><span data-i18n="home.xp.cta">Descubrí más</span><span class="sr-only">: <span data-i18n="home.xp.voting.title">URBANO Voting</span></span></a>
-          </div>
-        </article>
-      </li>
       <li>
         <article class="xp xp-score" aria-labelledby="xp-score-title">
           <img class="xp-art" src="/assets/home/urbano-score.webp" alt="" width="1280" height="720" decoding="async">
@@ -159,6 +145,20 @@
             <h3 class="xp-title" id="xp-poker-title" data-i18n="home.xp.poker.title">URBANO Poker</h3>
             <p class="xp-desc" data-i18n="home.xp.poker.desc">No-Limit Hold'em con tu grupo, en una mesa privada.</p>
             <a class="xp-cta" href="/poker.html"><span data-i18n="home.xp.cta">Descubrí más</span><span class="sr-only">: <span data-i18n="home.xp.poker.title">URBANO Poker</span></span></a>
+          </div>
+        </article>
+      </li>
+      <li>
+        <article class="xp xp-voting" aria-labelledby="xp-voting-title">
+          <img class="xp-art" src="/assets/home/urbano-voting.webp" alt="" width="1280" height="720" decoding="async">
+          <span class="xp-scrim" aria-hidden="true"></span>
+          <div class="xp-top">
+            <span class="xp-kicker" data-i18n="home.xp.voting.kicker">Votaciones</span>
+          </div>
+          <div class="xp-body">
+            <h3 class="xp-title" id="xp-voting-title" data-i18n="home.xp.voting.title">URBANO Voting</h3>
+            <p class="xp-desc" data-i18n="home.xp.voting.desc">Elegí a tus favoritos en las votaciones de tu comunidad.</p>
+            <a class="xp-cta" href="/voting.html"><span data-i18n="home.xp.cta">Descubrí más</span><span class="sr-only">: <span data-i18n="home.xp.voting.title">URBANO Voting</span></span></a>
           </div>
         </article>
       </li>
@@ -264,10 +264,12 @@
     "home.feat.label": "Destacado",
     "home.feat.product": "URBANO Voting",
     "home.feat.title": "Halloween",
+    "home.feat.tagline": "La última noche",
     "home.feat.sub": "Concurso de disfraces",
     "home.feat.venue": "The Pub by Beer Box",
-    "home.feat.date": "31 de octubre",
+    "home.feat.date": "Sábado 31 de octubre",
     "home.feat.desc": "Elegí a tus favoritos de la noche o sumate como concursante.",
+    "home.feat.prizes": "Habrá premios para los ganadores, entregados por The Pub.",
     "home.feat.vote": "Votar por tu disfraz favorito",
     "home.feat.join": "Participar como concursante",
     "home.feat.categories": "Categorías",

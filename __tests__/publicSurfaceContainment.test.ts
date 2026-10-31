@@ -153,7 +153,7 @@ describe("Premios: Spanish and English on the shared header, with the same hones
 
 describe("both pages share the header, the navigation and the language with the rest of the product", () => {
   for (const name of Object.keys(PAGES) as PageName[]) {
-    it(`${name}: language selector, brand, account entry, five navigation links with this page marked, footer; ES then EN`, async () => {
+    it(`${name}: language selector, brand, account entry, four navigation links with this page marked, footer; ES then EN`, async () => {
       const page = await open(name);
       expect(Array.from(page.doc.querySelectorAll("[data-lang]")).map((b) => `${b.getAttribute("data-lang")}:${b.getAttribute("aria-pressed")}`)).toEqual(["es:true", "en:false"]);
       expect(page.doc.querySelector(".brand-badge")?.getAttribute("href")).toBe("/");
@@ -161,15 +161,15 @@ describe("both pages share the header, the navigation and the language with the 
       expect(page.doc.getElementById("account-link")).not.toBeNull();
       expect(page.attach).toHaveLength(1);
       const nav = Array.from(page.doc.querySelectorAll(".primary-nav a"));
-      expect(nav.map((a) => a.getAttribute("href"))).toEqual(["/", "/#play", "/#experiences", "/leaderboards.html", "/rewards.html"]);
-      expect(nav.map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
+      expect(nav.map((a) => a.getAttribute("href"))).toEqual(["/", "/#experiences", "/leaderboards.html", "/rewards.html"]);
+      expect(nav.map((a) => a.textContent)).toEqual(["Inicio", "Experiencias", "Clasificaciones", "Premios"]);
       const current = page.doc.querySelectorAll('.primary-nav a[aria-current="page"]');
       expect(current).toHaveLength(1);
       expect((current[0] as HTMLAnchorElement).getAttribute("href")).toBe(name === "leaderboards.html" ? "/leaderboards.html" : "/rewards.html");
       expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
       page.en();
       await tick();
-      expect(nav.map((a) => a.textContent)).toEqual(["Home", "Play", "Experiences", "Leaderboards", "Rewards"]);
+      expect(nav.map((a) => a.textContent)).toEqual(["Home", "Experiences", "Leaderboards", "Rewards"]);
       expect(page.doc.querySelector(".primary-nav")!.getAttribute("aria-label")).toBe("Main navigation");
       expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
     });
@@ -178,7 +178,7 @@ describe("both pages share the header, the navigation and the language with the 
       const page = await open(name, { lang: "en" });
       expect(page.doc.documentElement.lang).toBe("en");
       expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
-      expect(page.text(".primary-nav")).toBe("Home Play Experiences Leaderboards Rewards");
+      expect(page.text(".primary-nav")).toBe("Home Experiences Leaderboards Rewards");
     });
 
     it(`${name}: wide layout rules for a phone — the header wraps in two rows, nothing wider than the screen, 16 px gutters`, () => {

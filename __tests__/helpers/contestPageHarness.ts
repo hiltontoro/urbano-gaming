@@ -16,6 +16,7 @@ import { vi } from "vitest";
 const ROOT = process.cwd();
 const read = (f: string) => readFileSync(path.join(ROOT, "public", f), "utf8");
 export const FILES: Record<string, string> = {
+  "featuredContest.js": read("featuredContest.js"),
   "communityVotingRound.js": read("communityVotingRound.js"),
   "communityVotingRoundOperator.js": read("communityVotingRoundOperator.js"),
   "communityVotingSlideshow.js": read("communityVotingSlideshow.js"),
@@ -178,10 +179,10 @@ export const TEXTS = {
   galleryConsent: { version: "halloween-2026-v3-gallery", text: "Texto del consentimiento de la foto (de prueba)." },
 };
 export const NAMES: Record<Key, { es: string; en: string; kind: "INDIVIDUAL" | "GROUP" }> = {
-  MOST_ELABORATE: { es: "Disfraz más elaborado", en: "Most elaborate costume", kind: "INDIVIDUAL" },
-  SEXIEST: { es: "Disfraz más sexy", en: "Sexiest costume", kind: "INDIVIDUAL" },
-  BEST_GROUP: { es: "Mejor disfraz en grupo", en: "Best group costume", kind: "GROUP" },
-  FUNNIEST: { es: "Disfraz más chistoso", en: "Funniest costume", kind: "INDIVIDUAL" },
+  MOST_ELABORATE: { es: "Más Elaborado", en: "Most Elaborate", kind: "INDIVIDUAL" },
+  SEXIEST: { es: "Más Sexy", en: "Sexiest", kind: "INDIVIDUAL" },
+  BEST_GROUP: { es: "Dúo o Grupo", en: "Duo or Group", kind: "GROUP" },
+  FUNNIEST: { es: "Más Divertido", en: "Funniest", kind: "INDIVIDUAL" },
 };
 
 export function contestBody(w: World = {}): Json {
