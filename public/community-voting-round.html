@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<title>Concurso de Disfraces — URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * Halloween Community Voting, two-round pilot — the voter's page. Mobile-first, on the same identity tokens as the rest of the shell.
+   * Everything shown comes from the server as plain text and is placed with textContent; this page never builds markup from data.
+   * It never receives, and so can never show, a total, a rank or a count of votes. It never asks the browser for a location in the
+   * preliminary; only the final does, and only because the server says so.
+   */
+  :root {
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c; --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a;
+    --halloween: #ff7a1a; --halloween-bg: rgba(255, 122, 26, 0.12); --purple: #7c3aed; --good: #4ade80; --bad: #f87171; --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  input[type="text"], input[type="email"] { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 16px; }
+  .top { display: flex; align-items: center; gap: 10px; padding: 14px 16px; max-width: 720px; margin: 0 auto; }
+  .top img { width: 24px; height: 26px; }
+  .top h1 { font-size: 15px; font-weight: 800; margin: 0; letter-spacing: 0.02em; flex: 1; }
+  .who { font-size: 11px; color: var(--muted); text-align: right; }
+  main { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+  .banner { background: var(--halloween-bg); border: 1px solid rgba(255, 122, 26, 0.4); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; line-height: 1.4; margin-bottom: 10px; }
+  .banner .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .banner.closed { background: var(--surface-2); border-color: var(--line); }
+  .banner .clock { font-weight: 800; font-size: 20px; letter-spacing: 0.04em; }
+  .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 16px; margin: 0 0 6px; }
+  .card p { margin: 6px 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .stack > * + * { margin-top: 10px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row > * { flex: 1; }
+  .btn { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-weight: 700; font-size: 14px; min-height: 44px; }
+  .btn.primary { background: var(--halloween); color: #1a0d00; border-color: var(--halloween); }
+  .btn.link { background: none; border: none; color: var(--muted); text-decoration: underline; font-weight: 600; min-height: 36px; }
+  .msg { font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+  .msg.err { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4); color: #fecaca; }
+  .msg.ok { background: rgba(74, 222, 128, 0.12); border: 1px solid rgba(74, 222, 128, 0.4); color: #bbf7d0; }
+  .steps { display: flex; gap: 6px; margin: 0 0 14px; padding: 0; list-style: none; }
+  .steps li { flex: 1; text-align: center; font-size: 11px; font-weight: 700; padding: 8px 4px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+  .steps li.done { background: rgba(74, 222, 128, 0.14); color: var(--good); }
+  .steps li.current { background: var(--halloween-bg); color: var(--halloween); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 12px; font-weight: 700; }
+  .tabs button[aria-selected="true"] { background: var(--halloween-bg); border-color: var(--halloween); color: var(--halloween); }
+  .meter { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .deck { position: relative; touch-action: pan-y; user-select: none; }
+  .deck .photo { width: 100%; height: min(58vh, 540px); object-fit: contain; border-radius: var(--radius); background: #000; display: block; }
+  .deck .tag { position: absolute; left: 12px; top: 12px; background: rgba(0, 0, 0, 0.7); border-radius: 999px; padding: 6px 12px; font-weight: 800; font-size: 14px; }
+  .deck .flag { position: absolute; right: 12px; top: 12px; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+  .flag.mine { background: var(--purple); }
+  .flag.voted { background: var(--good); color: #052e16; }
+  .deck-actions { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 8px; margin-top: 10px; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); background: rgba(10, 10, 10, 0.94); padding: 8px; border-radius: 14px; border: 1px solid var(--line); z-index: 1; }
+  .grid-scroller { height: min(70vh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); background: var(--bg-card); border: 1px solid var(--line); }
+  .grid-window { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 6px; }
+  .cell { position: relative; border: 0; padding: 0; background: var(--surface-2); border-radius: 10px; overflow: hidden; }
+  .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cell .no { position: absolute; left: 6px; bottom: 6px; background: rgba(0, 0, 0, 0.72); border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
+  .cell .pick { position: absolute; left: 6px; top: 6px; background: var(--good); color: #052e16; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; }
+  .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+  .modal { background: var(--bg-card); border: 1px solid var(--line); border-radius: 18px 18px 0 0; width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .modal img.full { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; background: #000; }
+  .code-big { font-size: 34px; font-weight: 800; letter-spacing: 0.12em; text-align: center; padding: 14px; background: var(--surface-2); border-radius: 12px; }
+  #bannerSlot { position: sticky; top: 0; z-index: 6; }
+  .test-banner { background: #b91c1c; color: #fff; padding: 10px 16px; font-size: 13px; font-weight: 700; line-height: 1.4; text-align: center; border-bottom: 3px solid #fecaca; }
+  .test-banner strong { letter-spacing: 0.08em; font-weight: 800; }
+  .test-tag { display: inline-block; background: #b91c1c; color: #fff; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 800; letter-spacing: 0.04em; }
+  .photo-missing { aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; background: var(--surface-2); border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .winners { display: flex; flex-wrap: wrap; gap: 10px; }
+  .winners figure { margin: 0; width: calc(50% - 5px); }
+  .winners img { width: 100%; border-radius: 12px; background: #000; }
+  .winners figcaption { text-align: center; font-weight: 800; padding-top: 4px; }
+  .hidden { display: none !important; }
+  @media (min-width: 560px) { .modal-back { align-items: center; } .modal { border-radius: 18px; } }
+</style>
+</head>
+<body>
+<div id="bannerSlot"></div>
+<header class="top">
+  <img src="/urbano-mark.svg" alt="" width="24" height="26" />
+  <h1>Concurso de Disfraces</h1>
+  <div class="who" id="who"></div>
+</header>
+<main id="main">
+  <div id="app" aria-busy="true" aria-live="polite"></div>
+</main>
+<div id="modalRoot"></div>
+
+<script src="/urbanoAuth.js"></script>
+<script src="/communityVotingRound.js"></script>
+<script>
+(() => {
+  "use strict";
+  const R = CommunityVotingRound;
+  const V = R;   // the deck, swipe and virtual-grid helpers live in the same module
+  const params = new URLSearchParams(window.location.search);
+  const instanceId = params.get("e") || "";
+  const app = document.getElementById("app");
+  const who = document.getElementById("who");
+  const modalRoot = document.getElementById("modalRoot");
+  const PHOTO_PREFIX = "/api/gaming/community-voting/rounds/";
+  const BASE_TITLE = document.title;
+
+  // ---- storage: per-voter conveniences only (the contestant to come back to after signing in). Every access is guarded.
+  const sessionStore = (() => {
+    try { return window.sessionStorage; } catch (e) { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; }
+  })();
+  const pending = R.createPendingSelection(sessionStore, instanceId);
+
+  const state = {
+    api: R.buildApi((...a) => window.fetch(...a), () => UrbanoAuth.getAccessToken(), instanceId),
+    info: null, texts: null, results: null,
+    auth: { status: "unauthenticated", email: "" }, authStep: "email", email: "", code: "", name: "",
+    bound: false, status: null, gallery: null, myCandidateId: null,
+    view: "deck", deckIndex: 0, grid: { scrollTop: 0 },
+    countdown: R.createCountdown(null),
+    claimResult: null, retry: null,
+    busy: false, error: null, notice: null, fatal: null,
+    // GATE-014: `epoch` goes up whenever the signed-in person changes or signs out, `castSeq` with every vote tap: a location answer that arrives
+    // after either moved on must send nothing.
+    epoch: 0, castSeq: 0,
+  };
+
+  // ---- tiny DOM builder: text only, never markup from data
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "text") el.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+      else if (v === true) el.setAttribute(k, "");
+      else el.setAttribute(k, String(v));
+    }
+    for (const kid of kids.flat()) {
+      if (kid === null || kid === undefined || kid === false) continue;
+      el.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    }
+    return el;
+  }
+  const safePhoto = (url) => (typeof url === "string" && url.startsWith(PHOTO_PREFIX) ? url : "");
+  const say = (code) => R.describeError(code);
+  const infoNow = () => (state.info && state.info.info) || null;
+  const phase = () => (infoNow() ? infoNow().phase : "NOT_OPEN");
+  const isFinal = () => !!(infoNow() && infoNow().roundRole === "FINAL");
+  const step = () => R.identityStep(state.auth.status);
+  const items = () => (state.gallery && state.gallery.items) || [];
+
+  // ---- identity -------------------------------------------------------------------------------------------------------------
+
+  /** Every change of WHO is signed in (or of how far their account is) goes through here, so anything started for the previous person can tell. */
+  function setAuth(next) {
+    if (state.auth.status !== next.status || state.auth.email !== next.email) state.epoch += 1;
+    state.auth = next;
+  }
+
+  async function refreshAuth() {
+    try {
+      const s = await UrbanoAuth.getState();
+      setAuth({ status: (s && s.status) || "unauthenticated", email: (s && s.email) || "" });
+    } catch (e) { setAuth({ status: "unauthenticated", email: "" }); }
+  }
+
+  /** Called once the person is a full voter (verified email + profile): bind, read their own state, and come back to the contestant they had chosen. */
+  async function enterRound() {
+    const bound = await state.api.bind();
+    if (bound.status !== 200 && bound.status !== 201) {
+      state.bound = false;
+      const back = R.stepForError(bound.json && bound.json.code);
+      if (back === "PROFILE") state.auth = { status: "profile_incomplete", email: state.auth.email };
+      else if (back === "SIGN_IN") state.auth = { status: "unauthenticated", email: state.auth.email };
+      else state.error = say(bound.json && bound.json.code);
+      return;
+    }
+    state.bound = true;
+    await refreshVoterData();
+    const resumed = R.resumeSelection(pending.get(), items(), phase(), state.myCandidateId);
+    if (resumed) { pending.clear(); render(); confirmVote(resumed); }
+  }
+
+  async function refreshVoterData() {
+    const [status, gallery] = await Promise.all([state.api.status(), state.api.gallery()]);
+    if (status.status === 200) {
+      state.status = status.json;
+      state.myCandidateId = status.json.myCandidateId || null;
+      applyServerTime(status.json);
+    }
+    if (gallery.status === 200) state.gallery = gallery.json;
+  }
+
+  function applyServerTime(source) {
+    if (source && source.deadlineRemainingMs !== undefined && source.deadlineRemainingMs !== null) state.countdown.resync(source.deadlineRemainingMs);
+    else state.countdown.resync(null);
+  }
+
+  // ---- polling: cheap public info (UG-IV-GATE-014) -----------------------------------------------------------------------------
+  // ONE request at a time, adaptive to what the round is doing (R.pollDelayMs: quick around the final's five minutes and after a close, slow
+  // once published), jittered so a crowd does not call in step, refreshed the moment the page is visible (or online) again, and never trusting
+  // an answer older than the newest. The page only ever SHOWS what the server answered: it invents no phase, no publication and no result.
+
+  let phaseSeenAt = 0; // when this page last saw the phase change: the quick "waiting for the publication" window counts from here
+  const poller = R.createPoller({
+    now: () => performance.now(),
+    setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimer: (handle) => window.clearTimeout(handle),
+    isVisible: () => !document.hidden,
+    random: () => Math.random(),
+    delayFor: () => {
+      const info = infoNow();
+      if (phase() === "ENDED") return null; // the event is over: nothing more to learn
+      return R.pollDelayMs({ roundRole: info && info.roundRole, phase: phase(), published: !!(info && info.published), sinceChangeMs: performance.now() - phaseSeenAt });
+    },
+    staleAfterMs: R.POLL.staleAfterMs,
+    fetchOnce: async () => {
+      const r = await state.api.info();
+      if (r.status !== 200) return { ok: false };
+      return { ok: true, apply: () => applyInfo(r.json) };
+    },
+  });
+  async function applyInfo(next) {
+    const before = phase();
+    state.info = next;
+    applyServerTime(infoNow());
+    const after = phase();
+    if (after !== before) phaseSeenAt = performance.now();
+    if (after !== before && state.bound) await refreshVoterData();
+    if ((after === "CLOSED" || after === "ENDED") && infoNow().published) await loadResults();
+    if (after !== before) render();
+  }
+  document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));
+  window.addEventListener("pageshow", (e) => { if (e && e.persisted) poller.refreshNow(); });
+  window.addEventListener("online", () => poller.refreshNow());
+  async function loadResults() {
+    const r = await state.api.results();
+    if (r.status === 200 && r.json.published) { state.results = r.json; render(); }
+  }
+
+  // ---- views ----------------------------------------------------------------------------------------------------------------
+
+  let clockEl = null;
+  function tickClock() {
+    if (!clockEl) return;
+    const left = state.countdown.remaining();
+    clockEl.textContent = left === null ? "" : R.formatCountdown(left);
+    if (left !== null && left <= 0 && phase() === "OPEN") { state.info.info.phase = "CLOSED"; phaseSeenAt = performance.now(); render(); poller.refreshNow(); }
+  }
+  setInterval(tickClock, 1000);
+
+  function banner() {
+    const info = infoNow();
+    if (!info) return null;
+    const lines = [h("div", { text: R.phaseNotice(info) })];
+    // The remaining time, from the SERVER's clock, for BOTH rounds while they are open.
+    if (info.phase === "OPEN" && info.deadlineAt) {
+      clockEl = h("div", { class: "clock", id: "clock", "aria-label": "Tiempo restante" });
+      lines.push(clockEl);
+      tickClock();
+    } else clockEl = null;
+    // The plan, in the event's own time. For a round that is not open yet it is the schedule; it never says "abierta".
+    if (info.phase === "NOT_OPEN" && (info.registrationOpensAt || info.contestantCutoffAt)) {
+      const parts = [];
+      if (info.registrationOpensAt) parts.push(`registro desde las ${R.formatEventTime(info.registrationOpensAt)}`);
+      if (info.contestantCutoffAt) parts.push(`hasta las ${R.formatEventTime(info.contestantCutoffAt)}`);
+      lines.push(h("div", { text: `${parts.join(" ")} (hora de Honduras)${info.tentative ? " · tentativo" : ""}`, class: "sub" }));
+    }
+    return h("div", { class: `banner${info.phase === "CLOSED" || info.phase === "ENDED" ? " closed" : ""}`, role: "status" }, lines);
+  }
+
+  function messages() {
+    return [
+      state.error ? h("div", { class: "msg err", role: "alert", text: state.error }) : null,
+      state.notice ? h("div", { class: "msg ok", role: "status", text: state.notice }) : null,
+    ];
+  }
+
+  function stepper() {
+    const s = step();
+    const mk = (label, done, current) => h("li", { class: done ? "done" : current ? "current" : "", text: `${done ? "✓ " : ""}${label}` });
+    if (s === "READY") return null;
+    return h("ol", { class: "steps", "aria-label": "Pasos" }, mk("Correo", s !== "SIGN_IN", s === "SIGN_IN"), mk("Perfil", false, s === "PROFILE"), mk("Votar", false, false));
+  }
+
+  function renderSignIn() {
+    const email = h("input", { type: "email", id: "email", autocomplete: "email", inputmode: "email", placeholder: "tu@correo.com", "aria-label": "Correo electrónico", value: state.email });
+    const code = h("input", { type: "text", id: "authCode", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "Código del correo", "aria-label": "Código del correo", maxlength: "10", value: state.code });
+    const send = h("button", { class: "btn primary", id: "sendEmail", disabled: state.busy, text: "Enviar código al correo", onclick: async () => {
+      state.error = null; state.busy = true; state.email = email.value.trim(); render();
+      const r = await UrbanoAuth.requestOtp(state.email);
+      state.busy = false;
+      if (r.status === "sent") { state.authStep = "code"; state.notice = "Te enviamos un código. Revisa tu correo."; } else state.error = say("INVALID_REQUEST");
+      render();
+    } });
+    const verify = h("button", { class: "btn primary", id: "verifyEmail", disabled: state.busy, text: "Verificar y entrar", onclick: async () => {
+      state.error = null; state.busy = true; state.code = code.value.trim(); render();
+      // verifyOtp is reachable ONLY from this panel, which exists only when there is no session: an existing session is never replaced here.
+      // The state is read again right before, because another tab may have signed in since this panel was drawn.
+      await refreshAuth();
+      if (step() !== "SIGN_IN") {
+        state.busy = false; state.authStep = "email"; state.code = "";
+        state.notice = "Ya hay una sesión abierta en este navegador. Seguimos con esa cuenta; si quieres usar otra, cámbiala desde “Usar otra cuenta”.";
+        await afterIdentityChange();
+        return;
+      }
+      const r = await UrbanoAuth.verifyOtp(state.email, state.code);
+      state.busy = false;
+      if (r.status === "error") { state.error = "El código no es correcto o ya venció. Pide uno nuevo."; render(); return; }
+      state.authStep = "email"; state.code = ""; state.notice = null;
+      await afterIdentityChange();
+    } });
+    return h("section", { class: "card stack", id: "stepIdentity" },
+      h("h2", { text: "Entra con tu correo" }),
+      h("p", { text: R.SIGN_IN_NOTICE }),
+      h("p", { text: "Para votar también necesitas tu perfil de URBANO Gaming; si es tu primera vez, lo completas justo después." }),
+      state.authStep === "email" ? [email, send] : [h("p", { text: `Código enviado a ${state.email}` }), code, verify, h("button", { class: "btn link", text: "Usar otro correo", onclick: () => { state.authStep = "email"; state.notice = null; render(); } })]
+    );
+  }
+
+  function renderProfile() {
+    const name = h("input", { type: "text", id: "displayName", autocomplete: "nickname", maxlength: "40", placeholder: "Tu nombre", "aria-label": "Tu nombre en URBANO Gaming", value: state.name });
+    const save = h("button", { class: "btn primary", id: "saveProfile", disabled: state.busy, text: "Guardar mi perfil y continuar", onclick: async () => {
+      state.error = null; state.busy = true; state.name = name.value; render();
+      const r = await UrbanoAuth.completeProfile(name.value.trim());
+      state.busy = false;
+      if (r.status === "error") { state.error = r.message ? "No pudimos guardar tu perfil. Revisa el nombre e inténtalo de nuevo." : say("INVALID_REQUEST"); render(); return; }
+      await afterIdentityChange();
+    } });
+    return h("section", { class: "card stack", id: "stepProfile" },
+      h("h2", { text: "Completa tu perfil para votar" }),
+      h("p", { id: "profileNotice", text: R.PROFILE_NOTICE }),
+      name, save,
+      h("button", { class: "btn link", id: "switchAccount", text: "Usar otra cuenta", onclick: confirmSwitchAccount }));
+  }
+
+  /** Signing out is the person's explicit act; nothing here ever replaces a session by itself. */
+  function confirmSwitchAccount() {
+    const close = () => { modalRoot.textContent = ""; };
+    modalRoot.textContent = "";
+    modalRoot.appendChild(h("div", { class: "modal-back" }, h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": "Cambiar de cuenta" },
+      h("h2", { text: "¿Cambiar de cuenta?" }),
+      h("p", { text: `Vas a cerrar la sesión de ${state.auth.email || "esta cuenta"}. Tu voto, si ya lo emitiste, se conserva.` }),
+      h("div", { class: "row" },
+        h("button", { class: "btn", id: "switchCancel", text: "Cancelar", onclick: close }),
+        h("button", { class: "btn primary", id: "switchConfirm", text: "Cerrar sesión", onclick: async () => {
+          close();
+          state.epoch += 1; state.castSeq += 1; state.busy = false; // a vote still waiting for the browser's position belongs to the person who is leaving
+          try { await UrbanoAuth.signOut(); } catch (e) { /* the page re-reads the state below */ }
+          state.bound = false; state.status = null; state.gallery = null; state.myCandidateId = null;
+          await refreshAuth(); render();
+        } })))));
+  }
+
+  async function afterIdentityChange() {
+    await refreshAuth();
+    if (step() === "READY") await enterRound();
+    render();
+  }
+
+  // -- contestants' claim (preliminary, before it opens)
+  function renderClaim() {
+    if (isFinal() || phase() !== "NOT_OPEN" || step() !== "READY") return null;
+    const code = h("input", { type: "text", id: "claimCode", autocomplete: "off", autocapitalize: "characters", placeholder: "Código de concursante", "aria-label": "Código de concursante", maxlength: "20" });
+    const go = h("button", { class: "btn", id: "claimGo", disabled: state.busy, text: "Registrar mi participación", onclick: async () => {
+      state.error = null; state.busy = true; render();
+      const r = await state.api.claim(code.value);
+      state.busy = false;
+      if (r.status === 201 && r.json.confirmationCode) state.claimResult = r.json; else state.error = say(r.json && r.json.code);
+      render();
+    } });
+    return h("section", { class: "card stack", id: "claimCard" },
+      h("h2", { text: "¿Eres concursante?" }),
+      state.claimResult
+        ? [h("p", { text: "Díctale este código al operador para confirmar que eres tú:" }), h("div", { class: "code-big", id: "confirmationCode", text: state.claimResult.confirmationCode })]
+        : [h("p", { text: "Si el operador te dio un código de concursante, escríbelo aquí." }), code, go]);
+  }
+
+  /**
+   * A rehearsal announces itself in every state, above everything, and in the title of the tab. The words are the operator page's. Nothing
+   * about a real round ever carries them.
+   */
+  function paintTestEvent() {
+    const slot = document.getElementById("bannerSlot");
+    const test = !!(infoNow() && infoNow().isTest === true);
+    document.title = test ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
+    slot.textContent = "";
+    if (test) slot.appendChild(h("div", { class: "test-banner", id: "testBanner", role: "status" }, h("strong", { text: R.TEST_EVENT_LABEL }), ` — ${R.TEST_EVENT_NOTICE}`));
+  }
+
+  /**
+   * The photograph of a published finalist. The published number and the result are a frozen snapshot; the photograph is not: the person may
+   * have asked for it to be hidden since. Then the server has none to give, and a deliberate placeholder takes its place — never a broken image —
+   * with the published number untouched.
+   */
+  function publishedPhoto(alias) {
+    const img = h("img", { alt: `Disfraz número ${alias}`, loading: "lazy" });
+    img.addEventListener("error", () => {
+      const placeholder = h("div", { class: "photo-missing", role: "img", "aria-label": `Imagen no disponible del disfraz número ${alias}`, text: "Imagen no disponible" });
+      if (img.parentNode) img.parentNode.replaceChild(placeholder, img);
+    });
+    img.setAttribute("src", safePhoto(`${PHOTO_PREFIX}${instanceId}/photos/${alias}?v=thumb`));
+    return img;
+  }
+
+  function renderResults() {
+    if (!state.results || !state.results.published) return null;
+    const winners = state.results.kind === "WINNERS";
+    return h("section", { class: "card stack", id: "announcement" },
+      infoNow() && infoNow().isTest === true ? h("span", { class: "test-tag", text: `${R.TEST_EVENT_LABEL}: este no es el resultado del evento real` }) : null,
+      h("h2", { text: winners ? (state.results.items.length > 1 ? "¡Tenemos ganadores compartidos!" : "¡Tenemos ganador!") : "Los finalistas" }),
+      h("div", { class: "winners" }, state.results.items.map((it) =>
+        h("figure", { "data-alias": it.alias },
+          publishedPhoto(it.alias),
+          h("figcaption", { text: `#${it.alias}` })))));
+  }
+
+  // -- voting
+  function canVote() {
+    return !!(state.bound && phase() === "OPEN" && state.gallery && state.gallery.interactionInstanceId);
+  }
+  function photoTag(item) {
+    return h("img", { src: safePhoto(item.thumbUrl), alt: `Disfraz número ${item.alias}`, loading: "lazy", decoding: "async" });
+  }
+  function votedFor(item) { return !!item.candidateId && item.candidateId === state.myCandidateId; }
+
+  /** The confirmation step: the person decides, then ONE vote runs. Nothing is shown as accepted until the server says so. */
+  function confirmVote(item) {
+    if (!canVote() || item.mine || !item.candidateId) return;
+    const close = () => { modalRoot.textContent = ""; };
+    modalRoot.textContent = "";
+    const locationNote = R.locationRequired(infoNow()) ? h("p", { id: "locationNote", text: "Para votar en la final usaremos tu ubicación solo para confirmar que estás en el evento. No la guardamos." }) : null;
+    const revising = !!state.myCandidateId && state.myCandidateId !== item.candidateId;
+    const go = h("button", { class: "btn primary", id: "confirmVote", text: revising ? "Cambiar mi voto" : "Confirmar mi voto", onclick: async () => {
+      go.disabled = true; state.error = null; state.notice = null; close();
+      const cast = ++state.castSeq;
+      const epoch = state.epoch;
+      state.busy = true; render();
+      const result = await R.castFavorite({
+        api: state.api, geolocation: window.navigator.geolocation, info: infoNow(),
+        candidateId: item.candidateId, interactionInstanceId: state.gallery.interactionInstanceId, retry: state.retry,
+        isCurrent: () => cast === state.castSeq && epoch === state.epoch && state.auth.status === "authenticated",
+      });
+      if (result.stale) { if (cast === state.castSeq) { state.busy = false; render(); } return; } // the page moved on: nothing was sent and nothing is shown
+      state.busy = false;
+      if (result.ok) {
+        state.retry = null; state.myCandidateId = item.candidateId; pending.clear();
+        state.notice = `Tu voto por #${item.alias} quedó registrado. Puedes cambiarlo ${isFinal() ? "mientras dure el tiempo" : "hasta que cierre la votación"}.`;
+      } else {
+        state.retry = result.retry || null;
+        const back = R.stepForError(result.code);
+        if (back) { pending.set(item.alias); state.auth = { status: back === "PROFILE" ? "profile_incomplete" : "unauthenticated", email: state.auth.email }; }
+        state.error = say(result.code);
+        if (result.code === "STALE_INTENT" || result.code === "INTERACTION_MISMATCH") await refreshVoterData();
+        if (result.code === "VOTING_WINDOW_ELAPSED" || result.code === "VOTING_NOT_OPEN") poller.refreshNow();
+      }
+      render();
+    } });
+    modalRoot.appendChild(h("div", { class: "modal-back", onclick: (e) => { if (e.target.classList.contains("modal-back")) close(); } },
+      h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": `Votar por el disfraz número ${item.alias}` },
+        h("img", { class: "full", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}` }),
+        h("h2", { text: `¿Votar por el disfraz #${item.alias}?` }),
+        h("p", { text: `Solo tienes un voto${isFinal() ? "" : " y puedes cambiarlo hasta que la votación cierre"}.` }),
+        locationNote,
+        h("div", { class: "row" }, h("button", { class: "btn", id: "cancelVote", text: "Cancelar", onclick: close }), go))));
+  }
+
+  function openPhoto(item) {
+    const close = () => { modalRoot.textContent = ""; };
+    modalRoot.textContent = "";
+    const can = canVote() && !item.mine && !!item.candidateId && !votedFor(item);
+    modalRoot.appendChild(h("div", { class: "modal-back", onclick: (e) => { if (e.target.classList.contains("modal-back")) close(); } },
+      h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": `Disfraz número ${item.alias}` },
+        h("img", { class: "full", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}` }),
+        h("div", { class: "row" },
+          can ? h("button", { class: "btn primary", id: "chooseThis", text: "Votar por este disfraz", onclick: () => { close(); confirmVote(item); } }) : null,
+          h("button", { class: "btn", text: "Cerrar", onclick: close })))));
+  }
+
+  function renderDeck() {
+    const list = items();
+    if (list.length === 0) return h("div", { class: "card" }, h("p", { text: "Todavía no hay disfraces publicados. Vuelve en un momento." }));
+    state.deckIndex = V.deckNavigate(state.deckIndex, 0, list.length);
+    const item = list[state.deckIndex];
+    let startX = 0, startY = 0;
+    const go = (delta) => { state.deckIndex = V.deckNavigate(state.deckIndex, delta, list.length); render(); };
+    const card = h("div", { class: "deck", id: "deck",
+      ontouchstart: (e) => { startX = e.changedTouches[0].clientX; startY = e.changedTouches[0].clientY; },
+      ontouchend: (e) => { const intent = V.swipeIntent({ dx: e.changedTouches[0].clientX - startX, dy: e.changedTouches[0].clientY - startY }); if (intent === "next") go(1); if (intent === "prev") go(-1); } },
+      h("img", { class: "photo", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}`, decoding: "async" }),
+      h("span", { class: "tag", text: `#${item.alias}` }),
+      item.mine ? h("span", { class: "flag mine", text: "Tu disfraz" }) : votedFor(item) ? h("span", { class: "flag voted", text: "✓ Tu voto" }) : null);
+    const can = canVote() && !item.mine && !!item.candidateId && !votedFor(item);
+    return h("div", null,
+      h("div", { class: "meter" }, h("span", { text: `${state.deckIndex + 1} de ${list.length}` })),
+      card,
+      h("div", { class: "deck-actions" },
+        h("button", { class: "btn", id: "prev", "aria-label": "Anterior", text: "←", onclick: () => go(-1) }),
+        h("button", { class: "btn primary", id: "choose", disabled: !can || state.busy, text: votedFor(item) ? "Es tu voto" : state.myCandidateId ? "Cambiar mi voto a este" : "Votar por este", onclick: () => confirmVote(item) }),
+        h("button", { class: "btn", id: "next", "aria-label": "Siguiente", text: "→", onclick: () => go(1) })),
+      h("button", { class: "btn link", text: "Ver en grande", onclick: () => openPhoto(item) }));
+  }
+
+  // virtualized grid: ~30 thumbnails exist at any moment, however many contestants there are
+  function gridMetrics(scroller) {
+    const width = scroller.clientWidth || 360;
+    const gap = 6;
+    const cell = (width - gap * 4) / 3;
+    return { rowHeight: Math.round(cell * (4 / 3)) + gap, viewportHeight: scroller.clientHeight || 560 };
+  }
+  function renderGridWindow(scroller, windowEl) {
+    const list = items();
+    const m = gridMetrics(scroller);
+    const w = V.computeVirtualWindow({ total: list.length, columns: 3, rowHeight: m.rowHeight, scrollTop: scroller.scrollTop, viewportHeight: m.viewportHeight, overscanRows: 2 });
+    windowEl.style.paddingTop = `${w.topPadding}px`;
+    windowEl.style.paddingBottom = `${w.bottomPadding}px`;
+    windowEl.style.gridAutoRows = `${m.rowHeight - 6}px`;
+    windowEl.textContent = "";
+    for (let i = w.firstIndex; i < w.lastIndex; i++) {
+      const item = list[i];
+      windowEl.appendChild(h("button", { class: "cell", "data-alias": item.alias, "aria-label": `Disfraz número ${item.alias}`, onclick: () => openPhoto(item) },
+        photoTag(item),
+        h("span", { class: "no", text: `#${item.alias}` }),
+        votedFor(item) ? h("span", { class: "pick", text: "✓ Tu voto" }) : null));
+    }
+  }
+  function renderGrid() {
+    const list = items();
+    if (list.length === 0) return h("div", { class: "card" }, h("p", { text: "Todavía no hay disfraces publicados." }));
+    const windowEl = h("div", { class: "grid-window", id: "gridWindow" });
+    const scroller = h("div", { class: "grid-scroller", id: "gridScroller", tabindex: "0", "aria-label": "Disfraces" }, windowEl);
+    let frame = 0;
+    scroller.addEventListener("scroll", () => {
+      state.grid.scrollTop = scroller.scrollTop;
+      if (frame) return;
+      frame = (window.requestAnimationFrame || ((f) => setTimeout(f, 16)))(() => { frame = 0; renderGridWindow(scroller, windowEl); });
+    });
+    setTimeout(() => { scroller.scrollTop = state.grid.scrollTop; renderGridWindow(scroller, windowEl); }, 0);
+    renderGridWindow(scroller, windowEl);
+    return h("div", null, h("div", { class: "meter" }, h("span", { text: `${list.length} disfraces` })), scroller);
+  }
+
+  function renderVoting() {
+    const tabs = h("div", { class: "tabs", role: "tablist" },
+      h("button", { role: "tab", id: "tabDeck", "aria-selected": state.view === "deck" ? "true" : "false", text: "Uno a uno", onclick: () => { state.view = "deck"; render(); } }),
+      h("button", { role: "tab", id: "tabGrid", "aria-selected": state.view === "grid" ? "true" : "false", text: "Todos", onclick: () => { state.view = "grid"; render(); } }));
+    return h("div", null, tabs, state.view === "deck" ? renderDeck() : renderGrid());
+  }
+
+  function render() {
+    app.setAttribute("aria-busy", "false");
+    if (state.fatal) { app.textContent = ""; app.appendChild(h("div", { class: "msg err", role: "alert", text: state.fatal })); return; }
+    who.textContent = state.auth.status === "unauthenticated" ? "" : state.auth.email;
+    paintTestEvent();
+    const s = step();
+    const parts = [banner(), ...messages(), renderResults()];
+    if (s === "SIGN_IN") parts.push(stepper(), renderSignIn());
+    else if (s === "PROFILE") parts.push(stepper(), renderProfile());
+    else {
+      parts.push(renderClaim());
+      parts.push(state.bound ? renderVoting() : h("div", { class: "card" }, h("p", { text: "Entrando a la votación…" })));
+      parts.push(h("button", { class: "btn link", id: "switchAccount", text: "Usar otra cuenta", onclick: confirmSwitchAccount }));
+    }
+    app.textContent = "";
+    for (const p of parts.flat()) if (p) app.appendChild(p);
+  }
+
+  // ---- start -----------------------------------------------------------------------------------------------------------------
+  (async () => {
+    if (!/^[0-9a-f-]{36}$/i.test(instanceId)) { state.fatal = say("INSTANCE_NOT_FOUND"); render(); return; }
+    const info = await state.api.info();
+    if (info.status !== 200) { state.fatal = say(info.json && info.json.code) ; render(); return; }
+    state.info = info.json;
+    applyServerTime(infoNow());
+    await refreshAuth();
+    if (step() === "READY") await enterRound();
+    if ((phase() === "CLOSED" || phase() === "ENDED") && infoNow().published) await loadResults();
+    render();
+    phaseSeenAt = performance.now();
+    poller.start();
+  })();
+})();
+</script>
+</body>
+</html>
