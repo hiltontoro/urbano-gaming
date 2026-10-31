@@ -148,7 +148,7 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.text("#featured-contest .xf-label")).toBe("Destacado");
     expect(page.text("#featured-contest .xf-title")).toBe("Halloween: La última noche");
     expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("Habrá premios para los ganadores, entregados por The Pub.");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, e.textContent])).toEqual([["SPAN", "Votar por tu disfraz favorito"], ["SPAN", "Participar como concursante"]]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Las inscripciones y la votación todavía no están disponibles.");
     expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
@@ -193,7 +193,7 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text("#featured-contest .xf-label")).toBe("Featured");
     expect(page.text("#featured-contest .xf-title")).toBe("Halloween: The Last Night");
     expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · Saturday, October 31");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("There will be prizes for the winners, delivered by The Pub.");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => e.textContent)).toEqual(["Vote for your favorite costume", "Take part as a contestant"]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Registration and voting are not available yet.");
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");

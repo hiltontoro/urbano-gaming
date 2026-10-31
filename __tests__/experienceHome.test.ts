@@ -101,7 +101,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
     expect(visibleText(card.querySelector(".xf-title .xf-tagline")!)).toBe("La última noche"); // the motto of the party: it is The Pub's last night
     expect(doc.querySelector("section.xf-section")!.getAttribute("aria-labelledby")).toBe(card.querySelector(".xf-title")!.id);
     expect(visibleText(card.querySelector(".xf-meta")!)).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(visibleText(card.querySelector(".xf-prizes")!)).toBe("Habrá premios para los ganadores, entregados por The Pub.");
+    expect(visibleText(card.querySelector(".xf-prizes")!)).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
     expect(Array.from(card.querySelectorAll("[data-feat]")).map((b) => [b.getAttribute("data-feat"), visibleText(b)])).toEqual([["vote", "Votar por tu disfraz favorito"], ["join", "Participar como concursante"]]);
     expect(card.textContent).not.toMatch(/Descubrí más|Discover more/);
     expect(visibleText(card.querySelector("[data-feat-status]")!)).toBe("Las inscripciones y la votación todavía no están disponibles.");
@@ -111,7 +111,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
     expect(EN["home.feat.join"]).toBe("Take part as a contestant");
     expect(EN["home.feat.date"]).toBe("Saturday, October 31");
     expect(EN["home.feat.tagline"]).toBe("The Last Night");
-    expect(EN["home.feat.prizes"]).toBe("There will be prizes for the winners, delivered by The Pub.");
+    expect(EN["home.feat.prizes"]).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
   });
 
   it("in the first HTML the featured card's two buttons are NOT links (words in a dashed outline), so nobody can press a link that leads nowhere", () => {
@@ -390,10 +390,10 @@ describe("the four experience pages", () => {
 
   it("the URBANO Voting page states what is true and nothing more: no prize, sponsor, fee, capacity or rule is invented; the Halloween block repeats the featured card's two buttons", () => {
     const mentioning = (key: string) => key.startsWith("lp.voting.") || key.startsWith("home.feat.") || key.startsWith("home.xp.voting.");
-    // the ONE sentence about prizes is the Founder's (2026-10-31), word for word; everything else here says nothing about prizes, sponsors, fees or capacity
-    expect(ES["home.feat.prizes"]).toBe("Habrá premios para los ganadores, entregados por The Pub.");
-    expect(EN["home.feat.prizes"]).toBe("There will be prizes for the winners, delivered by The Pub.");
-    expect(ES["home.feat.prizes"] + EN["home.feat.prizes"]).not.toMatch(/\d|\$|lempira|gratis|free|patrocin|sponsor|capacidad|capacity/i); // no amount, no number of prizes, no sponsor
+    // Official The Pub post De2iubTjoKK, verified 2026-10-31; Founder requested these category/prize announcements.
+    expect(ES["home.feat.prizes"]).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
+    expect(EN["home.feat.prizes"]).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
+    expect(ES["home.feat.prizes"] + EN["home.feat.prizes"]).not.toMatch(/lempira|gratis|free|patrocin|sponsor|capacidad|capacity/i); // no invented currency, sponsor, fee or capacity
     const all = Object.entries(ES).filter(([key]) => mentioning(key) && key !== "home.feat.prizes").map(([, v]) => v).join(" | ");
     expect(all).not.toMatch(/premio|prize|gratis|free|\$|L\.\s?\d|lempira|patrocin|sponsor|capacidad|capacity/i);
     const doc = dom("voting.html");
