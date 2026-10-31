@@ -10,13 +10,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/experience.css">
 </head>
-<body>
+<body class="home-brand-refresh">
 
 <header class="shell-header">
   <div class="brand">
-    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
-      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
-      <span class="brand-word">URBANO</span>
+    <a class="brand-link" href="https://www.urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <img class="brand-logo" src="/assets/brand/urbano-horizontal.png" alt="URBANO" width="134" height="32" />
     </a>
     <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
   </div>
@@ -166,10 +165,16 @@
   </section>
 </main>
 
-<footer>
-  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
-  <p><a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a></p>
-  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div><p class="footer-heading">URBANO Gaming</p><p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p><a href="https://www.urbanohn.com/" rel="noopener">www.urbanohn.com</a></div>
+    <div><h2 class="footer-heading" data-i18n="home.footer.contact">Contactanos</h2><a href="mailto:info@urbanohn.com">info@urbanohn.com</a></div>
+    <div><h2 class="footer-heading" data-i18n="home.footer.follow">Seguinos</h2><a href="https://www.instagram.com/realurbanohn/" rel="noopener">Instagram · @realurbanohn</a></div>
+  </div>
+  <div class="footer-bottom">
+    <a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a>
+    <p class="footer-powered">Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi"><img src="/assets/brand/tecnomovi.svg" alt="" width="142" height="30" /><span class="sr-only">TecnoMovi</span></a></p>
+  </div>
 </footer>
 
 <script src="/urbanoI18n.js"></script>
@@ -196,6 +201,8 @@
     "shell.nav.experiences": "Experiencias",
     "shell.nav.leaderboards": "Clasificaciones",
     "shell.nav.rewards": "Premios",
+    "home.footer.contact": "Contactanos",
+    "home.footer.follow": "Seguinos",
     "shell.footer.part": "URBANO Gaming — parte de URBANO",
     "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
     "shell.footer.legal": "Términos, privacidad y reglas",

@@ -304,6 +304,7 @@ describe("no link on any of the five pages leads nowhere", () => {
       const idsOf = (page: string) => new Set(Array.from(dom(page).querySelectorAll("[id]")).map((e) => e.id));
       for (const { attr, value, tag } of references(file)) {
         expect(value, `${file} <${tag} ${attr}>`).not.toMatch(/^(#|javascript:|)$/i);
+        if (file === "index.html" && tag === "a" && ["https://www.urbanohn.com/", "https://www.instagram.com/realurbanohn/", "mailto:info@urbanohn.com"].includes(value)) continue;
         if (/^https?:\/\//i.test(value)) {
           expect(value, `${file}: external ${value}`).toMatch(/^https:\/\/(urbanohn\.com\/|www\.tecnomovi\.com\/|fonts\.googleapis\.com|fonts\.gstatic\.com)/);
           continue;
@@ -377,12 +378,12 @@ describe("the four experience pages", () => {
     });
   }
 
-  it("the header, the navigation and the footer are the same on all five pages (only the highlighted item differs)", () => {
+  it("navigation and account controls remain shared; the Home alone has its requested brand/contact footer", () => {
     const frame = (file: string) => {
       const doc = dom(file);
       const nav = doc.querySelector("nav.primary-nav")!.cloneNode(true) as Element;
       nav.querySelectorAll("a").forEach((a) => { a.removeAttribute("aria-current"); a.classList.remove("is-active"); });
-      return doc.querySelector("header.shell-header")!.outerHTML + nav.outerHTML + doc.querySelector("footer")!.outerHTML;
+      return doc.querySelector(".header-tools")!.outerHTML + nav.outerHTML;
     };
     const home = frame("index.html");
     for (const file of ALL_PAGES.slice(1)) expect(frame(file), file).toBe(home);

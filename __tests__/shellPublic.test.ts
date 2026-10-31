@@ -217,10 +217,10 @@ describe("Home — header and footer", () => {
   it("the URBANO mark and wordmark are one link to https://urbanohn.com/; the Gaming badge is a separate link back to this application", async () => {
     const page = await loadHome();
     const logo = page.doc.querySelector("a.brand-link") as HTMLAnchorElement;
-    expect(logo.getAttribute("href")).toBe("https://urbanohn.com/");
+    expect(logo.getAttribute("href")).toBe("https://www.urbanohn.com/");
     expect(logo.getAttribute("rel")).toContain("noopener");
-    expect(logo.querySelector("img.brand-mark")).toBeTruthy();
-    expect(logo.querySelector(".brand-word")!.textContent).toBe("URBANO");
+    expect(logo.querySelector("img.brand-logo")!.getAttribute("alt")).toBe("URBANO");
+    expect(logo.querySelector(".brand-mark, .brand-word")).toBeNull();
     expect(logo.getAttribute("aria-label")).toBe("URBANO — ir a urbanohn.com");
     const badge = page.doc.querySelector("a.brand-badge") as HTMLAnchorElement;
     expect(badge.getAttribute("href")).toBe("/");
@@ -233,14 +233,17 @@ describe("Home — header and footer", () => {
     const footer = page.doc.querySelector("footer")!;
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
     const links = Array.from(footer.querySelectorAll("a"));
-    // the only OUTSIDE link is TecnoMovi's; beside it, one internal link to the legal texts (the terms, the privacy notice and the rules)
+    // Founder-confirmed destinations, not guessed social accounts or contact details.
     const outside = links.filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""));
-    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["TecnoMovi", "https://www.tecnomovi.com/"]]);
-    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["www.urbanohn.com", "https://www.urbanohn.com/"], ["Instagram · @realurbanohn", "https://www.instagram.com/realurbanohn/"], ["TecnoMovi", "https://www.tecnomovi.com/"]]);
+    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["info@urbanohn.com", "mailto:info@urbanohn.com"], ["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(footer.querySelector('.footer-powered img')!.getAttribute('src')).toBe('/assets/brand/tecnomovi.svg');
+    expect(footer.textContent).toContain('Contactanos');
     expect(outside[0].getAttribute("rel")).toContain("noopener");
     // The footer line is not translated: it is a name, the same in both languages.
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
+    expect(footer.textContent).toContain('Contact us');
   });
 
   it("name and Sign out live together in ONE group on the right, beside the selector; the shared component is handed exactly those elements", async () => {
