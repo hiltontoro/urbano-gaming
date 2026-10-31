@@ -272,7 +272,18 @@ export type CommunityVotingErrorCode =
   // ---- UG-IV-GATE-010: the operator's geofence setup and the test event
   | "GEOFENCE_FROZEN"
   | "NOT_A_FINAL"
-  | "TEST_MODE_MISMATCH";
+  | "TEST_MODE_MISMATCH"
+  // ---- UG-IV-GATE-018: the four-category contest (categories, groups, one candidacy per person)
+  | "NOT_A_CATEGORY_ROUND"
+  | "CONTEST_NOT_FOUND"
+  | "CATEGORY_ALREADY_REGISTERED"
+  | "WRONG_CATEGORY"
+  | "WRONG_ENTRY_KIND"
+  | "GROUP_FULL"
+  | "ALREADY_CANDIDATE"
+  | "OBSOLETE_FOR_CATEGORY"
+  // ---- UG-IV-GATE-018 addendum: self-registration
+  | "REGISTRATION_NOT_OPEN";
 
 /**
  * What a conflict says about the INTENT itself — kept strictly apart from `current`, the caller's present vote state.

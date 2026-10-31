@@ -1,63 +1,58 @@
-// URBANO Gaming — Halloween Community Voting, two-round pilot: the operator tablet's logic.
+// URBANO Gaming — Halloween Community Voting, the four-category contest: the operator's station (logic).
 //
-// Pure functions (no DOM, no network; the fetch is an argument). The page uses them to decide what to show and what to offer next; the
-// server and the database decide what is ALLOWED. Nothing here is an authority: `roundReadiness` mirrors the database's rule for opening
-// so the operator sees the blockers BEFORE pressing the button, but pressing it never relies on this, and `nextSteps` is a checklist, not
-// a lock — every button calls a route that checks the host token and the designated operator again, and the database checks them once more.
+// Pure functions and small injected-dependency helpers (no DOM; the network and the clock are ARGUMENTS), so the exact deployed text is unit-tested.
+// The station is organised around what the operator does with a person standing in front of them: search the code, verify the person, take the
+// photograph, record the consent, approve, confirm — and, afterwards, deliver the photograph by hand from their own WhatsApp. Everything here is a
+// CONVENIENCE: every rule (the host token, the designated operator, one candidacy per person, the consents of everybody in a photograph, the freeze at
+// opening) is enforced by the server and the database, and nothing on this page can make an invalid action valid.
 //
-// The event's time. Every time on the pilot's pages is read and written in the EVENT'S OWN zone, America/Tegucigalpa (UTC−6, no daylight
-// saving time), never the tablet's: a tablet set to another zone must not move the registration cutoff or the deadline by hours. The
-// schedule below is DATA — the Founder's initial times — used only to PREFILL the form; nothing here creates an event, opens a round or
-// saves anything, and the operator must press "Guardar horarios" to store it.
+// PRIVACY: the delivery number is requested only when the operator asks to deliver, from the one route that returns it, and it lives in this page's
+// memory only while that panel is open — it is never written to storage and never put in a URL other than the wa.me link the operator opens themself.
 
-const CommunityVotingRoundOperator = (() => {
+const CommunityVotingOperator = (() => {
   const EVENT_TIME_ZONE = "America/Tegucigalpa";
-  const EVENT_UTC_OFFSET_HOURS = -6;
+  const HN_OFFSET_MS = 6 * 60 * 60 * 1000; // UTC-6 all year (no daylight saving time)
+  const CATEGORY_KEYS = ["MOST_ELABORATE", "SEXIEST", "BEST_GROUP", "FUNNIEST"];
 
-  /** 31 October 2026: registration and photographs 19:00–20:30, preliminary 20:30–21:30, then a final of 300 seconds from its own opening. */
-  const EVENT_SCHEDULE_TEMPLATE = Object.freeze({
-    date: "2026-10-31",
-    registrationOpens: "19:00",
-    registrationCloses: "20:30",
-    preliminaryOpens: "20:30",
-    preliminaryCloses: "21:30",
-    finalWindowSeconds: 300,
-  });
+  // ---------------------------------------------------------------- time (the event's, never the phone's)
 
-  /** A calendar date and a wall-clock time in the event's zone -> an ISO instant, or null when either is not valid. */
-  function toEventInstant(date, time) {
-    const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof date === "string" ? date : "");
-    const t = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === "string" ? time : "");
+  /** "2026-10-31" + "20:00" (+ optional whole days) in Tegucigalpa time, as an ISO instant; null when either part is not valid. */
+  function eventInstant(date, time, plusDays) {
+    const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ""));
+    const t = /^(\d{2}):(\d{2})$/.exec(String(time || ""));
     if (!d || !t) return null;
-    const [y, m, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
-    const check = new Date(Date.UTC(y, m - 1, day));
-    if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== day) return null;
-    return new Date(Date.UTC(y, m - 1, day, Number(t[1]), Number(t[2])) - EVENT_UTC_OFFSET_HOURS * 3600 * 1000).toISOString();
+    const [y, mo, da, hh, mi] = [Number(d[1]), Number(d[2]), Number(d[3]), Number(t[1]), Number(t[2])];
+    const local = new Date(Date.UTC(y, mo - 1, da, hh, mi));
+    // a calendar date and a clock time that really exist: 31 February and 99:99 are not "rolled over" into some other day
+    if (local.getUTCFullYear() !== y || local.getUTCMonth() !== mo - 1 || local.getUTCDate() !== da || local.getUTCHours() !== hh || local.getUTCMinutes() !== mi) return null;
+    return new Date(local.getTime() + HN_OFFSET_MS + (plusDays || 0) * 86400000).toISOString();
   }
 
-  /** An ISO instant -> the event's own { date, time }, whatever the device's zone; null when absent or not a date. */
+  /** The instant as { date, time } in Tegucigalpa time, for filling the form back in. */
   function fromEventInstant(iso) {
-    if (typeof iso !== "string" || iso.length === 0) return null;
     const ms = Date.parse(iso);
-    if (Number.isNaN(ms)) return null;
-    const local = new Date(ms + EVENT_UTC_OFFSET_HOURS * 3600 * 1000);
-    const pad = (n) => String(n).padStart(2, "0");
-    return {
-      date: `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`,
-      time: `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`,
-    };
+    if (Number.isNaN(ms)) return { date: "", time: "" };
+    const d = new Date(ms - HN_OFFSET_MS);
+    const p = (n) => String(n).padStart(2, "0");
+    return { date: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`, time: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` };
   }
 
-  /** The template as exact instants: the registration cutoff is when registration closes, the preliminary's deadline is when it closes. */
-  function templateInstants() {
-    const t = EVENT_SCHEDULE_TEMPLATE;
-    return {
-      registrationOpensAt: toEventInstant(t.date, t.registrationOpens),
-      contestantCutoffAt: toEventInstant(t.date, t.registrationCloses),
-      votingOpensAt: toEventInstant(t.date, t.preliminaryOpens),
-      votingClosesAt: toEventInstant(t.date, t.preliminaryCloses),
-    };
+  /** The approved Halloween plan, as FORM VALUES (a button that fills a form; it saves and opens nothing). */
+  const EVENT_PLAN = { date: "2026-10-31", registrationOpens: "20:00", registrationCloses: "23:00", votingOpens: "23:00", votingCloses: "00:00" };
+
+  /** The form's times as the instants the server stores. The closing time at or before the opening time is the NEXT day (voting that runs past midnight). */
+  function scheduleFromForm(f) {
+    const registrationOpensAt = eventInstant(f.date, f.registrationOpens, 0);
+    const contestantCutoffAt = eventInstant(f.date, f.registrationCloses, 0);
+    const votingOpensAt = eventInstant(f.date, f.votingOpens, 0);
+    const wraps = typeof f.votingCloses === "string" && typeof f.votingOpens === "string" && f.votingCloses <= f.votingOpens;
+    const votingClosesAt = eventInstant(f.date, f.votingCloses, wraps ? 1 : 0);
+    if (!registrationOpensAt || !contestantCutoffAt || !votingOpensAt || !votingClosesAt) return null;
+    if (!(Date.parse(registrationOpensAt) <= Date.parse(contestantCutoffAt) && Date.parse(contestantCutoffAt) <= Date.parse(votingOpensAt) && Date.parse(votingOpensAt) < Date.parse(votingClosesAt))) return null;
+    return { registrationOpensAt, contestantCutoffAt, votingOpensAt, votingClosesAt, status: f.confirmed ? "CONFIRMED" : "TENTATIVE" };
   }
+
+  // ---------------------------------------------------------------- the photograph
 
   /** Never enlarges; keeps the aspect ratio; the long side is at most `maxLongSide`. */
   function planResize(width, height, maxLongSide) {
@@ -66,733 +61,258 @@ const CommunityVotingRoundOperator = (() => {
     const scale = Math.min(1, maxLongSide / longSide);
     return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scale };
   }
+  const PHOTO_LIMITS = { full: 1600, thumb: 480 };
 
+  /** The claim credential as it is read aloud: 4-4-4. Anything else is shown as it came. */
   function formatClaimCode(code) {
     if (typeof code !== "string") return "";
     return code.length === 12 ? `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8)}` : code;
   }
 
-  /** What still has to happen for one entry, in the order the process requires. A final's entries arrive complete (carried from the preliminary). */
-  function entryNextStep(entry) {
-    if (entry.withdrawn) return "WITHDRAWN";
-    // A photograph hidden at the person's request was approved first; hiding it does not make the contestant "not ready".
-    if (entry.media === "HIDDEN") return entry.association === "CONFIRMED" ? "READY" : "ASSOCIATION";
-    if (entry.media === "NONE" || entry.media === "REJECTED" || !entry.media) return "PHOTO";
-    if (entry.media === "PENDING_CONSENT") return "CONSENT";
-    if (entry.media === "PENDING_REVIEW") return "REVIEW";
-    return entry.association === "CONFIRMED" ? "READY" : "ASSOCIATION";
-  }
+  // ---------------------------------------------------------------- what an entry needs next
 
-  const STEP_REASON = {
-    PHOTO: "Falta una fotografía aprobada.",
-    CONSENT: "Falta el consentimiento de galería y concurso de la persona.",
-    REVIEW: "Falta aprobar o rechazar la fotografía.",
-    ASSOCIATION: "Falta confirmar la asociación con la persona participante.",
-  };
+  const isMember = (e) => e && e.kind === "GROUP_MEMBER";
+  const isReady = (e) => !!e && !e.withdrawn && e.association === "CONFIRMED" && e.media === "APPROVED";
 
-  function roundReadiness(overview) {
-    const entries = overview && Array.isArray(overview.entries) ? overview.entries : [];
-    const active = entries.filter((e) => !e.withdrawn);
-    const blockers = [];
-    for (const e of active) {
-      const step = entryNextStep(e);
-      if (step !== "READY") blockers.push({ entryId: e.entryId, label: e.label, reason: STEP_REASON[step] || "Falta completar este participante." });
-    }
-    return { ready: active.length >= 2 && blockers.length === 0, activeCount: active.length, blockers };
-  }
-
-  // ---------------------------------------------------------------- Test events: the same words on every page
-
-  /** The label of a rehearsal. The voter and display modules carry the same words (a test pins that they agree). */
-  const TEST_EVENT_LABEL = "EVENTO DE PRUEBA";
-  const TEST_EVENT_NOTICE = "Es un ensayo: nada de lo que pasa en esta ronda es el evento real ni cuenta como su resultado.";
-
-  // ---------------------------------------------------------------- The final's geofence: form, position of the device, outcome, schematic
-
-  const GEOFENCE_FIELDS = Object.freeze([
-    { id: "lat", key: "venueLatitude", label: "Latitud del centro", range: "un número entre -90 y 90", ok: (n) => n >= -90 && n <= 90 },
-    { id: "lon", key: "venueLongitude", label: "Longitud del centro", range: "un número entre -180 y 180", ok: (n) => n >= -180 && n <= 180 },
-    { id: "radius", key: "venueRadiusMeters", label: "Radio (metros)", range: "un número mayor que 0 y de hasta 100000", ok: (n) => n > 0 && n <= 100000 },
-    { id: "accuracy", key: "maxAccuracyMeters", label: "Precisión máxima aceptada (metros)", range: "un número mayor que 0 y de hasta 100000", ok: (n) => n > 0 && n <= 100000 },
-    { id: "inside", key: "insideMarginFactor", label: "Margen interior", range: "un número entre 0 y 1000", ok: (n) => n >= 0 && n <= 1000 },
-    { id: "outside", key: "outsideMarginFactor", label: "Margen exterior", range: "un número entre 0 y 1000", ok: (n) => n >= 0 && n <= 1000 },
-  ]);
-
-  const GEOFENCE_HELP = Object.freeze({
-    radius: "El radio es la distancia, en metros, del centro al borde del lugar. Solo se acepta el voto de quien está dentro de ese círculo.",
-    accuracy: "La precisión máxima es el error de posición (en metros) que el teléfono de un votante puede reportar. Si reporta más error que este valor, su lectura no se usa y se le pide salir a un lugar abierto o acercarse. Un valor bajo es más exigente; uno demasiado bajo deja fuera a teléfonos con una señal normal.",
-    inside: "El margen interior es cuántas veces el error reportado se suma a la distancia al centro antes de compararla con el radio. Con 1, alguien cuenta como dentro solo si incluso con todo su error cabe en el círculo; con 0 solo se mira la distancia.",
-    outside: "El margen exterior es cuántas veces el error reportado se resta a la distancia para decidir que alguien está fuera. Con 1, está fuera solo si incluso con todo su error sigue más allá del borde. Entre dentro y fuera la lectura queda sin confirmar y se le pide acercarse.",
-    browser: "La ubicación del navegador es una señal de elegibilidad, no es una prueba contra la suplantación: una persona podría simular una posición con herramientas de su teléfono. Sirve para pedir que los votantes estén en el lugar, no para garantizarlo.",
-  });
-
-  /** A plain decimal (a comma is accepted as the decimal mark). Anything else — blank, text, NaN, Infinity, an exponent — is not a number here. */
-  function parseDecimal(text) {
-    const t = String(text === undefined || text === null ? "" : text).trim().replace(/^([+-]?\d+),(\d+)$/, "$1.$2");
-    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t)) return null;
-    const n = Number(t);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  /** The six venue numbers from the form's six texts, or the fields that are wrong, each with its own message. Nothing is sent from a wrong form. */
-  function parseGeofenceForm(form) {
-    const errors = {};
-    const venue = {};
-    for (const f of GEOFENCE_FIELDS) {
-      const n = parseDecimal(form ? form[f.id] : "");
-      if (n === null || !f.ok(n)) errors[f.id] = `${f.label}: escribe ${f.range}.`;
-      else venue[f.key] = n;
-    }
-    return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, venue };
-  }
-
-  function geofenceToForm(venue) {
-    const out = {};
-    for (const f of GEOFENCE_FIELDS) out[f.id] = String(venue[f.key]);
-    return out;
-  }
-
-  /** True when the form differs from what is saved — numerically (14.0987 and 14.09870 are the same), and a form that cannot be read is a change. */
-  function geofenceDirty(saved, form) {
-    const parsed = parseGeofenceForm(form);
-    if (!parsed.ok || !saved) return true;
-    return GEOFENCE_FIELDS.some((f) => parsed.venue[f.key] !== saved[f.key]);
-  }
-
-  /** How precise a phone must be for its reading to propose a venue centre when the form gives no limit of its own. */
-  const DEFAULT_CENTRE_ACCURACY_METERS = 100;
-  const DEVICE_POSITION_OPTIONS = Object.freeze({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-
-  const validReading = (r) =>
-    !!r && Number.isFinite(r.latitude) && Number.isFinite(r.longitude) && Number.isFinite(r.accuracyMeters) &&
-    r.latitude >= -90 && r.latitude <= 90 && r.longitude >= -180 && r.longitude <= 180 && r.accuracyMeters > 0 && !(r.latitude === 0 && r.longitude === 0);
-
-  /**
-   * One fresh reading of THIS device, as { latitude, longitude, accuracyMeters }. The reading is handed to the caller and kept nowhere here: it
-   * is not stored, logged or sent anywhere by this function. Rejects with { code } so every failure has its own message.
-   */
-  function readDevicePosition(geolocation, options) {
-    return new Promise((resolve, reject) => {
-      if (!geolocation || typeof geolocation.getCurrentPosition !== "function") return reject({ code: "LOCATION_UNSUPPORTED" });
-      geolocation.getCurrentPosition(
-        (position) => {
-          const c = position && position.coords;
-          if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude) || !Number.isFinite(c.accuracy)) return reject({ code: "LOCATION_UNAVAILABLE" });
-          resolve({ latitude: c.latitude, longitude: c.longitude, accuracyMeters: c.accuracy });
-        },
-        (error) => reject({ code: error && error.code === 1 ? "LOCATION_DENIED" : error && error.code === 3 ? "LOCATION_TIMEOUT" : "LOCATION_UNAVAILABLE" }),
-        Object.assign({}, DEVICE_POSITION_OPTIONS, options || {})
-      );
-    });
+  /** The name the station shows: the public name, or the ballot number of an entry the team made by hand and has not named. */
+  function entryTitle(e) {
+    if (!e) return "";
+    return e.publicName ? e.publicName : e.label ? `Sin nombre · ${e.label}` : "Sin nombre";
   }
 
   /**
-   * The centre this reading can propose: only a reading precise enough for the accuracy the venue asks of its voters. A rough reading would put
-   * the circle somewhere else, so it proposes nothing and the page says why.
+   * The steps one candidacy goes through at the station, in order, each marked done / current / todo. The first step that is not done is the current
+   * one and the page shows ITS action. A self-registered candidacy is verified (the person's name and category) before anything else; a hand-made one
+   * is associated through the pilot's claim -> confirm act with the person's own phone.
    */
-  function proposeCenter(reading, maxAccuracyMeters) {
-    if (!validReading(reading)) return { ok: false, code: "INVALID_READING" };
-    const limit = Number.isFinite(maxAccuracyMeters) && maxAccuracyMeters > 0 ? maxAccuracyMeters : DEFAULT_CENTRE_ACCURACY_METERS;
-    if (reading.accuracyMeters > limit) return { ok: false, code: "ACCURACY_INSUFFICIENT" };
-    return { ok: true, latitude: reading.latitude, longitude: reading.longitude, accuracyMeters: reading.accuracyMeters };
-  }
-
-  const LOCATION_MESSAGES = Object.freeze({
-    LOCATION_DENIED: "El navegador no permitió usar la ubicación de este dispositivo. Permite el acceso a la ubicación para este sitio en la configuración del navegador y vuelve a intentarlo.",
-    LOCATION_UNAVAILABLE: "No se pudo obtener la ubicación del dispositivo. Revisa que la ubicación esté activada y vuelve a intentarlo.",
-    LOCATION_TIMEOUT: "La ubicación tardó demasiado en responder. Sal a un lugar abierto, espera unos segundos y vuelve a intentarlo.",
-    LOCATION_UNSUPPORTED: "Este dispositivo o navegador no permite obtener la ubicación.",
-    ACCURACY_INSUFFICIENT: "La precisión de la ubicación es insuficiente para proponer el centro. Sal a un lugar abierto, espera a que el teléfono mejore su lectura y vuelve a intentarlo.",
-    INVALID_READING: "La lectura de ubicación no es válida. Vuelve a intentarlo.",
-  });
-  function describeLocationError(code) {
-    return (typeof code === "string" && Object.prototype.hasOwnProperty.call(LOCATION_MESSAGES, code) && LOCATION_MESSAGES[code]) || "No se pudo usar la ubicación. Inténtalo de nuevo.";
-  }
-
-  /** Meters as people read them: whole numbers stay whole, anything else keeps one decimal. */
-  const meters = (n) => (Number.isFinite(n) ? (Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toFixed(1)) : "—");
-  const TEST_IS_ONLY_A_TEST = "Es solo una prueba: no se guardó tu posición ni se registró ningún voto.";
-
-  /** What the server's evaluation of ONE reading means, in words. The decision is the server's; this only describes it. */
-  function describeTestResult(result) {
-    const r = result || {};
-    const distance = meters(r.distanceMeters);
-    const accuracy = meters(r.accuracyMeters);
-    const radius = meters(r.radiusMeters);
-    const limit = meters(r.maxAccuracyMeters);
-    switch (r.decision) {
-      case "INSIDE":
-        return { tone: "good", title: "Dentro de la geocerca", detail: `Estás a ${distance} m del centro (radio ${radius} m), con una precisión de ±${accuracy} m. Con los márgenes configurados, esta lectura se aceptaría como dentro del lugar. ${TEST_IS_ONLY_A_TEST}` };
-      case "OUTSIDE":
-        return { tone: "bad", title: "Fuera de la geocerca", detail: `Estás a ${distance} m del centro (radio ${radius} m), con una precisión de ±${accuracy} m. Con esta lectura el voto se rechazaría. ${TEST_IS_ONLY_A_TEST}` };
-      case "AMBIGUOUS":
-        return { tone: "warn", title: "No se puede confirmar si estás dentro", detail: `Estás a ${distance} m del centro (radio ${radius} m), pero con una precisión de ±${accuracy} m el círculo de error cruza el borde: no se puede decir si estás dentro o fuera. A un votante se le pediría acercarse y volver a intentarlo. ${TEST_IS_ONLY_A_TEST}` };
-      case "ACCURACY_EXCESSIVE":
-        return { tone: "warn", title: "Precisión insuficiente", detail: `El teléfono reportó una precisión de ±${accuracy} m y el máximo aceptado es ${limit} m, así que la lectura no se usa para decidir. Distancia al centro: ${distance} m. ${TEST_IS_ONLY_A_TEST}` };
-      default:
-        return { tone: "warn", title: "Respuesta no reconocida", detail: `El servidor devolvió una decisión que esta pantalla no conoce; no la tomes como aprobada. ${TEST_IS_ONLY_A_TEST}` };
-    }
-  }
-
-  /**
-   * The local drawing of the venue: the centre, the radius and (when there is one) a test reading with its accuracy circle, north up and east to
-   * the right, in a square of `size` units. It is a SCHEMATIC computed here from the numbers: no map, no tiles, no provider, no key. The decision
-   * about a reading is the server's and is not made here; this only shows where the reading falls. A reading within three radii is kept in view by
-   * zooming out; a farther one is drawn as an arrow on the edge, so a stray reading cannot squash the venue.
-   */
-  function schematic(input) {
-    const size = input && input.size > 0 ? input.size : 240;
-    const radius = input ? input.radiusMeters : NaN;
-    const centre = input ? input.centre : null;
-    if (!Number.isFinite(radius) || radius <= 0 || !centre || !(centre.latitude >= -90 && centre.latitude <= 90) || !(centre.longitude >= -180 && centre.longitude <= 180)) return null;
-    const half = size / 2;
-    const rad = (d) => (d * Math.PI) / 180;
-
-    let located = null;
-    const r = input.reading;
-    if (validReading(r)) {
-      const east = 6371000 * Math.cos(rad(centre.latitude)) * rad(r.longitude - centre.longitude);
-      const north = 6371000 * rad(r.latitude - centre.latitude);
-      const distance = Math.hypot(east, north);
-      located = { east, north, distance, bearing: (((Math.atan2(east, north) * 180) / Math.PI) + 360) % 360, accuracy: r.accuracyMeters };
-    }
-
-    const base = radius / (0.7 * half); // the radius takes 70% of the half-frame
-    let metersPerPixel = base;
-    let far = false;
-    if (located) {
-      if (located.distance <= radius * 3) metersPerPixel = Math.max(base, located.distance / (0.9 * half));
-      else far = true;
-    }
-
-    let reading = null;
-    if (located) {
-      if (far) {
-        const k = 0.92 * half;
-        reading = { x: half + Math.sin(rad(located.bearing)) * k, y: half - Math.cos(rad(located.bearing)) * k, accuracyPx: 0, outOfFrame: true };
-      } else {
-        reading = { x: half + located.east / metersPerPixel, y: half - located.north / metersPerPixel, accuracyPx: located.accuracy / metersPerPixel, outOfFrame: false };
-      }
-      reading.bearingDegrees = located.bearing;
-      reading.distanceMeters = located.distance;
-    }
-
-    // a round scale bar (1, 2 or 5 times a power of ten) no longer than a third of the frame
-    const target = metersPerPixel * size * 0.3;
-    const power = Math.pow(10, Math.floor(Math.log10(target)));
-    const nice = [5, 2, 1].map((m) => m * power).find((m) => m <= target) || power;
-    return {
-      size,
-      centre: { x: half, y: half },
-      metersPerPixel,
-      radiusPx: radius / metersPerPixel,
-      reading,
-      scaleBar: { meters: nice, px: nice / metersPerPixel, label: `${nice} m` },
-    };
-  }
-
-  // ---------------------------------------------------------------- The lobby of the Session must be locked before voting can open
-
-  const LOBBY_LOCK_NOTICE =
-    "Antes de abrir, el lobby del evento debe estar bloqueado: así se cierra la entrada de participantes ordinarios y la lista de personas ya no cambia. " +
-    "El bloqueo lo hace el anfitrión desde el panel de su sesión, con su token; esta pantalla no lo hace por ti ni lo salta. Cuando esté bloqueado, vuelve a revisar.";
-
-  /** Whether the Session's lobby still has to be locked. An overview that does not say (or a round that already opened) blocks nothing: the server stays the authority. */
-  function lobbyStatus(overview) {
-    if (!overview || overview.opened || typeof overview.sessionState !== "string" || overview.sessionState === "LOBBY_LOCKED") return { pending: false, text: null };
-    return { pending: true, text: LOBBY_LOCK_NOTICE };
-  }
-
-  // ---------------------------------------------------------------- Policies that still need the Founder's approval
-
-  /**
-   * The three policies the system will not guess. Each has exactly ONE value the system can execute (`value`); another value would be a
-   * code change, not a choice on this screen. Until the operator records the policy (citing where the Founder approved it), the operation
-   * that depends on it is refused by the server. The three texts are statements — when it applies, what recording it does, and what happens
-   * until then — never a yes/no question, and never a suggestion of which answer to give.
-   */
-  const POLICY_INFO = Object.freeze({
-    ZERO_VALID_VOTES_PRELIMINARY: {
-      value: "ALL_ENTRIES_ADVANCE",
-      title: "Si nadie recibe votos válidos en la preliminar",
-      applies: "Aplica solo si la preliminar cierra sin ningún voto válido; un voto a una participación que se retiró no cuenta.",
-      ifRecorded: "El corte de finalistas se puede confirmar y pasan a la final todas las participaciones que no se retiraron.",
-      whilePending: "Si ocurre ese caso, el corte de finalistas se rechaza hasta que se registre.",
-    },
-    ZERO_VOTE_ENTRIES_AT_CUTOFF: {
-      value: "TIED_ZERO_VOTE_ENTRIES_ADVANCE",
-      title: "Si una participación sin votos quedaría dentro del corte",
-      applies: "Aplica solo si hay votos válidos pero una participación sin ningún voto quedaría dentro del corte de finalistas (por un campo pequeño o por un empate en cero).",
-      ifRecorded: "El corte de finalistas se puede confirmar y las participaciones sin votos que queden dentro del corte avanzan a la final.",
-      whilePending: "Si ocurre ese caso, el corte de finalistas se rechaza hasta que se registre.",
-    },
-    FINALIST_WITHDRAWAL_AFTER_SELECTION: {
-      value: "EXCLUDE_WITHOUT_REFILL",
-      title: "Si un finalista se retira después del corte",
-      applies: "Aplica solo si un finalista ya elegido se retira después del corte.",
-      ifRecorded: "La final sigue sin esa persona: nadie ocupa su lugar y el corte no se modifica.",
-      whilePending: "Si ocurre ese caso, no se prepara ni se abre la final y no se publica ninguna de las dos rondas.",
-    },
-  });
-
-  const POLICY_ORDER = ["ZERO_VALID_VOTES_PRELIMINARY", "ZERO_VOTE_ENTRIES_AT_CUTOFF", "FINALIST_WITHDRAWAL_AFTER_SELECTION"];
-
-  /**
-   * The wording of the policy panel. The operator's authority does not approve a policy: the Founder does, outside this screen, and the
-   * application has no way to check it. What the operator records is a note of an approval that already exists, in their name.
-   */
-  const POLICY_STATUS_PENDING = "Pendiente de aprobación del Founder";
-  const POLICY_STATUS_RECORDED = "Registrada por el operador";
-  const POLICY_ACTION_LABEL = "Registrar decisión aprobada";
-  const POLICY_OPERATOR_NOTICE = "Tu autoridad como operador no aprueba esta política: la aprueba el Founder, fuera de esta pantalla. Registrarla aquí solo deja constancia, a tu nombre, de esa aprobación; la aplicación no puede verificar que exista.";
-  const POLICY_ACK_TEXT = "Confirmo que el Founder ya aprobó esta política con este valor exacto, y entiendo que solo registro una constancia que la aplicación no verifica.";
-  const POLICY_RECORDED_NOTICE = "Constancia registrada por el operador. La aplicación no verificó que el Founder haya aprobado este valor.";
-  const POLICY_MISSING_ACK = "Confirma que el Founder ya aprobó esta política con este valor exacto.";
-  const POLICY_MISSING_REFERENCE = "Cita dónde consta la aprobación del Founder (mínimo 3 caracteres).";
-
-  const policyTitle = (key) => (POLICY_INFO[key] ? POLICY_INFO[key].title : key);
-
-  /**
-   * The checklist of the round, each step with whether it is available NOW and why not. `overview` is the operator overview. The order is
-   * the pilot's: preliminary — entries, open, close, cut, review, publish; final — prepare, open, close, review, publish.
-   */
-  function nextSteps(overview) {
-    if (!overview) return [];
-    const role = overview.roundRole;
-    const readiness = roundReadiness(overview);
-    const { opened, closed, published } = overview;
-    const open = opened && !closed;
-    const pending = (overview.pendingResolutions || []).map((p) => p.key);
-    const waiting = (keys) => pending.find((k) => keys.includes(k)) || null;
-    const decision = (key) => `${POLICY_STATUS_PENDING}: ${policyTitle(key)}.`;
-    const closes = overview.schedule && overview.schedule.votingClosesAt ? Date.parse(overview.schedule.votingClosesAt) : null;
-    const hasFutureDeadline = closes !== null && closes > Date.parse(overview.serverNow);
+  function stationSteps(e) {
+    if (!e) return [];
+    const selfRegistered = !!e.selfRegistered;
+    const confirmed = e.association === "CONFIRMED";
+    const hasPhoto = e.media !== "NONE" && e.media !== "REJECTED" && e.media !== "HIDDEN";
+    const consented = e.media === "PENDING_REVIEW" || e.media === "APPROVED" || e.entryConsent === true;
+    const approved = e.media === "APPROVED" || e.photoDecision === "APPROVED";
     const steps = [];
-
-    if (role === "FINAL") {
-      const held = waiting(["FINALIST_WITHDRAWAL_AFTER_SELECTION"]);
-      const prepared = overview.entries.length > 0;
-      steps.push({
-        key: "PREPARE", label: "Preparar la final con los finalistas", done: prepared,
-        enabled: !prepared && !opened && !held,
-        reason: prepared ? "La final ya tiene sus finalistas." : opened ? "La final ya abrió." : held ? decision(held) : null,
-      });
-    }
-
-    const openHeld = role === "FINAL" ? waiting(["FINALIST_WITHDRAWAL_AFTER_SELECTION"]) : null;
-    const lobby = lobbyStatus(overview);
     steps.push({
-      key: "OPEN",
-      label: role === "FINAL" ? "Abrir la final (empieza el tiempo)" : "Abrir la votación",
-      done: opened,
-      enabled: !opened && readiness.ready && !openHeld && !lobby.pending && (role === "FINAL" || hasFutureDeadline),
-      reason: opened ? "Ya está abierta."
-        : openHeld ? decision(openHeld)
-        : !readiness.ready ? (readiness.activeCount < 2 ? "Se necesitan al menos dos participantes." : "Hay participantes sin completar.")
-        : role === "PRELIMINARY" && !hasFutureDeadline ? "Configura primero la hora de cierre, que debe ser futura: es el límite para votar."
-        : lobby.pending ? "Falta bloquear el lobby del evento: lo hace el anfitrión desde el panel de su sesión, no esta pantalla."
-        : null,
+      key: selfRegistered ? "VERIFY" : "ASSOCIATE",
+      label: selfRegistered ? "Verificar a la persona (nombre y categoría)" : "Asociar a la persona con su teléfono",
+      done: confirmed,
     });
-    steps.push({ key: "CLOSE", label: "Cerrar la votación", done: closed, enabled: !!open, reason: closed ? "Ya está cerrada." : open ? null : "Primero hay que abrirla." });
-
-    if (role === "PRELIMINARY") {
-      const cutHeld = waiting(["ZERO_VALID_VOTES_PRELIMINARY", "ZERO_VOTE_ENTRIES_AT_CUTOFF"]);
-      steps.push({
-        key: "FINALISTS", label: "Hacer el corte de finalistas", done: !!overview.finalistsSelected,
-        enabled: !!closed && !overview.finalistsSelected && !cutHeld,
-        reason: !closed ? "Primero hay que cerrar la votación." : overview.finalistsSelected ? "El corte ya está hecho." : cutHeld ? decision(cutHeld) : null,
-      });
-    }
-
-    // A final that closed with no valid vote has no result: there is nothing to review and nothing to publish, whatever else is in place.
-    const noResult = role === "FINAL" && !!closed && overview.noValidResult === true;
-    const reviewReady = !!closed && (role === "FINAL" || !!overview.finalistsSelected);
-    const publishHeld = waiting(["FINALIST_WITHDRAWAL_AFTER_SELECTION"]);
-    // GATE-014: only a review the SERVER holds for exactly the current results counts — never a button that was pressed, and never a loose truthy value.
-    const reviewCurrent = !!overview.review && overview.review.current === true;
-    steps.push({
-      key: "REVIEW", label: "Registrar la revisión de los resultados",
-      done: !!published || (reviewCurrent && !noResult),
-      enabled: reviewReady && !published && !noResult && !reviewCurrent,
-      reason: published ? "Ya se publicaron." : noResult ? "La final no tiene ningún voto válido: no hay resultado que revisar." : reviewCurrent ? null : reviewReady ? (overview.review ? "La revisión anterior quedó vieja: regístrala de nuevo." : null) : role === "PRELIMINARY" ? "Primero hay que cerrar y hacer el corte." : "Primero hay que cerrar la votación.",
+    steps.push({ key: "PHOTO", label: "Tomar la foto", done: hasPhoto });
+    steps.push({ key: "CONSENT", label: "Consentimiento de la foto", done: consented });
+    steps.push({ key: "APPROVE", label: "Aprobar la foto", done: approved });
+    if (e.kind === "GROUP") steps.push({ key: "MEMBERS", label: "Integrantes del grupo", done: e.groupComplete === true });
+    let currentSeen = false;
+    return steps.map((s) => {
+      const state = s.done ? "done" : currentSeen ? "todo" : "current";
+      if (!s.done) currentSeen = true;
+      return { key: s.key, label: s.label, state };
     });
-    steps.push({
-      key: "PUBLISH", label: role === "FINAL" ? "Publicar al ganador (o ganadores)" : "Publicar a los finalistas", done: !!published,
-      enabled: reviewReady && !published && !noResult && reviewCurrent && !publishHeld,
-      reason: published ? "Ya se publicó."
-        : !reviewReady ? "Primero hay que cerrar la votación."
-        : noResult ? "La final no tiene ningún voto válido: no hay resultado que publicar."
-        : !reviewCurrent ? "Requiere una revisión de los resultados actuales."
-        : publishHeld ? decision(publishHeld)
-        : null,
-    });
-    return steps;
   }
 
-  /** The clock the operator sees, from the SERVER's answer (never the tablet's wall clock): the time left until the deadline, h:mm:ss or m:ss. */
-  function deadlineLabel(overview, monotonicElapsedMs) {
-    if (!overview || !overview.deadlineAt || !overview.opened || overview.closed) return null;
-    const left = Math.max(0, Date.parse(overview.deadlineAt) - Date.parse(overview.serverNow) - (monotonicElapsedMs || 0));
-    const total = Math.ceil(left / 1000);
-    const pad = (n) => String(n).padStart(2, "0");
-    return total >= 3600 ? `${Math.floor(total / 3600)}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}` : `${Math.floor(total / 60)}:${pad(total % 60)}`;
+  /** The current step's key, or null when the candidacy is complete (public once the photograph is approved and the person confirmed). */
+  function currentStep(e) {
+    const s = stationSteps(e).find((x) => x.state === "current");
+    return s ? s.key : null;
   }
 
-  // ---------------------------------------------------------------- live state (UG-IV-GATE-014)
-
-  // ---- createPoller:begin (the SAME text in communityVotingRoundOperator.js and communityVotingRound.js: a test pins that the two copies are identical)
   /**
-   * A self-scheduling poll with every guarantee a live page needs and none of its DOM. Every collaborator is an ARGUMENT (the clock, the
-   * timers, the page's visibility, the request itself), so the timing is unit-tested without waiting.
-   *   - ONE request at a time. A timer, a return to the page and refreshNow() that arrive while one is out make ONE follow-up, never two requests.
-   *   - The next poll is scheduled only AFTER the previous one finished, so polls can never pile up.
-   *   - An answer is used only while it is still the newest: invalidate() (an authoritative read made elsewhere) and stop() (another person,
-   *     another round, a sign-out) make whatever is in flight unusable — it is dropped when it arrives, never applied.
-   *   - Nothing runs while the page is hidden; becoming visible again refreshes at once.
-   *   - Failures back off (x2, capped) and data older than staleAfterMs is reported stale, so a page can SAY so instead of presenting it as current.
-   * fetchOnce() resolves { ok, apply?, terminal? }. apply() runs ONLY if the answer is still wanted; terminal ends the loop (the connection itself was refused).
+   * What stands between a category and its opening, from its overview. The database enforces the same rule (every candidacy ready, at least two);
+   * saying it here only spares the operator a refusal. A registration the person never completed is NOT dropped silently: it keeps the category
+   * from opening until the operator decides about it (completes it or removes it).
    */
-  function createPoller(deps) {
-    const staleAfterMs = deps.staleAfterMs === undefined ? 15000 : deps.staleAfterMs;
-    const jitter = deps.jitter === undefined ? 0.2 : deps.jitter;
-    const maxBackoffMs = deps.maxBackoffMs === undefined ? 30000 : deps.maxBackoffMs;
-    let running = false;
-    let terminal = false;
-    let generation = 0;
-    let sequence = 0;
-    let timer = null;
-    let flight = null;
-    let queued = false;
-    let failures = 0;
-    let startedAt = 0;
-    let lastOkAt = null;
-
-    function notify() {
-      if (typeof deps.onStatus !== "function") return;
-      try {
-        deps.onStatus();
-      } catch (e) {
-        /* a listener never stops the loop */
-      }
-    }
-    function cancelTimer() {
-      if (timer === null) return;
-      deps.clearTimer(timer);
-      timer = null;
-    }
-    function schedule() {
-      cancelTimer();
-      if (!running || flight !== null || !deps.isVisible()) return;
-      const base = deps.delayFor({ failures });
-      if (base === null || base === undefined) return;
-      const backedOff = Math.min(maxBackoffMs, base * Math.pow(2, Math.min(failures, 4)));
-      const factor = 1 + (deps.random() * 2 - 1) * jitter;
-      timer = deps.setTimer(() => {
-        timer = null;
-        run();
-      }, Math.round(backedOff * factor));
-    }
-    async function run() {
-      if (!running) return;
-      if (flight !== null) {
-        queued = true;
-        return;
-      }
-      cancelTimer();
-      queued = false;
-      sequence += 1;
-      const mine = { generation, sequence };
-      flight = mine;
-      notify();
-      let result;
-      try {
-        result = await deps.fetchOnce();
-      } catch (e) {
-        result = { ok: false };
-      }
-      settle(mine, result || { ok: false });
-    }
-    function settle(mine, result) {
-      if (flight === mine) flight = null;
-      if (mine.generation !== generation) return; // stopped (and perhaps started again) meanwhile: this answer is no longer ours
-      if (mine.sequence === sequence) {
-        // still the newest request: its answer is wanted
-        if (result.ok) {
-          failures = 0;
-          lastOkAt = deps.now();
-          if (typeof result.apply === "function") {
-            try {
-              const applied = result.apply();
-              if (applied && typeof applied.then === "function") applied.then(null, () => {});
-            } catch (e) {
-              /* the page's own error handling decides what to show */
-            }
-          }
-        } else {
-          failures += 1;
-          if (result.terminal) {
-            terminal = true;
-            running = false;
-          }
-        }
-      }
-      notify();
-      if (!running) return;
-      if (queued) {
-        queued = false;
-        run();
-        return;
-      }
-      schedule();
-    }
-    return {
-      start() {
-        generation += 1;
-        sequence += 1;
-        running = true;
-        terminal = false;
-        flight = null;
-        queued = false;
-        failures = 0;
-        startedAt = deps.now();
-        lastOkAt = null;
-        cancelTimer();
-        notify();
-        schedule();
-      },
-      stop() {
-        generation += 1;
-        running = false;
-        flight = null;
-        queued = false;
-        cancelTimer();
-        notify();
-      },
-      refreshNow() {
-        run();
-      },
-      invalidate() {
-        sequence += 1;
-      },
-      markFresh() {
-        lastOkAt = deps.now();
-        failures = 0;
-        if (running && flight === null) schedule(); // the next delay follows the state that was just read
-        notify();
-      },
-      onVisibility(visible) {
-        if (!running) return;
-        if (visible) {
-          run();
-          return;
-        }
-        cancelTimer();
-        notify();
-      },
-      status() {
-        const age = running ? deps.now() - (lastOkAt === null ? startedAt : lastOkAt) : null;
-        return { running, refreshing: flight !== null, failures, stale: running && age > staleAfterMs, ageMs: age, terminal, hidden: !deps.isVisible() };
-      },
-    };
-  }
-  // ---- createPoller:end
-
-  /** How often the operator's panel asks the server (before jitter and backoff). Bounded: never faster than 4 s, and the backoff never exceeds 30 s. */
-  const LIVE_POLL = { openMs: 4000, awaitingMs: 6000, activeMs: 8000, publishedMs: 20000, staleAfterMs: 15000, maxBackoffMs: 30000 };
-
-  /** The base delay of the next poll from the overview the panel holds: quick while voting is open (the counters move), slow once everything is published. */
-  function livePollDelayMs(ctx) {
-    const ov = ctx && ctx.overview;
-    if (!ov) return LIVE_POLL.activeMs;
-    if (ov.published) return LIVE_POLL.publishedMs;
-    if (ov.opened && !ov.closed) return LIVE_POLL.openMs;
-    if (ov.closed) return LIVE_POLL.awaitingMs; // closed, waiting for the cut, the review and the publication
-    return LIVE_POLL.activeMs; // in preparation
+  function categoryReadiness(overview) {
+    const entries = ((overview && overview.entries) || []).filter((e) => !isMember(e) && !e.withdrawn);
+    const ready = entries.filter(isReady);
+    const pending = entries.filter((e) => !isReady(e));
+    const reasons = [];
+    if (overview && overview.opened) return { opened: true, total: entries.length, ready: ready.length, pending, canOpen: false, reasons: [] };
+    if (entries.length < 2) reasons.push(entries.length === 0 ? "Todavía no hay candidaturas." : "Se necesitan al menos 2 candidaturas.");
+    if (pending.length > 0) reasons.push(pending.length === 1 ? "Falta completar 1 candidatura." : `Faltan completar ${pending.length} candidaturas.`);
+    return { opened: false, total: entries.length, ready: ready.length, pending, canOpen: reasons.length === 0 && ready.length >= 2, reasons };
   }
 
-  /** What the panel says about the freshness of what it shows. A stale status is NEVER "ok", even while a new request is out. */
-  function liveStatus(status) {
-    const s = status || {};
-    if (!s.running && !s.terminal) return { tone: "off", text: "" };
-    if (s.terminal) return { tone: "stale", text: "Sin conexión con la ronda: vuelve a conectarla." };
-    const age = Number.isFinite(s.ageMs) ? Math.max(0, s.ageMs) : 0;
-    const seconds = Math.floor(age / 1000);
-    const how = age >= 90_000 ? `${Math.floor(age / 60_000)} min` : `${seconds} s`;
-    if (s.stale) return { tone: "stale", text: `Sin actualizar: estos datos son de hace ${how}.` };
-    if (s.refreshing) return { tone: "refreshing", text: "Actualizando…" };
-    if (s.hidden) return { tone: "paused", text: "En pausa mientras esta pantalla está oculta." };
-    return { tone: "ok", text: age < 1500 ? "Actualizado ahora" : `Actualizado hace ${how}` };
+  /** A short label for where a category stands, for the operator's strip. */
+  function categoryPhaseLabel(overview) {
+    if (!overview) return "Sin datos";
+    if (overview.published) return "Resultados publicados";
+    if (overview.closed) return "Cerrada";
+    if (overview.opened) return "Votación abierta";
+    return "Preparando";
   }
 
-  const PROMO_LABEL = {
-    NOT_ASKED: "No se le ha preguntado",
-    ACCEPTED: "Autorizó el uso promocional",
-    DECLINED: "No autorizó el uso promocional",
-    WITHDRAWN: "Retiró la autorización promocional",
-  };
-  const promoLabel = (state) => PROMO_LABEL[state] || PROMO_LABEL.NOT_ASKED;
+  /** The operator's own next step for the category after it closes: review the result, then publish it. */
+  function afterCloseStep(overview) {
+    if (!overview || !overview.closed) return null;
+    if (overview.published) return "DONE";
+    if (overview.review && overview.review.current) return "PUBLISH";
+    return "REVIEW";
+  }
+
+  // ---------------------------------------------------------------- the delivery panel
+
+  const DELIVERY_LABEL = { PENDING: "Envío pendiente", DELIVERED: "Entregado" };
+  const deliveryLabel = (status) => DELIVERY_LABEL[status] || "";
+
+  /** The operator is reminded, in the panel itself, that the link cannot attach the picture. */
+  const DELIVERY_NOTICE =
+    "El enlace abre WhatsApp con el mensaje listo, pero no adjunta la foto: descargala y adjuntala vos. Abrir WhatsApp no marca nada como entregado; eso lo decidís vos al terminar.";
+
+  // ---------------------------------------------------------------- messages
 
   const MESSAGES = {
-    AUTHENTICATION_REQUIRED: "Inicia sesión como operador y confirma el token del evento.",
-    OPERATOR_REQUIRED: "Esta cuenta no es la del operador designado para este evento.",
-    HOST_TOKEN_MISMATCH: "El token del evento no coincide. Revisa que sea el de este evento.",
-    OPERATOR_NOT_CONFIGURED: "El operador de la actividad no está configurado en el servidor.",
-    PREPARATION_INCOMPLETE: "Todavía hay participantes sin completar. Revisa la lista de pendientes.",
-    PREPARATION_CLOSED: "La votación ya se abrió: ya no se puede cambiar la preparación ni los horarios.",
-    SESSION_NOT_STARTABLE: "Primero bloquea el lobby del evento.",
-    ALREADY_OPENED: "La votación ya está abierta.",
-    CUTOFF_PASSED: "Ya pasó la hora límite para nuevos participantes y fotografías.",
-    PHOTO_INVALID: "La fotografía no es válida. Toma otra.",
-    PHOTO_HIDDEN: "La persona pidió ocultar su fotografía: no se puede agregar otra.",
-    CONSENT_REQUIRED: "La persona debe confirmar que es mayor de edad y aceptar el consentimiento.",
-    CONSENT_ALREADY_RECORDED: "Esa decisión ya está registrada.",
-    DECISION_ALREADY_RECORDED: "Esta fotografía ya fue decidida.",
-    PHOTO_REQUIRED: "Esto aplica a la fotografía más reciente del participante.",
-    ENTRY_HAS_MEDIA: "Este participante ya tiene fotografía: retíralo en lugar de eliminarlo.",
-    ENTRY_ALREADY_WITHDRAWN: "Este participante ya fue retirado.",
-    ENTRY_NOT_FOUND: "No existe ese participante.",
-    CONFIRMATION_REJECTED: "El código no coincide. Pídele a la persona que lo lea de su pantalla.",
-    CLAIM_VOIDED: "Demasiados códigos incorrectos: la asociación quedó anulada. Crea el participante de nuevo.",
-    CONFIRMATION_NOT_PENDING: "Esta persona aún no ha ingresado su código de concursante.",
-    CLAIM_EXPIRED: "El código venció. Crea el participante de nuevo.",
-    WRONG_ROUND: "Esto no aplica a esta ronda.",
-    VOTING_NOT_OPEN: "La votación no está abierta.",
-    VOTING_WINDOW_ELAPSED: "El tiempo de votación terminó.",
-    NO_ELIGIBLE_ENTRIES: "No queda ningún participante para avanzar.",
-    FINALISTS_NOT_SELECTED: "Primero hay que hacer el corte de finalistas de la preliminar.",
-    POLICY_REQUIRED: "Falta registrar una decisión aprobada por el Founder antes de continuar. Se nombra en el panel de políticas.",
-    POLICY_ALREADY_RECORDED: "Esa política ya está registrada y no se puede cambiar.",
-    REVIEW_REQUIRED: "Primero registra la revisión de los resultados.",
-    REVIEW_STALE: "Los resultados o los participantes elegibles cambiaron después de la revisión (por ejemplo, un retiro o una decisión). Regístrala de nuevo.",
-    ALREADY_PUBLISHED: "Estos resultados ya se publicaron.",
-    RESULTS_NOT_AVAILABLE: "Los totales solo se ven cuando la votación está cerrada.",
-    NO_VALID_RESULT: "La final no tiene ningún voto válido: no hay resultado que publicar ni ganador. Los votos y la evidencia se conservan. El sistema no ofrece cancelar, reabrir, extender ni elegir un ganador; hace falta una resolución explícita.",
-    ALREADY_CLOSED: "Esto ya está cerrado.",
-    ADMISSION_CLOSED: "Ya no se admiten nuevos votantes en esta ronda.",
-    PROFILE_INCOMPLETE: "Completa tu perfil de URBANO Gaming para operar.",
-    VERIFIED_EMAIL_REQUIRED: "Necesitas un correo verificado para operar.",
-    INSTANCE_ALREADY_REGISTERED: "Esta sesión ya tiene una ronda registrada.",
-    SESSION_NOT_REGISTRABLE: "Esta sesión ya no puede registrarse.",
-    CAPABILITY_SET_NOT_EXACTLY_VOTING: "La sesión debe tener únicamente la capacidad de votación.",
-    PARTICIPANTS_ALREADY_EXIST: "La sesión ya tiene participantes: crea una sesión nueva.",
-    INVALID_GEOFENCE_CONFIG: "Los datos del lugar (latitud, longitud, radio, precisión y márgenes) no son válidos.",
-    INVALID_LOCATION_READING: "La lectura de ubicación no es válida. Vuelve a intentarlo.",
-    GEOFENCE_FROZEN: "La final ya abrió: la geocerca ya no se puede cambiar.",
-    NOT_A_FINAL: "Solo la final tiene geocerca: la preliminar se vota desde cualquier lugar.",
-    TEST_MODE_MISMATCH: "La final debe ser de prueba si su preliminar es de prueba, y real si es real.",
-    CANDIDATE_NOT_AVAILABLE: "Ese participante ya no está disponible.",
-    SCHEDULE_INVALID: "Los horarios no son coherentes: el orden debe ser registro, hora límite, apertura y cierre. La final no lleva hora de cierre: su tiempo cuenta desde que la abres.",
-    SCHEDULE_REQUIRED: "La preliminar necesita una hora de cierre configurada y futura antes de abrirse: es el límite para votar.",
-    INVALID_REQUEST: "Algo en la solicitud no es válido. Revisa los datos.",
-    INTERNAL_ERROR: "Algo salió mal en el servidor. Inténtalo de nuevo.",
-    NETWORK: "No hay conexión con el servidor. Inténtalo de nuevo.",
+    AUTHENTICATION_REQUIRED: "Iniciá sesión con tu correo para continuar.",
+    OPERATOR_REQUIRED: "Esta cuenta no es la del operador del concurso.",
+    OPERATOR_NOT_CONFIGURED: "El operador del concurso todavía no está configurado en el servidor.",
+    HOST_TOKEN_MISMATCH: "Las claves guardadas en este navegador no corresponden a este concurso. Restaurá la copia de seguridad.",
+    INSTANCE_NOT_FOUND: "No encontramos esa categoría.",
+    ENTRY_NOT_FOUND: "No encontramos esa candidatura.",
+    WRONG_ENTRY_KIND: "Esta acción no corresponde a este tipo de candidatura.",
+    PREPARATION_CLOSED: "La votación de esa categoría ya abrió: la preparación no se puede cambiar.",
+    PREPARATION_INCOMPLETE: "Todavía no se puede abrir: cada candidatura necesita su persona confirmada y su foto aprobada, y hace falta al menos 2.",
+    ALREADY_OPENED: "Esa categoría ya está abierta.",
+    SESSION_NOT_STARTABLE: "Esa categoría no está lista para abrir.",
+    SCHEDULE_REQUIRED: "La categoría necesita una hora de cierre en el futuro antes de abrir.",
+    SCHEDULE_INVALID: "Los horarios no tienen sentido: inscripción, cierre de inscripción, apertura y cierre deben ir en ese orden.",
+    CUTOFF_PASSED: "La inscripción ya terminó.",
+    CONSENT_REQUIRED: "Falta el consentimiento de la persona.",
+    PHOTO_INVALID: "La foto no sirve. Tomá otra.",
+    PHOTO_REQUIRED: "Primero hay que subir la foto.",
+    DECISION_ALREADY_RECORDED: "Esa foto ya tiene una decisión.",
+    CONSENT_ALREADY_RECORDED: "El consentimiento ya estaba registrado.",
+    CONFIRMATION_REJECTED: "Ese código no coincide. Pedíselo de nuevo a la persona.",
+    CONFIRMATION_NOT_PENDING: "Esa persona todavía no escribió su código.",
+    ALREADY_CANDIDATE: "Esa persona ya tiene una candidatura en el concurso.",
+    ENTRY_HAS_MEDIA: "Esa candidatura ya tiene foto: en vez de quitarla, retirala.",
+    ENTRY_ALREADY_WITHDRAWN: "Esa candidatura ya fue retirada.",
+    GROUP_FULL: "El grupo ya no tiene lugar para otra persona.",
+    ALREADY_CLOSED: "Esa categoría ya cerró.",
+    RESULTS_NOT_AVAILABLE: "Los resultados todavía no están disponibles.",
+    REVIEW_REQUIRED: "Primero registrá la revisión del resultado.",
+    REVIEW_STALE: "El resultado cambió después de la revisión: revisalo otra vez.",
+    ALREADY_PUBLISHED: "Esos resultados ya se publicaron.",
+    CATEGORY_ALREADY_REGISTERED: "Esa categoría ya existe en el concurso.",
+    NETWORK: "No hay conexión. Lo último que hiciste todavía no se confirmó.",
+    INVALID_REQUEST: "Algo en lo que escribiste no es válido.",
+    INTERNAL_ERROR: "Algo salió mal del lado del servidor. Intentalo de nuevo.",
   };
-
-  /**
-   * What the operator is told when a final closes with no valid vote. It states what the system holds and what it does NOT do: it keeps the
-   * votes and the round's evidence, publishes nobody, and offers no way out of its own — the way out is an explicit resolution by whoever
-   * owns the event, which is not decided here.
-   */
-  const NO_VALID_RESULT_NOTICE =
-    "La final cerró sin ningún voto válido, así que no tiene un resultado que publicar y no hay ganador. Los votos y la evidencia de la ronda se conservan. " +
-    "El sistema no ofrece cancelar, reabrir, extender ni elegir un ganador a mano: esto requiere una resolución explícita de quien decide sobre el evento.";
-
   function describeError(code) {
-    return (typeof code === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, code) && MESSAGES[code]) || "No se pudo completar la acción. Inténtalo de nuevo.";
+    return (typeof code === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, code) && MESSAGES[code]) || "No se pudo completar la acción. Intentalo de nuevo.";
   }
 
-  /** A thin client for the operator routes. The bearer proves WHO, the host token proves the event. Every call returns { status, json }. */
+  // ---------------------------------------------------------------- the clients
+
+  async function request(fetchImpl, getToken, url, method, body, extraHeaders) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, extraHeaders || {});
+    const token = await getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await fetchImpl(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      let json = null;
+      try {
+        json = await response.json();
+      } catch (e) {
+        json = null;
+      }
+      return { status: response.status, json };
+    } catch (e) {
+      return { status: 0, json: { code: "NETWORK" } };
+    }
+  }
+
+  /** The operator's client for ONE category: the bearer proves WHO, the category's host token proves the event. Every call returns { status, json }. */
   function buildOperatorApi(fetchImpl, getToken, getHostToken, instanceId) {
     const base = `/api/gaming/community-voting/rounds/${instanceId}`;
-    async function call(path, method, body) {
-      const headers = { "Content-Type": "application/json" };
-      const token = await getToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const host = getHostToken();
-      if (host) headers["x-host-token"] = host;
-      try {
-        const response = await fetchImpl(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-        let json = null;
-        try {
-          json = await response.json();
-        } catch (e) {
-          json = null;
-        }
-        return { status: response.status, json };
-      } catch (e) {
-        return { status: 0, json: { code: "NETWORK" } };
-      }
-    }
+    const call = (path, method, body) => request(fetchImpl, getToken, `${base}${path}`, method, body, { "x-host-token": getHostToken() || "" });
     return {
       overview: () => call("/operator/overview", "GET"),
       results: () => call("/operator/results", "GET"),
-      schedule: (body) => call("/schedule", "PUT", body),
-      geofence: (venue) => call("/operator/geofence", "PUT", { venue }),
-      testGeofence: (location) => call("/operator/geofence/test", "POST", { location }),
-      createEntry: (claimTtlSeconds) => call("/operator/entries", "POST", { claimTtlSeconds }),
+      info: () => call("/info", "GET"),
+      schedule: (schedule) => call("/schedule", "PUT", schedule),
+      listing: (listed) => call("/operator/listing", "PUT", { listed }),
+      find: (code) => call(`/operator/candidacies?code=${encodeURIComponent(code)}`, "GET"),
+      createEntry: (kind) => call("/operator/entries", "POST", kind === "GROUP" ? { kind: "GROUP" } : {}),
       removeEntry: (entryId) => call(`/operator/entries/${entryId}`, "DELETE"),
+      rename: (entryId, publicName) => call(`/operator/entries/${entryId}/name`, "PUT", { publicName }),
+      confirmation: (entryId) => call(`/operator/entries/${entryId}/confirmation`, "POST", {}),
       photo: (entryId, fullImage, thumbImage) => call(`/operator/entries/${entryId}/photo`, "POST", { fullImage, thumbImage }),
       consent: (entryId, photoId, consentVersion) => call(`/operator/entries/${entryId}/consent`, "POST", { photoId, consentVersion, accepted: true, ageConfirmed: true }),
-      promo: (entryId, consentVersion, decision) => call(`/operator/entries/${entryId}/promo-consent`, "POST", { consentVersion, decision }),
       decision: (entryId, photoId, decision, reason) => call(`/operator/entries/${entryId}/decision`, "POST", { photoId, decision, reason }),
       association: (entryId, confirmationCode) => call(`/operator/entries/${entryId}/association`, "POST", { confirmationCode }),
-      hidePhoto: (entryId, reason) => call(`/operator/entries/${entryId}/photo-hide`, "POST", { reason }),
+      addMember: (groupEntryId) => call(`/operator/entries/${groupEntryId}/members`, "POST", {}),
+      memberConsent: (memberEntryId, photoId, consentVersion) => call(`/operator/entries/${memberEntryId}/member-consent`, "POST", { photoId, consentVersion, accepted: true, ageConfirmed: true }),
       withdraw: (entryId, reason, hidePhoto) => call(`/operator/entries/${entryId}/withdrawal`, "POST", { reason, hidePhoto: hidePhoto === true }),
-      policy: (policyKey, approvalReference) => call("/operator/policies", "POST", { policyKey, policyValue: POLICY_INFO[policyKey] ? POLICY_INFO[policyKey].value : "", approvalReference }),
-      resolveTask: (taskId, note) => call(`/operator/tasks/${taskId}`, "POST", { note }),
+      contact: (entryId) => call(`/operator/entries/${entryId}/contact`, "POST", {}),
+      delivered: (entryId) => call(`/operator/entries/${entryId}/delivery`, "POST", {}),
       open: (promptText) => call("/operator/open", "POST", { promptText }),
       close: () => call("/operator/close", "POST", {}),
-      finalists: () => call("/operator/finalists", "POST", {}),
-      prepareFinal: () => call("/operator/prepare-final", "POST", {}),
-      review: (note) => call("/operator/review", "POST", { note }),
+      review: (note) => call("/operator/review", "POST", note ? { note } : {}),
       publish: () => call("/operator/publish", "POST", {}),
-      info: () => call("/info", "GET"),
     };
   }
 
+  /** The calls that create the contest: a Session per category (the platform's own routes), its capability, then the category's registration. */
+  function buildSetupApi(fetchImpl, getToken) {
+    return {
+      createSession: () => request(fetchImpl, getToken, "/api/sessions", "POST", undefined),
+      declareVoting: (sessionId, hostToken) => request(fetchImpl, getToken, `/api/sessions/${sessionId}/capabilities`, "POST", { hostToken, capabilities: ["VOTING"] }),
+      registerCategory: (sessionId, hostToken, categoryKey, contestId) =>
+        request(fetchImpl, getToken, "/api/gaming/community-voting/rounds", "POST", Object.assign({ sessionId, categoryKey }, contestId ? { contestId } : {}), { "x-host-token": hostToken }),
+      contest: (contestId) => request(fetchImpl, getToken, `/api/gaming/community-voting/contests/${contestId}`, "GET"),
+    };
+  }
+
+  // ---------------------------------------------------------------- what this browser keeps: the contest's keys
+
+  const STORE_KEY = "cv:operator:contest:v1";
+
+  /**
+   * The contest this operator is running: its id and, per category, the Instance and the host token. The tokens are secrets of THIS operator's device;
+   * the backup file lets them recover if the browser forgets. The shape is checked on every read: anything else is ignored, never trusted.
+   */
+  function parseKeys(raw) {
+    try {
+      const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!v || typeof v !== "object" || typeof v.contestId !== "string" || typeof v.categories !== "object" || v.categories === null) return null;
+      const categories = {};
+      for (const key of CATEGORY_KEYS) {
+        const c = v.categories[key];
+        if (c && typeof c.instanceId === "string" && typeof c.hostToken === "string" && c.hostToken.length > 0) {
+          categories[key] = { instanceId: c.instanceId, sessionId: typeof c.sessionId === "string" ? c.sessionId : "", hostToken: c.hostToken };
+        }
+      }
+      return { contestId: v.contestId, ownerUserId: typeof v.ownerUserId === "string" ? v.ownerUserId : "", categories };
+    } catch (e) {
+      return null;
+    }
+  }
+  const keysComplete = (k) => !!k && CATEGORY_KEYS.every((key) => k.categories[key]);
+
   return {
     EVENT_TIME_ZONE,
-    EVENT_SCHEDULE_TEMPLATE,
-    toEventInstant,
+    CATEGORY_KEYS,
+    EVENT_PLAN,
+    eventInstant,
     fromEventInstant,
-    templateInstants,
+    scheduleFromForm,
     planResize,
+    PHOTO_LIMITS,
     formatClaimCode,
-    entryNextStep,
-    roundReadiness,
-    POLICY_INFO,
-    POLICY_ORDER,
-    POLICY_STATUS_PENDING,
-    POLICY_STATUS_RECORDED,
-    POLICY_ACTION_LABEL,
-    POLICY_OPERATOR_NOTICE,
-    POLICY_ACK_TEXT,
-    POLICY_RECORDED_NOTICE,
-    POLICY_MISSING_ACK,
-    POLICY_MISSING_REFERENCE,
-    NO_VALID_RESULT_NOTICE,
-    TEST_EVENT_LABEL,
-    TEST_EVENT_NOTICE,
-    GEOFENCE_FIELDS,
-    GEOFENCE_HELP,
-    parseGeofenceForm,
-    geofenceToForm,
-    geofenceDirty,
-    readDevicePosition,
-    proposeCenter,
-    describeLocationError,
-    describeTestResult,
-    schematic,
-    lobbyStatus,
-    LOBBY_LOCK_NOTICE,
-    nextSteps,
-    createPoller,
-    LIVE_POLL,
-    livePollDelayMs,
-    liveStatus,
-    deadlineLabel,
-    promoLabel,
+    isMember,
+    isReady,
+    entryTitle,
+    stationSteps,
+    currentStep,
+    categoryReadiness,
+    categoryPhaseLabel,
+    afterCloseStep,
+    deliveryLabel,
+    DELIVERY_NOTICE,
     describeError,
     buildOperatorApi,
+    buildSetupApi,
+    STORE_KEY,
+    parseKeys,
+    keysComplete,
   };
 })();

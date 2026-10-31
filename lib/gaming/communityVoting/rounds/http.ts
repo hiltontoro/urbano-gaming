@@ -6,14 +6,14 @@ import { NO_STORE, getSupabaseCredentials, toHttpErrorResponse } from "../httpSu
 import { CommunityVotingError } from "../types";
 import { SupabaseEmailIdentityVerifier } from "./identity";
 import { resolveOperatorCredentials, toOperatorContext } from "./operatorRequest";
-import { SupabaseRoundsRepository } from "./supabaseRoundsRepository";
+import { SupabaseContestRepository } from "../contest/supabaseContestRepository";
 import type { OperatorContext } from "./types";
 import type { RoundVoterDeps } from "./voterOperations";
 
-/** Shared glue of the two-round routes. Routes stay thin: header and body extraction, then one domain call. */
+/** Shared glue of the contest's routes (the four-category contest runs on the pilot's rounds). Routes stay thin: header and body extraction, then one domain call. */
 
 export interface RouteEnv {
-  repo: SupabaseRoundsRepository;
+  repo: SupabaseContestRepository;
   /** The voter-side dependencies: the repository, the email verifier and the Gaming Member repository. */
   voter: RoundVoterDeps;
   url: string;
@@ -30,7 +30,7 @@ export async function handle(label: string, request: Request, run: (env: RouteEn
   const credentials = getSupabaseCredentials();
   if (!credentials) return json({ error: "Server misconfiguration: Supabase credentials not set.", code: "INTERNAL_ERROR" }, 500);
   try {
-    const repo = new SupabaseRoundsRepository(credentials.url, credentials.serviceKey);
+    const repo = new SupabaseContestRepository(credentials.url, credentials.serviceKey);
     return await run({
       repo,
       voter: {

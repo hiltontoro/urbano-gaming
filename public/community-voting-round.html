@@ -10,13 +10,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
-   * Halloween Community Voting, two-round pilot — the voter's page. Mobile-first, on the same identity tokens as the rest of the shell.
+   * Halloween Community Voting, the four-category contest — the voter's page. Mobile-first, on the same identity tokens as the rest of the shell.
    * Everything shown comes from the server as plain text and is placed with textContent; this page never builds markup from data.
-   * It never receives, and so can never show, a total, a rank or a count of votes. It never asks the browser for a location in the
-   * preliminary; only the final does, and only because the server says so.
+   * It never receives, and so can never show, a total, a rank or a count of votes. It never asks the browser for anything about where the person is.
    */
   :root {
-    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c; --ink: #f5f1e8; --muted: #9b9689; --line: #2a2a2a;
+    --bg-page: #0a0a0a; --bg-card: #161616; --surface-2: #1c1c1c; --ink: #f5f1e8; --muted: #a8a295; --line: #2a2a2a;
     --halloween: #ff7a1a; --halloween-bg: rgba(255, 122, 26, 0.12); --purple: #7c3aed; --good: #4ade80; --bad: #f87171; --radius: 14px;
   }
   * { box-sizing: border-box; }
@@ -24,75 +23,150 @@
   body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-page); color: var(--ink); margin: 0; padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
   button { font: inherit; color: inherit; cursor: pointer; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
-  input[type="text"], input[type="email"] { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 16px; }
-  .top { display: flex; align-items: center; gap: 10px; padding: 14px 16px; max-width: 720px; margin: 0 auto; }
+  input[type="text"], input[type="email"] { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 16px; min-height: 44px; }
+  .top { display: flex; align-items: center; gap: 10px; padding: 14px 16px; max-width: 720px; margin: 0 auto; flex-wrap: wrap; }
   .top img { width: 24px; height: 26px; }
-  .top h1 { font-size: 15px; font-weight: 800; margin: 0; letter-spacing: 0.02em; flex: 1; }
-  .who { font-size: 11px; color: var(--muted); text-align: right; }
+  .top h1 { font-size: 15px; font-weight: 800; margin: 0; letter-spacing: 0.02em; flex: 1; min-width: 150px; }
+  .who { font-size: 12px; color: var(--muted); text-align: right; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clockchip { background: var(--halloween-bg); border: 1px solid rgba(255, 122, 26, 0.5); border-radius: 999px; padding: 4px 12px; font-weight: 800; font-size: 14px; letter-spacing: 0.04em; }
   main { max-width: 720px; margin: 0 auto; padding: 0 16px; }
-  .banner { background: var(--halloween-bg); border: 1px solid rgba(255, 122, 26, 0.4); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; line-height: 1.4; margin-bottom: 10px; }
-  .banner .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .banner { background: var(--halloween-bg); border: 1px solid rgba(255, 122, 26, 0.4); border-radius: var(--radius); padding: 10px 14px; font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
+  .banner .sub, .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .banner.closed { background: var(--surface-2); border-color: var(--line); }
-  .banner .clock { font-weight: 800; font-size: 20px; letter-spacing: 0.04em; }
+  .banner .clock { font-weight: 800; font-size: 22px; letter-spacing: 0.04em; }
   .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
-  .card h2 { font-size: 16px; margin: 0 0 6px; }
-  .card p { margin: 6px 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .card h2 { font-size: 17px; margin: 0 0 6px; }
+  .card p { margin: 6px 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
   .stack > * + * { margin-top: 10px; }
   .row { display: flex; gap: 10px; align-items: center; }
   .row > * { flex: 1; }
   .btn { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-weight: 700; font-size: 14px; min-height: 44px; }
   .btn.primary { background: var(--halloween); color: #1a0d00; border-color: var(--halloween); }
-  .btn.link { background: none; border: none; color: var(--muted); text-decoration: underline; font-weight: 600; min-height: 36px; }
-  .msg { font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+  .btn.link { background: none; border: none; color: var(--muted); text-decoration: underline; font-weight: 600; min-height: 44px; }
+  .msg { font-size: 14px; line-height: 1.45; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
   .msg.err { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.4); color: #fecaca; }
   .msg.ok { background: rgba(74, 222, 128, 0.12); border: 1px solid rgba(74, 222, 128, 0.4); color: #bbf7d0; }
+  .msg .btn { margin-top: 8px; width: 100%; }
   .steps { display: flex; gap: 6px; margin: 0 0 14px; padding: 0; list-style: none; }
-  .steps li { flex: 1; text-align: center; font-size: 11px; font-weight: 700; padding: 8px 4px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+  .steps li { flex: 1; text-align: center; font-size: 12px; font-weight: 700; padding: 8px 4px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
   .steps li.done { background: rgba(74, 222, 128, 0.14); color: var(--good); }
   .steps li.current { background: var(--halloween-bg); color: var(--halloween); }
+  /* the category picker */
+  .cats { display: grid; gap: 12px; margin-bottom: 14px; }
+  .cat { display: block; width: 100%; text-align: left; background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-height: 76px; }
+  .cat h3 { margin: 0 0 4px; font-size: 16px; }
+  .cat .state { font-size: 13px; font-weight: 700; }
+  .cat .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .cat.open { border-color: rgba(255, 122, 26, 0.6); }
+  .cat.voted { border-color: rgba(74, 222, 128, 0.6); }
+  .cat.voted .state { color: var(--good); }
+  .cat.open .state { color: var(--halloween); }
+  .cat.results .state { color: #c4b5fd; }
+  .promise { text-align: center; font-weight: 700; font-size: 14px; color: var(--halloween); margin: 4px 0 14px; }
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-  .tabs button { flex: 1; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 12px; font-weight: 700; }
+  .tabs button { flex: 1; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 13px; font-weight: 700; min-height: 44px; }
   .tabs button[aria-selected="true"] { background: var(--halloween-bg); border-color: var(--halloween); color: var(--halloween); }
-  .meter { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .meter { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
   .deck { position: relative; touch-action: pan-y; user-select: none; }
   .deck .photo { width: 100%; height: min(58vh, 540px); object-fit: contain; border-radius: var(--radius); background: #000; display: block; }
   .deck .tag { position: absolute; left: 12px; top: 12px; background: rgba(0, 0, 0, 0.7); border-radius: 999px; padding: 6px 12px; font-weight: 800; font-size: 14px; }
   .deck .flag { position: absolute; right: 12px; top: 12px; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
   .flag.mine { background: var(--purple); }
   .flag.voted { background: var(--good); color: #052e16; }
-  .deck-actions { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 8px; margin-top: 10px; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); background: rgba(10, 10, 10, 0.94); padding: 8px; border-radius: 14px; border: 1px solid var(--line); z-index: 1; }
+  .deck-actions { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 8px; margin-top: 10px; position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); background: rgba(10, 10, 10, 0.94); padding: 8px; border-radius: 14px; border: 1px solid var(--line); }
+  .deck-status { margin-top: 10px; text-align: center; font-size: 14px; font-weight: 700; color: var(--muted); padding: 10px; border: 1px dashed var(--line); border-radius: 12px; }
   .grid-scroller { height: min(70vh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); background: var(--bg-card); border: 1px solid var(--line); }
   .grid-window { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 6px; }
   .cell { position: relative; border: 0; padding: 0; background: var(--surface-2); border-radius: 10px; overflow: hidden; }
   .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .cell .no { position: absolute; left: 6px; bottom: 6px; background: rgba(0, 0, 0, 0.72); border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
-  .cell .pick { position: absolute; left: 6px; top: 6px; background: var(--good); color: #052e16; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 800; }
+  .cell .no { position: absolute; left: 6px; top: 6px; background: rgba(0, 0, 0, 0.72); border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; }
+  .cell .pick { position: absolute; left: 6px; bottom: 6px; background: var(--good); color: #052e16; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 800; }
+  /* dialogs: the photograph gives way, the actions never leave the screen (a 320 x 568 phone included) */
   .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
-  .modal { background: var(--bg-card); border: 1px solid var(--line); border-radius: 18px 18px 0 0; width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
-  .modal img.full { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; background: #000; }
+  .modal { background: var(--bg-card); border: 1px solid var(--line); border-radius: 18px 18px 0 0; width: 100%; max-width: 560px; max-height: min(94vh, calc(100dvh - 8px)); display: flex; flex-direction: column; overflow: hidden; }
+  .modal-body { overflow: auto; padding: 14px 16px 8px; flex: 1 1 auto; min-height: 0; }
+  .modal-body > * + * { margin-top: 8px; }
+  .modal-actions { flex: 0 0 auto; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg-card); }
+  .modal h2 { font-size: 17px; margin: 0; }
+  .modal p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--muted); }
+  .modal img.full { width: 100%; max-height: 34vh; object-fit: contain; border-radius: 12px; background: #000; display: block; }
   .code-big { font-size: 34px; font-weight: 800; letter-spacing: 0.12em; text-align: center; padding: 14px; background: var(--surface-2); border-radius: 12px; }
-  #bannerSlot { position: sticky; top: 0; z-index: 6; }
-  .test-banner { background: #b91c1c; color: #fff; padding: 10px 16px; font-size: 13px; font-weight: 700; line-height: 1.4; text-align: center; border-bottom: 3px solid #fecaca; }
-  .test-banner strong { letter-spacing: 0.08em; font-weight: 800; }
-  .test-tag { display: inline-block; background: #b91c1c; color: #fff; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 800; letter-spacing: 0.04em; }
-  .photo-missing { aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; background: var(--surface-2); border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 13px; font-weight: 600; }
-  .winners { display: flex; flex-wrap: wrap; gap: 10px; }
+  .photo-missing { aspect-ratio: 3 / 4; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; background: var(--surface-2); border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 12px; }
+  .winners { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .winners figure { margin: 0; width: calc(50% - 5px); }
+  .winners.single figure { width: min(100%, 320px); }
   .winners img { width: 100%; border-radius: 12px; background: #000; }
   .winners figcaption { text-align: center; font-weight: 800; padding-top: 4px; }
+  .nowinner { text-align: center; font-weight: 700; color: var(--muted); padding: 10px; }
+  .review-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .review-row:first-of-type { border-top: 0; }
+  .review-row img { width: 56px; height: 72px; object-fit: cover; border-radius: 8px; background: #000; flex: 0 0 auto; }
+  .review-row .nopic { width: 56px; height: 72px; border-radius: 8px; border: 1px dashed var(--line); flex: 0 0 auto; }
+  .review-row .grow { flex: 1; min-width: 0; }
+  .review-row .grow b { display: block; font-size: 14px; }
+  .review-row .grow span { font-size: 13px; color: var(--muted); }
+  /* the contest's front door, the registration form, the ficha */
+  .facts { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  .facts li { font-size: 14px; line-height: 1.4; }
+  .facts li b { color: var(--ink); }
+  .facts li.zone { color: var(--muted); font-size: 12px; }
+  .entries { display: grid; gap: 10px; margin: 12px 0 14px; }
+  .btn.big { padding: 15px 16px; font-size: 16px; min-height: 52px; }
+  .btn.block { display: block; width: 100%; text-align: center; }
+  .searchbox { display: flex; gap: 8px; align-items: stretch; }
+  .searchbox input { flex: 1; min-width: 0; }
+  .searchbox .btn { flex: 0 0 auto; }
+  .lbl { display: block; font-size: 13px; font-weight: 700; margin: 0 0 6px; color: var(--ink); }
+  .field { margin-bottom: 14px; }
+  .field .hint { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .field .bad { font-size: 13px; color: #fecaca; margin-top: 4px; }
+  input[type="tel"], input[type="search"], select { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 16px; min-height: 44px; }
+  .phone-row { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  @media (min-width: 560px) { .phone-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); } .phone-row.other { grid-template-columns: 1fr; } }
+  .opts { display: grid; gap: 8px; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); min-height: 48px; cursor: pointer; }
+  .opt input { margin-top: 3px; width: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--halloween); }
+  .opt span { font-size: 14px; line-height: 1.4; }
+  .opt small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .opt.on { border-color: var(--halloween); background: var(--halloween-bg); }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; min-height: 44px; padding: 2px 0; }
+  .check input { margin-top: 3px; width: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--halloween); }
+  details.more { margin-top: 6px; }
+  details.more summary::before, details.how summary::before { content: "▸"; margin-right: 8px; }
+  details.more[open] summary::before, details.how[open] summary::before { content: "▾"; }
+  details.more summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+  details.more p { font-size: 13px; line-height: 1.5; margin: 6px 0 0; color: var(--muted); }
+  details.how { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 16px; margin-bottom: 14px; }
+  details.how summary { cursor: pointer; font-weight: 700; font-size: 15px; min-height: 48px; display: flex; align-items: center; }
+  details.how ul { margin: 0 0 12px; padding-left: 18px; }
+  details.how li { font-size: 14px; line-height: 1.5; color: var(--muted); margin-bottom: 6px; }
+  .codechip { display: inline-block; font-weight: 800; letter-spacing: 0.1em; font-size: 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; }
+  .ficha-photo { width: 100%; max-height: 62vh; object-fit: contain; border-radius: var(--radius); background: #000; display: block; }
+  .ficha-title { font-size: 20px; font-weight: 800; margin: 12px 0 4px; word-break: break-word; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .btnrow .btn { flex: 1 1 140px; }
+  .tag.code { position: absolute; left: 12px; bottom: 12px; top: auto; font-size: 13px; letter-spacing: 0.06em; }
+  .cell .no { max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell .cname { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, rgba(0, 0, 0, 0.82)); padding: 14px 6px 5px; font-size: 11px; font-weight: 700; text-align: left; line-height: 1.2; overflow: hidden; }
+  .cell .pick + .cname { padding-bottom: 5px; }
+  .winners figcaption small { display: block; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+  .promise.top { margin-top: 0; }
+  @media (max-width: 359px) { .top h1 { font-size: 14px; } .btnrow .btn { flex-basis: 100%; } }
   .hidden { display: none !important; }
   @media (min-width: 560px) { .modal-back { align-items: center; } .modal { border-radius: 18px; } }
 </style>
 </head>
 <body>
-<div id="bannerSlot"></div>
 <header class="top">
   <img src="/urbano-mark.svg" alt="" width="24" height="26" />
-  <h1>Concurso de Disfraces</h1>
+  <h1>Concurso de disfraces</h1>
+  <div class="clockchip hidden" id="clockChip" role="timer" aria-label="Tiempo restante de la votación"></div>
   <div class="who" id="who"></div>
 </header>
 <main id="main">
-  <div id="app" aria-busy="true" aria-live="polite"></div>
+  <div id="app" aria-busy="true" aria-live="polite">
+    <div class="card" id="loading" role="status"><h2>Cargando el concurso…</h2><p>Un momento, estamos buscando las categorías.</p></div>
+  </div>
 </main>
 <div id="modalRoot"></div>
 
@@ -104,32 +178,65 @@
   const R = CommunityVotingRound;
   const V = R;   // the deck, swipe and virtual-grid helpers live in the same module
   const params = new URLSearchParams(window.location.search);
-  const instanceId = params.get("e") || "";
+  const contestId = params.get("c") || "";
+  const rawCode = params.get("codigo") || "";
+  const urlCode = R.normalizeCode(rawCode);
+  const badCode = rawCode !== "" && !urlCode; // a link that carries something that cannot be a code is a link to nothing: it says so, it does not fall back to the front door
   const app = document.getElementById("app");
   const who = document.getElementById("who");
+  const clockChip = document.getElementById("clockChip");
   const modalRoot = document.getElementById("modalRoot");
-  const PHOTO_PREFIX = "/api/gaming/community-voting/rounds/";
-  const BASE_TITLE = document.title;
+  const API = "/api/gaming/community-voting/";
+  const PHOTO_PREFIX = API + "rounds/";
+  const KEYS = ["MOST_ELABORATE", "SEXIEST", "BEST_GROUP", "FUNNIEST"];
+  const PRIZE_PROMISE = "Habrá premios en cada categoría";
+  const VENUE = "The Pub by Beer Box";
 
-  // ---- storage: per-voter conveniences only (the contestant to come back to after signing in). Every access is guarded.
+  // ---- storage: per-person conveniences only (where to come back to, a draft of the form). Every access is guarded.
   const sessionStore = (() => {
     try { return window.sessionStorage; } catch (e) { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; }
   })();
-  const pending = R.createPendingSelection(sessionStore, instanceId);
+  const lastCatKey = `cv:contest:lastcat:${contestId}`;
+  const draftKey = `cv:contest:draft:${contestId}`;
+  const DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
+
+  const contestApi = R.buildContestApi((...a) => window.fetch(...a), () => UrbanoAuth.getAccessToken(), contestId);
 
   const state = {
-    api: R.buildApi((...a) => window.fetch(...a), () => UrbanoAuth.getAccessToken(), instanceId),
-    info: null, texts: null, results: null,
+    contest: null, cats: {}, order: [],
+    // panel: home | vote | category | review | register | ficha | signin
+    panel: urlCode || badCode ? "ficha" : params.get("participar") === "1" ? "register" : "home",
+    current: null, after: null,
+    ficha: { code: urlCode, status: urlCode ? "loading" : badCode ? "missing" : "idle", data: null },
+    mine: null, mineLoaded: false, mineError: false,
+    form: loadDraft(), formErrors: {}, registering: false,
     auth: { status: "unauthenticated", email: "" }, authStep: "email", email: "", code: "", name: "",
-    bound: false, status: null, gallery: null, myCandidateId: null,
-    view: "deck", deckIndex: 0, grid: { scrollTop: 0 },
-    countdown: R.createCountdown(null),
-    claimResult: null, retry: null,
-    busy: false, error: null, notice: null, fatal: null,
-    // GATE-014: `epoch` goes up whenever the signed-in person changes or signs out, `castSeq` with every vote tap: a location answer that arrives
-    // after either moved on must send nothing.
+    entered: false, search: "",
+    busy: false, error: null, notice: null, fatal: null, loadFailed: false,
+    // `epoch` goes up whenever the signed-in person changes or signs out, `castSeq` with every vote tap: a request that finishes after either
+    // moved on must not touch what the page shows.
     epoch: 0, castSeq: 0,
   };
+
+  // ---- the draft of the registration form: what the person typed (never their confirmations), kept in THIS tab only, for two hours
+  function blankForm() {
+    return { name: "", category: "", country: R.DEFAULT_COUNTRY, otherCountry: "", number: "", whatsappConfirmed: false, requirementsAccepted: false, deliveryAuthorized: false };
+  }
+  function loadDraft() {
+    const form = blankForm();
+    try {
+      const saved = JSON.parse(sessionStore.getItem(draftKey) || "null");
+      if (saved && Number.isFinite(saved.at) && Date.now() - saved.at < DRAFT_TTL_MS && saved.v) {
+        for (const k of ["name", "category", "country", "otherCountry", "number"]) if (typeof saved.v[k] === "string") form[k] = saved.v[k];
+      }
+    } catch (e) { /* no draft */ }
+    return form;
+  }
+  function saveDraft() {
+    const f = state.form;
+    try { sessionStore.setItem(draftKey, JSON.stringify({ at: Date.now(), v: { name: f.name, category: f.category, country: f.country, otherCountry: f.otherCountry, number: f.number } })); } catch (e) { /* nothing to remember */ }
+  }
+  function clearDraft() { try { sessionStore.removeItem(draftKey); } catch (e) { /* nothing to forget */ } state.form = blankForm(); }
 
   // ---- tiny DOM builder: text only, never markup from data
   function h(tag, attrs, ...kids) {
@@ -138,6 +245,8 @@
       if (v === undefined || v === null || v === false) continue;
       if (k === "class") el.className = v;
       else if (k === "text") el.textContent = v;
+      else if (k === "value") el.value = v;
+      else if (k === "checked") el.checked = !!v;
       else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
       else if (v === true) el.setAttribute(k, "");
       else el.setAttribute(k, String(v));
@@ -150,11 +259,112 @@
   }
   const safePhoto = (url) => (typeof url === "string" && url.startsWith(PHOTO_PREFIX) ? url : "");
   const say = (code) => R.describeError(code);
-  const infoNow = () => (state.info && state.info.info) || null;
-  const phase = () => (infoNow() ? infoNow().phase : "NOT_OPEN");
-  const isFinal = () => !!(infoNow() && infoNow().roundRole === "FINAL");
   const step = () => R.identityStep(state.auth.status);
-  const items = () => (state.gallery && state.gallery.items) || [];
+  const cat = (key) => state.cats[key];
+  const curCat = () => (state.current ? cat(state.current) : null);
+  const phaseOf = (c) => (c && c.pub ? c.pub.phase : "NOT_OPEN");
+  const allItemsOf = (c) => (c && c.gallery && c.gallery.items) || [];
+  const itemsOf = (c) => R.searchGallery(allItemsOf(c), c && c.search);
+  const catName = (key) => (cat(key) ? cat(key).name : "");
+  const registration = () => (state.contest && state.contest.registration) || { phase: "NOT_SCHEDULED", opensAt: null, closesAt: null };
+  const texts = () => (state.contest && state.contest.texts) || null;
+
+  function go(panel, extra) {
+    state.panel = panel; state.notice = null; state.error = null;
+    Object.assign(state, extra || {});
+    render(); window.scrollTo(0, 0);
+  }
+  /** Runs `next` once the person is a full voter (verified email + profile); shows the sign-in steps first when they are not. */
+  function requireIdentity(next) {
+    if (step() === "READY" && state.entered) { next(); return; }
+    state.after = next; state.panel = "signin"; state.notice = null; state.error = null; render(); window.scrollTo(0, 0);
+  }
+
+  async function copyText(text, okMessage) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { ok = false; }
+    if (!ok) {
+      try {
+        const area = h("textarea", { "aria-hidden": "true", tabindex: "-1", style: "position:fixed;left:-9999px;top:0" });
+        area.value = text; document.body.appendChild(area); area.select(); ok = document.execCommand("copy"); area.remove();
+      } catch (e) { ok = false; }
+    }
+    state.error = ok ? null : "No pudimos copiar. Mantené apretado el texto para copiarlo.";
+    state.notice = ok ? okMessage : null;
+    render();
+  }
+  async function shareFicha(data) {
+    const text = R.shareText(data);
+    if (navigator.share) {
+      try { await navigator.share({ title: "Concurso de disfraces", text, url: new URL(data.candidacy.ficheUrl, window.location.origin).toString() }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    await copyText(text, "Copiamos el mensaje para que lo pegues donde quieras.");
+  }
+  const absoluteFiche = (path) => new URL(path, window.location.origin).toString();
+
+  // ---- the contest and its categories ----------------------------------------------------------------------------------------
+
+  function makeCat(ref) {
+    return {
+      key: ref.key, instanceId: ref.instanceId, kind: ref.kind, name: ref.name.es, prompt: ref.prompt.es,
+      api: R.buildApi((...a) => window.fetch(...a), () => UrbanoAuth.getAccessToken(), ref.instanceId),
+      pub: ref, countdown: R.createCountdown(ref.deadlineRemainingMs),
+      bound: false, status: null, gallery: null, myCandidateId: null, results: null, retry: null, search: "",
+      deckIndex: 0, grid: { scrollTop: 0 }, view: "deck", pending: R.createPendingSelection(sessionStore, ref.instanceId),
+    };
+  }
+
+  /** Reads the contest's public state and folds it in. Returns true when something a person sees changed. */
+  async function applyContest(next) {
+    let changed = !state.contest;
+    const regBefore = state.contest ? state.contest.registration.phase : null;
+    state.contest = next;
+    if (regBefore !== null && regBefore !== next.registration.phase) changed = true;
+    const keys = KEYS.filter((k) => next.categories.some((c) => c.key === k));
+    if (keys.join() !== state.order.join()) { state.order = keys; changed = true; }
+    for (const ref of next.categories) {
+      let c = cat(ref.key);
+      if (!c) { c = makeCat(ref); state.cats[ref.key] = c; changed = true; }
+      const before = c.pub.phase, wasPublished = c.pub.published;
+      c.pub = ref;
+      c.countdown.resync(ref.deadlineRemainingMs);
+      if (ref.phase !== before || ref.published !== wasPublished) {
+        changed = true;
+        if (before === "OPEN" && ref.phase !== "OPEN") { c.retry = null; if (state.current === ref.key) state.notice = null; } // an old "your vote was registered, you can change it" must not outlive the window
+        if (state.entered && c.bound) await refreshCategory(c);
+        if ((ref.phase === "CLOSED" || ref.phase === "ENDED") && ref.published) await loadResults(c);
+      }
+      if (state.entered && !c.bound && (ref.phase === "OPEN" || ref.phase === "NOT_OPEN") && (await tryBind(c))) changed = true;
+    }
+    return changed;
+  }
+
+  async function loadContest() {
+    const r = await R.readContest((...a) => window.fetch(...a), contestId);
+    if (r.status !== 200) return { ok: false, status: r.status, code: r.json && r.json.code };
+    return { ok: true, json: r.json };
+  }
+
+  async function loadResults(c) {
+    const r = await c.api.results();
+    if (r.status === 200 && r.json.published) { c.results = r.json; render(); }
+  }
+
+  async function loadMine() {
+    const r = await contestApi.mine();
+    if (r.status === 200) { state.mine = (r.json && r.json.candidacy) || null; state.mineLoaded = true; state.mineError = false; }
+    else if (r.status === 0 || r.status >= 500) state.mineError = true;
+  }
+
+  async function loadFicha(code) {
+    state.ficha = { code, status: "loading", data: null };
+    const r = await contestApi.ficha(code);
+    if (state.ficha.code !== code) return; // the person asked for another one meanwhile
+    if (r.status === 200) state.ficha = { code, status: "ok", data: r.json };
+    else if (r.status === 404) state.ficha = { code, status: "missing", data: null };
+    else state.ficha = { code, status: "error", data: null };
+    render();
+  }
 
   // ---- identity -------------------------------------------------------------------------------------------------------------
 
@@ -171,44 +381,58 @@
     } catch (e) { setAuth({ status: "unauthenticated", email: "" }); }
   }
 
-  /** Called once the person is a full voter (verified email + profile): bind, read their own state, and come back to the contestant they had chosen. */
-  async function enterRound() {
-    const bound = await state.api.bind();
-    if (bound.status !== 200 && bound.status !== 201) {
-      state.bound = false;
-      const back = R.stepForError(bound.json && bound.json.code);
+  /** Once the person is a full voter (verified email + profile): bind in every category, read their own state, and come back to where they were. */
+  async function enterContest() {
+    const bound = await Promise.all(state.order.map((k) => cat(k).api.bind()));
+    // A category that admits nobody new at this moment (its lobby is locked and it has not opened yet) is not an error: the person is bound
+    // to it the moment it opens (see tryBind). Anything else that refuses a binding is about the person, and sends them back to that step.
+    const refusal = bound.find((b) => b.status !== 200 && b.status !== 201 && !(b.json && b.json.code === "ADMISSION_CLOSED"));
+    if (refusal) {
+      state.entered = false;
+      const code = refusal.json && refusal.json.code;
+      const back = R.stepForError(code);
       if (back === "PROFILE") state.auth = { status: "profile_incomplete", email: state.auth.email };
       else if (back === "SIGN_IN") state.auth = { status: "unauthenticated", email: state.auth.email };
-      else state.error = say(bound.json && bound.json.code);
-      return;
+      else state.error = say(code);
+      if (back) return;
     }
-    state.bound = true;
-    await refreshVoterData();
-    const resumed = R.resumeSelection(pending.get(), items(), phase(), state.myCandidateId);
-    if (resumed) { pending.clear(); render(); confirmVote(resumed); }
+    state.order.forEach((k, i) => { cat(k).bound = bound[i].status === 200 || bound[i].status === 201; });
+    state.entered = true;
+    await Promise.all([...state.order.map((k) => refreshCategory(cat(k))), loadMine()]);
+    resumeAfterSignIn();
   }
 
-  async function refreshVoterData() {
-    const [status, gallery] = await Promise.all([state.api.status(), state.api.gallery()]);
-    if (status.status === 200) {
-      state.status = status.json;
-      state.myCandidateId = status.json.myCandidateId || null;
-      applyServerTime(status.json);
-    }
-    if (gallery.status === 200) state.gallery = gallery.json;
+  /** A category that could not admit the person earlier (locked, not yet open) is joined the moment it can. Cheap, and quiet when it still cannot. */
+  async function tryBind(c) {
+    const r = await c.api.bind();
+    if (r.status !== 200 && r.status !== 201) return false;
+    c.bound = true;
+    await refreshCategory(c);
+    return true;
   }
 
-  function applyServerTime(source) {
-    if (source && source.deadlineRemainingMs !== undefined && source.deadlineRemainingMs !== null) state.countdown.resync(source.deadlineRemainingMs);
-    else state.countdown.resync(null);
+  async function refreshCategory(c) {
+    if (!c.bound) return;
+    const [status, gallery] = await Promise.all([c.api.status(), c.api.gallery()]);
+    if (status.status === 200) { c.status = status.json; c.myCandidateId = status.json.myCandidateId || null; }
+    if (gallery.status === 200) c.gallery = gallery.json;
   }
 
-  // ---- polling: cheap public info (UG-IV-GATE-014) -----------------------------------------------------------------------------
-  // ONE request at a time, adaptive to what the round is doing (R.pollDelayMs: quick around the final's five minutes and after a close, slow
-  // once published), jittered so a crowd does not call in step, refreshed the moment the page is visible (or online) again, and never trusting
-  // an answer older than the newest. The page only ever SHOWS what the server answered: it invents no phase, no publication and no result.
+  /** After sign-in or profile the page may resume on the candidacy the person had chosen — when it is SAFE to: open, still shown, not their own, not already their vote. */
+  function resumeAfterSignIn() {
+    let key = null;
+    try { key = sessionStore.getItem(lastCatKey); } catch (e) { key = null; }
+    const c = key ? cat(key) : null;
+    if (!c) return;
+    const resumed = R.resumeSelection(c.pending.get(), allItemsOf(c), phaseOf(c), c.myCandidateId);
+    if (resumed) { c.pending.clear(); state.panel = "category"; state.current = c.key; render(); confirmVote(c, resumed); }
+  }
 
-  let phaseSeenAt = 0; // when this page last saw the phase change: the quick "waiting for the publication" window counts from here
+  // ---- polling: ONE cheap public read of the whole contest ----------------------------------------------------------------------
+  // One request at a time, adaptive to what the contest is doing (R.pollDelayMs), jittered so a crowd does not call in step, refreshed the moment
+  // the page is visible (or online) again, and never trusting an answer older than the newest. The page only ever SHOWS what the server answered.
+
+  let phaseSeenAt = 0;
   const poller = R.createPoller({
     now: () => performance.now(),
     setTimer: (fn, ms) => window.setTimeout(fn, ms),
@@ -216,307 +440,550 @@
     isVisible: () => !document.hidden,
     random: () => Math.random(),
     delayFor: () => {
-      const info = infoNow();
-      if (phase() === "ENDED") return null; // the event is over: nothing more to learn
-      return R.pollDelayMs({ roundRole: info && info.roundRole, phase: phase(), published: !!(info && info.published), sinceChangeMs: performance.now() - phaseSeenAt });
+      const phase = state.contest ? state.contest.phase : "NOT_OPEN";
+      const done = state.contest && state.contest.categories.every((c) => c.phase === "ENDED");
+      if (done) return null;
+      return R.pollDelayMs({ phase, published: phase === "RESULTS", sinceChangeMs: performance.now() - phaseSeenAt });
     },
     staleAfterMs: R.POLL.staleAfterMs,
     fetchOnce: async () => {
-      const r = await state.api.info();
-      if (r.status !== 200) return { ok: false };
-      return { ok: true, apply: () => applyInfo(r.json) };
+      const r = await loadContest();
+      if (!r.ok) return { ok: false };
+      return { ok: true, apply: async () => { const before = state.contest && state.contest.phase; const changed = await applyContest(r.json); if (state.contest.phase !== before) phaseSeenAt = performance.now(); if (changed && !formIsBeingEdited()) render(); } };
     },
   });
-  async function applyInfo(next) {
-    const before = phase();
-    state.info = next;
-    applyServerTime(infoNow());
-    const after = phase();
-    if (after !== before) phaseSeenAt = performance.now();
-    if (after !== before && state.bound) await refreshVoterData();
-    if ((after === "CLOSED" || after === "ENDED") && infoNow().published) await loadResults();
-    if (after !== before) render();
-  }
   document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));
   window.addEventListener("pageshow", (e) => { if (e && e.persisted) poller.refreshNow(); });
   window.addEventListener("online", () => poller.refreshNow());
-  async function loadResults() {
-    const r = await state.api.results();
-    if (r.status === 200 && r.json.published) { state.results = r.json; render(); }
+  /** A background refresh never rebuilds the page under a hand that is typing. */
+  function formIsBeingEdited() {
+    const a = document.activeElement;
+    return !!(a && a !== document.body && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && app.contains(a));
   }
 
-  // ---- views ----------------------------------------------------------------------------------------------------------------
+  // ---- the clock: the server's remaining time, advanced by a monotonic clock -------------------------------------------------------
 
-  let clockEl = null;
+  function clockCat() {
+    const open = state.order.map(cat).filter((c) => phaseOf(c) === "OPEN" && c.pub.deadlineAt);
+    if (open.length === 0) return null;
+    if (curCat() && open.includes(curCat())) return curCat();
+    return open.slice().sort((a, b) => (a.countdown.remaining() || 0) - (b.countdown.remaining() || 0))[0];
+  }
   function tickClock() {
-    if (!clockEl) return;
-    const left = state.countdown.remaining();
-    clockEl.textContent = left === null ? "" : R.formatCountdown(left);
-    if (left !== null && left <= 0 && phase() === "OPEN") { state.info.info.phase = "CLOSED"; phaseSeenAt = performance.now(); render(); poller.refreshNow(); }
+    const c = clockCat();
+    const live = document.getElementById("clock");
+    if (!c) { clockChip.classList.add("hidden"); if (live) live.textContent = ""; return; }
+    const left = c.countdown.remaining();
+    const text = left === null ? "" : R.formatCountdown(left);
+    clockChip.textContent = text ? `⏱ ${text}` : "";
+    clockChip.classList.toggle("hidden", !text);
+    if (live) live.textContent = text;
+    if (left !== null && left <= 0) { c.pub.phase = "CLOSED"; c.retry = null; if (state.current === c.key) state.notice = null; phaseSeenAt = performance.now(); render(); poller.refreshNow(); }
   }
   setInterval(tickClock, 1000);
 
-  function banner() {
-    const info = infoNow();
-    if (!info) return null;
-    const lines = [h("div", { text: R.phaseNotice(info) })];
-    // The remaining time, from the SERVER's clock, for BOTH rounds while they are open.
-    if (info.phase === "OPEN" && info.deadlineAt) {
-      clockEl = h("div", { class: "clock", id: "clock", "aria-label": "Tiempo restante" });
-      lines.push(clockEl);
-      tickClock();
-    } else clockEl = null;
-    // The plan, in the event's own time. For a round that is not open yet it is the schedule; it never says "abierta".
-    if (info.phase === "NOT_OPEN" && (info.registrationOpensAt || info.contestantCutoffAt)) {
-      const parts = [];
-      if (info.registrationOpensAt) parts.push(`registro desde las ${R.formatEventTime(info.registrationOpensAt)}`);
-      if (info.contestantCutoffAt) parts.push(`hasta las ${R.formatEventTime(info.contestantCutoffAt)}`);
-      lines.push(h("div", { text: `${parts.join(" ")} (hora de Honduras)${info.tentative ? " · tentativo" : ""}`, class: "sub" }));
-    }
-    return h("div", { class: `banner${info.phase === "CLOSED" || info.phase === "ENDED" ? " closed" : ""}`, role: "status" }, lines);
-  }
+  // ---- shared pieces -------------------------------------------------------------------------------------------------------
 
   function messages() {
+    const retrying = state.order.map(cat).find((c) => c.retry);
     return [
       state.error ? h("div", { class: "msg err", role: "alert", text: state.error }) : null,
+      retrying ? h("div", { class: "msg err", role: "alert" },
+        h("div", { text: `No pudimos confirmar tu voto en «${retrying.name}». Si ya había llegado, no se duplica.` }),
+        h("button", { class: "btn primary", id: "retryVote", disabled: state.busy, text: "Reintentar mi voto", onclick: () => retryVote(retrying) })) : null,
       state.notice ? h("div", { class: "msg ok", role: "status", text: state.notice }) : null,
     ];
   }
+
+  const back = (label, panel) => h("button", { class: "btn link", id: "backLink", text: label || "← Inicio", onclick: () => go(panel || "home", { current: null, after: null }) });
 
   function stepper() {
     const s = step();
     const mk = (label, done, current) => h("li", { class: done ? "done" : current ? "current" : "", text: `${done ? "✓ " : ""}${label}` });
     if (s === "READY") return null;
-    return h("ol", { class: "steps", "aria-label": "Pasos" }, mk("Correo", s !== "SIGN_IN", s === "SIGN_IN"), mk("Perfil", false, s === "PROFILE"), mk("Votar", false, false));
+    return h("ol", { class: "steps", "aria-label": "Pasos" }, mk("Correo", s !== "SIGN_IN", s === "SIGN_IN"), mk("Perfil", false, s === "PROFILE"), mk("Listo", false, false));
   }
 
   function renderSignIn() {
     const email = h("input", { type: "email", id: "email", autocomplete: "email", inputmode: "email", placeholder: "tu@correo.com", "aria-label": "Correo electrónico", value: state.email });
     const code = h("input", { type: "text", id: "authCode", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "Código del correo", "aria-label": "Código del correo", maxlength: "10", value: state.code });
-    const send = h("button", { class: "btn primary", id: "sendEmail", disabled: state.busy, text: "Enviar código al correo", onclick: async () => {
+    const send = h("button", { class: "btn primary", id: "sendEmail", disabled: state.busy, text: state.busy ? "Enviando…" : "Enviar código al correo", onclick: async () => {
       state.error = null; state.busy = true; state.email = email.value.trim(); render();
       const r = await UrbanoAuth.requestOtp(state.email);
       state.busy = false;
-      if (r.status === "sent") { state.authStep = "code"; state.notice = "Te enviamos un código. Revisa tu correo."; } else state.error = say("INVALID_REQUEST");
+      if (r.status === "sent") { state.authStep = "code"; state.notice = "Te enviamos un código. Revisá tu correo."; } else state.error = say("INVALID_REQUEST");
       render();
     } });
-    const verify = h("button", { class: "btn primary", id: "verifyEmail", disabled: state.busy, text: "Verificar y entrar", onclick: async () => {
+    const verify = h("button", { class: "btn primary", id: "verifyEmail", disabled: state.busy, text: state.busy ? "Verificando…" : "Verificar y entrar", onclick: async () => {
       state.error = null; state.busy = true; state.code = code.value.trim(); render();
       // verifyOtp is reachable ONLY from this panel, which exists only when there is no session: an existing session is never replaced here.
       // The state is read again right before, because another tab may have signed in since this panel was drawn.
       await refreshAuth();
       if (step() !== "SIGN_IN") {
         state.busy = false; state.authStep = "email"; state.code = "";
-        state.notice = "Ya hay una sesión abierta en este navegador. Seguimos con esa cuenta; si quieres usar otra, cámbiala desde “Usar otra cuenta”.";
+        state.notice = "Ya hay una sesión abierta en este navegador. Seguimos con esa cuenta; si querés usar otra, cambiala desde “Usar otra cuenta”.";
         await afterIdentityChange();
         return;
       }
       const r = await UrbanoAuth.verifyOtp(state.email, state.code);
       state.busy = false;
-      if (r.status === "error") { state.error = "El código no es correcto o ya venció. Pide uno nuevo."; render(); return; }
+      if (r.status === "error") { state.error = "El código no es correcto o ya venció. Pedí uno nuevo."; state.notice = null; render(); return; }
       state.authStep = "email"; state.code = ""; state.notice = null;
       await afterIdentityChange();
     } });
     return h("section", { class: "card stack", id: "stepIdentity" },
-      h("h2", { text: "Entra con tu correo" }),
+      h("h2", { text: "Entrá con tu correo" }),
       h("p", { text: R.SIGN_IN_NOTICE }),
-      h("p", { text: "Para votar también necesitas tu perfil de URBANO Gaming; si es tu primera vez, lo completas justo después." }),
       state.authStep === "email" ? [email, send] : [h("p", { text: `Código enviado a ${state.email}` }), code, verify, h("button", { class: "btn link", text: "Usar otro correo", onclick: () => { state.authStep = "email"; state.notice = null; render(); } })]
     );
   }
 
   function renderProfile() {
     const name = h("input", { type: "text", id: "displayName", autocomplete: "nickname", maxlength: "40", placeholder: "Tu nombre", "aria-label": "Tu nombre en URBANO Gaming", value: state.name });
-    const save = h("button", { class: "btn primary", id: "saveProfile", disabled: state.busy, text: "Guardar mi perfil y continuar", onclick: async () => {
+    const save = h("button", { class: "btn primary", id: "saveProfile", disabled: state.busy, text: state.busy ? "Guardando…" : "Guardar mi perfil y continuar", onclick: async () => {
       state.error = null; state.busy = true; state.name = name.value; render();
       const r = await UrbanoAuth.completeProfile(name.value.trim());
       state.busy = false;
-      if (r.status === "error") { state.error = r.message ? "No pudimos guardar tu perfil. Revisa el nombre e inténtalo de nuevo." : say("INVALID_REQUEST"); render(); return; }
+      if (r.status === "error") { state.error = r.message ? "No pudimos guardar tu perfil. Revisá el nombre e intentalo de nuevo." : say("INVALID_REQUEST"); render(); return; }
       await afterIdentityChange();
     } });
     return h("section", { class: "card stack", id: "stepProfile" },
-      h("h2", { text: "Completa tu perfil para votar" }),
+      h("h2", { text: "Completá tu perfil" }),
       h("p", { id: "profileNotice", text: R.PROFILE_NOTICE }),
       name, save,
       h("button", { class: "btn link", id: "switchAccount", text: "Usar otra cuenta", onclick: confirmSwitchAccount }));
   }
+  const identityCards = () => [stepper(), step() === "PROFILE" ? renderProfile() : renderSignIn()];
 
   /** Signing out is the person's explicit act; nothing here ever replaces a session by itself. */
   function confirmSwitchAccount() {
     const close = () => { modalRoot.textContent = ""; };
     modalRoot.textContent = "";
-    modalRoot.appendChild(h("div", { class: "modal-back" }, h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": "Cambiar de cuenta" },
-      h("h2", { text: "¿Cambiar de cuenta?" }),
-      h("p", { text: `Vas a cerrar la sesión de ${state.auth.email || "esta cuenta"}. Tu voto, si ya lo emitiste, se conserva.` }),
-      h("div", { class: "row" },
+    modalRoot.appendChild(h("div", { class: "modal-back" }, h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Cambiar de cuenta" },
+      h("div", { class: "modal-body" },
+        h("h2", { text: "¿Cambiar de cuenta?" }),
+        h("p", { text: `Vas a cerrar la sesión de ${state.auth.email || "esta cuenta"}. Tus votos y tu candidatura, si ya los hiciste, se conservan.` })),
+      h("div", { class: "modal-actions row" },
         h("button", { class: "btn", id: "switchCancel", text: "Cancelar", onclick: close }),
         h("button", { class: "btn primary", id: "switchConfirm", text: "Cerrar sesión", onclick: async () => {
           close();
-          state.epoch += 1; state.castSeq += 1; state.busy = false; // a vote still waiting for the browser's position belongs to the person who is leaving
+          state.epoch += 1; state.castSeq += 1; state.busy = false; // a vote still in flight belongs to the person who is leaving
           try { await UrbanoAuth.signOut(); } catch (e) { /* the page re-reads the state below */ }
-          state.bound = false; state.status = null; state.gallery = null; state.myCandidateId = null;
+          state.entered = false; state.panel = "home"; state.current = null; state.after = null; state.mine = null; state.mineLoaded = false;
+          for (const k of state.order) { const c = cat(k); c.bound = false; c.status = null; c.gallery = null; c.myCandidateId = null; c.retry = null; }
           await refreshAuth(); render();
         } })))));
   }
 
   async function afterIdentityChange() {
     await refreshAuth();
-    if (step() === "READY") await enterRound();
+    if (step() === "READY") {
+      await enterContest();
+      if (state.after && step() === "READY" && state.entered) { const next = state.after; state.after = null; next(); return; }
+    }
     render();
   }
 
-  // -- contestants' claim (preliminary, before it opens)
-  function renderClaim() {
-    if (isFinal() || phase() !== "NOT_OPEN" || step() !== "READY") return null;
-    const code = h("input", { type: "text", id: "claimCode", autocomplete: "off", autocapitalize: "characters", placeholder: "Código de concursante", "aria-label": "Código de concursante", maxlength: "20" });
-    const go = h("button", { class: "btn", id: "claimGo", disabled: state.busy, text: "Registrar mi participación", onclick: async () => {
+  // ---- candidacy cards (the person's own, a ficha) --------------------------------------------------------------------------
+
+  function codeActions(code, ficheUrl, data) {
+    return h("div", { class: "btnrow" },
+      h("button", { class: "btn", id: "copyCode", text: "Copiar código", onclick: () => copyText(code, `Copiamos el código ${code}.`) }),
+      h("button", { class: "btn", id: "copyLink", text: "Copiar enlace", onclick: () => copyText(absoluteFiche(ficheUrl), "Copiamos el enlace de la ficha.") }),
+      navigator.share && data ? h("button", { class: "btn", id: "shareFicha", text: "Compartir", onclick: () => shareFicha(data) }) : null);
+  }
+
+  function renderMine() {
+    const m = state.mine;
+    if (!m) return null;
+    const rep = m.role !== "MEMBER";
+    return h("section", { class: "card stack", id: "myCandidacy" },
+      h("h2", { text: "Tu candidatura" }),
+      h("p", { text: `${m.publicName || "Sin nombre público todavía"} · ${catName(m.categoryKey) || m.categoryName.es}` }),
+      h("div", null, h("span", { class: "codechip", id: "myCode", text: m.publicCode })),
+      h("p", { id: "myCandidacyText", text: R.myCandidacyText(m) }),
+      rep && m.deliveryStatus ? h("p", { id: "deliveryText", text: R.deliveryText(m.deliveryStatus) }) : null,
+      codeActions(m.publicCode, m.ficheUrl, null),
+      m.state === "PUBLIC" ? h("button", { class: "btn", id: "openMyFicha", text: "Ver mi ficha", onclick: () => openFicha(m.publicCode) }) : null);
+  }
+
+  function openFicha(code) {
+    const normalized = R.normalizeCode(code);
+    if (!normalized) { state.error = say("ENTRY_NOT_FOUND"); render(); return; }
+    state.ficha = { code: normalized, status: "loading", data: null };
+    go("ficha");
+    loadFicha(normalized);
+  }
+
+  function renderSearch(idSuffix) {
+    const input = h("input", { type: "search", id: `codeSearch${idSuffix || ""}`, autocomplete: "off", autocapitalize: "characters", placeholder: "Código, por ejemplo HAL-K7M2Q", "aria-label": "Buscar una candidatura por su código", value: state.search });
+    const run = () => { state.search = input.value; const code = R.normalizeCode(input.value); if (code) openFicha(code); else { state.error = "Ese código no es válido. Los códigos se ven así: HAL-K7M2Q."; state.notice = null; render(); } };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+    return h("section", { class: "card stack", id: `searchCard${idSuffix || ""}` },
+      h("h2", { text: "Buscar por código" }),
+      h("p", { text: "Si alguien te compartió el código de su disfraz, escribilo y mirá su ficha." }),
+      h("div", { class: "searchbox" }, input, h("button", { class: "btn primary", id: `searchGo${idSuffix || ""}`, text: "Buscar", onclick: run })));
+  }
+
+  // ---- the front door ----------------------------------------------------------------------------------------------------------
+
+  function planFacts() {
+    const first = state.order.length ? cat(state.order[0]).pub : null;
+    if (!first) return null;
+    const lines = [];
+    const date = R.formatEventDate(first.votingOpensAt || first.registrationOpensAt);
+    if (date) lines.push(h("li", null, h("b", { text: date.charAt(0).toUpperCase() + date.slice(1) })));
+    const reg = R.registrationWindowText(first.registrationOpensAt, first.contestantCutoffAt);
+    if (reg) lines.push(h("li", { id: "factRegistration", text: reg }));
+    const vote = R.votingWindowText(first.votingOpensAt, first.votingClosesAt);
+    if (vote) lines.push(h("li", { id: "factVoting", text: vote }));
+    if (lines.length) lines.push(h("li", { class: "zone", text: `Hora de Honduras${first.tentative ? " · horario tentativo" : ""}` }));
+    return lines.length ? h("ul", { class: "facts", id: "planFacts" }, lines) : null;
+  }
+
+  function howToParticipate() {
+    return h("details", { class: "how", id: "howTo" }, h("summary", { text: "Cómo participar" }), h("ul", null, R.HOW_TO_PARTICIPATE.map((t) => h("li", { text: t }))));
+  }
+
+  function renderHome() {
+    const reg = registration();
+    const anyOpen = state.order.map(cat).some((c) => phaseOf(c) === "OPEN");
+    const registerLabel = reg.phase === "CLOSED" ? "Inscripción terminada" : "Participar como concursante";
+    const voteLine = anyOpen ? "La votación está abierta." : state.order.map(cat).every((c) => ["CLOSED", "ENDED"].includes(phaseOf(c))) ? "La votación ya cerró." : "La votación todavía no está abierta.";
+    return [
+      h("div", { class: "promise top", id: "prizePromise", text: PRIZE_PROMISE }),
+      h("section", { class: "card", id: "eventCard" },
+        h("h2", { text: `Concurso de disfraces · ${VENUE}` }),
+        planFacts(),
+        h("p", { id: "registrationNotice", text: R.registrationNotice(reg) }),
+        h("p", { id: "voteLine", text: voteLine })),
+      h("div", { class: "entries" },
+        h("button", { class: "btn primary big block", id: "entryVote", text: "Votar por tu disfraz favorito", onclick: () => go("vote") }),
+        h("button", { class: "btn big block", id: "entryRegister", text: registerLabel, onclick: () => go("register") })),
+      state.mine ? h("div", { class: "card", id: "mineMini" }, h("p", { text: `Tu candidatura: ${state.mine.publicName || "sin nombre"} · ${state.mine.publicCode}` }), h("button", { class: "btn", id: "seeMine", text: "Ver mi candidatura", onclick: () => go("register") })) : null,
+      renderSearch(""),
+      howToParticipate(),
+      state.order.map(cat).map(renderResults),
+      step() === "READY" ? h("button", { class: "btn link", id: "switchAccount", text: "Usar otra cuenta", onclick: confirmSwitchAccount }) : null,
+    ];
+  }
+
+  // ---- the people who take part: the registration --------------------------------------------------------------------------------
+
+  function field(label, control, hint, bad, id, errKey) {
+    return h("div", { class: "field" }, id ? h("label", { class: "lbl", for: id, text: label }) : h("div", { class: "lbl", text: label }), control, hint ? h("div", { class: "hint", text: hint }) : null, bad ? h("div", { class: "bad", role: "alert", id: `err_${errKey}`, text: bad }) : null);
+  }
+  /** An error stays only until the person touches what it is about: it is removed in place (the form is not rebuilt under their hand). */
+  function clearError(key) {
+    if (state.formErrors[key] === undefined) return;
+    delete state.formErrors[key];
+    const el = document.getElementById(`err_${key}`);
+    if (el) el.remove();
+  }
+
+  function renderForm() {
+    const f = state.form;
+    const errs = state.formErrors;
+    const t = texts();
+    const kinds = state.order.map(cat);
+    const catGroup = h("div", { class: "opts", role: "radiogroup", "aria-label": "Categoría" }, kinds.map((c) => {
+      const input = h("input", { type: "radio", name: "category", value: c.key, id: `cat_${c.key}`, checked: f.category === c.key, onchange: () => { f.category = c.key; saveDraft(); state.formErrors = Object.assign({}, state.formErrors, { category: undefined }); render(); } });
+      return h("label", { class: `opt${f.category === c.key ? " on" : ""}`, for: `cat_${c.key}` }, input, h("span", null, c.name, c.kind === "GROUP" ? h("small", { text: "Una persona inscribe al grupo; en la estación se registra a las demás." }) : null));
+    }));
+    const name = h("input", { type: "text", id: "regName", maxlength: "40", autocomplete: "nickname", placeholder: "Por ejemplo, Drácula de Tegucigalpa", value: f.name, "aria-label": "Nombre público" });
+    name.addEventListener("input", () => { f.name = name.value; saveDraft(); clearError("name"); });
+    const country = h("select", { id: "regCountry", "aria-label": "País del número de WhatsApp" }, R.COUNTRY_CODES.map((c) => h("option", { value: c.code, text: c.label, selected: f.country === c.code })));
+    const other = h("input", { type: "tel", id: "regOtherCountry", inputmode: "numeric", placeholder: "Código del país, por ejemplo 52", value: f.otherCountry, "aria-label": "Código del país" });
+    const number = h("input", { type: "tel", id: "regNumber", inputmode: "numeric", autocomplete: "tel-national", placeholder: "Número de WhatsApp", value: f.number, "aria-label": "Número de WhatsApp" });
+    const composed = () => R.composeWhatsapp(f.country === "other" ? f.otherCountry : f.country, f.number);
+    const confirmText = h("span", { id: "waConfirmText" });
+    const refreshConfirm = () => { const shown = R.displayWhatsapp(composed()); confirmText.textContent = shown ? `Confirmo que ${shown} es mi número de WhatsApp.` : "Confirmo que este es mi número de WhatsApp (escribilo completo, con el código del país)."; };
+    country.addEventListener("change", () => { f.country = country.value; saveDraft(); clearError("whatsapp"); render(); });
+    other.addEventListener("input", () => { f.otherCountry = other.value; saveDraft(); refreshConfirm(); clearError("whatsapp"); });
+    number.addEventListener("input", () => { f.number = number.value; saveDraft(); refreshConfirm(); clearError("whatsapp"); });
+    refreshConfirm();
+    const waCheck = h("input", { type: "checkbox", id: "regWaConfirmed", checked: f.whatsappConfirmed, onchange: (e) => { f.whatsappConfirmed = e.target.checked; clearError("whatsappConfirmed"); } });
+    const reqCheck = h("input", { type: "checkbox", id: "regRequirements", checked: f.requirementsAccepted, onchange: (e) => { f.requirementsAccepted = e.target.checked; clearError("requirements"); } });
+    const delCheck = h("input", { type: "checkbox", id: "regDelivery", checked: f.deliveryAuthorized, onchange: (e) => { f.deliveryAuthorized = e.target.checked; clearError("delivery"); } });
+    const submit = h("button", { class: "btn primary big block", id: "regSubmit", disabled: state.registering, text: state.registering ? "Inscribiendo…" : "Inscribirme", onclick: submitRegistration });
+    return h("section", { class: "card", id: "registerForm" },
+      h("h2", { text: "Inscribite" }),
+      h("p", { text: "Son cuatro pasos cortos. Tu candidatura se hace pública solo después de pasar por la estación." }),
+      field("Categoría", catGroup, null, errs.category, null, "category"),
+      field("Nombre público", name, "Es el nombre con el que aparecés junto a tu foto (de 2 a 40 letras).", errs.name, "regName", "name"),
+      field("Tu WhatsApp", h("div", { class: `phone-row${f.country === "other" ? " other" : ""}` }, country, f.country === "other" ? other : null, number),
+        "Lo usamos solo para enviarte tu foto y tu código. No se muestra a nadie ni sirve para votar.", errs.whatsapp, "regNumber", "whatsapp"),
+      h("div", { class: "field" }, h("label", { class: "check", for: "regWaConfirmed" }, waCheck, confirmText), errs.whatsappConfirmed ? h("div", { class: "bad", role: "alert", id: "err_whatsappConfirmed", text: errs.whatsappConfirmed }) : null),
+      h("div", { class: "field" },
+        h("label", { class: "check", for: "regRequirements" }, reqCheck, h("span", { text: "Soy mayor de edad y acepto los requisitos." })),
+        t ? h("details", { class: "more" }, h("summary", { text: "Leer los requisitos" }), h("p", { id: "requirementsText", text: t.requirements.text })) : null,
+        errs.requirements ? h("div", { class: "bad", role: "alert", id: "err_requirements", text: errs.requirements }) : null),
+      h("div", { class: "field" },
+        h("label", { class: "check", for: "regDelivery" }, delCheck, h("span", { text: "Autorizo que me envíen mi foto y mi código por WhatsApp." })),
+        t ? h("details", { class: "more" }, h("summary", { text: "Leer la autorización" }), h("p", { id: "deliveryAuthText", text: t.whatsappDelivery.text })) : null,
+        errs.delivery ? h("div", { class: "bad", role: "alert", id: "err_delivery", text: errs.delivery }) : null),
+      submit);
+  }
+
+  async function submitRegistration() {
+    if (state.registering) return;
+    const f = state.form;
+    const checked = R.validateRegistration(f);
+    state.formErrors = checked.errors;
+    state.error = null; state.notice = null;
+    if (!checked.ok) { render(); const first = app.querySelector(".bad"); if (first && first.scrollIntoView) first.scrollIntoView({ block: "center" }); return; }
+    const t = texts();
+    const target = cat(f.category);
+    if (!t || !target) { state.error = say("INTERNAL_ERROR"); render(); return; }
+    state.registering = true; render();
+    const epoch = state.epoch;
+    const r = await target.api.register({
+      publicName: checked.name, adultConfirmed: true, requirementsAccepted: true, requirementsVersion: t.requirements.version,
+      whatsapp: checked.whatsapp, whatsappConfirmed: true, deliveryAuthorized: true, deliveryVersion: t.whatsappDelivery.version,
+    });
+    if (epoch !== state.epoch) { state.registering = false; render(); return; } // the person changed meanwhile: nothing is shown for the previous one
+    state.registering = false;
+    if (r.status === 201) {
+      clearDraft(); state.formErrors = {};
+      await loadMine();
+      state.notice = "¡Listo! Tu candidatura quedó inscrita. Presentate en la estación con tu código.";
+      render(); window.scrollTo(0, 0); return;
+    }
+    const code = r.json && r.json.code;
+    if (code === "NETWORK" || code === "ALREADY_CANDIDATE" || (r.status >= 500)) {
+      // an answer that never arrived is not a failure: if the registration did go through, the person has a candidacy and sees it — never a duplicate
+      await loadMine();
+      if (state.mine) { clearDraft(); state.notice = "Tu candidatura ya estaba inscrita. Esta es."; render(); window.scrollTo(0, 0); return; }
+    }
+    const back2 = R.stepForError(code);
+    if (back2) { state.auth = { status: back2 === "PROFILE" ? "profile_incomplete" : "unauthenticated", email: state.auth.email }; state.entered = false; }
+    state.error = say(code);
+    const fresh = await loadContest();
+    if (fresh.ok) await applyContest(fresh.json);
+    render();
+  }
+
+  function renderRegister() {
+    const reg = registration();
+    const stage = R.registrationStage(reg, state.mine);
+    const parts = [back(), h("div", { class: "card", id: "registerIntro" }, h("h2", { text: "Participar como concursante" }), h("p", { id: "registrationNotice", text: R.registrationNotice(reg) }))];
+    if (state.mine) { parts.push(renderMine()); return parts; }
+    if (step() !== "READY" || !state.entered) {
+      if (stage === "FORM") parts.push(h("p", { class: "sub", text: "Para inscribirte entrás con tu correo y tu perfil de URBANO Gaming." }), ...identityCards());
+      else parts.push(h("div", { class: "card stack" }, h("p", { text: "Si ya te inscribiste, entrá con tu correo para ver tu candidatura." }), h("button", { class: "btn", id: "signInToSee", text: "Entrar", onclick: () => requireIdentity(() => go("register")) })));
+      return parts;
+    }
+    if (state.mineError && !state.mineLoaded) parts.push(h("div", { class: "msg err", role: "alert" }, h("div", { text: "No pudimos revisar si ya tenés una candidatura." }), h("button", { class: "btn", id: "retryMine", text: "Reintentar", onclick: async () => { await loadMine(); render(); } })));
+    else if (stage === "FORM") parts.push(renderForm());
+    else if (stage === "CLOSED") parts.push(h("div", { class: "card", id: "registrationClosed" }, h("p", { text: "Si querés ver a quienes participan, mirá la votación." }), h("button", { class: "btn primary", id: "toVote", text: "Ir a votar", onclick: () => go("vote") })));
+    return parts;
+  }
+
+  // ---- the ficha of one candidacy ----------------------------------------------------------------------------------------------
+
+  function renderFicha() {
+    const fi = state.ficha;
+    const parts = [back()];
+    if (fi.status === "loading" || fi.status === "idle") { parts.push(h("div", { class: "card", role: "status" }, h("h2", { text: "Buscando la ficha…" }))); return parts; }
+    if (fi.status === "missing") {
+      parts.push(h("div", { class: "card stack", id: "fichaMissing" }, h("h2", { text: "No encontramos esa candidatura" }), h("p", { text: say("ENTRY_NOT_FOUND") })), renderSearch("Missing"));
+      return parts;
+    }
+    if (fi.status === "error") {
+      parts.push(h("div", { class: "card stack", id: "fichaError" }, h("h2", { text: "No pudimos abrir la ficha" }), h("p", { text: "Revisá tu conexión e intentalo de nuevo." }), h("button", { class: "btn primary", id: "retryFicha", text: "Reintentar", onclick: () => loadFicha(fi.code) })));
+      return parts;
+    }
+    const d = fi.data;
+    const c = d.candidacy;
+    const v = d.voting;
+    let status;
+    let canGo = false;
+    if (v.phase === "OPEN") { status = `La votación de esta categoría está abierta${v.deadlineAt ? ` ${R.untilTime(v.deadlineAt)}` : ""} (hora de Honduras).`; canGo = true; }
+    else if (v.phase === "CLOSED" || v.phase === "ENDED") status = v.published ? "La votación de esta categoría ya cerró y los resultados están publicados." : "La votación de esta categoría ya cerró.";
+    else status = v.votingOpensAt ? `La votación de esta categoría todavía no abre: está prevista ${R.atTime(v.votingOpensAt)} (hora de Honduras).` : "La votación de esta categoría todavía no abre.";
+    parts.push(h("section", { class: "card", id: "fichaCard" },
+      h("img", { class: "ficha-photo", src: safePhoto(c.imageUrl), alt: `Foto de ${c.name || "la candidatura"}`, decoding: "async" }),
+      h("div", { class: "ficha-title", id: "fichaName", text: c.name || "Disfraz" }),
+      h("p", { id: "fichaCategory", text: c.category.name.es }),
+      h("div", null, h("span", { class: "codechip", id: "fichaCode", text: c.code })),
+      h("p", { id: "fichaStatus", text: status }),
+      canGo ? h("button", { class: "btn primary big block", id: "fichaVote", text: "Ir a votar en esta categoría", onclick: () => openCategoryFor(c.category.key) }) : null,
+      codeActions(c.code, c.ficheUrl, d)));
+    parts.push(h("div", { class: "promise", text: PRIZE_PROMISE }));
+    return parts;
+  }
+
+  // ---- voting ------------------------------------------------------------------------------------------------------------------
+
+  /** The people who take part with a claim code from the operator (the station's older, hand-made entries). Kept: it is the pilot's own association. */
+  function renderClaim(c) {
+    if (phaseOf(c) !== "NOT_OPEN" || step() !== "READY" || !c.bound || !c.showClaim) return null;
+    const group = c.kind === "GROUP";
+    const code = h("input", { type: "text", id: "claimCode", autocomplete: "off", autocapitalize: "characters", placeholder: "Código de participante", "aria-label": "Código de participante", maxlength: "20" });
+    const go2 = h("button", { class: "btn", id: "claimGo", disabled: state.busy, text: group ? "Registrar mi participación en el grupo" : "Registrar mi participación", onclick: async () => {
       state.error = null; state.busy = true; render();
-      const r = await state.api.claim(code.value);
+      const r = await c.api.claim(code.value);
       state.busy = false;
-      if (r.status === 201 && r.json.confirmationCode) state.claimResult = r.json; else state.error = say(r.json && r.json.code);
+      if (r.status === 201 && r.json.confirmationCode) c.claimResult = r.json; else state.error = say(r.json && r.json.code);
       render();
     } });
     return h("section", { class: "card stack", id: "claimCard" },
-      h("h2", { text: "¿Eres concursante?" }),
-      state.claimResult
-        ? [h("p", { text: "Díctale este código al operador para confirmar que eres tú:" }), h("div", { class: "code-big", id: "confirmationCode", text: state.claimResult.confirmationCode })]
-        : [h("p", { text: "Si el operador te dio un código de concursante, escríbelo aquí." }), code, go]);
+      h("h2", { text: group ? "¿Sos parte de un grupo?" : "¿Te dieron un código de participante?" }),
+      c.claimResult
+        ? [h("p", { text: "Dictale este código al operador para confirmar que sos vos:" }), h("div", { class: "code-big", id: "confirmationCode", text: c.claimResult.confirmationCode })]
+        : [h("p", { text: group ? "Si el equipo te dio un código para tu grupo, escribilo acá. Cada persona del grupo tiene el suyo." : "Si el equipo te dio un código de participante, escribilo acá." }), code, go2]);
   }
 
   /**
-   * A rehearsal announces itself in every state, above everything, and in the title of the tab. The words are the operator page's. Nothing
-   * about a real round ever carries them.
+   * The photograph of a published winner. The published number is a frozen snapshot; the photograph is not: the person may have asked for it to be
+   * hidden since. Then the server has none to give, and a deliberate placeholder takes its place — never a broken image.
    */
-  function paintTestEvent() {
-    const slot = document.getElementById("bannerSlot");
-    const test = !!(infoNow() && infoNow().isTest === true);
-    document.title = test ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
-    slot.textContent = "";
-    if (test) slot.appendChild(h("div", { class: "test-banner", id: "testBanner", role: "status" }, h("strong", { text: R.TEST_EVENT_LABEL }), ` — ${R.TEST_EVENT_NOTICE}`));
-  }
-
-  /**
-   * The photograph of a published finalist. The published number and the result are a frozen snapshot; the photograph is not: the person may
-   * have asked for it to be hidden since. Then the server has none to give, and a deliberate placeholder takes its place — never a broken image —
-   * with the published number untouched.
-   */
-  function publishedPhoto(alias) {
+  function publishedPhoto(c, alias) {
     const img = h("img", { alt: `Disfraz número ${alias}`, loading: "lazy" });
     img.addEventListener("error", () => {
       const placeholder = h("div", { class: "photo-missing", role: "img", "aria-label": `Imagen no disponible del disfraz número ${alias}`, text: "Imagen no disponible" });
       if (img.parentNode) img.parentNode.replaceChild(placeholder, img);
     });
-    img.setAttribute("src", safePhoto(`${PHOTO_PREFIX}${instanceId}/photos/${alias}?v=thumb`));
+    img.setAttribute("src", safePhoto(`${PHOTO_PREFIX}${c.instanceId}/photos/${alias}?v=thumb`));
     return img;
   }
 
-  function renderResults() {
-    if (!state.results || !state.results.published) return null;
-    const winners = state.results.kind === "WINNERS";
-    return h("section", { class: "card stack", id: "announcement" },
-      infoNow() && infoNow().isTest === true ? h("span", { class: "test-tag", text: `${R.TEST_EVENT_LABEL}: este no es el resultado del evento real` }) : null,
-      h("h2", { text: winners ? (state.results.items.length > 1 ? "¡Tenemos ganadores compartidos!" : "¡Tenemos ganador!") : "Los finalistas" }),
-      h("div", { class: "winners" }, state.results.items.map((it) =>
-        h("figure", { "data-alias": it.alias },
-          publishedPhoto(it.alias),
-          h("figcaption", { text: `#${it.alias}` })))));
+  function renderResults(c) {
+    if (!c.results || !c.results.published) return null;
+    const headline = R.resultsHeadline(c.results);
+    const n = c.results.items.length;
+    return h("section", { class: "card stack", id: `announcement-${c.key}` },
+      h("h2", { text: n === 0 ? "Sin resultado ganador" : headline }),
+      h("p", { text: c.name }),
+      n === 0
+        ? h("div", { class: "nowinner", text: "En esta categoría nadie recibió un voto válido, así que no hay ganador." })
+        : h("div", { class: `winners${n === 1 ? " single" : ""}` }, c.results.items.map((it) =>
+            h("figure", { "data-alias": it.alias }, publishedPhoto(c, it.alias), h("figcaption", null, it.name || `#${it.alias}`, it.code ? h("small", { text: it.code }) : null)))));
   }
 
-  // -- voting
-  function canVote() {
-    return !!(state.bound && phase() === "OPEN" && state.gallery && state.gallery.interactionInstanceId);
+  function canVote(c) {
+    return !!(state.entered && c.bound && phaseOf(c) === "OPEN" && c.gallery && c.gallery.interactionInstanceId);
   }
-  function photoTag(item) {
-    return h("img", { src: safePhoto(item.thumbUrl), alt: `Disfraz número ${item.alias}`, loading: "lazy", decoding: "async" });
+  function votedFor(c, item) { return !!item.candidateId && item.candidateId === c.myCandidateId; }
+  function photoTag(c, item) {
+    return h("img", { src: safePhoto(item.thumbUrl), alt: R.candidacyTitle(item), loading: "lazy", decoding: "async" });
   }
-  function votedFor(item) { return !!item.candidateId && item.candidateId === state.myCandidateId; }
+
+  async function runCast(c, item, retry) {
+    const cast = ++state.castSeq;
+    const epoch = state.epoch;
+    state.busy = true; state.error = null; state.notice = null; render();
+    const result = await R.castFavorite({
+      api: c.api, candidateId: item.candidateId, interactionInstanceId: c.gallery.interactionInstanceId, retry,
+      isCurrent: () => cast === state.castSeq && epoch === state.epoch && state.auth.status === "authenticated",
+    });
+    if (result.stale) { if (cast === state.castSeq) { state.busy = false; render(); } return; } // the page moved on: nothing more was sent and nothing is shown
+    state.busy = false;
+    if (result.ok) {
+      c.retry = null; c.myCandidateId = item.candidateId; c.pending.clear();
+      state.notice = `Tu voto por ${R.candidacyTitle(item)} en «${c.name}» quedó registrado. Podés cambiarlo hasta que cierre la votación.`;
+    } else {
+      c.retry = result.retry ? { ...result.retry, alias: item.alias } : null;
+      const back2 = R.stepForError(result.code);
+      if (back2) { c.pending.set(item.alias); try { sessionStore.setItem(lastCatKey, c.key); } catch (e) { /* nothing to remember */ } state.auth = { status: back2 === "PROFILE" ? "profile_incomplete" : "unauthenticated", email: state.auth.email }; }
+      // a lost answer is told once, by the retry box that offers to send the SAME vote again; any other refusal says why
+      state.error = result.retry ? null : say(result.code);
+      if (result.code === "STALE_INTENT" || result.code === "INTERACTION_MISMATCH") await refreshCategory(c);
+      if (result.code === "VOTING_WINDOW_ELAPSED" || result.code === "VOTING_NOT_OPEN") poller.refreshNow();
+    }
+    render();
+  }
+
+  function retryVote(c) {
+    const retry = c.retry;
+    const item = retry && allItemsOf(c).find((i) => i.candidateId === retry.candidateId);
+    if (!item) { c.retry = null; render(); return; }
+    runCast(c, item, retry);
+  }
 
   /** The confirmation step: the person decides, then ONE vote runs. Nothing is shown as accepted until the server says so. */
-  function confirmVote(item) {
-    if (!canVote() || item.mine || !item.candidateId) return;
+  function confirmVote(c, item) {
+    if (!canVote(c) || item.mine || !item.candidateId) return;
     const close = () => { modalRoot.textContent = ""; };
     modalRoot.textContent = "";
-    const locationNote = R.locationRequired(infoNow()) ? h("p", { id: "locationNote", text: "Para votar en la final usaremos tu ubicación solo para confirmar que estás en el evento. No la guardamos." }) : null;
-    const revising = !!state.myCandidateId && state.myCandidateId !== item.candidateId;
-    const go = h("button", { class: "btn primary", id: "confirmVote", text: revising ? "Cambiar mi voto" : "Confirmar mi voto", onclick: async () => {
-      go.disabled = true; state.error = null; state.notice = null; close();
-      const cast = ++state.castSeq;
-      const epoch = state.epoch;
-      state.busy = true; render();
-      const result = await R.castFavorite({
-        api: state.api, geolocation: window.navigator.geolocation, info: infoNow(),
-        candidateId: item.candidateId, interactionInstanceId: state.gallery.interactionInstanceId, retry: state.retry,
-        isCurrent: () => cast === state.castSeq && epoch === state.epoch && state.auth.status === "authenticated",
-      });
-      if (result.stale) { if (cast === state.castSeq) { state.busy = false; render(); } return; } // the page moved on: nothing was sent and nothing is shown
-      state.busy = false;
-      if (result.ok) {
-        state.retry = null; state.myCandidateId = item.candidateId; pending.clear();
-        state.notice = `Tu voto por #${item.alias} quedó registrado. Puedes cambiarlo ${isFinal() ? "mientras dure el tiempo" : "hasta que cierre la votación"}.`;
-      } else {
-        state.retry = result.retry || null;
-        const back = R.stepForError(result.code);
-        if (back) { pending.set(item.alias); state.auth = { status: back === "PROFILE" ? "profile_incomplete" : "unauthenticated", email: state.auth.email }; }
-        state.error = say(result.code);
-        if (result.code === "STALE_INTENT" || result.code === "INTERACTION_MISMATCH") await refreshVoterData();
-        if (result.code === "VOTING_WINDOW_ELAPSED" || result.code === "VOTING_NOT_OPEN") poller.refreshNow();
-      }
-      render();
+    const revising = !!c.myCandidateId && c.myCandidateId !== item.candidateId;
+    const title = R.candidacyTitle(item);
+    const go2 = h("button", { class: "btn primary", id: "confirmVote", text: revising ? "Cambiar mi voto" : "Confirmar mi voto", onclick: () => {
+      go2.disabled = true; close();
+      runCast(c, item, c.retry && c.retry.candidateId === item.candidateId ? c.retry : null);
     } });
     modalRoot.appendChild(h("div", { class: "modal-back", onclick: (e) => { if (e.target.classList.contains("modal-back")) close(); } },
-      h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": `Votar por el disfraz número ${item.alias}` },
-        h("img", { class: "full", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}` }),
-        h("h2", { text: `¿Votar por el disfraz #${item.alias}?` }),
-        h("p", { text: `Solo tienes un voto${isFinal() ? "" : " y puedes cambiarlo hasta que la votación cierre"}.` }),
-        locationNote,
-        h("div", { class: "row" }, h("button", { class: "btn", id: "cancelVote", text: "Cancelar", onclick: close }), go))));
+      h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": `Votar por ${title}` },
+        h("div", { class: "modal-body" },
+          h("img", { class: "full", src: safePhoto(item.fullUrl), alt: title }),
+          h("h2", { text: `¿Votar por ${title} en «${c.name}»?` }),
+          item.code ? h("p", { text: `Código ${item.code}` }) : null,
+          h("p", { text: "Tenés un voto por categoría y podés cambiarlo hasta que la votación cierre." })),
+        h("div", { class: "modal-actions row" }, h("button", { class: "btn", id: "cancelVote", text: "Cancelar", onclick: close }), go2))));
   }
 
-  function openPhoto(item) {
+  function openPhoto(c, item) {
     const close = () => { modalRoot.textContent = ""; };
     modalRoot.textContent = "";
-    const can = canVote() && !item.mine && !!item.candidateId && !votedFor(item);
+    const can = canVote(c) && !item.mine && !!item.candidateId && !votedFor(c, item);
     modalRoot.appendChild(h("div", { class: "modal-back", onclick: (e) => { if (e.target.classList.contains("modal-back")) close(); } },
-      h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": `Disfraz número ${item.alias}` },
-        h("img", { class: "full", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}` }),
-        h("div", { class: "row" },
-          can ? h("button", { class: "btn primary", id: "chooseThis", text: "Votar por este disfraz", onclick: () => { close(); confirmVote(item); } }) : null,
+      h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": R.candidacyTitle(item) },
+        h("div", { class: "modal-body" }, h("img", { class: "full", src: safePhoto(item.fullUrl), alt: R.candidacyTitle(item) }), h("h2", { text: R.candidacyTitle(item) }), item.code ? h("p", { text: `Código ${item.code}` }) : null),
+        h("div", { class: "modal-actions row" },
+          can ? h("button", { class: "btn primary", id: "chooseThis", text: "Votar por este disfraz", onclick: () => { close(); confirmVote(c, item); } }) : null,
           h("button", { class: "btn", text: "Cerrar", onclick: close })))));
   }
 
-  function renderDeck() {
-    const list = items();
-    if (list.length === 0) return h("div", { class: "card" }, h("p", { text: "Todavía no hay disfraces publicados. Vuelve en un momento." }));
-    state.deckIndex = V.deckNavigate(state.deckIndex, 0, list.length);
-    const item = list[state.deckIndex];
-    let startX = 0, startY = 0;
-    const go = (delta) => { state.deckIndex = V.deckNavigate(state.deckIndex, delta, list.length); render(); };
-    const card = h("div", { class: "deck", id: "deck",
-      ontouchstart: (e) => { startX = e.changedTouches[0].clientX; startY = e.changedTouches[0].clientY; },
-      ontouchend: (e) => { const intent = V.swipeIntent({ dx: e.changedTouches[0].clientX - startX, dy: e.changedTouches[0].clientY - startY }); if (intent === "next") go(1); if (intent === "prev") go(-1); } },
-      h("img", { class: "photo", src: safePhoto(item.fullUrl), alt: `Disfraz número ${item.alias}`, decoding: "async" }),
-      h("span", { class: "tag", text: `#${item.alias}` }),
-      item.mine ? h("span", { class: "flag mine", text: "Tu disfraz" }) : votedFor(item) ? h("span", { class: "flag voted", text: "✓ Tu voto" }) : null);
-    const can = canVote() && !item.mine && !!item.candidateId && !votedFor(item);
-    return h("div", null,
-      h("div", { class: "meter" }, h("span", { text: `${state.deckIndex + 1} de ${list.length}` })),
-      card,
-      h("div", { class: "deck-actions" },
-        h("button", { class: "btn", id: "prev", "aria-label": "Anterior", text: "←", onclick: () => go(-1) }),
-        h("button", { class: "btn primary", id: "choose", disabled: !can || state.busy, text: votedFor(item) ? "Es tu voto" : state.myCandidateId ? "Cambiar mi voto a este" : "Votar por este", onclick: () => confirmVote(item) }),
-        h("button", { class: "btn", id: "next", "aria-label": "Siguiente", text: "→", onclick: () => go(1) })),
-      h("button", { class: "btn link", text: "Ver en grande", onclick: () => openPhoto(item) }));
+  /** What stands where the vote button would be when voting is not possible: a plain statement, never a disabled action. */
+  function voteStatus(c, item) {
+    if (item.mine) return "Este es tu disfraz: no podés votar por él.";
+    if (votedFor(c, item)) return "Es tu voto en esta categoría.";
+    const p = phaseOf(c);
+    if (p === "NOT_OPEN") return "La votación todavía no abre.";
+    if (p === "CLOSED" || p === "ENDED") return "La votación cerró.";
+    return "";
   }
 
-  // virtualized grid: ~30 thumbnails exist at any moment, however many contestants there are
+  function renderDeck(c) {
+    const all = allItemsOf(c);
+    const list = itemsOf(c);
+    if (list.length === 0) return h("div", { class: "card", id: "emptyGallery" }, h("p", { text: all.length === 0 ? "Todavía no hay disfraces para mostrar en esta categoría. Volvé en un momento." : "No encontramos disfraces con eso. Probá con otro nombre o código." }));
+    c.deckIndex = V.deckNavigate(c.deckIndex, 0, list.length);
+    const item = list[c.deckIndex];
+    let startX = 0, startY = 0;
+    const move = (delta) => { c.deckIndex = V.deckNavigate(c.deckIndex, delta, list.length); render(); };
+    const card = h("div", { class: "deck", id: "deck",
+      ontouchstart: (e) => { startX = e.changedTouches[0].clientX; startY = e.changedTouches[0].clientY; },
+      ontouchend: (e) => { const intent = V.swipeIntent({ dx: e.changedTouches[0].clientX - startX, dy: e.changedTouches[0].clientY - startY }); if (intent === "next") move(1); if (intent === "prev") move(-1); } },
+      h("img", { class: "photo", src: safePhoto(item.fullUrl), alt: R.candidacyTitle(item), decoding: "async" }),
+      h("span", { class: "tag", id: "deckName", text: R.candidacyTitle(item) }),
+      item.code ? h("span", { class: "tag code", id: "deckCode", text: item.code }) : null,
+      item.mine ? h("span", { class: "flag mine", text: "Tu disfraz" }) : votedFor(c, item) ? h("span", { class: "flag voted", text: "✓ Tu voto" }) : null);
+    const can = canVote(c) && !item.mine && !!item.candidateId && !votedFor(c, item);
+    return h("div", null,
+      h("div", { class: "meter" }, h("span", { text: `${c.deckIndex + 1} de ${list.length}` })),
+      card,
+      can
+        ? h("div", { class: "deck-actions" },
+            h("button", { class: "btn", id: "prev", "aria-label": "Anterior", text: "←", onclick: () => move(-1) }),
+            h("button", { class: "btn primary", id: "choose", disabled: state.busy, text: c.myCandidateId ? "Cambiar mi voto a este" : "Votar por este", onclick: () => confirmVote(c, item) }),
+            h("button", { class: "btn", id: "next", "aria-label": "Siguiente", text: "→", onclick: () => move(1) }))
+        : h("div", { class: "deck-actions" },
+            h("button", { class: "btn", id: "prev", "aria-label": "Anterior", text: "←", onclick: () => move(-1) }),
+            h("div", { class: "deck-status", id: "voteStatus", text: voteStatus(c, item) }),
+            h("button", { class: "btn", id: "next", "aria-label": "Siguiente", text: "→", onclick: () => move(1) })),
+      h("button", { class: "btn link", text: "Ver en grande", onclick: () => openPhoto(c, item) }));
+  }
+
+  // virtualized grid: ~30 thumbnails exist at any moment, however many candidacies there are
   function gridMetrics(scroller) {
     const width = scroller.clientWidth || 360;
     const gap = 6;
     const cell = (width - gap * 4) / 3;
     return { rowHeight: Math.round(cell * (4 / 3)) + gap, viewportHeight: scroller.clientHeight || 560 };
   }
-  function renderGridWindow(scroller, windowEl) {
-    const list = items();
+  function renderGridWindow(c, scroller, windowEl) {
+    const list = itemsOf(c);
     const m = gridMetrics(scroller);
     const w = V.computeVirtualWindow({ total: list.length, columns: 3, rowHeight: m.rowHeight, scrollTop: scroller.scrollTop, viewportHeight: m.viewportHeight, overscanRows: 2 });
     windowEl.style.paddingTop = `${w.topPadding}px`;
@@ -525,67 +992,179 @@
     windowEl.textContent = "";
     for (let i = w.firstIndex; i < w.lastIndex; i++) {
       const item = list[i];
-      windowEl.appendChild(h("button", { class: "cell", "data-alias": item.alias, "aria-label": `Disfraz número ${item.alias}`, onclick: () => openPhoto(item) },
-        photoTag(item),
-        h("span", { class: "no", text: `#${item.alias}` }),
-        votedFor(item) ? h("span", { class: "pick", text: "✓ Tu voto" }) : null));
+      windowEl.appendChild(h("button", { class: "cell", "data-alias": item.alias, "aria-label": R.candidacyTitle(item), onclick: () => openPhoto(c, item) },
+        photoTag(c, item),
+        votedFor(c, item) ? h("span", { class: "pick", text: "✓ Tu voto" }) : null,
+        h("span", { class: "cname", text: R.candidacyTitle(item) })));
     }
   }
-  function renderGrid() {
-    const list = items();
-    if (list.length === 0) return h("div", { class: "card" }, h("p", { text: "Todavía no hay disfraces publicados." }));
+  function renderGrid(c) {
+    const list = itemsOf(c);
+    if (list.length === 0) return h("div", { class: "card" }, h("p", { text: allItemsOf(c).length === 0 ? "Todavía no hay disfraces para mostrar en esta categoría." : "No encontramos disfraces con eso. Probá con otro nombre o código." }));
     const windowEl = h("div", { class: "grid-window", id: "gridWindow" });
     const scroller = h("div", { class: "grid-scroller", id: "gridScroller", tabindex: "0", "aria-label": "Disfraces" }, windowEl);
     let frame = 0;
     scroller.addEventListener("scroll", () => {
-      state.grid.scrollTop = scroller.scrollTop;
+      c.grid.scrollTop = scroller.scrollTop;
       if (frame) return;
-      frame = (window.requestAnimationFrame || ((f) => setTimeout(f, 16)))(() => { frame = 0; renderGridWindow(scroller, windowEl); });
+      frame = (window.requestAnimationFrame || ((f) => setTimeout(f, 16)))(() => { frame = 0; renderGridWindow(c, scroller, windowEl); });
     });
-    setTimeout(() => { scroller.scrollTop = state.grid.scrollTop; renderGridWindow(scroller, windowEl); }, 0);
-    renderGridWindow(scroller, windowEl);
-    return h("div", null, h("div", { class: "meter" }, h("span", { text: `${list.length} disfraces` })), scroller);
+    setTimeout(() => { scroller.scrollTop = c.grid.scrollTop; renderGridWindow(c, scroller, windowEl); }, 0);
+    renderGridWindow(c, scroller, windowEl);
+    return h("div", null, h("div", { class: "meter" }, h("span", { text: `${list.length} ${list.length === 1 ? "disfraz" : "disfraces"}` })), scroller);
   }
 
-  function renderVoting() {
+  function renderVoting(c) {
     const tabs = h("div", { class: "tabs", role: "tablist" },
-      h("button", { role: "tab", id: "tabDeck", "aria-selected": state.view === "deck" ? "true" : "false", text: "Uno a uno", onclick: () => { state.view = "deck"; render(); } }),
-      h("button", { role: "tab", id: "tabGrid", "aria-selected": state.view === "grid" ? "true" : "false", text: "Todos", onclick: () => { state.view = "grid"; render(); } }));
-    return h("div", null, tabs, state.view === "deck" ? renderDeck() : renderGrid());
+      h("button", { role: "tab", id: "tabDeck", "aria-selected": c.view === "deck" ? "true" : "false", text: "Uno a uno", onclick: () => { c.view = "deck"; render(); } }),
+      h("button", { role: "tab", id: "tabGrid", "aria-selected": c.view === "grid" ? "true" : "false", text: "Todos", onclick: () => { c.view = "grid"; render(); } }));
+    const search = h("input", { type: "search", id: "gallerySearch", autocomplete: "off", placeholder: "Buscar por nombre o código", "aria-label": "Buscar por nombre o código", value: c.search });
+    // typing repaints only the gallery below, never the box being typed in
+    const area = h("div", { id: "galleryArea" });
+    const paint = () => { area.textContent = ""; area.appendChild(c.view === "deck" ? renderDeck(c) : renderGrid(c)); };
+    search.addEventListener("input", () => { c.search = search.value; c.deckIndex = 0; c.grid.scrollTop = 0; paint(); });
+    paint();
+    return h("div", null, allItemsOf(c).length > 1 ? h("div", { class: "field" }, search) : null, tabs, area);
+  }
+
+  // ---- the panels ------------------------------------------------------------------------------------------------------------
+
+  /** The plan of the event, from what the team keeps up to date. It is information: only the team's act opens a category. */
+  function scheduleLines() {
+    const facts = planFacts();
+    return facts ? h("section", { class: "card", id: "scheduleCard" }, facts) : null;
+  }
+
+  function openCategoryFor(key) {
+    requireIdentity(() => { state.current = key; try { sessionStore.setItem(lastCatKey, key); } catch (e) { /* nothing to remember */ } go("category", { current: key }); });
+  }
+
+  function renderVote() {
+    const cards = state.order.map((k) => {
+      const c = cat(k);
+      const s = R.categoryState(c.pub, c.myCandidateId);
+      const when = c.pub.phase === "NOT_OPEN" && c.pub.votingOpensAt ? `Votación prevista ${R.atTime(c.pub.votingOpensAt)} (hora de Honduras)` : c.pub.phase === "OPEN" && c.pub.deadlineAt ? `Cierra ${R.atTime(c.pub.deadlineAt)} (hora de Honduras)` : "";
+      return h("button", { class: `cat ${s.tone}`, "data-category": k, id: `cat-${k}`, onclick: () => openCategoryFor(k) },
+        h("h3", { text: c.name }),
+        h("div", { class: "state", text: s.label }),
+        when ? h("div", { class: "meta", text: when }) : null);
+    });
+    const open = state.order.map(cat).filter((c) => phaseOf(c) === "OPEN");
+    const voted = open.filter((c) => c.myCandidateId).length;
+    const allClosed = state.order.map(cat).every((c) => ["CLOSED", "ENDED"].includes(phaseOf(c)));
+    const headline = open.length > 0 ? "La votación está abierta. Elegí una categoría." : allClosed ? "La votación ya cerró. Gracias por participar." : "La votación todavía no está abierta.";
+    return [
+      back(),
+      h("section", { class: "card", id: "voteIntro" }, h("h2", { text: "Votar por tu disfraz favorito" }), h("p", { id: "voteHeadline", text: headline }), planFacts()),
+      h("div", { class: "cats", id: "categories" }, cards),
+      open.length > 0 && step() === "READY" ? h("div", { class: "card stack" },
+        h("p", { id: "voteProgress", text: `Votaste en ${voted} de ${open.length} ${open.length === 1 ? "categoría abierta" : "categorías abiertas"}.` }),
+        h("button", { class: "btn", id: "reviewVotes", text: "Revisar mis votos", onclick: () => go("review") })) : null,
+      state.order.map(cat).map(renderResults),
+    ];
+  }
+
+  function banner(c) {
+    const info = c.pub;
+    const lines = [h("div", { text: R.phaseNotice(info) })];
+    if (info.phase === "OPEN" && info.deadlineAt) lines.push(h("div", { class: "clock", id: "clock", "aria-label": "Tiempo restante" }));
+    return h("div", { class: `banner${info.phase === "CLOSED" || info.phase === "ENDED" ? " closed" : ""}`, role: "status" }, lines);
+  }
+
+  function renderCategory(c) {
+    const parts = [
+      back("← Categorías", "vote"),
+      h("div", { class: "card" }, h("h2", { text: c.name }), h("p", { text: c.prompt })),
+      banner(c),
+      renderClaim(c),
+      renderResults(c),
+    ];
+    const p = phaseOf(c);
+    if (c.results && c.results.published) { /* the announcement is the whole answer: no voting deck once the result is out */ }
+    else if (!c.bound) { if (p === "OPEN") parts.push(h("div", { class: "card", role: "status" }, h("p", { text: "Entrando a la categoría…" }))); }
+    else if (p === "CLOSED" || p === "ENDED") parts.push(h("div", { class: "card", id: "closedCard" }, h("h2", { text: "Votación cerrada" }), h("p", { text: c.myCandidateId ? "Tu voto quedó registrado. Los resultados se publican cuando el equipo termine de revisarlos." : "Gracias por participar. Los resultados se publican cuando el equipo termine de revisarlos." })));
+    else parts.push(renderVoting(c));
+    if (state.entered && c.bound && (p === "OPEN") && state.order.length > 1) parts.push(h("button", { class: "btn", id: "reviewVotes", text: "Revisar mis votos", onclick: () => go("review") }));
+    if (state.entered && c.bound && p === "NOT_OPEN" && !c.showClaim) parts.push(h("button", { class: "btn link", id: "showClaim", text: "Tengo un código de participante", onclick: () => { c.showClaim = true; render(); } }));
+    return parts;
+  }
+
+  function renderReview() {
+    const rows = state.order.map((k) => {
+      const c = cat(k);
+      const item = c.myCandidateId ? allItemsOf(c).find((i) => i.candidateId === c.myCandidateId) : null;
+      const p = phaseOf(c);
+      const s = R.categoryState(c.pub, c.myCandidateId);
+      return h("div", { class: "review-row", "data-category": k },
+        item ? h("img", { src: safePhoto(item.thumbUrl), alt: R.candidacyTitle(item), loading: "lazy" }) : h("div", { class: "nopic", "aria-hidden": "true" }),
+        h("div", { class: "grow" }, h("b", { text: c.name }), h("span", { text: item ? `Tu voto: ${R.candidacyTitle(item)}` : p === "OPEN" ? "Todavía no votaste en esta categoría." : p === "NOT_OPEN" ? "La votación todavía no abre." : "No votaste en esta categoría." }), h("div", null, h("span", { text: s.label }))),
+        p === "OPEN" ? h("button", { class: "btn", "data-change": k, text: item ? "Cambiar" : "Votar", onclick: () => go("category", { current: k }) }) : null);
+    });
+    return [
+      back("← Categorías", "vote"),
+      h("section", { class: "card", id: "reviewCard" }, h("h2", { text: "Mis votos" }), h("p", { text: "Tenés un voto por categoría. Mientras la categoría esté abierta podés cambiarlo." }), rows),
+    ];
+  }
+
+  function renderLoadFailed() {
+    return h("div", { class: "card stack", id: "loadFailed" },
+      h("h2", { text: "No pudimos cargar el concurso" }),
+      h("p", { text: "Revisá tu conexión e intentalo de nuevo." }),
+      h("button", { class: "btn primary", id: "retryLoad", text: "Reintentar", onclick: () => { state.loadFailed = false; app.textContent = ""; app.appendChild(h("div", { class: "card", role: "status" }, h("h2", { text: "Cargando el concurso…" }))); start(); } }));
+  }
+
+  /** Keeps what the person was typing where it was when a background change rebuilds the page. */
+  function withFocusKept(build) {
+    const a = document.activeElement;
+    const id = a && a !== document.body && app.contains(a) ? a.id : "";
+    const range = id && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
+    build();
+    if (!id) return;
+    const again = document.getElementById(id);
+    if (!again) return;
+    try { again.focus({ preventScroll: true }); if (range && typeof again.setSelectionRange === "function") again.setSelectionRange(range[0], range[1]); } catch (e) { /* focus is a nicety */ }
   }
 
   function render() {
     app.setAttribute("aria-busy", "false");
     if (state.fatal) { app.textContent = ""; app.appendChild(h("div", { class: "msg err", role: "alert", text: state.fatal })); return; }
+    if (state.loadFailed) { app.textContent = ""; app.appendChild(renderLoadFailed()); return; }
     who.textContent = state.auth.status === "unauthenticated" ? "" : state.auth.email;
-    paintTestEvent();
+    const parts = [...messages()];
     const s = step();
-    const parts = [banner(), ...messages(), renderResults()];
-    if (s === "SIGN_IN") parts.push(stepper(), renderSignIn());
-    else if (s === "PROFILE") parts.push(stepper(), renderProfile());
-    else {
-      parts.push(renderClaim());
-      parts.push(state.bound ? renderVoting() : h("div", { class: "card" }, h("p", { text: "Entrando a la votación…" })));
-      parts.push(h("button", { class: "btn link", id: "switchAccount", text: "Usar otra cuenta", onclick: confirmSwitchAccount }));
-    }
-    app.textContent = "";
-    for (const p of parts.flat()) if (p) app.appendChild(p);
+    if (state.panel === "signin") parts.push(back(), h("p", { class: "sub", text: "Entrá con tu correo para continuar." }), ...identityCards());
+    else if (state.panel === "register") parts.push(...renderRegister());
+    else if (state.panel === "ficha") parts.push(...renderFicha());
+    else if (state.panel === "vote") parts.push(...renderVote());
+    else if (state.panel === "category" && curCat()) parts.push(...renderCategory(curCat()));
+    else if (state.panel === "review") parts.push(...renderReview());
+    else parts.push(...renderHome());
+    if (s !== "READY" && state.panel === "signin") { /* the steps are the page */ }
+    withFocusKept(() => {
+      app.textContent = "";
+      for (const p of parts.flat()) if (p) app.appendChild(p);
+    });
+    tickClock();
   }
 
   // ---- start -----------------------------------------------------------------------------------------------------------------
-  (async () => {
-    if (!/^[0-9a-f-]{36}$/i.test(instanceId)) { state.fatal = say("INSTANCE_NOT_FOUND"); render(); return; }
-    const info = await state.api.info();
-    if (info.status !== 200) { state.fatal = say(info.json && info.json.code) ; render(); return; }
-    state.info = info.json;
-    applyServerTime(infoNow());
+  async function start() {
+    if (!/^[0-9a-f-]{36}$/i.test(contestId)) { state.fatal = say("CONTEST_NOT_FOUND"); render(); return; }
+    const first = await loadContest();
+    if (!first.ok) {
+      if (first.status === 404) { state.fatal = say("CONTEST_NOT_FOUND"); render(); return; }
+      state.loadFailed = true; render(); return;
+    }
+    await applyContest(first.json);
     await refreshAuth();
-    if (step() === "READY") await enterRound();
-    if ((phase() === "CLOSED" || phase() === "ENDED") && infoNow().published) await loadResults();
+    if (step() === "READY") await enterContest();
+    for (const k of state.order) { const c = cat(k); if ((phaseOf(c) === "CLOSED" || phaseOf(c) === "ENDED") && c.pub.published) await loadResults(c); }
+    if (state.panel === "ficha" && urlCode) loadFicha(urlCode);
     render();
     phaseSeenAt = performance.now();
     poller.start();
-  })();
+  }
+  start();
 })();
 </script>
 </body>

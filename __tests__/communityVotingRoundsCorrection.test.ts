@@ -71,26 +71,32 @@ describe("superseded files are not part of the active candidate", () => {
     expect(names.filter((n) => /ranked|ballot|phoneNumber|phoneProvider|phone\//i.test(n) && !/verifiedIdentity|20261020190300_guard_event_bound_opening_and_ballot/.test(n))).toEqual([]);
   });
 
-  it("serves the voting API from exactly two route families: the GATE-003 foundation and the pilot's rounds", () => {
+  it("serves the voting API from exactly two route families: the contest's own and the category rounds' — the single-choice `instances/**` write path (UG-IV-GATE-003) is retired", () => {
     const families = readdirSync(path.join(ROOT, "app/api/gaming/community-voting")).sort();
-    expect(families).toEqual(["instances", "rounds", "route.ts"].filter((f) => families.includes(f)).sort());
     expect(families).not.toContain("ranked");
-    expect(families.filter((f) => f !== "route.ts")).toEqual(["instances", "rounds"]);
+    expect(families).not.toContain("instances");
+    expect(families.filter((f) => f !== "route.ts")).toEqual(["contests", "rounds"]);
   });
 
-  it("mentions no five-option ballot, telephone possession, provider or Instagram in the pilot's code, routes or pages", () => {
+  it("mentions no five-option ballot, telephone possession, messaging provider or Instagram in the contest's code, routes or pages — WhatsApp appears only as the person's own number for a delivery BY HAND", () => {
     const files = [
       ...walk(path.join(ROOT, "lib/gaming/communityVoting/rounds")),
-      ...walk(path.join(ROOT, "app/api/gaming/community-voting/rounds")),
+      ...walk(path.join(ROOT, "lib/gaming/communityVoting/contest")),
+      ...walk(path.join(ROOT, "app/api/gaming/community-voting")),
       ...["community-voting-round.html", "community-voting-round-operator.html", "community-voting-round-display.html", "communityVotingRound.js", "communityVotingRoundOperator.js"].map((f) => path.join(ROOT, "public", f)),
     ].filter((f) => /\.(ts|js|html)$/.test(f));
-    expect(files.length).toBeGreaterThan(30);
+    expect(files.length).toBeGreaterThan(40);
     for (const f of files) {
-      expect(stripComments(readFileSync(f, "utf8")), rel(f)).not.toMatch(/ranked|ballot|RANK_POINTS|phoneDigest|phone_digest|twilio|whatsapp|\bsms\b|instagram|PUBLIC_PHOTO_RETENTION|removal_due|media-purge|purge/i);
+      const code = stripComments(readFileSync(f, "utf8"));
+      expect(code, rel(f)).not.toMatch(/ranked|RANK_POINTS|phoneDigest|phone_digest|twilio|\bsms\b|instagram|PUBLIC_PHOTO_RETENTION|removal_due|media-purge|purge/i);
+      // no provider, no API, no automatic sending: the only WhatsApp URL is the wa.me link the operator opens themself, and nothing is posted to one
+      expect(code, rel(f)).not.toMatch(/api\.whatsapp|graph\.facebook|whatsapp-web|WhatsApp Business|cloud api|sendMessage|messages\.create/i);
     }
+    // the five-option ballot of the retired ranked format has no trace in the code the contest ships
+    for (const f of files) expect(stripComments(readFileSync(f, "utf8")), rel(f)).not.toMatch(/community_voting_ballots|ballot_picks|RANKED_TOP_5/);
   });
 
-  it("keeps the GATE-003 foundation: its migrations, modules and routes are all still there", () => {
+  it("keeps the GATE-003 foundation's migrations and modules (committed history stays); only its HTTP write path is gone", () => {
     for (const f of [
       "supabase/migrations/20261020190000_create_community_voting_instances.sql",
       "supabase/migrations/20261020190100_create_community_voting_functions.sql",
@@ -98,11 +104,11 @@ describe("superseded files are not part of the active candidate", () => {
       "supabase/migrations/20261020190300_guard_event_bound_opening_and_ballot.sql",
       "lib/gaming/communityVoting/verifiedIdentity.ts",
       "lib/gaming/communityVoting/db/supabaseCommunityVotingRepository.ts",
-      "app/api/gaming/community-voting/instances/route.ts",
     ]) expect(exists(f), f).toBe(true);
+    expect(exists("app/api/gaming/community-voting/instances")).toBe(false);
   });
 
-  it("has only the pilot's migrations after the GATE-003 foundation: the three of the pilot and the one of GATE-010 (geofence setup, test events), additive, none of them ranked", () => {
+  it("has exactly the twelve Community Voting migrations the hosted ledger lacks — the four of GATE-003, the three of the pilot, the one of GATE-010 and the four of the four-category contest — additive, none of them ranked, none of them editing a committed one", () => {
     const mine = readdirSync(path.join(ROOT, "supabase/migrations")).filter((f) => /community_voting|event_bound_opening/.test(f)).sort();
     expect(mine).toEqual([
       "20261020190000_create_community_voting_instances.sql",
@@ -113,6 +119,10 @@ describe("superseded files are not part of the active candidate", () => {
       "20261029100100_community_voting_two_round_functions.sql",
       "20261029100200_community_voting_two_round_guards.sql",
       "20261030100000_community_voting_geofence_setup_and_test_events.sql",
+      "20261031120000_community_voting_four_category_foundation.sql",
+      "20261031120100_community_voting_four_category_functions.sql",
+      "20261031120200_community_voting_four_category_guards.sql",
+      "20261031120300_community_voting_self_registration.sql",
     ]);
     const sql = mine.map((f) => read(`supabase/migrations/${f}`)).join("\n");
     expect(sql).not.toMatch(/RANKED_TOP_5|community_voting_ballots|ballot_picks|phone_digest|removal_due_at|RETENTION_EXPIRED/);
@@ -194,73 +204,7 @@ interface RoundLogic {
   deadlineRemainingText(info: Record<string, unknown>): string | null;
 }
 
-describe("the initial schedule (31 October 2026, America/Tegucigalpa)", () => {
-  const O = load<Operator>("communityVotingRoundOperator.js", "CommunityVotingRoundOperator");
-
-  it("is registration and photographs 19:00–20:30, the preliminary 20:30–21:30, and a final of five minutes from its own opening", () => {
-    expect(O.EVENT_TIME_ZONE).toBe("America/Tegucigalpa");
-    expect(O.EVENT_SCHEDULE_TEMPLATE).toEqual({
-      date: "2026-10-31", registrationOpens: "19:00", registrationCloses: "20:30", preliminaryOpens: "20:30", preliminaryCloses: "21:30", finalWindowSeconds: 300,
-    });
-  });
-
-  it("converts to exact instants (Honduras is UTC−6 all year) for the cutoff, the opening and the deadline", () => {
-    expect(O.templateInstants()).toEqual({
-      registrationOpensAt: "2026-11-01T01:00:00.000Z",
-      contestantCutoffAt: "2026-11-01T02:30:00.000Z",
-      votingOpensAt: "2026-11-01T02:30:00.000Z",
-      votingClosesAt: "2026-11-01T03:30:00.000Z",
-    });
-    expect(O.toEventInstant("2026-10-31", "21:30")).toBe("2026-11-01T03:30:00.000Z");
-    expect(O.toEventInstant("2026-10-31", "00:00")).toBe("2026-10-31T06:00:00.000Z");
-  });
-
-  it("reads an instant back as the event's own date and time, whatever the device's time zone", () => {
-    expect(O.fromEventInstant("2026-11-01T03:30:00.000Z")).toEqual({ date: "2026-10-31", time: "21:30" });
-    expect(O.fromEventInstant("2026-11-01T01:00:00.000Z")).toEqual({ date: "2026-10-31", time: "19:00" });
-    expect(O.fromEventInstant(null)).toBeNull();
-    expect(O.fromEventInstant("not a date")).toBeNull();
-  });
-
-  it("refuses an invalid date or time", () => {
-    for (const [d, t] of [["", "20:30"], ["2026-13-01", "20:30"], ["2026-10-31", "25:00"], ["2026-10-31", "7pm"], ["31/10/2026", "20:30"]]) expect(O.toEventInstant(d, t), `${d} ${t}`).toBeNull();
-  });
-
-  it("is data and pure functions only: loading it makes no request, reads no environment, creates and opens nothing", () => {
-    const src = stripComments(read("public/communityVotingRoundOperator.js"));
-    const templateStart = src.indexOf("EVENT_SCHEDULE_TEMPLATE");
-    expect(templateStart).toBeGreaterThan(-1);
-    expect(src.slice(templateStart, templateStart + 600)).not.toMatch(/fetch|XMLHttpRequest|process\.env|localStorage/);
-  });
-});
-
-describe("what a visitor is told about the time", () => {
-  const R = load<RoundLogic>("communityVotingRound.js", "CommunityVotingRound");
-
-  it("shows times in the event's zone, not the device's", () => {
-    expect(R.EVENT_TIME_ZONE).toBe("America/Tegucigalpa");
-    expect(R.formatEventTime("2026-11-01T02:30:00.000Z")).toMatch(/20:30/);
-    expect(R.formatEventTime("2026-11-01T03:30:00.000Z")).toMatch(/21:30/);
-    expect(R.formatEventTime(null)).toBe("");
-  });
-
-  it("distinguishes a round that is SCHEDULED from one that is actually OPEN", () => {
-    const scheduled = R.phaseNotice({ phase: "NOT_OPEN", roundRole: "PRELIMINARY", scheduledOpensAt: "2026-11-01T02:30:00.000Z", deadlineAt: "2026-11-01T03:30:00.000Z" });
-    expect(scheduled).toMatch(/programada/i);
-    expect(scheduled).toMatch(/20:30/);
-    expect(scheduled).toMatch(/aún no está abierta|todavía no está abierta|no ha abierto/i);
-    const open = R.phaseNotice({ phase: "OPEN", roundRole: "PRELIMINARY", deadlineAt: "2026-11-01T03:30:00.000Z" });
-    expect(open).toMatch(/abierta/i);
-    expect(open).toMatch(/21:30/);
-    expect(open).not.toMatch(/programada/i);
-  });
-
-  it("shows the remaining time from the server's clock for BOTH rounds", () => {
-    expect(R.deadlineRemainingText({ deadlineRemainingMs: 90_000 })).toBe("1:30");
-    expect(R.deadlineRemainingText({ deadlineRemainingMs: 0 })).toBe("0:00");
-    expect(R.deadlineRemainingText({ deadlineRemainingMs: null })).toBeNull();
-  });
-});
+// (the initial two-round schedule and the old page texts were retired by UG-IV-GATE-018: the four-category plan's times and words are pinned in communityVotingContestUiLogic.test.ts)
 
 describe("the phase a screen shows follows the server's deadline", () => {
   const base = { sessionState: "LOBBY_LOCKED", interactionState: "PROMPT_ACTIVE", closed: false, deadlineAt: null as string | null, serverNow: "2026-11-01T03:00:00.000Z" };

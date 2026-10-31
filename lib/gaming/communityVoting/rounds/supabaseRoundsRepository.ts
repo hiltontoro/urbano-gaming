@@ -406,8 +406,32 @@ export class SupabaseRoundsRepository extends SupabaseCommunityVotingRepository 
     return { taskId: row.task_id as string, status: row.status as FollowupTask["status"], resolvedAt: ts(row.resolved_at) };
   }
 
+  /** The database operation that opens a round. The four-category contest names its own (the ballot excludes group members). */
+  protected startRpcName(): string {
+    return "start_community_voting_round_atomically";
+  }
+
+  /** The database operation that casts a vote, and its arguments. The contest's has NO location parameter at all. */
+  protected castRpcName(): string {
+    return "cast_community_voting_round_vote_atomically";
+  }
+  protected castRpcArgs(input: CastRoundVoteInput): Record<string, unknown> {
+    const loc = input.location;
+    return {
+      p_instance_id: input.instanceId,
+      p_auth_user_id: input.authUserId,
+      p_binding_id: input.bindingId,
+      p_intent_no: input.intentNo,
+      p_interaction_instance_id: input.interactionInstanceId,
+      p_candidate_id: input.candidateId,
+      p_latitude: loc ? loc.latitude : null,
+      p_longitude: loc ? loc.longitude : null,
+      p_accuracy_meters: loc ? loc.accuracyMeters : null,
+    };
+  }
+
   async startRound(input: OperatorContext & { promptText: string }): Promise<RoundStarted> {
-    const [row] = await this.rows<Record<string, unknown>>("start_community_voting_round_atomically", {
+    const [row] = await this.rows<Record<string, unknown>>(this.startRpcName(), {
       ...operatorArgs(input),
       p_prompt_text: input.promptText,
     });
@@ -561,20 +585,9 @@ export class SupabaseRoundsRepository extends SupabaseCommunityVotingRepository 
   }
 
   async castRoundVote(input: CastRoundVoteInput): Promise<CastCommunityVoteResult> {
-    const loc = input.location;
     let rows: Record<string, unknown>[];
     try {
-      rows = await this.rows<Record<string, unknown>>("cast_community_voting_round_vote_atomically", {
-        p_instance_id: input.instanceId,
-        p_auth_user_id: input.authUserId,
-        p_binding_id: input.bindingId,
-        p_intent_no: input.intentNo,
-        p_interaction_instance_id: input.interactionInstanceId,
-        p_candidate_id: input.candidateId,
-        p_latitude: loc ? loc.latitude : null,
-        p_longitude: loc ? loc.longitude : null,
-        p_accuracy_meters: loc ? loc.accuracyMeters : null,
-      });
+      rows = await this.rows<Record<string, unknown>>(this.castRpcName(), this.castRpcArgs(input));
     } catch (err) {
       // A losing device needs to reconcile (see the foundation repository): attach the caller's OWN current state, and say honestly what
       // is known about the INTENT. Neither is ever dressed up as a success.

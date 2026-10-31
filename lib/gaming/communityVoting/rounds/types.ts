@@ -123,6 +123,9 @@ export interface GalleryRow {
   /** Null until voting has opened (an approved entry is not yet a candidate). */
   candidateId: string | null;
   ordinal: number;
+  /** A category of the contest shows its candidacies by name and by code (the code only LOCATES: it claims, edits and authorizes nothing). */
+  publicCode?: string;
+  publicName?: string | null;
 }
 
 export interface PhotoBytes {

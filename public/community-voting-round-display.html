@@ -10,35 +10,34 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /*
-   * Halloween Community Voting, two-round pilot — the public display (a screen at the venue). Its job is EXPOSURE: every shown costume, in turn,
-   * in a fresh random order. It receives no count, rank, total or "trending" signal from the server, so it cannot show standing even
-   * by accident. It needs no sign-in: nothing here is private.
+   * Halloween Community Voting, the four-category contest — the public display (a screen at the venue). Its job is EXPOSURE: every shown costume, in turn,
+   * in a fresh random order, with the name and the code its person chose. It receives no count, rank, total or "trending" signal from the server, so it
+   * cannot show standing even by accident, and it says only what is true now (registration, voting not yet open, open, closed, the winners).
+   * It needs no sign-in: nothing here is private.
    */
   :root { --bg-page: #000; --ink: #f5f1e8; --muted: #b5afa0; --halloween: #ff7a1a; }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg-page); color: var(--ink); font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; cursor: none; }
   #stage { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  #photoWrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; padding: 3vh 4vw 0; min-height: 0; }
+  #title { padding: 2.4vh 4vw 0; text-align: center; font-size: clamp(18px, 2.6vw, 40px); font-weight: 800; color: var(--halloween); letter-spacing: 0.02em; }
+  #photoWrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; padding: 1.5vh 4vw 0; min-height: 0; }
   #photo { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 18px; opacity: 0; transition: opacity 0.6s ease; box-shadow: 0 0 80px rgba(255, 122, 26, 0.25); }
   #photo.show { opacity: 1; }
-  #number { position: absolute; left: 5vw; top: 5vh; background: rgba(0, 0, 0, 0.72); border: 2px solid var(--halloween); border-radius: 999px; padding: 0.6vh 1.6vw; font-size: clamp(22px, 4vw, 64px); font-weight: 800; }
-  #prompt { padding: 2.4vh 4vw 3.4vh; text-align: center; font-size: clamp(20px, 3.2vw, 52px); font-weight: 800; letter-spacing: 0.01em; }
-  #when { padding: 0 4vw 2vh; text-align: center; font-size: clamp(14px, 1.8vw, 28px); color: var(--muted); min-height: 1.4em; }
-  #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 8vw; font-size: clamp(24px, 4vw, 64px); font-weight: 800; }
+  #category { align-self: center; margin-top: 1.2vh; max-width: 90vw; text-align: center; border: 2px solid var(--halloween); border-radius: 999px; padding: 0.6vh 1.6vw; font-size: clamp(16px, 2.4vw, 38px); font-weight: 800; }
+  #caption { padding: 1.6vh 4vw 0; text-align: center; font-size: clamp(22px, 3.6vw, 60px); font-weight: 800; min-height: 1.3em; }
+  #caption small { display: inline-block; margin-left: 0.6em; font-size: 0.55em; color: var(--muted); letter-spacing: 0.1em; font-weight: 700; }
+  #when { padding: 1vh 5vw 3vh; text-align: center; font-size: clamp(15px, 2vw, 32px); color: var(--muted); min-height: 1.4em; line-height: 1.35; }
+  #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 8vw; font-size: clamp(24px, 4vw, 64px); font-weight: 800; line-height: 1.25; }
   #empty.show { display: flex; }
-  #testBanner { position: absolute; top: 0; left: 0; right: 0; z-index: 5; background: #b91c1c; color: #fff; text-align: center; font-weight: 800; letter-spacing: 0.08em; padding: 1.2vh 3vw; font-size: clamp(18px, 3vw, 46px); border-bottom: 0.6vh solid #fecaca; }
-  #testBanner[hidden] { display: none; }
-  body.is-test #photoWrap { padding-top: 12vh; }
-  body.is-test #number { top: 13vh; }
 </style>
 </head>
 <body>
 <div id="stage" aria-live="off">
-  <div id="testBanner" hidden></div>
+  <div id="title">Concurso de disfraces · The Pub by Beer Box</div>
+  <div id="category" hidden></div>
   <div id="photoWrap"><img id="photo" alt="" decoding="async" /></div>
-  <div id="number" hidden></div>
-  <div id="prompt"></div>
+  <div id="caption"></div>
   <div id="when"></div>
   <div id="empty"></div>
 </div>
@@ -48,131 +47,168 @@
 <script>
 (() => {
   "use strict";
+  const R = CommunityVotingRound;
   const params = new URLSearchParams(window.location.search);
-  const id = params.get("e") || "";
+  const contestId = params.get("c") || "";
   const photo = document.getElementById("photo");
-  const number = document.getElementById("number");
-  const promptEl = document.getElementById("prompt");
+  const categoryEl = document.getElementById("category");
+  const captionEl = document.getElementById("caption");
   const whenEl = document.getElementById("when");
   const emptyEl = document.getElementById("empty");
-  const testBanner = document.getElementById("testBanner");
-  const BASE_TITLE = document.title;
   const PREFIX = "/api/gaming/community-voting/rounds/";
-  const DEFAULT_PROMPT = "Elige tu disfraz favorito.";
   const rotation = CommunityVotingSlideshow.createRotation();
+  const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contestId);
   let rotationSeconds = 8;
   let timer = null;
+  let info = null;            // the contest as the server last described it
+  let fetchedAt = 0;          // this page's monotonic clock at that answer
+  let results = {};           // published winners per category
+  let lastMode = "gallery";
+  let phaseSeenAt = 0;
+  let deadlineAsked = false;
 
-  const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-  const base = `${PREFIX}${id}`;
-
-  async function getJson(path) {
+  async function getJson(url) {
     try {
-      const r = await window.fetch(`${base}${path}`);
+      const r = await window.fetch(url);
       if (r.status !== 200) return null;
       return await r.json();
     } catch (e) { return null; }
+  }
+
+  const resultsReady = () => !!info && info.categories.length > 0 && info.categories.every((c) => c.published || c.phase === "NOT_OPEN") && info.categories.some((c) => c.published);
+
+  /** Every shown costume of every category, once per pass. The rotation keys on `alias`, so the category is part of it (numbers repeat across categories). */
+  async function buildItems() {
+    if (!info) return [];
+    if (resultsReady()) {
+      const out = [];
+      for (const c of info.categories) {
+        const res = results[c.key];
+        if (!res || !res.published) continue;
+        for (const it of res.items) out.push({ alias: `${c.key}:${it.alias}`, imageUrl: `${PREFIX}${c.instanceId}/photos/${it.alias}?v=full`, name: it.name, code: it.code, category: c.name.es, winner: true });
+      }
+      return out;
+    }
+    const lists = await Promise.all(info.categories.map((c) => getJson(`${PREFIX}${c.instanceId}/slideshow`).then((s) => ({ c, s }))));
+    const out = [];
+    for (const { c, s } of lists) {
+      if (!s) continue;
+      for (const it of s.items || []) out.push({ alias: `${c.key}:${it.alias}`, imageUrl: it.imageUrl, name: it.name, code: it.code, category: c.name.es, winner: false });
+    }
+    return out;
+  }
+
+  async function refreshList() {
+    const items = await buildItems();
+    if (items === null) return false; // keep cycling the last list rather than going blank
+    rotation.load(items);
+    return true;
   }
 
   function show(item) {
     if (!item || typeof item.imageUrl !== "string" || !item.imageUrl.startsWith(PREFIX)) return;
     photo.classList.remove("show");
     const next = new Image();
-    next.onload = () => { photo.src = item.imageUrl; photo.alt = `Disfraz número ${item.alias}`; number.textContent = `#${item.alias}`; number.hidden = false; photo.classList.add("show"); };
+    next.onload = () => {
+      photo.src = item.imageUrl;
+      photo.alt = item.name || "Disfraz";
+      categoryEl.textContent = item.winner ? `Ganador · ${item.category}` : item.category;
+      categoryEl.hidden = false;
+      captionEl.textContent = "";
+      captionEl.appendChild(document.createTextNode(item.name || ""));
+      if (item.code) { const small = document.createElement("small"); small.textContent = item.code; captionEl.appendChild(small); }
+      photo.classList.add("show");
+    };
     next.onerror = () => { /* a picture that fails to load is skipped; the next tick shows the next one */ };
     next.src = item.imageUrl;
   }
 
-  async function refreshList() {
-    const slide = await getJson("/slideshow");
-    if (!slide) return false; // keep cycling the last list rather than going blank
-    promptEl.textContent = slide.prompt || DEFAULT_PROMPT;
-    if (Number.isFinite(slide.rotationSeconds) && slide.rotationSeconds >= 3) rotationSeconds = slide.rotationSeconds;
-    rotation.load(slide.items || []);
-    return true;
-  }
-
-  // The line under the photograph comes from the SERVER's answer: the remaining time is derived from the server clock it reports (and advanced
-  // by this page's monotonic clock), never from this screen's wall clock, and every time shown is the EVENT's (America/Tegucigalpa).
-  // A round that is only SCHEDULED is announced as scheduled, never as open. After publication the announcement replaces it.
-  const R = CommunityVotingRound;
-  let remainingAtFetch = null;
-  let fetchedAt = 0;
-  let lastInfo = null;
-  let announcement = null;
+  // The line under the photograph comes from the SERVER's answer: the remaining time is derived from the server clock it reports (and advanced by this
+  // page's monotonic clock), never from this screen's wall clock, and every time shown is the EVENT's (America/Tegucigalpa). A category that is only
+  // SCHEDULED is announced as scheduled, never as open.
   function paintWhen() {
-    const i = lastInfo;
-    if (!i) return;
-    if (announcement) { whenEl.textContent = announcement; return; }
+    if (!info) return;
+    const cats = info.categories;
+    const open = cats.filter((c) => c.phase === "OPEN");
     let line = "";
-    if (i.phase === "NOT_OPEN") {
-      const planned = R.formatEventTime(i.votingOpensAt);
-      line = planned ? `${i.roundRole === "FINAL" ? "La final" : "La votación"} está programada para las ${planned} (hora de Honduras) y aún no está abierta${i.tentative ? " · horario tentativo" : ""}` : "La votación aún no está abierta";
-    } else if (i.phase === "OPEN" && remainingAtFetch !== null) {
-      const left = remainingAtFetch - (performance.now() - fetchedAt);
-      line = left > 0 ? `${i.roundRole === "FINAL" ? "Final abierta" : "Votación abierta"} · quedan ${R.formatCountdown(left)}` : "El tiempo de votación terminó. ¡Gracias por participar!";
-      if (left <= 0 && !deadlineAsked) { deadlineAsked = true; poller.refreshNow(); } // the clock reached zero: ask the server at once
-    } else if (i.phase === "OPEN") line = "Votación abierta";
-    else if (i.phase === "CLOSED" || i.phase === "ENDED") line = "La votación está cerrada. ¡Gracias por participar!";
+    if (resultsReady()) {
+      const none = cats.filter((c) => c.published && (!results[c.key] || results[c.key].items.length === 0)).map((c) => c.name.es);
+      line = none.length ? `Sin ganador: ${none.join(", ")}.` : "¡Gracias por participar!";
+    } else if (open.length > 0) {
+      const left = Math.max(...open.map((c) => (Number.isFinite(c.deadlineRemainingMs) ? c.deadlineRemainingMs - (performance.now() - fetchedAt) : 0)));
+      line = left > 0 ? `Votación abierta · quedan ${R.formatCountdown(left)} · Votá desde tu teléfono en ${window.location.host}` : "El tiempo de votación terminó. ¡Gracias por participar!";
+      if (left <= 0 && !deadlineAsked) { deadlineAsked = true; poller.refreshNow(); }
+    } else if (cats.some((c) => c.phase === "CLOSED" || c.phase === "ENDED")) {
+      line = "La votación cerró. ¡Gracias por participar! Los ganadores se anuncian después de revisar los resultados.";
+    } else {
+      const reg = info.registration || { phase: "NOT_SCHEDULED" };
+      const first = cats[0];
+      const opens = first ? R.atTime(first.votingOpensAt) : "";
+      const voteLine = opens ? `La votación abre ${opens} (hora de Honduras).` : "La votación todavía no está abierta.";
+      if (reg.phase === "NOT_OPEN") line = `${R.registrationNotice(reg)} ${voteLine}`;
+      else if (reg.phase === "OPEN") line = `${R.registrationNotice(reg)} ${voteLine}`;
+      else line = voteLine;
+      if (first && first.tentative) line += " Horario tentativo.";
+    }
     whenEl.textContent = line;
   }
-  // A rehearsal is labelled on the venue screen for as long as it is shown, in the same words as every other page.
-  function paintTestEvent(isTest) {
-    testBanner.hidden = !isTest;
-    if (isTest) testBanner.textContent = `${R.TEST_EVENT_LABEL} — ${R.TEST_EVENT_NOTICE}`;
-    document.body.classList.toggle("is-test", isTest);
-    document.title = isTest ? `[PRUEBA] ${BASE_TITLE}` : BASE_TITLE;
-  }
-  // UG-IV-GATE-014: the same poller as the voter page (one request at a time, adaptive, refreshed when the screen is visible again) instead of a
-  // fixed 15-second timer that could pile requests up and was blind to the final's five minutes. Only what the server answers is shown.
-  let phaseSeenAt = 0;
-  let deadlineAsked = false;
-  function applyWhen(info, res) {
-    const previousPhase = lastInfo ? lastInfo.phase : null;
-    lastInfo = info.info;
-    if (lastInfo.phase !== previousPhase) phaseSeenAt = performance.now();
-    deadlineAsked = false;
-    paintTestEvent(lastInfo.isTest === true);
-    remainingAtFetch = Number.isFinite(lastInfo.deadlineRemainingMs) ? lastInfo.deadlineRemainingMs : null;
+
+  function applyContest(next) {
+    const before = info ? info.phase : null;
+    info = next;
     fetchedAt = performance.now();
+    deadlineAsked = false;
+    if (info.phase !== before) phaseSeenAt = performance.now();
     paintWhen();
-    if (lastInfo.published && res && res.published && res.items.length > 0) {
-      const names = res.items.map((x) => `#${x.alias}`).join(" · ");
-      announcement = res.kind === "WINNERS" ? `${res.items.length > 1 ? "Ganadores" : "Ganador"}: ${names}` : `Finalistas: ${names}`;
-      whenEl.textContent = announcement;
-    }
   }
+
   const poller = R.createPoller({
     now: () => performance.now(),
     setTimer: (fn, ms) => window.setTimeout(fn, ms),
     clearTimer: (handle) => window.clearTimeout(handle),
     isVisible: () => !document.hidden,
     random: () => Math.random(),
-    delayFor: () => (lastInfo ? R.pollDelayMs({ roundRole: lastInfo.roundRole, phase: lastInfo.phase, published: !!lastInfo.published, sinceChangeMs: performance.now() - phaseSeenAt }) : R.POLL.settledMs),
+    delayFor: () => (info ? R.pollDelayMs({ phase: info.phase, published: info.phase === "RESULTS", sinceChangeMs: performance.now() - phaseSeenAt }) : R.POLL.settledMs),
     staleAfterMs: R.POLL.staleAfterMs,
     fetchOnce: async () => {
-      const info = await getJson("/info");
-      if (!info) return { ok: false };
-      const res = info.info.published ? await getJson("/results") : null;
-      return { ok: true, apply: () => applyWhen(info, res) };
+      const next = await getJson(`/api/gaming/community-voting/contests/${contestId}`);
+      if (!next) return { ok: false };
+      return {
+        ok: true,
+        apply: async () => {
+          const cats = next.categories.filter((c) => c.published);
+          const fresh = {};
+          await Promise.all(cats.map(async (c) => { fresh[c.key] = await getJson(`${PREFIX}${c.instanceId}/results`); }));
+          results = fresh;
+          applyContest(next);
+        },
+      };
     },
   });
 
   async function tick() {
-    if (rotation.needsRefresh()) await refreshList();
+    const mode = resultsReady() ? "results" : "gallery";
+    if (mode !== lastMode) { lastMode = mode; await refreshList(); } // from the gallery to the winners (or back) at once, not at the end of a pass
+    else if (rotation.needsRefresh()) await refreshList();
     const item = rotation.next();
     if (item) { emptyEl.classList.remove("show"); show(item); }
-    else { emptyEl.textContent = promptEl.textContent || DEFAULT_PROMPT; emptyEl.classList.add("show"); photo.classList.remove("show"); number.hidden = true; }
+    else {
+      emptyEl.textContent = info && info.registration && info.registration.phase === "OPEN" ? "¡Participá! Inscribite desde tu teléfono." : "Pronto verás aquí los disfraces del concurso.";
+      emptyEl.classList.add("show"); photo.classList.remove("show"); categoryEl.hidden = true; captionEl.textContent = "";
+    }
     clearTimeout(timer);
     timer = setTimeout(tick, rotationSeconds * 1000);
   }
 
   async function boot() {
-    promptEl.textContent = DEFAULT_PROMPT;
     if (!validId) { emptyEl.textContent = "Enlace de pantalla no válido."; emptyEl.classList.add("show"); return; }
+    const first = await getJson(`/api/gaming/community-voting/contests/${contestId}`);
+    if (first) {
+      const cats = first.categories.filter((c) => c.published);
+      await Promise.all(cats.map(async (c) => { results[c.key] = await getJson(`${PREFIX}${c.instanceId}/results`); }));
+      applyContest(first);
+    }
     await refreshList();
-    const first = await getJson("/info");
-    if (first) applyWhen(first, first.info.published ? await getJson("/results") : null);
     phaseSeenAt = performance.now();
     poller.start();
     document.addEventListener("visibilitychange", () => poller.onVisibility(!document.hidden));

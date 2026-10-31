@@ -98,7 +98,8 @@ export async function getRoundPublicInfo(repo: RoundsRepository, instanceId: str
 export async function getRoundSlideshow(repo: RoundsRepository, instanceId: string) {
   const info = await requireRound(repo, instanceId);
   const gallery = await repo.readRoundGallery(instanceId);
-  const items = gallery.map((g) => ({ alias: g.alias.slice(1), imageUrl: photoUrl(instanceId, g.alias.slice(1), "full") }));
+  // a category of the contest shows each candidacy by name and by its public code; the slideshow carries no standing of any kind
+  const items = gallery.map((g) => ({ alias: g.alias.slice(1), imageUrl: photoUrl(instanceId, g.alias.slice(1), "full"), name: g.publicName ?? null, code: g.publicCode ?? null }));
   for (let i = items.length - 1; i > 0; i--) {
     const j = randomInt(0, i + 1);
     [items[i], items[j]] = [items[j], items[i]];
@@ -111,12 +112,25 @@ export async function getRoundPhoto(repo: RoundsRepository, instanceId: string, 
   return repo.readRoundPhoto({ instanceId, alias, variant });
 }
 
-/** What a PUBLISHED round announced (finalists or winners). Nothing before publication, and never a count. */
-export async function getRoundPublicResults(repo: RoundsRepository, instanceId: string): Promise<{ published: boolean; kind: PublicRoundResult["kind"] | null; items: Array<{ alias: string }> }> {
+/** What a PUBLISHED round announced: its winners (none when nobody cast a valid vote). Nothing before publication, and never a count. */
+export async function getRoundPublicResults(
+  repo: RoundsRepository,
+  instanceId: string
+): Promise<{ published: boolean; kind: PublicRoundResult["kind"] | null; items: Array<{ alias: string; name: string | null; code: string | null }> }> {
   const info = await requireRound(repo, instanceId);
   if (!info.published) return { published: false, kind: null, items: [] };
-  const rows = await repo.readRoundPublicResults(instanceId);
-  return { published: true, kind: rows[0]?.kind ?? (info.roundRole === "PRELIMINARY" ? "FINALISTS" : "WINNERS"), items: rows.map((r) => ({ alias: r.alias.slice(1) })) };
+  const [rows, gallery] = await Promise.all([repo.readRoundPublicResults(instanceId), repo.readRoundGallery(instanceId)]);
+  // The announcement names a winner by the public name and code its person chose. A winner whose photograph was hidden since is no longer in
+  // the gallery: it is announced by its published number alone, exactly as before.
+  const byAlias = new Map(gallery.map((g) => [g.alias, g]));
+  return {
+    published: true,
+    kind: rows[0]?.kind ?? "WINNERS",
+    items: rows.map((r) => {
+      const g = byAlias.get(r.alias);
+      return { alias: r.alias.slice(1), name: g?.publicName ?? null, code: g?.publicCode ?? null };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------- identity: bind
@@ -199,6 +213,9 @@ export async function getRoundGallery(deps: RoundVoterDeps, authorizationHeader:
         thumbUrl: photoUrl(instanceId, alias, "thumb"),
         fullUrl: photoUrl(instanceId, alias, "full"),
         mine: mine === r.alias,
+        // a category of the contest shows each candidacy by name and by its public code (the code only locates)
+        code: r.publicCode ?? null,
+        name: r.publicName ?? null,
       };
     }),
   };

@@ -1,20 +1,18 @@
-// URBANO Gaming — Halloween Community Voting, two-round pilot: the voter page's logic.
+// URBANO Gaming — Halloween Community Voting, the four-category contest: the voter page's logic.
 //
-// Pure functions and small injected-dependency helpers (no DOM; the network, the clock, the storage and the location sensor are all
-// ARGUMENTS), so the exact deployed text is unit-tested. Everything here is a CONVENIENCE for the person voting: which step to show,
-// what to remember across a sign-in, how to run one vote. The rules that decide whether a vote counts live on the server and in the
-// database; nothing on this page can make an invalid vote valid, and nothing here can see a total, a rank or a count of votes — the
-// server never sends one to a voter.
+// Pure functions and small injected-dependency helpers (no DOM; the network, the clock and the storage are all ARGUMENTS), so the exact
+// deployed text is unit-tested. Everything here is a CONVENIENCE for the person voting: which step to show, what to remember across a sign-in,
+// how to run one vote. The rules that decide whether a vote counts live on the server and in the database; nothing on this page can make an
+// invalid vote valid, and nothing here can see a total, a rank or a count of votes — the server never sends one to a voter.
 //
-// Identity (UG-IV-GATE-004A): a Supabase session with a CONFIRMED EMAIL plus a Gaming Member profile, through the platform's existing
-// seam (public/urbanoAuth.js). No telephone, WhatsApp or SMS step exists on this page, and Instagram is only a link that brings people
-// here; nothing is read from it.
+// Identity: a Supabase session with a CONFIRMED EMAIL plus a Gaming Member profile, through the platform's existing seam (public/urbanoAuth.js).
+// No telephone, WhatsApp or SMS step exists on this page, and Instagram is only a link that brings people here; nothing is read from it.
 //
-// Location: the PRELIMINARY is voted from anywhere and this page never asks the browser for a position there. The FINAL asks for one
-// with every vote and every revision. The decision comes from the server's answer (`locationRequired`), never from the page itself.
+// NO LOCATION: the contest is voted from anywhere, by people at the venue and by people who are not. This page has no code that reads a position,
+// no location message and no request that carries a coordinate, and a test pins that.
 //
 // Time: every time shown is the EVENT'S (America/Tegucigalpa), never the phone's, and the remaining time is judged against the SERVER's
-// clock. A round that is scheduled but has not been opened by the operator is shown as exactly that — "programada", not "abierta".
+// clock. A category that is scheduled but has not been opened by the operator is shown as exactly that — "programada", not "abierta".
 
 const CommunityVotingRound = (() => {
   const toNum = (v) => (Number.isFinite(v) ? v : 0);
@@ -24,43 +22,39 @@ const CommunityVotingRound = (() => {
   // ---------------------------------------------------------------- messages
 
   const MESSAGES = {
-    AUTHENTICATION_REQUIRED: "Inicia sesión con tu correo para continuar.",
-    VERIFIED_EMAIL_REQUIRED: "Necesitas verificar tu correo electrónico para votar.",
-    PROFILE_INCOMPLETE: "Antes de votar, completa tu perfil de URBANO Gaming.",
-    INSTANCE_NOT_FOUND: "No encontramos esta votación. Revisa el enlace.",
-    NOT_BOUND: "Primero entra a la votación con tu correo.",
+    AUTHENTICATION_REQUIRED: "Iniciá sesión con tu correo para continuar.",
+    VERIFIED_EMAIL_REQUIRED: "Necesitás verificar tu correo electrónico para continuar.",
+    PROFILE_INCOMPLETE: "Antes de continuar, completá tu perfil de URBANO Gaming.",
+    INSTANCE_NOT_FOUND: "No encontramos esta votación. Revisá el enlace.",
+    CONTEST_NOT_FOUND: "No encontramos este concurso. Revisá el enlace.",
+    ENTRY_NOT_FOUND: "No encontramos esa candidatura. Puede que todavía no sea pública.",
+    NOT_BOUND: "Primero entrá al concurso con tu correo.",
     ADMISSION_CLOSED: "Ya no se admiten nuevos votantes en este momento.",
     NOT_A_ROUND: "Este enlace no corresponde a esta votación.",
-    VOTING_NOT_OPEN: "La votación no está abierta.",
+    NOT_A_CATEGORY_ROUND: "Este enlace no corresponde a esta votación.",
+    VOTING_NOT_OPEN: "La votación de esta categoría no está abierta.",
     VOTING_WINDOW_ELAPSED: "El tiempo de la votación terminó. Tu voto no se pudo registrar ni cambiar.",
-    CANDIDATE_NOT_AVAILABLE: "Ese disfraz ya no está disponible. Elige otro.",
-    SELF_VOTE_NOT_ALLOWED: "No puedes votar por tu propio disfraz. Elige otro.",
-    INTERACTION_MISMATCH: "La votación cambió. Recarga la página.",
-    INTENT_UNISSUED: "No pudimos preparar tu voto. Inténtalo de nuevo.",
-    INTENT_BINDING_MISMATCH: "No pudimos preparar tu voto. Recarga la página.",
-    INTENT_PAYLOAD_MISMATCH: "Este envío ya se usó para otro voto. Recarga la página.",
-    STALE_INTENT: "Ya enviaste un voto más reciente desde otro lugar. Recarga para ver cuál quedó.",
-    STALE_ACTION: "La pantalla cambió mientras se tomaba tu ubicación: no se envió ningún voto.",
-    INVALID_LOCATION_READING: "No pudimos leer tu ubicación. Activa la ubicación del teléfono e inténtalo de nuevo.",
-    LOCATION_ACCURACY_EXCESSIVE: "Tu ubicación no es lo bastante precisa. Sal a un lugar abierto y vuelve a intentarlo.",
-    LOCATION_OUTSIDE: "Para votar en la final debes estar en el evento.",
-    LOCATION_AMBIGUOUS: "No pudimos confirmar que estás en el evento. Acércate y vuelve a intentarlo.",
-    LOCATION_DENIED: "Para votar en la final necesitamos tu ubicación. Permite el acceso a la ubicación y vuelve a intentarlo.",
-    LOCATION_UNAVAILABLE: "No pudimos obtener tu ubicación. Inténtalo de nuevo en un momento.",
-    LOCATION_TIMEOUT: "La ubicación tardó demasiado. Inténtalo de nuevo.",
-    LOCATION_UNSUPPORTED: "Este dispositivo no permite obtener la ubicación, que la final necesita.",
-    CLAIM_INVALID: "Ese código de concursante no es válido. Pide uno nuevo al operador.",
-    CLAIM_EXPIRED: "Ese código de concursante venció. Pide uno nuevo al operador.",
-    CLAIM_RATE_LIMITED: "Demasiados códigos incorrectos. Habla con el operador.",
-    CONTESTANT_ALREADY_HAS_ENTRY: "Ya tienes una participación registrada en este concurso.",
-    PREPARATION_CLOSED: "La preparación del concurso ya terminó.",
-    NETWORK: "No hay conexión. Tu voto todavía no se confirmó; inténtalo de nuevo.",
-    INVALID_REQUEST: "Algo en la solicitud no es válido. Inténtalo de nuevo.",
-    INTERNAL_ERROR: "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento.",
+    CANDIDATE_NOT_AVAILABLE: "Ese disfraz ya no está disponible. Elegí otro.",
+    SELF_VOTE_NOT_ALLOWED: "No podés votar por tu propio disfraz ni por el de tu grupo. Elegí otro.",
+    INTERACTION_MISMATCH: "La votación cambió. Recargá la página.",
+    INTENT_UNISSUED: "No pudimos preparar tu voto. Intentalo de nuevo.",
+    INTENT_BINDING_MISMATCH: "No pudimos preparar tu voto. Recargá la página.",
+    INTENT_PAYLOAD_MISMATCH: "Este envío ya se usó para otro voto. Recargá la página.",
+    STALE_INTENT: "Ya enviaste un voto más reciente desde otro lugar. Recargá para ver cuál quedó.",
+    STALE_ACTION: "La pantalla cambió mientras se enviaba tu voto: no se envió ningún voto.",
+    ALREADY_CANDIDATE: "Ya tenés una candidatura en el concurso. Cada persona participa una sola vez, en una sola categoría.",
+    REGISTRATION_NOT_OPEN: "La inscripción todavía no abrió.",
+    CUTOFF_PASSED: "La inscripción terminó. Ya no se aceptan nuevas candidaturas.",
+    SCHEDULE_REQUIRED: "La inscripción todavía no tiene horario. Volvé más tarde.",
+    PREPARATION_CLOSED: "La inscripción terminó. Ya no se aceptan nuevas candidaturas.",
+    CONSENT_REQUIRED: "Marcá las confirmaciones que te pedimos para poder inscribirte.",
+    NETWORK: "No hay conexión. Todavía no se confirmó; intentalo de nuevo.",
+    INVALID_REQUEST: "Algo en lo que escribiste no es válido. Revisalo e intentalo de nuevo.",
+    INTERNAL_ERROR: "Algo salió mal de nuestro lado. Intentalo de nuevo en un momento.",
   };
 
   function describeError(code) {
-    return (typeof code === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, code) && MESSAGES[code]) || "No pudimos completar la acción. Inténtalo de nuevo.";
+    return (typeof code === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, code) && MESSAGES[code]) || "No pudimos completar la acción. Intentalo de nuevo.";
   }
 
   // ---------------------------------------------------------------- identity: which step is next
@@ -83,9 +77,8 @@ const CommunityVotingRound = (() => {
     return null;
   }
 
-  const PROFILE_NOTICE =
-    "Para votar necesitas completar tu perfil de URBANO Gaming. Solo te pedimos el nombre con el que quieres aparecer; tu voto sigue siendo privado.";
-  const SIGN_IN_NOTICE = "Para votar entras con tu correo: te enviamos un código y lo escribes aquí. No hace falta teléfono.";
+  const PROFILE_NOTICE = "Para participar necesitás completar tu perfil de URBANO Gaming. Solo te pedimos el nombre con el que querés aparecer.";
+  const SIGN_IN_NOTICE = "Entrás con tu correo: te enviamos un código y lo escribís acá. No hace falta teléfono.";
 
   /**
    * How a TEST event (a rehearsal) announces itself on the voter page and the venue screen. The words are the same as the operator page's
@@ -188,39 +181,117 @@ const CommunityVotingRound = (() => {
     return formatCountdown(info.deadlineRemainingMs);
   }
 
-  /** A time of day (HH:MM, 24 hours) in the EVENT's zone, whatever the phone's; "" when absent or not a date. */
+  // America/Tegucigalpa is UTC-6 all year (no daylight saving time). The parts are computed from the instant, never from the phone's clock or zone.
+  const HN_OFFSET_MS = 6 * 60 * 60 * 1000;
+  const WEEKDAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+  function eventParts(iso) {
+    if (typeof iso !== "string" || iso.length === 0) return null;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return null;
+    const d = new Date(t - HN_OFFSET_MS);
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate(), weekday: d.getUTCDay(), hour: d.getUTCHours(), minute: d.getUTCMinutes() };
+  }
+  const isMidnight = (p) => p.hour === 0 && p.minute === 0;
+  const clock12 = (p) => `${p.hour % 12 === 0 ? 12 : p.hour % 12}:${String(p.minute).padStart(2, "0")}`;
+
+  /** A time of day in the EVENT's zone, in 12 hours: "11:00 p. m."; midnight is the word "medianoche". "" when absent or not a date. */
   function formatEventTime(iso) {
-    if (typeof iso !== "string" || iso.length === 0 || Number.isNaN(Date.parse(iso))) return "";
-    try {
-      return new Intl.DateTimeFormat("es-HN", { timeZone: EVENT_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
-    } catch (e) {
-      return "";
-    }
+    const p = eventParts(iso);
+    if (!p) return "";
+    return isMidnight(p) ? "medianoche" : `${clock12(p)} ${p.hour < 12 ? "a. m." : "p. m."}`;
+  }
+  /** "a las 11:00 p. m." / "a medianoche": the time as a sentence needs it. */
+  function atTime(iso) {
+    const t = formatEventTime(iso);
+    return t === "" ? "" : t === "medianoche" ? "a medianoche" : `a las ${t}`;
+  }
+  /** "hasta las 11:00 p. m." / "hasta medianoche". */
+  function untilTime(iso) {
+    const t = formatEventTime(iso);
+    return t === "" ? "" : t === "medianoche" ? "hasta medianoche" : `hasta las ${t}`;
+  }
+  /** "8:00–11:00 p. m." when both ends share the meridiem; otherwise each end in full ("11:00 p. m.–medianoche"). "" when either is absent. */
+  function formatEventRange(fromIso, toIso) {
+    const a = eventParts(fromIso);
+    const b = eventParts(toIso);
+    if (!a || !b) return "";
+    if (!isMidnight(a) && !isMidnight(b) && a.hour < 12 === b.hour < 12) return `${clock12(a)}–${clock12(b)} ${b.hour < 12 ? "a. m." : "p. m."}`;
+    return `${formatEventTime(fromIso)}–${formatEventTime(toIso)}`;
+  }
+  /** "sábado 31 de octubre de 2026". */
+  function formatEventDate(iso) {
+    const p = eventParts(iso);
+    return p ? `${WEEKDAYS[p.weekday]} ${p.day} de ${MONTHS[p.month]} de ${p.year}` : "";
+  }
+  /** "domingo 1 de noviembre". */
+  function formatEventDayShort(iso) {
+    const p = eventParts(iso);
+    return p ? `${WEEKDAYS[p.weekday]} ${p.day} de ${MONTHS[p.month]}` : "";
+  }
+  /** "Inscripciones y fotos: 8:00–11:00 p. m." — "" when the plan is not configured: nothing is invented. */
+  function registrationWindowText(opensIso, closesIso) {
+    const range = formatEventRange(opensIso, closesIso);
+    return range ? `Inscripciones y fotos: ${range}` : "";
+  }
+  /** "Votación: 11:00 p. m.–medianoche, entrando al domingo 1 de noviembre". */
+  function votingWindowText(opensIso, closesIso) {
+    const range = formatEventRange(opensIso, closesIso);
+    if (!range) return "";
+    const a = eventParts(opensIso);
+    const b = eventParts(closesIso);
+    const nextDay = a.day !== b.day || a.month !== b.month || a.year !== b.year;
+    return `Votación: ${range}${nextDay ? `, entrando al ${formatEventDayShort(closesIso)}` : ""}`;
   }
 
   /**
-   * What the banner says. A round that is merely SCHEDULED is not open: it says when it is planned and that the operator has not
-   * opened it yet. A round that is OPEN says that, and when it stops. The times are the event's.
+   * What a CATEGORY's banner says. A category that is merely SCHEDULED is not open: it says when it is planned and that the team has not opened it
+   * yet. An OPEN one says that, and when it stops. A closed one says so and, once published, that the results are in. The times are the event's.
    */
   function phaseNotice(info) {
     const phase = info && info.phase;
-    const final = !!(info && info.roundRole === "FINAL");
     if (phase === "OPEN") {
-      const until = formatEventTime(info.deadlineAt);
-      const stops = until ? ` Cierra a las ${until} (hora de Honduras).` : "";
-      return final
-        ? `La final está abierta. Elige a tu favorito entre los finalistas: puedes cambiar tu voto mientras dure el tiempo.${stops}`
-        : `La votación está abierta. Elige a tu favorito: puedes cambiar tu voto hasta que cierre.${stops}`;
+      const until = info.deadlineAt ? ` Cierra ${atTime(info.deadlineAt)} (hora de Honduras).` : "";
+      return `La votación está abierta. Elegí a tu favorito: podés cambiar tu voto hasta que cierre.${until}`;
     }
-    if (phase === "CLOSED") return "La votación está cerrada. Gracias por participar.";
-    if (phase === "ENDED") return "Este evento ya terminó. Gracias por participar.";
-    const planned = formatEventTime(info && (info.scheduledOpensAt || info.votingOpensAt));
-    if (planned) {
-      return `La ${final ? "final" : "votación"} está programada para las ${planned} (hora de Honduras), pero aún no está abierta: la abre el equipo del evento.${info.tentative ? " El horario es tentativo hasta que se confirme." : ""}`;
+    if (phase === "CLOSED") return info && info.published ? "La votación de esta categoría cerró y ya están los resultados." : "La votación de esta categoría cerró. Gracias por participar: los resultados se publican después de que el equipo los revise.";
+    if (phase === "ENDED") return "El concurso ya terminó. Gracias por participar.";
+    const planned = atTime(info && (info.scheduledOpensAt || info.votingOpensAt));
+    if (planned) return `La votación todavía no está abierta: está prevista ${planned} (hora de Honduras) y la abre el equipo del evento.${info.tentative ? " El horario es tentativo hasta que se confirme." : ""}`;
+    return info && info.tentative ? "La votación todavía no está abierta. Los horarios son tentativos hasta que se confirmen." : "La votación todavía no está abierta. Volvé en unos minutos.";
+  }
+
+  /**
+   * What the REGISTRATION of contestants says, by the server's clock. It never invents a time: with nothing configured it says only that the
+   * schedule will be announced. After the cutoff it says that registrations ended — the page then offers no form at all.
+   */
+  function registrationNotice(reg) {
+    const phase = reg && reg.phase;
+    if (phase === "OPEN") return reg.closesAt ? `La inscripción de concursantes está abierta ${untilTime(reg.closesAt)} (hora de Honduras).` : "La inscripción de concursantes está abierta.";
+    if (phase === "NOT_OPEN") return reg.opensAt ? `La inscripción de concursantes abre ${atTime(reg.opensAt)} (hora de Honduras).` : "La inscripción de concursantes todavía no abrió.";
+    if (phase === "CLOSED") return "La inscripción de concursantes terminó. Ya no se aceptan nuevas candidaturas.";
+    return "Pronto anunciaremos el horario de inscripción.";
+  }
+
+  /** The state of a category as the picker names it: one short label and whether it can be voted in. Judged by the SERVER's phase, never the phone. */
+  function categoryState(cat, myVote) {
+    const voted = !!myVote;
+    if (!cat) return { label: "", open: false, tone: "idle" };
+    if (cat.phase === "OPEN") return { label: voted ? "Ya votaste · podés cambiarlo" : "Votación abierta · todavía no votaste", open: true, tone: voted ? "voted" : "open" };
+    if (cat.phase === "CLOSED" || cat.phase === "ENDED") {
+      if (cat.published) return { label: "Resultados publicados", open: false, tone: "results" };
+      return { label: voted ? "Votación cerrada · tu voto quedó registrado" : "Votación cerrada", open: false, tone: "closed" };
     }
-    return info && info.tentative
-      ? "La votación aún no está abierta. Los horarios son tentativos hasta que se confirmen."
-      : "La votación aún no está abierta. Vuelve en unos minutos.";
+    return { label: "La votación todavía no abre", open: false, tone: "idle" };
+  }
+
+  /** What a published category announces: the winner(s) by public number, or — when nobody cast a valid vote — that there is no winner. Never a count. */
+  function resultsHeadline(results) {
+    if (!results || results.published !== true) return null;
+    const n = Array.isArray(results.items) ? results.items.length : 0;
+    if (n === 0) return "Sin resultado ganador";
+    return n > 1 ? "¡Tenemos ganadores compartidos!" : "¡Tenemos ganador!";
   }
 
   // ---------------------------------------------------------------- the deck and the grid
@@ -273,71 +344,22 @@ const CommunityVotingRound = (() => {
     return dx < 0 ? "next" : "prev";
   }
 
-  // ---------------------------------------------------------------- location (final only)
-
-  /** Does THIS round need a position with the vote? Only what the server says: a page cannot decide it. */
-  function locationRequired(info) {
-    return !!(info && info.locationRequired === true);
-  }
-
-  /**
-   * One position reading, or a rejection carrying a code from MESSAGES. Fresh (never a cached position), bounded in time. The result is
-   * sent in the body of the vote POST and nowhere else; it is never stored, logged or put in a URL.
-   */
-  function readPosition(geolocation, options) {
-    const timeout = (options && options.timeoutMs) || 12000;
-    // The browser's own `timeout` starts only AFTER the person answers the permission prompt, so a prompt nobody answers would leave the
-    // vote waiting forever; this wall-clock limit (the browser's timeout plus time to answer) ends it, and whatever arrives later is ignored.
-    const grace = options && Number.isFinite(options.promptGraceMs) ? options.promptGraceMs : 45000;
-    const setTimer = (options && options.setTimer) || ((fn, ms) => setTimeout(fn, ms));
-    const clearTimer = (options && options.clearTimer) || ((handle) => clearTimeout(handle));
-    return new Promise((resolve, reject) => {
-      if (!geolocation || typeof geolocation.getCurrentPosition !== "function") return reject({ code: "LOCATION_UNSUPPORTED" });
-      let settled = false;
-      let timer = null;
-      const finish = (settle, value) => {
-        if (settled) return; // a callback that arrives after the answer, the refusal or the time limit changes nothing
-        settled = true;
-        if (timer !== null) clearTimer(timer);
-        settle(value);
-      };
-      timer = setTimer(() => finish(reject, { code: "LOCATION_TIMEOUT" }), timeout + grace);
-      geolocation.getCurrentPosition(
-        (position) => {
-          const c = position && position.coords;
-          if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude) || !Number.isFinite(c.accuracy)) return finish(reject, { code: "LOCATION_UNAVAILABLE" });
-          finish(resolve, { latitude: c.latitude, longitude: c.longitude, accuracyMeters: c.accuracy });
-        },
-        (error) => finish(reject, { code: error && error.code === 1 ? "LOCATION_DENIED" : error && error.code === 3 ? "LOCATION_TIMEOUT" : "LOCATION_UNAVAILABLE" }),
-        { enableHighAccuracy: true, timeout, maximumAge: 0 }
-      );
-    });
-  }
-
   // ---------------------------------------------------------------- one vote, start to finish
 
   /**
-   * Runs ONE vote (or one revision): bind (idempotent), take a fresh server-issued intent, read the position ONLY when the round needs
-   * one, and send the vote. The vote is confirmed ONLY when the server answered 200; nothing is shown as accepted before that.
+   * Runs ONE vote (or one revision): bind (idempotent), take a fresh server-issued intent and send the vote. The vote is confirmed ONLY when the
+   * server answered 200; nothing is shown as accepted before that. Nothing about a location is read, asked or sent: there is none in the contest.
    *
    * A lost response (network error on the vote) is not a failure and not a success: the result carries `retry`, the SAME intent, which
    * the server answers as a replay if it had been applied and applies if it had not — so retrying can never duplicate or fabricate a vote.
    */
   async function castFavorite(deps) {
-    const { api, geolocation, info, candidateId, interactionInstanceId, retry, isCurrent } = deps;
-    // A position can arrive long after the tap that asked for it (the person answers the prompt late, signs out, taps something else).
-    // `isCurrent` says whether the page is still where the tap happened; when it is not, NOTHING is sent: no bind, no intent, no vote.
+    const { api, candidateId, interactionInstanceId, retry, isCurrent } = deps;
+    // `isCurrent` says whether the page is still where the tap happened (the person may sign out or tap something else while a request is out);
+    // when it is not, NOTHING further is sent: no bind, no intent, no vote.
     const stale = () => typeof isCurrent === "function" && !isCurrent();
     const staleResult = () => ({ ok: false, code: "STALE_ACTION", stale: true, retry: retry || null });
-    let location = null;
-    if (locationRequired(info)) {
-      try {
-        location = await readPosition(geolocation);
-      } catch (e) {
-        return { ok: false, code: (e && e.code) || "LOCATION_UNAVAILABLE", retry: retry || null };
-      }
-      if (stale()) return staleResult();
-    }
+    if (stale()) return staleResult();
 
     let bindingId;
     let intentNo;
@@ -355,9 +377,7 @@ const CommunityVotingRound = (() => {
       intentNo = issued.json.intentNo;
     }
 
-    const body = { bindingId, intentNo, interactionInstanceId, candidateId };
-    if (location) body.location = location;
-    const cast = await api.vote(body);
+    const cast = await api.vote({ bindingId, intentNo, interactionInstanceId, candidateId });
     if (cast.status === 200 && cast.json && (cast.json.outcome === "APPLIED" || cast.json.outcome === "UNCHANGED" || cast.json.outcome === "REPLAYED")) {
       return { ok: true, outcome: cast.json.outcome, candidateId: cast.json.candidateId };
     }
@@ -365,9 +385,135 @@ const CommunityVotingRound = (() => {
     return { ok: false, code: (cast.json && cast.json.code) || "INTERNAL_ERROR", status: cast.status, current: (cast.json && cast.json.current) || null };
   }
 
+  // ---------------------------------------------------------------- the public code, the search and the share text
+
+  /**
+   * The code as a person types it: any case, with or without the hyphen, with spaces. Null when it cannot be a code (a look-alike — 0, 1, I, L, O,
+   * U — or the wrong length). The SAME normalization the server and the database apply, so the page and the search agree on what was meant.
+   */
+  function normalizeCode(raw) {
+    if (typeof raw !== "string") return null;
+    const compact = raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    return /^HAL[2-9A-HJKMNP-TV-Z]{5}$/.test(compact) ? `HAL-${compact.slice(3)}` : null;
+  }
+
+  const fold = (text) => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  /**
+   * The gallery filtered by what the person typed: a complete code finds exactly that candidacy; anything else matches names and codes by substring
+   * (accents and case ignored). An empty query shows everything. Nothing here ranks or reorders: the order is the voter's own reproducible one.
+   */
+  function searchGallery(items, query) {
+    const list = Array.isArray(items) ? items : [];
+    const q = typeof query === "string" ? query.trim() : "";
+    if (q === "") return list;
+    const code = normalizeCode(q);
+    if (code) return list.filter((i) => i.code === code);
+    const needle = fold(q);
+    return list.filter((i) => fold(i.name).includes(needle) || fold(i.code).includes(needle) || fold(i.code).replace(/-/g, "").includes(needle.replace(/-/g, "")));
+  }
+
+  /** What a candidacy shows as its title: the public name the person chose, or — for an entry the team made by hand and has not named — its ballot number. */
+  function candidacyTitle(item) {
+    if (item && typeof item.name === "string" && item.name !== "") return item.name;
+    return item && item.alias ? `Disfraz #${item.alias}` : "Disfraz";
+  }
+
+  /** The text to share a ficha: neutral (it never asks for a vote), the code and the link. */
+  function shareText(ficha) {
+    const c = ficha && ficha.candidacy;
+    if (!c) return "";
+    return `Mirá la candidatura de ${c.name || "este disfraz"} (código ${c.code}) en el concurso de disfraces de The Pub by Beer Box: ${c.ficheUrl}`;
+  }
+
+  // ---------------------------------------------------------------- the contestant's registration (form logic only: the server and the database decide)
+
+  const COUNTRY_CODES = [
+    { code: "504", label: "Honduras (+504)" },
+    { code: "502", label: "Guatemala (+502)" },
+    { code: "503", label: "El Salvador (+503)" },
+    { code: "505", label: "Nicaragua (+505)" },
+    { code: "506", label: "Costa Rica (+506)" },
+    { code: "507", label: "Panamá (+507)" },
+    { code: "52", label: "México (+52)" },
+    { code: "1", label: "Estados Unidos y Canadá (+1)" },
+    { code: "57", label: "Colombia (+57)" },
+    { code: "34", label: "España (+34)" },
+    { code: "other", label: "Otro país" },
+  ];
+  const DEFAULT_COUNTRY = "504";
+
+  /** "+504" and "9988 7766" make "+50499887766"; "" when either part has no digits. The person SEES this number and confirms it before it is sent. */
+  function composeWhatsapp(countryCode, national) {
+    const cc = String(countryCode || "").replace(/\D/g, "");
+    const nn = String(national || "").replace(/\D/g, "");
+    return cc && nn ? `+${cc}${nn}` : "";
+  }
+  const validWhatsapp = (e164) => /^\+[1-9][0-9]{7,14}$/.test(e164);
+
+  /** "+504 9988-7766" as the person reads it back to confirm; the E.164 digits when the country is unknown to the formatter. */
+  function displayWhatsapp(e164) {
+    if (!validWhatsapp(e164)) return "";
+    const m = /^\+504(\d{4})(\d{4})$/.exec(e164);
+    return m ? `+504 ${m[1]}-${m[2]}` : e164;
+  }
+
+  const hasControl = (text) => /[\u0000-\u001f\u007f-\u009f]/.test(text);
+
+  /** The registration form's own checks — a convenience for the person. The server and the database re-validate every one of them. */
+  function validateRegistration(v) {
+    const errors = {};
+    const name = typeof v.name === "string" ? v.name.trim() : "";
+    if ([...name].length < 2 || [...name].length > 40 || hasControl(name)) errors.name = "Escribí el nombre con el que querés aparecer (de 2 a 40 letras).";
+    if (!["MOST_ELABORATE", "SEXIEST", "BEST_GROUP", "FUNNIEST"].includes(v.category)) errors.category = "Elegí la categoría en la que participás.";
+    const whatsapp = composeWhatsapp(v.country === "other" ? v.otherCountry : v.country, v.number);
+    if (!validWhatsapp(whatsapp)) errors.whatsapp = "Escribí tu número de WhatsApp completo, con el código del país.";
+    else if (v.whatsappConfirmed !== true) errors.whatsappConfirmed = "Confirmá que este número es tuyo.";
+    if (v.requirementsAccepted !== true) errors.requirements = "Para inscribirte tenés que confirmar que sos mayor de edad y aceptar los requisitos.";
+    if (v.deliveryAuthorized !== true) errors.delivery = "Marcá si autorizás que te enviemos tu foto y tu código por WhatsApp.";
+    return { ok: Object.keys(errors).length === 0, errors, whatsapp, name };
+  }
+
+  /** What the registration view shows, from the contest's registration phase and the person's own candidacy. */
+  function registrationStage(registration, mine) {
+    if (mine) return "MINE";
+    const phase = registration && registration.phase;
+    if (phase === "OPEN") return "FORM";
+    if (phase === "NOT_OPEN") return "NOT_OPEN";
+    if (phase === "CLOSED") return "CLOSED";
+    return "NOT_SCHEDULED";
+  }
+
+  /** What a candidacy says about itself to the person who owns it (or belongs to it), step by step. Never a promise the team has not made. */
+  function myCandidacyText(mine) {
+    if (!mine) return "";
+    if (mine.state === "WITHDRAWN") return "Esta candidatura fue retirada.";
+    if (mine.state === "PUBLIC") return "Tu candidatura ya es pública: aparece en la galería con tu foto.";
+    return mine.role === "MEMBER"
+      ? "Eres parte de esta candidatura de grupo. Aparecerá en la galería cuando el equipo termine de verificarla en la estación."
+      : "Tu candidatura está inscrita. Pasá por la estación del concurso con tu código: el equipo verifica tu nombre y tu categoría, te toma la foto y la hace pública.";
+  }
+
+  function deliveryText(status) {
+    if (status === "DELIVERED") return "Tu foto y tu código ya te los enviaron por WhatsApp.";
+    if (status === "PENDING") return "Te enviaremos tu foto y tu código por WhatsApp después de la estación. Mientras tanto, tu candidatura no depende de ese envío.";
+    return "";
+  }
+
+  /** The reasons of the contest in a few lines, for "Cómo participar". Nothing here hides an essential condition; the rest of the page stays short. */
+  const HOW_TO_PARTICIPATE = [
+    "Para participar como concursante, inscribite con tu cuenta de URBANO Gaming (correo verificado y perfil completo). Es una sola candidatura por persona, en una sola categoría, y solo para mayores de edad.",
+    "Pasá por la estación del concurso con tu código: el equipo verifica tu nombre y tu categoría y te toma la foto. Tu candidatura se hace pública solo después de eso.",
+    "En el grupo, una persona lo inscribe como representante y el equipo registra en la estación a las demás. Todas las personas de la foto tienen que aceptar.",
+    "Para votar entrás con tu correo. Podés votar desde donde estés: no pedimos tu ubicación. Tenés un voto por categoría y lo podés cambiar hasta que cierre la votación.",
+    "No podés votar por tu propio disfraz ni por el de tu grupo.",
+    "Gana quien reciba más votos en cada categoría. Si hay empate, hay más de un ganador. Los resultados se publican después de que el equipo los revise.",
+    "Habrá premios en cada categoría.",
+  ];
+
   // ---------------------------------------------------------------- the API
 
-  /** A thin client for the pilot's routes. Every call returns { status, json }; it never throws on an HTTP error. */
+  /** A thin client for ONE category's routes. Every call returns { status, json }; it never throws on an HTTP error. */
   function buildApi(fetchImpl, getToken, instanceId) {
     const base = `/api/gaming/community-voting/rounds/${instanceId}`;
     async function call(path, method, body, authed) {
@@ -398,9 +544,54 @@ const CommunityVotingRound = (() => {
       intent: () => call("/intents", "POST", {}, true),
       vote: (body) => call("/votes", "POST", body, true),
       claim: (claimCode) => call("/claims", "POST", { claimCode }, true),
+      register: (body) => call("/registration", "POST", body, true),
     };
   }
 
+  /** The contest's own routes: the caller's candidacy (signed in) and a candidacy's public ficha by its code. Every call returns { status, json }. */
+  function buildContestApi(fetchImpl, getToken, contestId) {
+    const base = `/api/gaming/community-voting/contests/${contestId}`;
+    async function call(path, authed) {
+      const headers = { "Content-Type": "application/json" };
+      if (authed) {
+        const token = await getToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+      }
+      try {
+        const response = await fetchImpl(`${base}${path}`, { method: "GET", headers });
+        let json = null;
+        try {
+          json = await response.json();
+        } catch (e) {
+          json = null;
+        }
+        return { status: response.status, json };
+      } catch (e) {
+        return { status: 0, json: { code: "NETWORK" } };
+      }
+    }
+    return {
+      mine: () => call("/mine", true),
+      ficha: (code) => call(`/candidacies/${encodeURIComponent(code)}`, false),
+    };
+  }
+
+
+  /** The contest's own public read: the categories that have a round, each with its phase by the SERVER's clock. No identity, never cached. */
+  async function readContest(fetchImpl, contestId) {
+    try {
+      const response = await fetchImpl(`/api/gaming/community-voting/contests/${contestId}`, { method: "GET", headers: { "Content-Type": "application/json" } });
+      let json = null;
+      try {
+        json = await response.json();
+      } catch (e) {
+        json = null;
+      }
+      return { status: response.status, json };
+    } catch (e) {
+      return { status: 0, json: { code: "NETWORK" } };
+    }
+  }
 
   // ---------------------------------------------------------------- live state: how soon a page learns what the server decided (UG-IV-GATE-014)
 
@@ -562,18 +753,17 @@ const CommunityVotingRound = (() => {
   // ---- createPoller:end
 
   /**
-   * How often a public page asks for the round's state (before jitter and backoff). The window of a FINAL is only five minutes, so it is asked
-   * often; a preliminary lasts hours and may have a crowd, so it is asked less. After a close the publication is expected soon, so the page
-   * asks quickly for a few minutes and then settles; once published there is little left to learn. Bounded: never faster than 5 s.
+   * How often a public page asks for the contest's state (before jitter and backoff). A category lasts an hour at most and may have a crowd, so
+   * it is asked every 15 s while open; after a close the publication is expected soon, so the page asks quickly for a few minutes and then
+   * settles; once everything is published there is little left to learn. Bounded: never faster than 5 s.
    */
-  const POLL = { finalOpenMs: 5000, finalWaitMs: 8000, openMs: 15000, waitMs: 20000, afterCloseMs: 6000, afterCloseWindowMs: 180000, settledMs: 20000, publishedMs: 60000, staleAfterMs: 30000 };
+  const POLL = { openMs: 15000, waitMs: 20000, afterCloseMs: 6000, afterCloseWindowMs: 180000, settledMs: 20000, publishedMs: 60000, staleAfterMs: 30000 };
 
   function pollDelayMs(ctx) {
     const c = ctx || {};
-    const final = c.roundRole === "FINAL";
-    if (c.phase === "OPEN") return final ? POLL.finalOpenMs : POLL.openMs;
-    if (c.phase === "NOT_OPEN") return final ? POLL.finalWaitMs : POLL.waitMs;
-    if (c.phase === "CLOSED" || c.phase === "ENDED") {
+    if (c.phase === "OPEN") return POLL.openMs;
+    if (c.phase === "NOT_OPEN") return POLL.waitMs;
+    if (c.phase === "CLOSED" || c.phase === "ENDED" || c.phase === "RESULTS") {
       if (c.published) return POLL.publishedMs;
       return toNum(c.sinceChangeMs) < POLL.afterCloseWindowMs ? POLL.afterCloseMs : POLL.settledMs;
     }
@@ -594,18 +784,41 @@ const CommunityVotingRound = (() => {
     formatCountdown,
     deadlineRemainingText,
     formatEventTime,
+    formatEventRange,
+    formatEventDate,
+    formatEventDayShort,
+    atTime,
+    untilTime,
+    registrationWindowText,
+    votingWindowText,
     EVENT_TIME_ZONE,
     phaseNotice,
+    registrationNotice,
+    normalizeCode,
+    searchGallery,
+    candidacyTitle,
+    shareText,
+    COUNTRY_CODES,
+    DEFAULT_COUNTRY,
+    composeWhatsapp,
+    displayWhatsapp,
+    validateRegistration,
+    registrationStage,
+    myCandidacyText,
+    deliveryText,
+    HOW_TO_PARTICIPATE,
+    categoryState,
+    resultsHeadline,
     computeVirtualWindow,
     deckNavigate,
     swipeIntent,
-    locationRequired,
-    readPosition,
     castFavorite,
     createPoller,
     POLL,
     pollDelayMs,
     buildApi,
+    buildContestApi,
+    readContest,
     toNum,
   };
 })();
