@@ -103,13 +103,11 @@ describe("the page does not pretend to enforce it", () => {
     expect(code).not.toMatch(/opens_at|12:30|windowOpens|90 \* 60|5400000|kickoffAt[^;\n]*[-+]\s*\d+\s*\*/); // no arithmetic on the start, no hard-coded hour
     expect(code).toMatch(/match\.participationOpensAt/); // what it shows is what the server says
     expect(code).toMatch(/new Date\(\) >= new Date\(match\.kickoffAt\)/); // closing: the one time rule
+    // The Home (redesigned on 2026-10-31 into four experience panels) carries no card, no list and no script of its own: it can keep no clock and show no hour.
     const home = read("public/index.html");
-    expect(home).toMatch(/<p class="featured-note" id="featured-note" data-i18n="home\.upcoming\.note">/); // the note on the card is a static line
     expect(home).not.toMatch(/featured-window/); // the old class (and its markup) is gone
     const homeCode = home.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "");
-    expect(homeCode).not.toMatch(/featured-(note|window)[^;{}]*\.(hidden|disabled)|\.disabled\s*=|setTimeout\(|setInterval\(/);
-    // the one thing the page does with the note is hide it when the list has no rows: never a clock or an hour
-    expect(homeCode).toMatch(/note\.hidden = items\.length === 0/);
+    expect(homeCode).not.toMatch(/participationOpensAt|kickoffAt|setTimeout\(|setInterval\(|Date\.now|new Date\(|\.disabled\s*=/);
     const card = read("public/homeUpcoming.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(card).not.toMatch(/opens_at|12:30|90 \* 60|5400000|kickoffAt[^;\n]*[-+]\s*\d+\s*\*/); // no hard-coded hour, no arithmetic on the start to find an opening
     // the opening it shows is the one the server sends: the only reader of an opening is windowOpensMs, it reads the SERVER match's participationOpensAt, and it is only ever asked about a server match

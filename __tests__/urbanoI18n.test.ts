@@ -172,6 +172,9 @@ describe("the two languages carry the same table", () => {
   it("Spanish is real Spanish: no entry is an unchanged copy of the English one unless it is a name or a symbol", () => {
     const SAME_ON_PURPOSE = new Set([
       "home.halloween.event", // "Halloween · Beer Box" is the event's name and its venue's, the same in both languages
+      "home.xp.voting.title", "home.xp.score.title", "home.xp.trivia.title", "home.xp.poker.title", // "URBANO Voting", "URBANO Score", "URBANO Trivia" and "URBANO Poker" are product names
+      "lp.voting.pageTitle", "lp.score.pageTitle", "lp.trivia.pageTitle", "lp.poker.pageTitle", // (and the page titles made of them)
+      "home.feat.product", "home.feat.title", "home.feat.venue", // the featured card: "URBANO Voting", "Halloween" and "The Pub by Beer Box" are names, the same in both languages
       "home.title", "pred.title", "pred.vs", "upcoming.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "vs" is the same word in both languages (the separator between two teams)
     ]);
     for (const key of Object.keys(en)) {
@@ -291,7 +294,7 @@ describe("every public page is wired to the table", () => {
   const { es, en } = i18n.dictionary() as { es: Record<string, string>; en: Record<string, string> };
   const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
 
-  for (const file of ["public/index.html", "public/soccer-predictions.html", "public/profile.html", "public/leaderboards.html", "public/rewards.html"]) {
+  for (const file of ["public/index.html", "public/voting.html", "public/score.html", "public/trivia.html", "public/poker.html", "public/soccer-predictions.html", "public/profile.html", "public/leaderboards.html", "public/rewards.html"]) {
     it(`${file}: Spanish first paint, a key for every translated node, and the first-paint text equals the Spanish table`, () => {
       const dom = new JSDOM(read(file), { url: "http://localhost/" }); // no scripts run: this is the no-script first paint
       const doc = dom.window.document;

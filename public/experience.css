@@ -1,0 +1,341 @@
+/*
+ * URBANO Gaming — Experiences.
+ *
+ * The Home's four experience panels (Halloween, Score, Trivia, Poker) and the four experience pages that "Discover more" opens.
+ * The same identity tokens as the rest of the application shell (charcoal, ivory, the purple of the Gaming layer, Montserrat); each
+ * experience adds ONE accent colour, used for its label, its border and its glow, never as the fill of a button (the one button of
+ * every panel is the shell's ivory pill) and never for running text.
+ *
+ * Every picture is decoration (empty alt text) and every word is in the markup, so nothing here depends on a script. The shell
+ * rules (header, language selector, account controls, navigation, footer) are the Home's own, unchanged, so a person moving between
+ * the Home, the experience pages and Premios or Clasificaciones sees the same page frame.
+ */
+:root {
+  --charcoal: #0a0a0a;
+  --bg-page: #0a0a0a;
+  --bg-card: #161616;
+  --surface-2: #1c1c1c;
+  --ink: #f5f1e8;
+  --muted: #9b9689;
+  --line: #2a2a2a;
+  --gold: #d4af37;
+  --primary-fill: #f5f1e8;
+  --primary-ink: #0a0a0a;
+  --exp-purple: #7c3aed;
+  --exp-purple-glow: rgba(124, 58, 237, 0.45);
+  --exp-purple-bg: rgba(124, 58, 237, 0.12);
+  --exp-purple-soft: #b57cff;
+  /* one accent per experience */
+  --ember: #ff9a4d;
+  --pitch: #4ade80;
+  --violet: #b57cff;
+  --ruby: #ff7a8a;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-page);
+  color: var(--ink);
+  margin: 0;
+  padding: 0 0 60px;
+}
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---------- shell: header, language selector, account controls (the Home's own rules) ---------- */
+.shell-header {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+  max-width: 1240px; margin: 0 auto; padding: 20px 20px 0;
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-link { display: inline-flex; align-items: center; gap: 10px; border-radius: 6px; }
+.brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+.brand-mark-wrap::before {
+  content: ""; position: absolute; inset: -9px;
+  background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
+  filter: blur(4px); z-index: 0;
+}
+.brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+.brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+.brand-badge {
+  background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+  color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+}
+.header-tools { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; max-width: 100%; }
+.lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.lang-switch button {
+  font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted);
+  background: transparent; border: none; padding: 9px 12px; min-height: 44px; min-width: 44px; cursor: pointer;
+}
+.lang-switch button[aria-pressed="true"] { color: var(--primary-ink); background: var(--primary-fill); }
+.account-group { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; position: relative; }
+.account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
+.signin-btn {
+  font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
+  border-radius: 8px; border: 1px solid var(--ink); background: transparent;
+  color: var(--ink); cursor: pointer;
+  white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.signin-btn:hover { background: var(--surface-2); }
+a.signin-btn { display: inline-block; text-align: center; }
+.account-group .signin-btn { flex: 0 1 auto; min-width: 0; }
+.signin-status {
+  display: none; max-width: 1240px; margin: 10px auto 0; padding: 10px 20px 0;
+  font-size: 12.5px; color: var(--muted); line-height: 1.5;
+}
+
+/* ---------- shell: primary navigation ---------- */
+.primary-nav {
+  display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  max-width: 1240px; margin: 16px auto 0; padding: 0 20px 2px;
+}
+.primary-nav::-webkit-scrollbar { display: none; }
+.nav-link {
+  flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted);
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.nav-link.is-active { color: var(--ink); border-color: var(--ink); }
+
+/* ---------- shell: footer ---------- */
+footer {
+  max-width: 1240px; margin: 56px auto 0; padding: 20px; text-align: center;
+  color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+}
+footer p { margin: 0 0 6px; }
+footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
+
+/* ---------- focus: one visible ring everywhere ---------- */
+.brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
+.signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .xp-cta:focus-visible, .lp-back:focus-visible,
+.lp-btn:focus-visible, .xf-btn:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+/* ---------- Home: hero ---------- */
+.hero { max-width: 1240px; margin: 0 auto; padding: 34px 20px 4px; text-align: center; }
+.hero h1 {
+  font-size: clamp(28px, 4.6vw, 44px); font-weight: 800; letter-spacing: -0.015em; line-height: 1.12;
+  margin: 0 0 12px; text-wrap: balance;
+}
+.hero p { color: var(--muted); font-size: 15px; max-width: 620px; margin: 0 auto; line-height: 1.6; text-wrap: balance; }
+
+/* ---------- the four experience panels ----------
+ * Two shapes, chosen by width. From 641 px a panel is a WIDE card: the picture fills it, the words sit on its dark left side over a scrim that opens to the
+ * right (the pictures are composed that way: dark and quiet on the left, the subject on the right). Up to 640 px a panel is a STACKED card: the whole
+ * 16:9 picture on top (nothing is cropped away, nothing covers it) and the words below it. Two columns of wide cards from 900 px, one column below. */
+.xp-section { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+.xp-choose {
+  margin: 30px 0 14px; text-align: center; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+}
+.xp-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .xp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.xp-grid > li { display: flex; min-width: 0; }
+
+.xp {
+  --accent: var(--exp-purple-soft);
+  --art-x: 70%;
+  position: relative; isolation: isolate; overflow: hidden; width: 100%;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 22px;
+  min-height: 440px; padding: 26px 30px;
+  border-radius: 18px; background: var(--charcoal);
+  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
+}
+.xp-voting { --accent: var(--ember); --art-x: 36%; }
+.xp-score { --accent: var(--pitch); --art-x: 82%; }
+.xp-trivia { --accent: var(--violet); --art-x: 72%; }
+.xp-poker { --accent: var(--ruby); --art-x: 72%; }
+
+.xp-art {
+  position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; pointer-events: none;
+  object-fit: cover; object-position: var(--art-x) 50%;
+  transition: transform 0.6s ease;
+}
+/* the dark that carries the words: deepest on the left, where the words are, opening to the right so the picture shows at its own brightness */
+.xp-scrim {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(10, 10, 10, 0.97) 0, rgba(10, 10, 10, 0.88) 38%, rgba(10, 10, 10, 0.34) 64%, rgba(10, 10, 10, 0) 100%),
+    linear-gradient(0deg, rgba(10, 10, 10, 0.5), transparent 40%);
+}
+.xp-top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: flex-start; }
+.xp-kicker, .xp-chip {
+  font-size: 11px; font-weight: 700; line-height: 1.2; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 999px; background: rgba(10, 10, 10, 0.86);
+}
+.xp-kicker { color: var(--accent); border: 1px solid rgba(255, 255, 255, 0.2); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+.xp-chip { color: var(--ink); border: 1px solid rgba(245, 241, 232, 0.28); letter-spacing: 0.06em; }
+.xp-body { display: flex; flex-direction: column; gap: 10px; max-width: 56%; }
+.xp-title { margin: 0; font-size: 32px; line-height: 1.1; font-weight: 800; letter-spacing: -0.01em; text-wrap: balance; }
+.xp-desc { margin: 0; max-width: 38ch; font-size: 14.5px; line-height: 1.55; color: rgba(245, 241, 232, 0.94); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+
+/* The one button of a panel. It is a link (it goes somewhere), drawn as the shell's ivory pill. Its pseudo-element stretches over the whole
+   panel, so the whole panel is the tap target while the panel has one link and one tab stop. */
+.xp-cta {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; margin-top: 6px;
+  min-height: 46px; padding: 11px 22px; border-radius: 999px;
+  background: var(--primary-fill); color: var(--primary-ink); font-size: 14px; font-weight: 700;
+}
+.xp-cta::before { content: ""; position: absolute; inset: 0; z-index: 1; } /* no radius: the panel's own overflow clips it, so every corner answers */
+.xp-cta::after { content: "→"; content: "→" / ""; transition: transform 0.25s ease; }
+.xp:focus-within { border-color: var(--accent); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .xp:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: 0 22px 44px -24px rgba(0, 0, 0, 0.9), 0 0 38px -12px var(--accent); }
+  .xp:hover .xp-art { transform: scale(1.04); }
+  .xp:hover .xp-cta::after { transform: translateX(4px); }
+}
+
+/* ---------- the featured card ("Destacado") ---------- */
+.xf-section { max-width: 1240px; margin: 28px auto 0; padding: 0 20px; }
+.xf {
+  --accent: var(--ember);
+  position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: flex-end; min-height: 340px;
+  border-radius: 20px; background: var(--charcoal);
+  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: 0 24px 60px -36px var(--accent);
+}
+.xf-art { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; pointer-events: none; object-fit: cover; object-position: 92% 50%; }
+.xf-scrim {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(10, 10, 10, 0.96) 0, rgba(10, 10, 10, 0.9) 34%, rgba(10, 10, 10, 0.45) 62%, rgba(10, 10, 10, 0.04) 100%),
+    linear-gradient(0deg, rgba(10, 10, 10, 0.55), transparent 40%);
+}
+.xf-body { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 660px; padding: 30px 32px 32px; }
+.xf-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.xf-label {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.2;
+  padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--primary-ink);
+}
+.xf-title { margin: 0; font-size: clamp(38px, 6vw, 62px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; }
+.xf-meta { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.45; color: rgba(245, 241, 232, 0.96); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.xf-desc { margin: 0; max-width: 48ch; font-size: 15px; line-height: 1.55; color: rgba(245, 241, 232, 0.94); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.xf-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+.xf-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 24px; border-radius: 999px;
+  font-size: 14px; font-weight: 700; line-height: 1.2; text-align: center;
+}
+a.xf-btn.is-primary { background: var(--primary-fill); color: var(--primary-ink); }
+a.xf-btn.is-secondary { background: rgba(10, 10, 10, 0.62); color: var(--ink); border: 1.5px solid rgba(245, 241, 232, 0.6); }
+a.xf-btn::after { content: "→"; content: "→" / ""; margin-left: 10px; }
+/* While nothing is open the two buttons are written but not pressable: a dashed outline and plain words say so (never a faded button), and the sentence under them says why. */
+span.xf-btn { cursor: default; color: #d6d1c3; border: 1.5px dashed rgba(245, 241, 232, 0.5); background: rgba(10, 10, 10, 0.55); }
+.xf-status { margin: 2px 0 0; max-width: 56ch; font-size: 13px; font-weight: 600; line-height: 1.5; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+.xf-cats { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.xf-cats li { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: rgba(10, 10, 10, 0.78); border: 1px solid rgba(245, 241, 232, 0.25); color: #e3dfd3; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  a.xf-btn { transition: transform 0.25s ease; }
+  a.xf-btn:hover { transform: translateY(-2px); }
+}
+/* ---------- the ten crests of URBANO Score (the strip of the previous Home, with its own rules unchanged) ---------- */
+.club-crest { width: 24px; height: 24px; object-fit: contain; flex: none; }
+.featured-teams { margin: 0; width: 100%; }
+.featured-teams-label { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.78); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+/* The ten crests: decoration drawn by /urbanoClubCrests.js. The team's NAME is in the markup (visually hidden while its crest is drawn, visible as a
+   small label when it is not), so the strip is never an unlabelled row of pictures. */
+.ten-crests { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; align-items: center; justify-items: center; }
+.ten-crests .crest-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 0; }
+.ten-crests .club-crest { width: 34px; height: 34px; }
+.ten-crests .crest-name { font-size: 11px; font-weight: 700; color: var(--ink); text-align: center; line-height: 1.2; }
+/* the safety net: if no crest is drawn (withdrawn, or none loads) the names get room of their own instead of running into each other */
+.ten-crests:not(:has(.club-crest)) { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px 12px; justify-items: start; }
+.ten-crests .club-crest + .crest-name { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
+.featured-legal { margin: 14px 0 0; max-width: 60ch; font-size: 12px; line-height: 1.5; color: rgba(245, 241, 232, 0.8); }
+/* In the Score panel the strip and its sentence sit together in one dark box (its own backing, so the small words never depend on the picture behind
+   them): two rows of five in a wide card, one row of ten in a stacked card (a phone). */
+.xp-teams { padding: 11px 12px 12px; border-radius: 12px; background: rgba(10, 10, 10, 0.78); border: 1px solid rgba(245, 241, 232, 0.14); }
+.xp-teams .ten-crests { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 6px; }
+.xp-teams .ten-crests .club-crest { width: 100%; max-width: 32px; height: auto; aspect-ratio: 1 / 1; }
+.xp-teams .featured-legal { margin: 10px 0 0; }
+/* the safety net, in the panel: with no crest drawn the names get columns wide enough for a name (this wins over the panel's five and ten columns above) */
+.xp-teams .ten-crests:not(:has(.club-crest)) { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px 12px; justify-items: start; }
+
+/* ---------- experience pages ---------- */
+.lp { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+.lp-back { display: inline-block; margin: 20px 0 14px; padding: 8px 0; font-size: 13px; font-weight: 600; color: var(--muted); border-radius: 6px; }
+.lp-back:hover { color: var(--ink); }
+.xp--hero { min-height: 420px; padding: 30px 32px; }
+.xp--hero .xp-body { max-width: 560px; gap: 12px; }
+.xp--hero .xp-title { font-size: clamp(34px, 5vw, 52px); line-height: 1.06; }
+.xp--hero .xp-desc { max-width: 46ch; font-size: 16px; }
+.lp-section { margin-top: 44px; }
+.lp-h2 { margin: 0 0 16px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.lp-steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.lp-step { counter-increment: step; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-card); padding: 18px; }
+.lp-step::before {
+  content: counter(step); display: inline-grid; place-items: center; width: 30px; height: 30px; margin-bottom: 12px;
+  border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font-size: 14px; font-weight: 800;
+}
+.lp-step h3 { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+.lp-step p { margin: 0; font-size: 13.5px; line-height: 1.6; color: #cfcabc; }
+.lp-know { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.lp-know li { max-width: 80ch; border-left: 2px solid var(--accent); padding: 2px 0 2px 14px; font-size: 14px; line-height: 1.6; color: #d6d1c3; }
+.lp-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.lp-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 10px 22px; border-radius: 999px;
+  font-size: 14px; font-weight: 700; background: var(--primary-fill); color: var(--primary-ink);
+}
+.lp-btn.is-quiet { background: transparent; color: var(--ink); border: 1px solid rgba(245, 241, 232, 0.4); }
+.lp-live { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 14px; background: var(--bg-card); padding: 20px 20px 22px; }
+.lp-live-title { margin: 0 0 10px; font-size: 17px; font-weight: 600; line-height: 1.45; color: var(--ink); }
+.lp-live-title strong { font-weight: 800; }
+.lp-live-status { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink); max-width: 60ch; }
+.lp-live .xf-btn { min-height: 46px; }
+.lp-chips { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-chips li { font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: #d6d1c3; }
+
+/* ---------- phone: STACKED cards (the whole picture, then the words) ---------- */
+@media (max-width: 640px) {
+  .shell-header { padding: 16px 16px 0; }
+  .header-tools { display: contents; }
+  .lang-switch { margin-left: auto; }
+  .account-group { flex: 1 1 100%; }
+  .brand-word { font-size: 15px; }
+  .signin-btn { font-size: 12px; padding: 9px 12px; min-height: 44px; }
+  .primary-nav { padding: 0 16px 2px; }
+  .signin-status { padding: 10px 16px 0; }
+  .hero { padding: 28px 16px 2px; }
+  .xp-section, .lp, .xf-section { padding: 0 16px; }
+  .xp-grid { gap: 14px; }
+  .xp-choose { margin-top: 24px; }
+
+  .xp, .xp--hero { min-height: 0; padding: 0; gap: 0; justify-content: flex-start; }
+  .xp-art { position: relative; inset: auto; width: 100%; height: auto; aspect-ratio: 16 / 9; z-index: auto; flex: none; }
+  .xp-scrim, .xp--hero .xp-scrim {
+    inset: 0 0 auto 0; height: auto; aspect-ratio: 16 / 9; z-index: 0;
+    background: linear-gradient(0deg, rgba(10, 10, 10, 0.9) 0, rgba(10, 10, 10, 0) 55%);
+  }
+  .xp-top { position: absolute; top: 14px; left: 14px; right: 14px; z-index: 1; }
+  .xp-body, .xp--hero .xp-body { max-width: none; padding: 16px 16px 20px; }
+  .xp-title { font-size: 26px; }
+  .xp--hero .xp-title { font-size: 34px; }
+  .xp-desc, .xp--hero .xp-desc { max-width: none; }
+
+  .xf { flex-direction: column; align-items: stretch; min-height: 0; }
+  .xf-art { position: relative; inset: auto; width: 100%; height: auto; aspect-ratio: 16 / 9; z-index: auto; flex: none; object-position: 90% 50%; }
+  .xf-scrim { inset: 0 0 auto 0; height: auto; aspect-ratio: 16 / 9; z-index: 0; background: linear-gradient(0deg, rgba(10, 10, 10, 0.9) 0, rgba(10, 10, 10, 0) 55%); }
+  .xf-body { max-width: none; padding: 18px 18px 22px; }
+  .xf-title { font-size: 42px; }
+  .xf-actions { flex-direction: column; }
+  .xf-btn { width: 100%; }
+
+  .xp-teams .ten-crests { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; }
+  .xp-teams .ten-crests .club-crest { max-width: 30px; }
+  .xp-teams .featured-teams-label { margin-bottom: 6px; font-size: 11.5px; letter-spacing: 0.02em; text-transform: none; font-weight: 600; }
+}
+@media (max-width: 374px) {
+  .shell-header { flex-wrap: wrap; row-gap: 8px; }
+}
+/* below 340 px (a 320 px phone) ten crests in one row would be about 20 px each: two rows of five keep them at 30 px */
+@media (max-width: 339px) {
+  .xp-teams .ten-crests { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xp, .xp-art, .xp-cta::after, a.xf-btn { transition: none; }
+}

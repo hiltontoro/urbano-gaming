@@ -15,11 +15,16 @@ import path from "node:path";
  * link still works.
  *
  * Out of scope (reported, not touched): other products' pages that still say "Soccer Predictions" (see the delivery inventory).
+ *
+ * Update of 2026-10-31 (Founder direction: the Home shows four experiences): the Home no longer carries the "Próximos partidos" card. The name is now the title
+ * of the Home's Score panel and the h1 of its own page, /score.html, which leads to the application (the lineup and the history). The assertions about the
+ * old card (its preselection, its chips, its two links, its element ids) were retired with it; the ones about the name, the old name, the scope and the
+ * identity of the route were kept and now also cover the Score page. The old Home is kept verbatim in archive/home.score-card-2026-10-29.html.
  */
 
 const ROOT = process.cwd();
 const read = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
-const HTML = { "index.html": read("public/index.html"), "soccer-predictions.html": read("public/soccer-predictions.html"), "profile.html": read("public/profile.html") } as const;
+const HTML = { "index.html": read("public/index.html"), "score.html": read("public/score.html"), "soccer-predictions.html": read("public/soccer-predictions.html"), "profile.html": read("public/profile.html") } as const;
 type PageName = keyof typeof HTML;
 const UPCOMING_DATA_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcomingData.js"), "utf8");
 const UPCOMING_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcoming.js"), "utf8");
@@ -150,17 +155,25 @@ describe("URBANO Score is named, described and bounded where a person meets it",
   } as const;
 
   for (const lang of ["es", "en"] as const) {
-    it(`Home (${lang}): the featured card is "URBANO Score", listing the coming matches as a preselection, in a heading the card is named by`, async () => {
+    it(`Home (${lang}): the Score panel is "URBANO Score" (the name is not translated), in a heading the panel is named by, with one link: to the Score page`, async () => {
       const page = await open("index.html", lang);
-      expect(page.text("#featured-title")).toBe("URBANO Score");
-      expect(page.doc.querySelector("#featured-predictions h2")!.id).toBe("featured-title");
-      expect(page.text("#featured-status")).toBe(COPY[lang].homePill);
-      expect(page.text("#featured-predictions .featured-descriptor")).toBe(COPY[lang].homeLine);
-      expect(page.doc.querySelector("#featured-predictions .featured-scope")).toBeNull(); // the card names no venue and no single match
-      expect(page.doc.querySelectorAll("#featured-predictions .upcoming-item")).toHaveLength(5);
-      expect(Array.from(page.doc.querySelectorAll("#featured-predictions .upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill(COPY[lang].homeChip));
-      expect(page.text("#featured-past")).toBe(COPY[lang].homePast);
-      expect(page.text("#featured-lineup")).toBe(COPY[lang].homeLineup);
+      expect(page.text("#xp-score-title")).toBe("URBANO Score");
+      expect(page.doc.querySelector("article.xp-score h3")!.id).toBe("xp-score-title");
+      expect(page.doc.querySelector("article.xp-score")!.getAttribute("aria-labelledby")).toBe("xp-score-title");
+      expect(page.text("article.xp-score .xp-kicker")).toBe(dictionary[lang]["home.xp.score.kicker"]);
+      expect(page.text("article.xp-score .xp-desc")).toBe(dictionary[lang]["home.xp.score.desc"]);
+      const links = Array.from(page.doc.querySelectorAll("article.xp-score a")) as HTMLAnchorElement[];
+      expect(links.map((a) => a.getAttribute("href"))).toEqual(["/score.html"]);
+    });
+
+    it(`the Score page (${lang}): h1 "URBANO Score", the descriptor and the scope are its lead, and its two ways into the application are the lineup and the history`, async () => {
+      const page = await open("score.html", lang);
+      expect(page.doc.title).toBe(dictionary[lang]["lp.score.pageTitle"]);
+      expect(Array.from(page.doc.querySelectorAll("h1")).map((h) => h.textContent)).toEqual(["URBANO Score"]);
+      expect(page.text(".xp-desc")).toBe(`${dictionary[lang]["pred.descriptor"]}. ${dictionary[lang]["pred.scope"]}`);
+      const links = Array.from(page.doc.querySelectorAll(".xp--hero a")) as HTMLAnchorElement[];
+      expect(links.map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html", "/soccer-predictions.html#historial"]);
+      expect(links.map((a) => a.textContent)).toEqual([dictionary[lang]["home.upcoming.play"], dictionary[lang]["home.upcoming.past"]]);
     });
 
     it(`the public page (${lang}): title, one heading, descriptor, scope and the loading text carry the name`, async () => {
@@ -181,47 +194,28 @@ describe("URBANO Score is named, described and bounded where a person meets it",
     });
   }
 
-  it("the name and the card's two links (Home), and the name, descriptor, scope and access to the history (public page), are static markup: on screen before any script runs and whatever happens to the list", () => {
-    expect(HTML["index.html"]).toMatch(/<span class="status-pill status-soon" id="featured-status" data-i18n="home\.upcoming\.pill">Próximos partidos<\/span>\s*<h2 id="featured-title">URBANO Score<\/h2>\s*<p class="featured-descriptor" data-i18n="home\.upcoming\.intro">Preselección de los próximos partidos de URBANO Score\.<\/p>/);
-    expect(HTML["index.html"]).toMatch(/<a class="featured-access-link" id="featured-past" href="\/soccer-predictions\.html#historial" data-i18n="home\.upcoming\.past">Mis participaciones y premios<\/a>\s*<p class="featured-access-note" data-i18n="home\.upcoming\.pastNote">Tus participaciones en partidos finalizados y el estado de tus premios\.<\/p>/);
-    expect(HTML["index.html"]).toMatch(/<a class="featured-lineup" id="featured-lineup" href="\/soccer-predictions\.html" data-i18n="home\.upcoming\.play">Ver cartelera de Score<\/a>/);
+  it("the name and the panel's one link (Home), the name, lead and the two links (Score page), and the name, descriptor, scope and access to the history (public page), are static markup: on screen before any script runs", () => {
+    expect(HTML["index.html"]).toMatch(/<h3 class="xp-title" id="xp-score-title" data-i18n="home\.xp\.score\.title">URBANO Score<\/h3>/);
+    expect(HTML["index.html"]).toMatch(/<a class="xp-cta" href="\/score\.html">/);
+    expect(HTML["score.html"]).toMatch(/<h1 class="xp-title" id="lp-title" data-i18n="home\.xp\.score\.title">URBANO Score<\/h1>/);
+    expect(HTML["score.html"]).toMatch(/<a class="lp-btn" href="\/soccer-predictions\.html" data-i18n="lp\.score\.cta\.lineup">Ver cartelera de Score<\/a>/);
+    expect(HTML["score.html"]).toMatch(/<a class="lp-btn is-quiet" href="\/soccer-predictions\.html#historial" data-i18n="lp\.score\.cta\.history">Mis participaciones y premios<\/a>/);
     expect(HTML["soccer-predictions.html"]).toMatch(/<a class="score-access-link" id="score-access-history" href="#historial" data-i18n="pred\.access\.history">Mis participaciones y premios<\/a>/);
     expect(HTML["soccer-predictions.html"]).toMatch(/<h1 id="score-title">URBANO Score<\/h1>\s*<p class="score-descriptor" data-i18n="pred\.descriptor">Tus predicciones deportivas<\/p>\s*<p class="score-scope" data-i18n="pred\.scope">Por ahora solo hay fútbol disponible\.<\/p>/);
   });
 
-  it("Home offers no call to action to play — nothing says 'Jugar ahora' or 'Play now' — even when the database holds an open match that is not one of the announced ones; its two links lead to the Score page: the history first, then the lineup", async () => {
-    const dom = new JSDOM(HTML["index.html"], {
-      url: "http://localhost/index.html", runScripts: "dangerously", pretendToBeVisual: true,
-      beforeParse(window) {
-        const w = window as any;
-        fixClock(w, HOME_NOW);
-        w.eval(I18N_SOURCE);
-        w.eval(UPCOMING_DATA_SOURCE);
-        w.eval(UPCOMING_SOURCE);
-        w.UrbanoAuth = { attachSignInButton: () => {} };
-        w.fetch = async (url: string) => String(url) === "/api/gaming/predictions/matches"
-          ? { status: 200, json: async () => ({ matches: [{ matchId: "m1", competition: "Liga", cancelledAt: null, finalized: false, kickoffAt: new Date(Date.now() + 3600_000 * 3).toISOString(), homeTeam: { name: "A FC" }, awayTeam: { name: "B FC" }, venueActivations: [{ enabled: true, venue: { active: true } }] }] }) }
-          : { status: 404, json: async () => ({}) };
-      },
-    });
-    closers.push(() => dom.window.close());
-    await tick();
-    const doc = dom.window.document;
-    expect(doc.querySelector("#featured-action")).toBeNull();
-    expect(doc.querySelector("#featured-predictions .featured-cta")).toBeNull();
-    const links = Array.from(doc.querySelectorAll("#featured-predictions a")) as HTMLAnchorElement[];
-    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
-    expect(links.map((a) => a.textContent)).toEqual(["Mis participaciones y premios", "Ver cartelera de Score"]);
-    expect(Array.from(doc.querySelectorAll("#featured-predictions .upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Preselección"));
+  it("neither the Home nor the Score page offers a call to action to play — nothing says 'Jugar ahora' or 'Play now' — and the Home reaches the application only through the Score page", async () => {
     const everyPlayable = (document: Document) => Array.from(document.querySelectorAll("a, button, [role='button'], input[type='submit']")).filter((e) => /Jugar ahora|Play now/i.test(`${e.textContent} ${e.getAttribute("aria-label") ?? ""}`));
-    expect(everyPlayable(doc)).toEqual([]); // not on the card, and nowhere else on the page either
-    expect(doc.querySelector("#featured-play, .featured-play")).toBeNull();
-    // and in English
-    (doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]); // the same two elements, translated in place
-    expect(links.map((a) => a.textContent)).toEqual(["My participations and prizes", "See the Score fixtures"]);
-    expect(Array.from(doc.querySelectorAll("#featured-predictions .upcoming-chip")).map((c) => c.textContent)).toEqual(Array(5).fill("Shortlisted"));
-    expect(everyPlayable(doc)).toEqual([]);
+    for (const lang of ["es", "en"] as const) {
+      const home = await open("index.html", lang);
+      expect(everyPlayable(home.doc), `Home ${lang}`).toEqual([]);
+      expect(home.doc.querySelector("#featured-action, #featured-play, .featured-play, .featured-cta")).toBeNull();
+      const score = await open("score.html", lang);
+      expect(everyPlayable(score.doc), `Score ${lang}`).toEqual([]);
+    }
+    const doc = (await open("index.html", "es")).doc;
+    expect(Array.from(doc.querySelectorAll("a")).map((a) => a.getAttribute("href")).filter((h) => /soccer-predictions/.test(h ?? ""))).toEqual([]);
+    expect(Array.from(doc.querySelectorAll("article.xp-score a")).map((a) => a.getAttribute("href"))).toEqual(["/score.html"]);
   });
 });
 
@@ -240,31 +234,37 @@ describe("the name does not enable other sports or a multi-sport architecture", 
   });
 
   it("there is no sport selector, tab or filter anywhere on Home or the public page: soccer is the only thing, and it is said", async () => {
-    for (const page of ["index.html", "soccer-predictions.html"] as const) {
+    for (const page of ["index.html", "score.html", "soccer-predictions.html"] as const) {
       const loaded = await open(page, "es");
       expect(loaded.doc.querySelector("[data-sport], [name='sport'], #sport, .sport-tabs, .sport-filter, [aria-label*='deporte' i]")).toBeNull();
       const sportSelect = Array.from(loaded.doc.querySelectorAll("select")).filter((s) => /sport|deporte/i.test(`${s.id} ${s.getAttribute("name") ?? ""} ${s.getAttribute("aria-label") ?? ""}`));
       expect(sportSelect).toHaveLength(0);
     }
     expect(HTML["index.html"]).not.toMatch(/data-sport|sport-tabs|sport-filter/);
+    expect(HTML["score.html"]).not.toMatch(/data-sport|sport-tabs|sport-filter/);
     expect(HTML["soccer-predictions.html"]).not.toMatch(/data-sport|sport-tabs|sport-filter|sportKey|sport_key/);
   });
 
-  it("the scope sentence is the product's only statement about sports, and it is about soccer", () => {
+  it("the scope sentence is the product's only statement about sports, and it is about soccer: the words of the Home and of the Score page that mention sport say soccer (or repeat the approved descriptor)", () => {
     for (const lang of ["es", "en"] as const) {
-      const mentions = Object.entries(dictionary[lang]).filter(([key, value]) => /^(home|pred|profile)\./.test(key) && /f[uú]tbol|soccer|deport|sport/i.test(value) && !/^pred\.(f\.|dim\.|geo\.)/.test(key));
+      const mentions = Object.entries(dictionary[lang]).filter(([key, value]) => /^(home|pred|profile|lp)\./.test(key) && /f[uú]tbol|soccer|deport|sport/i.test(value) && !/^pred\.(f\.|dim\.|geo\.)/.test(key));
       const keys = mentions.map(([key]) => key).sort();
-      expect(keys, lang).toEqual(["home.hero.sub", "pred.descriptor", "pred.scope"].filter((k) => keys.includes(k)).sort());
+      expect(keys, lang).toEqual(["home.hero.sub", "home.xp.score.desc", "home.xp.score.kicker", "lp.score.lead", "pred.descriptor", "pred.scope"].filter((k) => keys.includes(k)).sort());
+      expect(keys, lang).toEqual(expect.arrayContaining(["pred.descriptor", "pred.scope", "home.xp.score.desc", "lp.score.lead"]));
+      expect(dictionary[lang]["home.xp.score.desc"]).toMatch(/f[uú]tbol|soccer/i);
+      expect(dictionary[lang]["lp.score.lead"]).toBe(`${dictionary[lang]["pred.descriptor"]}. ${dictionary[lang]["pred.scope"]}`);
     }
   });
 });
 
 describe("what is identity, not text, kept its historical name", () => {
-  it("the route and the file are unchanged, and every existing link to them still points there", () => {
+  it("the route and the file are unchanged, and every existing link to them still points there; /score.html is the Score page of the four experiences, not a rename (it holds no predictions code and links to the application)", () => {
     expect(existsSync(path.join(ROOT, "public/soccer-predictions.html"))).toBe(true);
-    expect(existsSync(path.join(ROOT, "public/score.html"))).toBe(false);
-    expect(HTML["index.html"].match(/href="\/soccer-predictions\.html"/g)!).toHaveLength(1); // the lineup
-    expect(HTML["index.html"].match(/href="\/soccer-predictions\.html#historial"/g)!).toHaveLength(1); // the past participations and prizes: the Score page's history
+    expect(existsSync(path.join(ROOT, "public/score.html"))).toBe(true);
+    expect(HTML["score.html"]).not.toMatch(/\/api\/gaming\/predictions|UrbanoClubCrests|homeUpcoming/);
+    expect(HTML["score.html"].match(/href="\/soccer-predictions\.html"/g)!).toHaveLength(1); // the lineup
+    expect(HTML["score.html"].match(/href="\/soccer-predictions\.html#historial"/g)!).toHaveLength(1); // the past participations and prizes: the Score page's history
+    expect(HTML["index.html"]).not.toContain("soccer-predictions"); // the Home leads to the Score page, which leads to the application
     expect(HTML["profile.html"]).toContain('link.href = "/soccer-predictions.html"');
   });
 
@@ -272,7 +272,5 @@ describe("what is identity, not text, kept its historical name", () => {
     expect(HTML["soccer-predictions.html"]).toContain("/api/gaming/predictions/matches");
     for (const dir of ["app/api/gaming/predictions", "lib/gaming/predictions", "supabase/migrations"]) expect(existsSync(path.join(ROOT, dir)), dir).toBe(true);
     expect(existsSync(path.join(ROOT, "lib/gaming/predictions/types.ts"))).toBe(true);
-    expect(HTML["index.html"]).toContain('id="featured-predictions"'); // the element ids keep their names too
-    expect(HTML["index.html"]).toContain('id="featured-status"');
   });
 });

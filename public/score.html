@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="lp.score.pageTitle">URBANO Score — URBANO Gaming</title>
+<meta name="description" content="URBANO Score: tus predicciones deportivas. Por ahora solo hay fútbol disponible." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/experience.css">
+</head>
+<body>
+
+<header class="shell-header">
+  <div class="brand">
+    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+      <span class="brand-word">URBANO</span>
+    </a>
+    <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
+  </div>
+  <div class="header-tools">
+    <div class="lang-switch" role="group" aria-label="Idioma" data-i18n-attr="aria-label:shell.lang.label">
+      <button type="button" data-lang="es" lang="es" aria-pressed="true" aria-label="Cambiar a español" data-i18n-attr="aria-label:shell.lang.es">ES</button>
+      <button type="button" data-lang="en" lang="en" aria-pressed="false" aria-label="Cambiar a inglés" data-i18n-attr="aria-label:shell.lang.en">EN</button>
+    </div>
+    <div class="account-group">
+      <a class="signin-btn" id="account-link" href="/profile.html" hidden></a>
+      <button class="signin-btn" id="btn-signin" style="visibility:hidden">Iniciar sesión / Crear cuenta</button>
+    </div>
+  </div>
+</header>
+<p class="signin-status" id="signin-status"></p>
+
+<nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
+  <a class="nav-link" href="/" data-i18n="shell.nav.home">Inicio</a>
+  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
+  <a class="nav-link is-active" href="/#experiences" data-i18n="shell.nav.experiences">Experiencias</a>
+  <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
+  <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
+</nav>
+
+<main class="lp xp-score" id="content">
+  <a class="lp-back" href="/#experiences" data-i18n="lp.common.back">← Todas las experiencias</a>
+
+  <section class="xp xp--hero xp-score" aria-labelledby="lp-title">
+    <img class="xp-art" src="/assets/home/urbano-score.webp" alt="" width="1280" height="720" decoding="async">
+    <span class="xp-scrim" aria-hidden="true"></span>
+    <div class="xp-top">
+      <span class="xp-kicker" data-i18n="home.xp.score.kicker">Predicciones deportivas</span>
+    </div>
+    <div class="xp-body">
+      <h1 class="xp-title" id="lp-title" data-i18n="home.xp.score.title">URBANO Score</h1>
+      <p class="xp-desc" data-i18n="lp.score.lead">Tus predicciones deportivas. Por ahora solo hay fútbol disponible.</p>
+        <div class="lp-links">
+          <a class="lp-btn" href="/soccer-predictions.html" data-i18n="lp.score.cta.lineup">Ver cartelera de Score</a>
+          <a class="lp-btn is-quiet" href="/soccer-predictions.html#historial" data-i18n="lp.score.cta.history">Mis participaciones y premios</a>
+        </div>
+    </div>
+  </section>
+
+  <section class="lp-section" aria-labelledby="lp-how">
+    <h2 class="lp-h2" id="lp-how" data-i18n="lp.common.how">Cómo funciona</h2>
+    <ol class="lp-steps">
+      <li class="lp-step">
+        <h3 data-i18n="lp.score.step1.title">Mirá la cartelera</h3>
+        <p data-i18n="lp.score.step1.body">Ahí están los próximos partidos y cuáles están abiertos para participar.</p>
+      </li>
+      <li class="lp-step">
+        <h3 data-i18n="lp.score.step2.title">Participá desde una sede</h3>
+        <p data-i18n="lp.score.step2.body">Iniciá sesión con tu cuenta URBANO y activá tu ubicación para enviar tu predicción en un partido abierto.</p>
+      </li>
+      <li class="lp-step">
+        <h3 data-i18n="lp.score.step3.title">Seguí tus resultados</h3>
+        <p data-i18n="lp.score.step3.body">En tu historial ves tus participaciones en partidos finalizados y el estado de tus premios.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="lp-section" aria-labelledby="lp-know">
+    <h2 class="lp-h2" id="lp-know" data-i18n="lp.common.know">Bueno saber</h2>
+    <ul class="lp-know">
+      <li data-i18n="lp.score.know1">Fechas y horarios informativos: pueden cambiar. Hora de Honduras.</li>
+      <li data-i18n="lp.score.know2">Solo se puede participar en los partidos que figuran como abiertos en la cartelera.</li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p><a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a></p>
+  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+</footer>
+
+<script src="/urbanoI18n.js"></script>
+<script id="i18n-fallback">
+/* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
+   If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
+   supplies the language table; nothing here decides what is available or allowed. There is no English without the module, so the
+   language selector is hidden instead of offering a control that does nothing. */
+(function (w) {
+  "use strict";
+  var m = w.UrbanoI18n;
+  if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
+  var ES = {
+    "shell.lang.label": "Idioma",
+    "shell.lang.es": "Cambiar a español",
+    "shell.lang.en": "Cambiar a inglés",
+    "shell.brand.urbano": "URBANO — ir a urbanohn.com",
+    "shell.brand.gaming": "URBANO Gaming — inicio",
+    "shell.nav.label": "Navegación principal",
+    "shell.nav.home": "Inicio",
+    "shell.nav.play": "Jugar",
+    "shell.nav.experiences": "Experiencias",
+    "shell.nav.leaderboards": "Clasificaciones",
+    "shell.nav.rewards": "Premios",
+    "shell.footer.part": "URBANO Gaming — parte de URBANO",
+    "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "shell.footer.legal": "Términos, privacidad y reglas",
+    "home.xp.choose": "Elegí tu experiencia",
+    "home.xp.cta": "Descubrí más",
+    "home.xp.voting.kicker": "Votaciones",
+    "home.xp.voting.title": "URBANO Voting",
+    "home.xp.voting.desc": "Elegí a tus favoritos en las votaciones de tu comunidad.",
+    "home.xp.score.kicker": "Predicciones deportivas",
+    "home.xp.score.title": "URBANO Score",
+    "home.xp.score.desc": "Predecí partidos de fútbol y competí con tu comunidad.",
+    "home.xp.trivia.kicker": "En vivo",
+    "home.xp.trivia.title": "URBANO Trivia",
+    "home.xp.trivia.desc": "Preguntas en vivo con tu grupo y un anfitrión. Respondé desde tu celular.",
+    "home.xp.poker.kicker": "Mesas privadas",
+    "home.xp.poker.title": "URBANO Poker",
+    "home.xp.poker.desc": "No-Limit Hold'em con tu grupo, en una mesa privada.",
+    "lp.common.back": "← Todas las experiencias",
+    "lp.common.how": "Cómo funciona",
+    "lp.common.know": "Bueno saber",
+    "lp.score.pageTitle": "URBANO Score — URBANO Gaming",
+    "lp.score.lead": "Tus predicciones deportivas. Por ahora solo hay fútbol disponible.",
+    "lp.score.step1.title": "Mirá la cartelera",
+    "lp.score.step1.body": "Ahí están los próximos partidos y cuáles están abiertos para participar.",
+    "lp.score.step2.title": "Participá desde una sede",
+    "lp.score.step2.body": "Iniciá sesión con tu cuenta URBANO y activá tu ubicación para enviar tu predicción en un partido abierto.",
+    "lp.score.step3.title": "Seguí tus resultados",
+    "lp.score.step3.body": "En tu historial ves tus participaciones en partidos finalizados y el estado de tus premios.",
+    "lp.score.know1": "Fechas y horarios informativos: pueden cambiar. Hora de Honduras.",
+    "lp.score.know2": "Solo se puede participar en los partidos que figuran como abiertos en la cartelera.",
+    "lp.score.cta.lineup": "Ver cartelera de Score",
+    "lp.score.cta.history": "Mis participaciones y premios",
+    "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
+    "auth.btn.finish": "Terminá de crear tu cuenta",
+    "auth.btn.hi": "Hola, {name}",
+    "auth.profile.title": "Ver mi perfil",
+    "auth.signOut": "Cerrar sesión",
+    "auth.panel.aria": "Iniciar sesión o crear una cuenta",
+    "auth.entry.title": "Entrá a URBANO",
+    "auth.entry.note": "Iniciá sesión en tu cuenta o creá una.",
+    "auth.login": "Iniciar sesión",
+    "auth.register": "Crear cuenta",
+    "auth.method.loginNote": "Elegí cómo recibir tu código.",
+    "auth.method.registerNote": "Te enviaremos un código para confirmar que sos vos.",
+    "auth.method.email": "Correo",
+    "auth.method.phone": "Teléfono",
+    "auth.method.phoneSoon": "Teléfono — todavía no disponible",
+    "auth.method.phoneSoonTitle": "El acceso por teléfono todavía no está disponible.",
+    "auth.method.phoneSoonMsg": "El acceso por teléfono todavía no está disponible. Usá tu correo.",
+    "auth.input.emailPlaceholder": "tu@ejemplo.com",
+    "auth.input.emailAria": "Correo electrónico",
+    "auth.input.phoneAria": "Número de teléfono",
+    "auth.sendLogin": "Enviar código de acceso",
+    "auth.sendVerification": "Enviar código de verificación",
+    "auth.phoneHint": "Usá el código de país, por ejemplo +504 9999 9999.",
+    "auth.back": "Volver",
+    "auth.switch.toRegister": "Crear una cuenta en su lugar",
+    "auth.switch.toLogin": "Ya tengo una cuenta",
+    "auth.code.title": "Ingresá tu código",
+    "auth.code.introLoginEmail": "Si {id} tiene una cuenta, te llegará un código en breve. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introLoginPhone": "Si {id} tiene una cuenta, te llegará un mensaje de texto con un código. Puede tardar un minuto.",
+    "auth.code.introRegisterEmail": "Enviamos un código a {id}. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introRegisterPhone": "Enviamos un mensaje de texto con un código a {id}. Puede tardar un minuto.",
+    "auth.code.placeholder": "Código de verificación",
+    "auth.code.verify": "Verificar",
+    "auth.code.resend": "Reenviar código",
+    "auth.code.resendIn": "Reenviar código en {s} s",
+    "auth.code.otherNumber": "Usar otro número",
+    "auth.code.otherEmail": "Usar otro correo",
+    "auth.code.noCodeEmail": "¿No te llegó el código por correo? ",
+    "auth.code.noCodePhone": "¿No te llegó el código por mensaje de texto? ",
+    "auth.name.title": "Elegí tu nombre para mostrar",
+    "auth.name.note": "Así vas a aparecer en los juegos.",
+    "auth.name.placeholder": "Cómo vas a aparecer en los juegos",
+    "auth.name.aria": "Nombre para mostrar",
+    "auth.continue": "Continuar",
+    "auth.welcome.title": "Te damos la bienvenida de nuevo",
+    "auth.welcome.email": "Este correo ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.welcome.phone": "Este número de teléfono ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.msg.phoneEmpty": "Ingresá tu número de teléfono con el código de país, por ejemplo +504 9999 9999.",
+    "auth.msg.phoneNoCountry": "Empezá con el código de país, por ejemplo +504 9999 9999 para Honduras.",
+    "auth.msg.phoneInvalid": "Ese número de teléfono no parece válido. Usá el código de país seguido del número, por ejemplo +504 9999 9999.",
+    "auth.msg.emailEmpty": "Ingresá tu correo electrónico.",
+    "auth.msg.emailInvalid": "Eso no parece un correo electrónico. Revisalo e intentá de nuevo.",
+    "auth.msg.requestingLogin": "Solicitando tu código de acceso...",
+    "auth.msg.sendingVerification": "Enviando tu código de verificación...",
+    "auth.msg.sendingNew": "Enviando un código nuevo...",
+    "auth.msg.resentLogin": "Si existe una cuenta, te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.resentRegister": "Te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.codeEmptyPhone": "Ingresá el código de tu mensaje de texto.",
+    "auth.msg.codeEmptyEmail": "Ingresá el código de tu correo.",
+    "auth.msg.verifying": "Verificando...",
+    "auth.msg.incompleteLogin": "Encontramos tu acceso pero no una cuenta terminada. Elegí un nombre para mostrar para terminarla.",
+    "auth.msg.lastStep": "Un último paso para terminar de crear tu cuenta.",
+    "auth.msg.nameEmpty": "Ingresá un nombre para mostrar.",
+    "auth.msg.saving": "Guardando...",
+    "auth.err.rateLimited": "Demasiadas solicitudes. Esperá {seconds} segundos e intentá de nuevo.",
+    "auth.err.rateLimitedFew": "Demasiadas solicitudes. Esperá unos segundos e intentá de nuevo.",
+    "auth.err.codeInvalid": "Ese código no es válido o venció. Revisá el código o pedí uno nuevo.",
+    "auth.err.signupClosed": "Por ahora no se pueden crear cuentas nuevas.",
+    "auth.err.phoneUnavailable": "El acceso por teléfono no está disponible en este momento.",
+    "auth.err.phoneUnavailableYet": "El acceso por teléfono todavía no está disponible.",
+    "auth.err.invalidPhone": "Ese número de teléfono no se puede usar.",
+    "auth.err.invalidEmail": "Ese correo electrónico no se puede usar.",
+    "auth.err.network": "No pudimos conectarnos con el servidor. Revisá tu conexión e intentá de nuevo.",
+    "auth.err.unknown": "Algo salió mal. Intentá de nuevo.",
+    "auth.err.notSignedIn": "No iniciaste sesión.",
+    "auth.err.identityChanged": "Tu sesión cambió. Intentá de nuevo.",
+    "auth.err.profileFailed": "No se pudo completar el perfil.",
+    "auth.srv.nameEmpty": "El nombre para mostrar no puede estar vacío.",
+    "auth.srv.nameTooLong": "El nombre para mostrar no puede superar los 40 caracteres.",
+    "auth.link.error": "Este enlace de acceso no es válido, ya se usó o venció. Pedí uno nuevo para iniciar sesión.",
+    "auth.link.retry": "Pedir un código nuevo"
+  };
+  var SERVER = {};
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+  function t(key, vars) {
+    var template = own(ES, key) ? ES[key] : key;
+    return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
+      if (!vars || !own(vars, name)) return whole;
+      var value = vars[name];
+      if (value && typeof value === "object" && typeof value.$t === "string") return t(value.$t);
+      return value === null || value === undefined ? "" : String(value);
+    });
+  }
+  w.UrbanoI18n = {
+    fallback: true,
+    STORAGE_KEY: "urbano.lang",
+    DEFAULT_LANG: "es",
+    LANGS: ["es"],
+    getLang: function () { return "es"; },
+    setLang: function () { return false; },
+    t: t,
+    has: function (key) { return own(ES, key); },
+    locale: function () { return "es-HN"; },
+    serverMessageKey: function (message) { return own(SERVER, message) ? SERVER[message] : null; },
+    onChange: function () { return function () {}; },
+    apply: function () {},
+    dictionary: function () { return { es: ES, en: {} }; }
+  };
+  var groups = w.document.querySelectorAll(".lang-switch");
+  for (var i = 0; i < groups.length; i++) { groups[i].hidden = true; groups[i].style.display = "none"; }
+})(window);
+</script>
+<script src="/urbanoAuth.js"></script>
+<script>
+  // The header's account control is the only other part of this page that talks to the application.
+  // (UrbanoAuth is a top-level const of /urbanoAuth.js: a global binding, NOT a property of window, so it is looked for with typeof, never with window.UrbanoAuth.)
+  if (typeof UrbanoAuth !== "undefined") {
+    UrbanoAuth.attachSignInButton(
+      document.getElementById("btn-signin"),
+      document.getElementById("signin-status"),
+      { accountLink: document.getElementById("account-link") }
+    );
+  }
+</script>
+
+</body>
+</html>
