@@ -33,6 +33,15 @@ import path from "node:path";
  * The tests of the card's LOGIC (states, matching, failure) run on a fixed fixture, not on the editorial selection.
  */
 
+/**
+ * Update of 2026-10-31 (Founder direction: the Home shows four experiences). The Home no longer carries this card: it has no list of coming matches, no status line
+ * and no access links of its own, and it does not run /homeUpcoming.js. The tests below are those of the MODULE (the editorial list and its rules, the states, the
+ * timing, the twins, the hours, the redraws), which the Score page still runs with a list of its own (its "Cartelera" preselection), and they are unchanged. The tests
+ * that booted the old Home page to prove the card's own markup, words, crests strip (now proven on the Home's Score panel, in clubCrests.test.ts), status sentence,
+ * phone layout and fail-closed reading were retired with the card; they are in git history at 98bb902, and the old Home is kept in
+ * archive/home.score-card-2026-10-29.html.
+ */
+
 const ROOT = process.cwd();
 const INDEX_HTML = readFileSync(path.join(ROOT, "public/index.html"), "utf8");
 const I18N_SOURCE = readFileSync(path.join(ROOT, "public/urbanoI18n.js"), "utf8");
@@ -41,14 +50,11 @@ const DATA_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcomingData.js"), 
 const MODULE_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcoming.js"), "utf8");
 const SCORE_HTML = readFileSync(path.join(ROOT, "public/soccer-predictions.html"), "utf8");
 const MATCHES_URL = "/api/gaming/predictions/matches";
-const LINEUP_PAGE = "/soccer-predictions.html";
-const HISTORY_LINK = "/soccer-predictions.html#historial";
 const CODE = INDEX_HTML.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\/\/.*$/gm, "");
 
 // The page's own CSS, as rules (so a test can read what one rule says without a browser).
 const STYLE = Array.from(INDEX_HTML.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)).map((m) => m[1]).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 const RULES = Array.from(STYLE.matchAll(/([^{}]+)\{([^{}]*)\}/g)).map((m) => ({ selector: m[1]!.trim().replace(/\s+/g, " "), body: m[2]! }));
-const rulesFor = (selector: string) => RULES.filter((r) => r.selector === selector);
 
 type Reply = { status: number; json?: unknown } | "reject" | "badjson" | "hang";
 interface Call { url: string; init: Record<string, any> }
@@ -158,12 +164,6 @@ const countingI18n = (win: any) => {
   };
 };
 
-/** The page's markup as shipped, with NO script run: what a person sees before anything loads. */
-function staticPage() {
-  const doc = new JSDOM(INDEX_HTML).window.document;
-  return { doc, card: doc.getElementById("featured-predictions") as HTMLElement };
-}
-
 /** Where an hour was read and when it was last compared with that source: the card shows an hour only with both (see the tests of that rule). */
 const SRC = { source: "Fuente de ensayo", verifiedAt: "2026-10-01" };
 
@@ -199,10 +199,6 @@ function serverMatch(over: Record<string, unknown> = {}) {
 const answer = (...matches: unknown[]): Reply => ({ status: 200, json: { matches } });
 const noOffer = { available: false, maxLevel: 0, levels: [], digest: null, problem: "NO_LEVELS" };
 const disabled = (m: any, patch: Record<string, unknown>) => ({ ...m, venueActivations: [{ ...m.venueActivations[0], ...patch }] });
-
-// The five matches of the editorial preselection, in order of start (real data: see the last describe).
-const FIVE = ["Valencia v Real Madrid", "Atlético de Madrid v FC Barcelona", "Motagua v Olimpia", "Liverpool v Manchester United", "Arsenal v Manchester City"];
-const FIVE_IDS = ["N26-26", "N26-27", "N26-46", "N26-22", "N26-24"];
 
 // The ten teams of the strip, in the Founder's order, with the key of the crest the central registry draws for each.
 const STRIP = [
@@ -255,96 +251,11 @@ const COPY = {
   },
 } as const;
 
-/** Everything a person could read as "you can take part now", in either language (the chip "Abierto para participar" and the status sentence that
- *  says matches are open are the only allowed ones, and only on the server's word: the tests that must not see them use this). */
-const OPENING_LANGUAGE = /Entrar a|Enter URBANO|Abierto para|Open to participate|Los ves en la cartelera|Some matches are open|Predictions are open|ya pod[ée]s predecir|you can (now )?predict|Hac[ée] tu predicci|Make your prediction|Live now|En vivo ahora|Jugar ahora|Play now/i;
-/** What the card must never promise or imply. Run it on `promiseText()`: the legal line is left out because it names sponsorship in order to DENY it. */
-const PROMISES = /gan[aá]\b|ganá|ganar[aá]s?|you will win|win a |premio de L|L ?\d{3}|tequeños|bono|oficial|socio|partner(ship)? with|patrocinado por|sponsored by|en alianza|licens/i;
-
 // ---------------------------------------------------------------------------------------------------------------------------------
 // What the card says
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 describe("the card: what it says, in both languages", () => {
-  it.each(["es", "en"] as const)("%s: pill, name, intro, note, the access to earlier participations and prizes, the strip's label, the Score lineup link, the legal line", async (lang) => {
-    const page = await loadHome({ lang });
-    const c = COPY[lang];
-    expect(page.status()).toBe(c.pill);
-    expect(page.part("h2")).toBe("URBANO Score");
-    expect(page.part(".featured-descriptor")).toBe(c.intro);
-    expect(page.part("#featured-note")).toBe(c.note);
-    expect(page.doc.querySelector(".featured-window")).toBeNull(); // renamed: the note is .featured-note#featured-note
-    expect(page.part("#featured-past")).toBe(c.past);
-    expect(page.part(".featured-access-note")).toBe(c.pastNote);
-    expect(page.part("#featured-teams-label")).toBe(c.teamsLabel);
-    expect(page.part("#featured-lineup")).toBe(c.lineup);
-    expect(page.part(".featured-legal")).toBe(c.legal);
-    expect(page.q("#upcoming-list")!.getAttribute("aria-label")).toBe(c.listLabel);
-    expect(page.consoleErrors).toEqual([]);
-    expect(page.pageErrors).toEqual([]);
-  });
-
-  it("has exactly two links, in this order: the access to earlier participations and prizes (BEFORE the list) and the informational link to the Score lineup (AFTER it); nothing in the list is a link", async () => {
-    const page = await loadHome();
-    const links = page.qa("#featured-predictions a") as HTMLAnchorElement[];
-    expect(links.map((a) => [a.id, a.getAttribute("href")])).toEqual([["featured-past", HISTORY_LINK], ["featured-lineup", LINEUP_PAGE]]);
-    const list = page.q("#upcoming-list")!;
-    expect(list.querySelector("a")).toBeNull();
-    expect(list.contains(page.doc.getElementById("featured-past"))).toBe(false);
-    expect(list.contains(page.doc.getElementById("featured-lineup"))).toBe(false);
-    expect(page.doc.querySelector("#featured-action")).toBeNull();
-    expect(page.doc.querySelector("#featured-predictions button, #featured-predictions form, #featured-predictions input")).toBeNull();
-  });
-
-  it("is already complete before any script or request: the markup carries the Spanish text and the language keys, and the ten names", () => {
-    const start = INDEX_HTML.indexOf('id="featured-predictions"');
-    const card = INDEX_HTML.slice(start, INDEX_HTML.indexOf('<div class="section" id="experiences">'));
-    const withoutScripts = card.replace(/<script[\s\S]*?<\/script>/g, "");
-    for (const key of ["home.upcoming.pill", "home.upcoming.intro", "home.upcoming.past", "home.upcoming.pastNote", "home.upcoming.teamsLabel", "home.upcoming.note", "home.upcoming.play", "upcoming.disclaimer"]) expect(withoutScripts, key).toContain(`data-i18n="${key}"`);
-    expect(withoutScripts).not.toContain("home.upcoming.disclaimer"); // the legal line's key MOVED to upcoming.disclaimer (the Score page says the same words)
-    expect(withoutScripts).toContain("home.upcoming.listLabel");
-    expect(withoutScripts).toContain('<span class="status-pill status-soon" id="featured-status" data-i18n="home.upcoming.pill">' + COPY.es.pill + "</span>");
-    expect(withoutScripts).toContain('class="featured-legal" data-i18n="upcoming.disclaimer">' + COPY.es.legal + "</p>");
-    expect(withoutScripts).toContain('class="featured-note" id="featured-note" data-i18n="home.upcoming.note">' + COPY.es.note + "</p>");
-    expect(withoutScripts).toContain('id="featured-past" href="' + HISTORY_LINK + '" data-i18n="home.upcoming.past">' + COPY.es.past + "</a>");
-    expect(withoutScripts).toContain('id="featured-lineup" href="' + LINEUP_PAGE + '" data-i18n="home.upcoming.play">' + COPY.es.lineup + "</a>");
-    expect(withoutScripts).not.toMatch(/<img|<svg/); // no element image of its own: the crests are drawn by the central module
-    // and the same in the parsed page, with no script run
-    const { card: parsed } = staticPage();
-    expect(parsed.querySelector("h2#featured-title")!.textContent).toBe("URBANO Score");
-    expect(Array.from(parsed.querySelectorAll("ul.ten-crests > li.crest-chip .crest-name")).map((e) => e.textContent)).toEqual(STRIP_NAMES);
-    expect(parsed.querySelector("#upcoming-list")!.children).toHaveLength(0); // the list is drawn by its module, from the editorial data
-    const status = parsed.querySelector("#upcoming-status") as HTMLElement;
-    expect(status.hasAttribute("hidden")).toBe(true); // nothing is said under the list until the list is drawn
-    expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(parsed.querySelector("#featured-note")!.hasAttribute("hidden")).toBe(false); // the note is hidden by the list's own drawing, when it has no rows
-  });
-
-  it("loads the central scripts in order (language table, crests, editorial data, list) before the page script that starts the list, and no shipped page asks for a crest preview", () => {
-    const at = (needle: string) => INDEX_HTML.indexOf(needle);
-    const order = ['<script src="/urbanoI18n.js"></script>', '<script src="/urbanoClubCrests.js"></script>', '<script src="/homeUpcomingData.js"></script>', '<script src="/homeUpcoming.js"></script>', '<script id="i18n-fallback">'].map(at);
-    expect(order.every((i) => i > 0)).toBe(true);
-    expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(CODE).toMatch(/UrbanoClubCrests\.decorate\(document\)/);
-    // the list is started by the page script, inside try/catch (it is informational: it must never stop the catalogs of the page), and hides the note when it has no rows
-    const start = CODE.indexOf("UrbanoHomeUpcoming.init(");
-    expect(start).toBeGreaterThan(0);
-    const call = CODE.slice(start, CODE.indexOf("\n      });", start));
-    expect(call).toContain('host: document.getElementById("upcoming-list")');
-    expect(call).toContain('statusHost: document.getElementById("upcoming-status")');
-    expect(call).toMatch(/limit: \(\) => \(phone && phone\.matches \? PHONE_ROWS : undefined\)/); // a phone shows the next three; anything wider, every one
-    expect(call).toMatch(/onPaint: \(items, total\) => \{/);
-    expect(call).toMatch(/if \(note\) note\.hidden = items\.length === 0;/);
-    const tryAt = CODE.lastIndexOf("try {", start);
-    const catchAt = CODE.indexOf("} catch (err) {", start);
-    expect(tryAt).toBeGreaterThan(0);
-    expect(catchAt).toBeGreaterThan(start);
-    expect(CODE.slice(tryAt, catchAt)).not.toContain("renderCatalog("); // only the list is inside the try: the catalogs are drawn after it
-    expect(CODE.slice(catchAt, catchAt + 250)).toContain("console.error(");
-    expect(CODE.indexOf("renderCatalog(EXPERIENCES_CATALOG")).toBeGreaterThan(catchAt);
-    // the ten crests are drawn as shipped: no page switches a preview on
-    for (const html of [INDEX_HTML, SCORE_HTML]) expect(html).not.toMatch(/URBANO_CRESTS_PREVIEW/);
-  });
 
   it("without the language table the card is not started and adds no failure of its own (the page's own handling of that failure is what it was)", async () => {
     const page = await loadHome();
@@ -354,28 +265,6 @@ describe("the card: what it says, in both languages", () => {
     expect(page.win.UrbanoHomeUpcoming.init({ host: null })).toBeNull();
     expect(host.children).toHaveLength(0);
   });
-
-  it("every key the card and the list ask for exists in both languages and in the Spanish fallback the page carries", async () => {
-    const page = await loadHome();
-    const dict = page.win.UrbanoI18n.dictionary();
-    const start = INDEX_HTML.indexOf('id="featured-predictions"');
-    const card = INDEX_HTML.slice(start, INDEX_HTML.indexOf('<div class="section" id="experiences">'));
-    const cardKeys = [
-      ...Array.from(card.matchAll(/data-i18n="([^"]+)"/g)).map((m) => m[1]!),
-      ...Array.from(card.matchAll(/data-i18n-attr="[a-z-]+:([^"]+)"/g)).map((m) => m[1]!),
-    ];
-    const moduleKeys = Array.from(new Set(Array.from(MODULE_SOURCE.matchAll(/"(upcoming\.[A-Za-z.]+)"/g)).map((m) => m[1]!)));
-    expect(cardKeys.length).toBeGreaterThanOrEqual(9);
-    expect(moduleKeys).toEqual(expect.arrayContaining(["upcoming.none", "upcoming.status.none", "upcoming.status.open", "upcoming.whenTbc", "upcoming.when", "upcoming.state.next", "upcoming.opensAt", "upcoming.opensAtOne", "upcoming.vs"]));
-    expect(cardKeys).toContain("upcoming.disclaimer");
-    expect(cardKeys).not.toContain("home.upcoming.disclaimer");
-    const fallback = INDEX_HTML.slice(INDEX_HTML.indexOf('<script id="i18n-fallback">'), INDEX_HTML.indexOf("</script>", INDEX_HTML.indexOf('<script id="i18n-fallback">')));
-    for (const key of [...cardKeys, ...moduleKeys]) {
-      expect(dict.es[key], `es ${key}`).toEqual(expect.any(String));
-      expect(dict.en[key], `en ${key}`).toEqual(expect.any(String));
-      expect(fallback, `fallback ${key}`).toContain(`"${key}":`);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -383,60 +272,10 @@ describe("the card: what it says, in both languages", () => {
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 describe("the access to earlier participations and prizes: its own, visible, before the list", () => {
-  it("is the first link of the card, BEFORE the list of coming matches, outside it, and points to the history of the Score page", async () => {
-    const page = await loadHome();
-    const past = page.q("#featured-past") as HTMLAnchorElement;
-    const list = page.q("#upcoming-list")!;
-    const lineup = page.q("#featured-lineup")!;
-    expect(past.getAttribute("href")).toBe(HISTORY_LINK);
-    expect(past.tagName).toBe("A");
-    expect(past.compareDocumentPosition(list) & 4).toBeTruthy(); // 4: the list FOLLOWS the access
-    expect(list.compareDocumentPosition(lineup) & 4).toBeTruthy(); // the lineup link FOLLOWS the list
-    expect(list.contains(past)).toBe(false);
-    expect(page.q("#featured-teams")!.contains(past)).toBe(false);
-    // the first link of the card, so nobody has to look for it under the matches
-    expect((page.q("#featured-predictions a") as HTMLElement).id).toBe("featured-past");
-    expect(page.part(".featured-access-note")).toBe(COPY.es.pastNote);
-  });
-
-  it("is visible: nothing in it or around it is hidden, and it has a focus style and a touch-sized target", async () => {
-    const page = await loadHome();
-    for (let el: HTMLElement | null = page.q("#featured-past"); el && el !== page.doc.body; el = el.parentElement) {
-      expect(el.hasAttribute("hidden"), el.id || el.className).toBe(false);
-      expect(el.getAttribute("aria-hidden"), el.id || el.className).toBeNull();
-    }
-    const accessLink = rulesFor(".featured-access-link");
-    expect(accessLink).toHaveLength(1);
-    expect(accessLink[0]!.body).not.toMatch(/display:\s*none|visibility:\s*hidden/);
-    expect(accessLink[0]!.body).toMatch(/min-height:\s*(4[4-9]|[5-9]\d)px/);
-    expect(RULES.some((r) => r.selector.split(",").map((s) => s.trim()).includes(".featured-access-link:focus-visible"))).toBe(true);
-  });
-
-  it("stays when there is nothing to list: every match passed, or the server cannot be read", async () => {
-    for (const opts of [{ now: "2026-12-30T00:00:00Z" }, { server: { status: 500, json: {} } as Reply }, { server: "reject" as Reply }]) {
-      const page = await loadHome(opts);
-      expect(page.part("#featured-past"), JSON.stringify(opts)).toBe(COPY.es.past);
-      expect((page.q("#featured-past") as HTMLAnchorElement).getAttribute("href")).toBe(HISTORY_LINK);
-    }
-  });
 
   it("the Score page has the place that link points to: the history section", () => {
     expect(SCORE_HTML).toMatch(/id="historial"/);
     expect(SCORE_HTML).toMatch(/id="score-access-history"[^>]*href="#historial"|href="#historial"[^>]*id="score-access-history"/);
-  });
-
-  it("the way into the Score lineup informs and does not invite: an outlined link (transparent background), not the filled button the other cards use", async () => {
-    const page = await loadHome();
-    const lineup = rulesFor(".featured-lineup").filter((r) => /border:/.test(r.body)); // the class exists (a phone adds only its margin)
-    expect(lineup).toHaveLength(1);
-    const backgrounds = Array.from(lineup[0]!.body.matchAll(/background(?:-color)?:\s*([^;]+);/g)).map((m) => m[1]!.trim());
-    expect(backgrounds).toEqual(["transparent"]);
-    expect(lineup[0]!.body).toMatch(/border:\s*1px solid/);
-    expect(lineup[0]!.body).toMatch(/min-height:\s*(4[4-9]|[5-9]\d)px/);
-    expect(RULES.some((r) => r.selector.split(",").map((s) => s.trim()).includes(".featured-lineup:focus-visible"))).toBe(true);
-    expect(page.q("#featured-lineup")!.className).toBe("featured-lineup");
-    expect(page.part("#featured-lineup")).toBe(COPY.es.lineup);
-    expect(page.part("#featured-lineup")).not.toMatch(OPENING_LANGUAGE);
   });
 });
 
@@ -445,17 +284,6 @@ describe("the access to earlier participations and prizes: its own, visible, bef
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 describe("the Clásico and its 'Jugar ahora' button are gone from the Home card", () => {
-  it.each(["es", "en"] as const)("%s: no text about the Clásico or about playing now anywhere in the card, and no #featured-play", async (lang) => {
-    const page = await loadHome({ lang, crests: true });
-    expect(page.cardText()).not.toMatch(/cl[aá]sico/i);
-    expect(page.cardText()).not.toMatch(/jugar ahora|play now/i);
-    expect(page.card().innerHTML).not.toMatch(/cl[aá]sico|jugar ahora|play now/i);
-    expect(page.doc.getElementById("featured-play")).toBeNull();
-    expect(page.doc.querySelector(".featured-play")).toBeNull();
-    // the Clásico is not a match of the list either
-    expect(page.teams().join(" | ")).not.toMatch(/Barcelona v Real Madrid|Real Madrid v (FC )?Barcelona/);
-    expect(page.items().map((el) => page.itemText(el)).join(" ")).not.toMatch(/cl[aá]sico/i);
-  });
 
   it("nothing of the old card is left in the page, the language tables or the fallback: #featured-play, .featured-past, the old strip of two crests, home.upcoming.pastLabel, home.score.*", async () => {
     const page = await loadHome();
@@ -478,310 +306,6 @@ describe("the Clásico and its 'Jugar ahora' button are gone from the Home card"
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
-// The strip of the ten teams
-// ---------------------------------------------------------------------------------------------------------------------------------
-
-describe("the strip of the ten crests (mandatory by the Founder's decision; it establishes no licence)", () => {
-  it("is TEN list items in the Founder's order, each named in text — in the markup, with no script run", () => {
-    const { card } = staticPage();
-    const chips = Array.from(card.querySelectorAll("ul.ten-crests > li.crest-chip"));
-    expect(chips).toHaveLength(10);
-    expect(chips.map((li) => li.getAttribute("data-club"))).toEqual(STRIP_NAMES);
-    expect(chips.map((li) => squash(li.textContent))).toEqual(STRIP_NAMES);
-    expect(chips.map((li) => squash(li.querySelector(".crest-name")!.textContent))).toEqual(STRIP_NAMES);
-    expect(card.querySelectorAll("ul.ten-crests img")).toHaveLength(0); // the crests are drawn by the central module, never written into the markup
-  });
-
-  it("all TEN crest images are drawn WITH NO preview flag: the right crest of each team, first in its item, decoration (empty alt, aria-hidden), and each file exists", async () => {
-    const page = await loadHome({ crests: true });
-    expect(page.win.URBANO_CRESTS_PREVIEW).toBeUndefined();
-    const chips = page.strip();
-    expect(chips).toHaveLength(10);
-    expect(chips.map((li) => li.getAttribute("data-club"))).toEqual(STRIP_NAMES);
-    const images = chips.map((li) => li.querySelectorAll("img"));
-    for (const found of images) expect(found).toHaveLength(1);
-    const imgs = chips.map((li) => li.querySelector("img.club-crest") as HTMLImageElement);
-    expect(imgs.map((img) => img.getAttribute("data-crest"))).toEqual(STRIP_KEYS);
-    expect(new Set(STRIP_KEYS).size).toBe(10);
-    chips.forEach((li, i) => {
-      expect(li.firstElementChild, STRIP_NAMES[i]).toBe(imgs[i]);
-      expect(imgs[i]!.getAttribute("alt"), STRIP_NAMES[i]).toBe("");
-      expect(imgs[i]!.getAttribute("aria-hidden"), STRIP_NAMES[i]).toBe("true");
-      const src = imgs[i]!.getAttribute("src")!;
-      expect(src, STRIP_NAMES[i]).toMatch(/^\/assets\/clubs\/[a-z-]+\.(png|svg)$/);
-      expect(existsSync(path.join(ROOT, "public", src)), src).toBe(true);
-      expect(squash(li.querySelector(".crest-name")!.textContent), STRIP_NAMES[i]).toBe(STRIP_NAMES[i]); // the name stays in text: the accessible name
-      expect(squash(li.textContent)).toBe(STRIP_NAMES[i]); // and nothing else is written in the item (the image has no text)
-    });
-    for (const img of page.qa("#featured-predictions img")) { expect(img.getAttribute("alt")).toBe(""); expect(img.getAttribute("aria-hidden")).toBe("true"); }
-  });
-
-  it("is a list labelled by the visible label above it, in both languages", async () => {
-    const page = await loadHome({ crests: true });
-    const ul = page.q("#featured-predictions ul.ten-crests")!;
-    expect(ul.tagName).toBe("UL");
-    expect(ul.getAttribute("aria-labelledby")).toBe("featured-teams-label");
-    const label = page.doc.getElementById("featured-teams-label")!;
-    expect(squash(label.textContent)).toBe(COPY.es.teamsLabel);
-    expect(label.compareDocumentPosition(ul) & 4).toBeTruthy(); // the label comes before the strip
-    page.win.UrbanoI18n.setLang("en");
-    await page.settle();
-    expect(squash(page.doc.getElementById("featured-teams-label")!.textContent)).toBe(COPY.en.teamsLabel);
-    expect(ul.getAttribute("aria-labelledby")).toBe("featured-teams-label");
-    // the names are proper nouns: they are not translated and the crests are drawn once
-    expect(page.strip().map((li) => li.getAttribute("data-club"))).toEqual(STRIP_NAMES);
-    expect(page.qa("ul.ten-crests img")).toHaveLength(10);
-  });
-
-  it("is outside the list of matches, before it, and has no link or control", async () => {
-    const page = await loadHome({ crests: true });
-    const ul = page.q("ul.ten-crests")!;
-    const list = page.q("#upcoming-list")!;
-    expect(list.contains(ul)).toBe(false);
-    expect(ul.compareDocumentPosition(list) & 4).toBeTruthy();
-    expect(ul.querySelector("a, button, input, form")).toBeNull();
-  });
-
-  it("is still complete BY NAME when the crests module is absent: ten items, ten names, no image, still labelled", async () => {
-    const page = await loadHome(); // no crests module: the page's script tag failed to load
-    expect(page.win.UrbanoClubCrests).toBeUndefined();
-    expect(page.doc.querySelectorAll("#featured-predictions img")).toHaveLength(0);
-    expect(page.strip().map((li) => squash(li.textContent))).toEqual(STRIP_NAMES);
-    expect(page.q("ul.ten-crests")!.getAttribute("aria-labelledby")).toBe("featured-teams-label");
-    expect(page.teams()).toEqual(FIVE); // and the list is the same without them
-  });
-
-  it("a crest whose file cannot be loaded removes itself and leaves the name: the strip is never a row of broken pictures", async () => {
-    const page = await loadHome({ crests: true });
-    const first = page.strip()[0]!;
-    const img = first.querySelector("img")!;
-    img.dispatchEvent(new page.win.Event("error"));
-    expect(first.querySelector("img")).toBeNull();
-    expect(squash(first.textContent)).toBe("Real Madrid");
-    expect(page.strip()).toHaveLength(10);
-    expect(page.qa("ul.ten-crests img")).toHaveLength(9);
-  });
-
-  it("the list beside it draws a crest only for the clubs the registry has (and Valencia, Atlético de Madrid and Liverpool, which it has not, are just their names); every crest of the list is also in the strip", async () => {
-    const page = await loadHome({ crests: true });
-    expect(page.teams()).toEqual(FIVE);
-    const listCrests = page.qa("#upcoming-list img.club-crest");
-    expect(listCrests.map((img) => img.parentElement!.getAttribute("data-club"))).toEqual(["Real Madrid", "FC Barcelona", "Motagua", "Olimpia", "Manchester United", "Arsenal", "Manchester City"]);
-    const inStrip = new Set(page.qa("ul.ten-crests img").map((img) => img.getAttribute("data-crest")));
-    for (const img of listCrests) expect(inStrip.has(img.getAttribute("data-crest")), img.getAttribute("data-crest")!).toBe(true);
-    // the three of the ten that no listed match names (Inter, Bayern, Paris Saint-Germain) keep their crest: five matches do not shrink the strip
-    const listed = new Set(page.items().flatMap((el) => Array.from(el.querySelectorAll(".upcoming-team")).map((t) => t.getAttribute("data-club"))));
-    expect(STRIP_NAMES.filter((n) => !listed.has(n))).toEqual(["Inter de Milán", "Bayern Múnich", "Paris Saint-Germain"]);
-    expect(page.qa("ul.ten-crests img")).toHaveLength(10);
-    for (const img of page.qa("#featured-predictions img")) { expect(img.getAttribute("alt")).toBe(""); expect(img.getAttribute("aria-hidden")).toBe("true"); }
-  });
-
-  it("a change of language or time redraws the list without adding a second crest to anyone", async () => {
-    const page = await loadHome({ crests: true });
-    const before = [page.qa("ul.ten-crests img").length, page.qa("#upcoming-list img").length];
-    expect(before).toEqual([10, 7]);
-    page.win.UrbanoI18n.setLang("en");
-    await page.settle();
-    expect([page.qa("ul.ten-crests img").length, page.qa("#upcoming-list img").length]).toEqual(before);
-    expect(page.qa("#upcoming-list .upcoming-team")).toHaveLength(10);
-  });
-
-  it("the page's CSS keeps the names: a name is hidden ONLY beside a drawn crest (as a screen-reader label), and no rule removes the strip or an item, on a phone either", () => {
-    const hide = rulesFor(".ten-crests .club-crest + .crest-name");
-    expect(hide).toHaveLength(1);
-    expect(hide[0]!.body).toMatch(/position:\s*absolute/);
-    const name = rulesFor(".ten-crests .crest-name");
-    expect(name).toHaveLength(1);
-    expect(name[0]!.body).not.toMatch(/display:\s*none|visibility:\s*hidden|opacity:\s*0\b|clip|position:\s*absolute/);
-    for (const rule of RULES.filter((r) => /\.(ten-crests|crest-chip)\b/.test(r.selector))) expect(rule.body, rule.selector).not.toMatch(/display:\s*none/);
-    expect(rulesFor(".ten-crests").length).toBeGreaterThanOrEqual(2); // the desktop rule and a rule for a narrow screen
-  });
-});
-
-// ---------------------------------------------------------------------------------------------------------------------------------
-// The list: at most five, in order of start, in Honduras time, all "Preselección" by default
-// ---------------------------------------------------------------------------------------------------------------------------------
-
-describe("the list of coming matches", () => {
-  it("shows the five matches of the preselection, in order of start, each with ONE state in words: 'Preselección' — and nothing that says people can take part", async () => {
-    const page = await loadHome();
-    expect(page.teams()).toEqual(FIVE);
-    expect(page.ids()).toEqual(FIVE_IDS);
-    expect(page.chips()).toEqual(Array(5).fill(COPY.es.next));
-    expect(page.states()).toEqual(Array(5).fill("next"));
-    expect(page.cardText()).not.toMatch(OPENING_LANGUAGE);
-    expect(page.promiseText()).not.toMatch(PROMISES);
-    expect(page.cardText()).not.toMatch(/Próximo partido|Upcoming match\b/); // the old chip is gone
-    expect(page.cardText()).not.toMatch(/Aún no abierto|Not open yet/); // and so is the chip that said a match was NOT open
-    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-opens")).toHaveLength(0); // no participation window is written or invented
-    expect(page.doc.querySelectorAll("#upcoming-list .state-open, #upcoming-list .state-scheduled")).toHaveLength(0);
-  });
-
-  it.each(["es", "en"] as const)("%s: the chip of an announced match is 'Preselección' / 'Shortlisted': it says what the match IS, never that it is NOT open; no other chip changed", async (lang) => {
-    const page = await loadHome({ lang });
-    expect(page.chips()).toEqual(Array(5).fill(COPY[lang].next));
-    expect(COPY[lang].next).toBe(lang === "es" ? "Preselección" : "Shortlisted");
-    for (const chip of page.chips()) expect(chip, chip).not.toMatch(/\bno\b|\bnot\b|a[uú]n|yet/i);
-    expect(page.qa("#upcoming-list .upcoming-chip").every((c) => c.className === "upcoming-chip state-next")).toBe(true);
-    // the other four states are worded as before (and the five are distinct)
-    const dict = page.win.UrbanoI18n.dictionary()[lang];
-    expect([dict["upcoming.state.scheduled"], dict["upcoming.state.open"], dict["upcoming.state.closed"], dict["upcoming.state.final"]]).toEqual([COPY[lang].scheduled, COPY[lang].open, COPY[lang].closed, COPY[lang].final]);
-    expect(new Set([dict["upcoming.state.next"], COPY[lang].scheduled, COPY[lang].open, COPY[lang].closed, COPY[lang].final]).size).toBe(5);
-  });
-
-  it("the card's words never promise anything, in either language (the legal line, which names sponsorship only to deny it, is the one text left out)", async () => {
-    for (const lang of ["es", "en"] as const) {
-      const page = await loadHome({ lang });
-      expect(page.promiseText(), lang).not.toMatch(PROMISES);
-      expect(page.promiseText(), lang).not.toMatch(OPENING_LANGUAGE);
-      expect(page.cardText(), lang).toContain(COPY[lang].legal); // the legal line is the one thing left out above, and it is there
-    }
-  });
-
-  it("the markup of a row: li.upcoming-item > div.upcoming-teams > [span.upcoming-team (home)] + span.upcoming-away > [span.upcoming-vs + span.upcoming-team (away)]; then div.upcoming-meta; then span.upcoming-chip", async () => {
-    const shape = (el: Element) => `${el.tagName.toLowerCase()}.${el.className.split(" ")[0]}`;
-    for (const lang of ["es", "en"] as const) {
-      const page = await loadHome({ lang });
-      for (const li of page.items()) {
-        expect(li.tagName).toBe("LI");
-        expect(Array.from(li.children).map(shape)).toEqual(["div.upcoming-teams", "div.upcoming-meta", "span.upcoming-chip"]);
-        const [teams, meta] = [li.children[0]!, li.children[1]!];
-        expect(Array.from(teams.children).map(shape)).toEqual(["span.upcoming-team", "span.upcoming-away"]);
-        expect(Array.from(teams.children[1]!.children).map(shape)).toEqual(["span.upcoming-vs", "span.upcoming-team"]);
-        expect(Array.from(meta.children).map(shape)).toEqual(["span.upcoming-comp", "time.upcoming-time"]);
-        // descendant selectors still reach the teams and the "vs"
-        expect(li.querySelectorAll(".upcoming-team")).toHaveLength(2);
-        expect(li.querySelectorAll(".upcoming-vs")).toHaveLength(1);
-        expect(squash(li.querySelector(".upcoming-vs")!.textContent)).toBe("vs"); // «vs» in both languages (was «vs.» / «v»)
-      }
-      // the first row, word for word: home, vs, away
-      const first = page.items()[0]!;
-      expect(Array.from(first.querySelectorAll(".upcoming-team, .upcoming-vs")).map((e) => squash(e.textContent))).toEqual(["Valencia", "vs", "Real Madrid"]);
-      expect(first.children[0]!.getAttribute("class")).toBe("upcoming-teams");
-      expect(first.querySelector(".upcoming-away")!.firstElementChild!.className).toBe("upcoming-vs"); // the "vs" stays with the AWAY team
-    }
-  });
-
-  it("with the crest module the row has the same shape: the crests are added INSIDE each team, and nothing else moves", async () => {
-    const page = await loadHome({ crests: true });
-    const first = page.items()[0]!;
-    expect(Array.from(first.children).map((e) => e.className.split(" ")[0])).toEqual(["upcoming-teams", "upcoming-meta", "upcoming-chip"]);
-    expect(Array.from(first.querySelector(".upcoming-teams")!.children).map((e) => e.className)).toEqual(["upcoming-team", "upcoming-away"]);
-    expect(first.querySelector(".upcoming-away")!.firstElementChild!.className).toBe("upcoming-vs");
-    for (const team of Array.from(first.querySelectorAll(".upcoming-team"))) expect(team.parentElement === first.querySelector(".upcoming-teams") || team.parentElement === first.querySelector(".upcoming-away")).toBe(true);
-  });
-
-  it("writes each start once: machine-readable (the UTC instant, or the plain date) and as Honduras time; a match with no confirmed hour says so and shows no hour", async () => {
-    const es = await loadHome({ lang: "es" });
-    expect(es.times()).toEqual([
-      ["set", "2026-11-07T20:00:00Z", "sáb 7 nov · 🇭🇳 2:00 p. m."],
-      ["set", "2026-11-08T20:00:00Z", "dom 8 nov · 🇭🇳 2:00 p. m."],
-      ["tbc", "2026-11-19", "jue 19 nov · Horario por confirmar"],
-      ["set", "2026-11-22T16:30:00Z", "dom 22 nov · 🇭🇳 10:30 a. m."],
-      ["set", "2026-11-29T16:30:00Z", "dom 29 nov · 🇭🇳 10:30 a. m."],
-    ]);
-    const en = await loadHome({ lang: "en" });
-    expect(en.times().map((t) => t[2])).toEqual(["Sat, Nov 7 · 🇭🇳 2:00 p.m.", "Sun, Nov 8 · 🇭🇳 2:00 p.m.", "Thu, Nov 19 · Time to be confirmed", "Sun, Nov 22 · 🇭🇳 10:30 a.m.", "Sun, Nov 29 · 🇭🇳 10:30 a.m."]);
-    // the clock of the person's device does not matter: only the instant and the six hours
-    expect(MODULE_SOURCE).toMatch(/HN_OFFSET_MS = 6 \* 60 \* 60 \* 1000/);
-    expect(MODULE_SOURCE).not.toMatch(/Intl\.|toLocale|getTimezoneOffset|getHours\(|getDay\(\)|getDate\(\)/);
-  });
-
-  it("Honduras time is the instant minus six hours, with no daylight saving: 01:30 UTC of the 20th is 7:30 p. m. of the 19th; midnight and noon read 12:00 a. m. and 12:00 p. m.", async () => {
-    const page = await loadHome();
-    const t = (k: string, v?: unknown) => page.win.UrbanoI18n.t(k, v);
-    const api = page.win.UrbanoHomeUpcoming;
-    expect(api.whenText(Date.parse("2026-11-20T01:30:00Z"), t)).toBe("jue 19 nov · 🇭🇳 7:30 p. m.");
-    expect(api.whenText(Date.parse("2026-11-07T06:00:00Z"), t)).toBe("sáb 7 nov · 🇭🇳 12:00 a. m.");
-    expect(api.whenText(Date.parse("2026-11-07T18:00:00Z"), t)).toBe("sáb 7 nov · 🇭🇳 12:00 p. m.");
-    expect(api.whenText(Date.parse("2026-11-07T05:59:00Z"), t)).toBe("vie 6 nov · 🇭🇳 11:59 p. m.");
-    expect(api.whenDateText(Date.parse("2026-11-19T06:00:00Z"), t)).toBe("jue 19 nov · Horario por confirmar");
-    const shown = await loadHome({ data: { matches: [{ ...SRC, id: "late", kickoffAt: "2026-11-20T01:30:00Z", home: "Motagua", away: "Olimpia", competition: "Liga Nacional" }] } });
-    expect(shown.times()).toEqual([["set", "2026-11-20T01:30:00Z", "jue 19 nov · 🇭🇳 7:30 p. m."]]); // still the 19th in Honduras
-  });
-
-  it("a match with an hour leaves the list three hours after it starts (and is 'Cerrado' until then); the list gets shorter, there being only five", async () => {
-    const earlier = await loadHome({ now: "2026-11-07T20:15:00Z" }); // 15 minutes after the first kickoff
-    expect(earlier.teams()).toEqual(FIVE);
-    expect(earlier.states()).toEqual(["closed", "next", "next", "next", "next"]);
-    const almost = await loadHome({ now: "2026-11-07T22:59:59Z" }); // one second before the three hours
-    expect(almost.teams()[0]).toBe("Valencia v Real Madrid");
-    expect(almost.states()[0]).toBe("closed");
-    const later = await loadHome({ now: "2026-11-07T23:00:00Z" }); // three hours after
-    expect(later.teams()).toEqual(FIVE.slice(1));
-    expect(later.states()).toEqual(Array(4).fill("next"));
-  });
-
-  it("with more announced matches than fit, the list moves up when one leaves: the next match takes its place", async () => {
-    const entries = [1, 2, 3, 4, 5, 6].map((n) => ({ ...SRC, id: `M-${n}`, kickoffAt: `2026-11-0${n}T20:00:00Z`, home: `Casa ${n}`, away: `Visita ${n}`, competition: "Liga" }));
-    const before = await loadHome({ data: { matches: entries }, now: NOW_QUIET });
-    expect(before.ids()).toEqual(["M-1", "M-2", "M-3", "M-4", "M-5"]); // the sixth waits
-    const after = await loadHome({ data: { matches: entries }, now: "2026-11-01T23:00:00Z" }); // M-1 left three hours after its start
-    expect(after.ids()).toEqual(["M-2", "M-3", "M-4", "M-5", "M-6"]);
-  });
-
-  it("when every announced match has passed, it says it is preparing the next ones (no empty box, no error) and the accesses and the ten crests stay", async () => {
-    for (const lang of ["es", "en"] as const) {
-      const done = await loadHome({ lang, now: "2026-12-30T00:00:00Z", crests: true });
-      expect(done.items()).toHaveLength(0);
-      expect(squash(done.doc.querySelector("#upcoming-list .upcoming-none")!.textContent)).toBe(COPY[lang].none);
-      expect(done.part("#featured-lineup")).toBe(COPY[lang].lineup); // the way into the lineup is still there
-      expect(done.part("#featured-past")).toBe(COPY[lang].past); // and so is the way to earlier participations and prizes
-      expect(done.strip()).toHaveLength(10);
-      expect(done.qa("ul.ten-crests img")).toHaveLength(10);
-      expect(done.note().hidden, lang).toBe(true); // the note about the dates of the rows has nothing to talk about
-    }
-  });
-
-  it("the note about dates and times (#featured-note) is shown while there are rows and hidden when the list is empty; it returns with the rows", async () => {
-    const withRows = await loadHome();
-    expect(withRows.items()).toHaveLength(5);
-    expect(withRows.note().hidden).toBe(false);
-    expect(squash(withRows.note().textContent)).toBe(COPY.es.note);
-    expect(withRows.note().className).toBe("featured-note");
-    const empty = await loadHome({ now: "2026-12-30T00:00:00Z" });
-    expect(empty.items()).toHaveLength(0);
-    expect(empty.note().hidden).toBe(true);
-    const noEntries = await loadHome({ data: { matches: [] } });
-    expect(noEntries.note().hidden).toBe(true);
-    // a redrawn list moves the note with it, in both directions, through the module's onPaint
-    const note = withRows.note();
-    const host = withRows.doc.createElement("ul");
-    let nowMs = Date.parse(NOW_QUIET);
-    const handle = withRows.win.UrbanoHomeUpcoming.init({ host, data: FIXTURE, now: () => nowMs, serverMatches: [], refreshMs: 0, onPaint: (items: any[]) => { note.hidden = items.length === 0; } });
-    expect(note.hidden).toBe(false);
-    nowMs = Date.parse("2026-12-30T00:00:00Z");
-    handle.paint();
-    expect(note.hidden).toBe(true);
-    nowMs = Date.parse(NOW_QUIET);
-    handle.paint();
-    expect(note.hidden).toBe(false);
-    handle.stop();
-  });
-
-  it("the old note and scope classes are gone: no .featured-window, .featured-scope or .featured-when in the markup, the code or the CSS; .featured-note styles the note", async () => {
-    const page = await loadHome();
-    expect(CODE).not.toMatch(/featured-window|featured-scope|featured-when/);
-    expect(RULES.filter((r) => /featured-window|featured-scope|featured-when/.test(r.selector))).toEqual([]);
-    expect(rulesFor(".featured-note")).toHaveLength(1);
-    for (const sel of [".featured-window", ".featured-scope", ".featured-when"]) expect(page.doc.querySelector(sel), sel).toBeNull();
-    expect(page.doc.querySelectorAll("p#featured-note.featured-note")).toHaveLength(1);
-  });
-
-  it("is drawn from text, never markup: a name with markup in it is shown as the words it is", async () => {
-    const page = await loadHome();
-    const tricky = [
-      { ...SRC, id: "x", kickoffAt: "2026-11-02T20:00:00Z", home: "<img src=x onerror=alert(1)>", away: "A&B <b>FC</b>", competition: "<script>1</script>" },
-      { id: "y", date: "2026-11-03", home: "<i>Rojo</i>", away: "Azul & Co", competition: "<svg onload=alert(2)>" },
-    ];
-    page.win.UrbanoHomeUpcoming.init({ host: page.doc.getElementById("upcoming-list"), data: { matches: tricky }, now: () => Date.parse(NOW_QUIET), fetch: null, serverMatches: [], refreshMs: 0 });
-    expect(page.doc.querySelectorAll("#upcoming-list img, #upcoming-list b, #upcoming-list i, #upcoming-list script, #upcoming-list svg")).toHaveLength(0); // no element was made out of the data
-    expect(page.teams()).toEqual(["<img src=x onerror=alert(1)> v A&B <b>FC</b>", "<i>Rojo</i> v Azul & Co"]);
-    expect(page.qa("#upcoming-list .upcoming-comp").map((e) => squash(e.textContent))).toEqual(["<script>1</script>", "<svg onload=alert(2)>"]);
-  });
-});
-
-// ---------------------------------------------------------------------------------------------------------------------------------
 // Five matches at most, and the filter of states
 // ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -792,18 +316,6 @@ describe("the limit of five, and the filter of states applied BEFORE it", () => 
   const NOW = Date.parse("2026-11-03T21:00:00Z");
   const ids = (items: any[]) => Array.from(items, (i) => i.entry.id);
   const states = (items: any[]) => Array.from(items, (i) => i.state);
-
-  it("MAX_ITEMS is five: the default limit of select and of the card", async () => {
-    const page = await loadHome();
-    const api = page.win.UrbanoHomeUpcoming;
-    expect(api.MAX_ITEMS).toBe(5);
-    expect(ids(api.select(ENTRIES, [], NOW))).toEqual(["E-1", "E-2", "E-3", "E-4", "E-5"]);
-    expect(ids(api.select(ENTRIES, [], NOW, undefined))).toEqual(["E-1", "E-2", "E-3", "E-4", "E-5"]);
-    expect(ids(api.select(ENTRIES, [], NOW, 2))).toEqual(["E-1", "E-2"]); // an explicit limit wins, applied after the order of start
-    expect(ids(api.select([...ENTRIES].reverse(), [], NOW, 3))).toEqual(["E-1", "E-2", "E-3"]);
-    expect(page.items()).toHaveLength(5); // the real preselection fits exactly
-    expect(MODULE_SOURCE).not.toMatch(/MAX_ITEMS = 3/);
-  });
 
   it("with `only`, the states are filtered BEFORE the limit: three 'next' matches are returned even though the first two entries are 'closed'", async () => {
     const api = (await loadHome()).win.UrbanoHomeUpcoming;
@@ -838,26 +350,6 @@ describe("a match with only a date: 'Horario por confirmar', stays through the H
   const api = (page: Home) => page.win.UrbanoHomeUpcoming;
   const states = (items: any[]) => Array.from(items, (i) => i.state);
 
-  it("is drawn with its date and the words 'Horario por confirmar' (never an hour), data-time='tbc', datetime = the date, and the chip 'Preselección' — in both languages", async () => {
-    for (const lang of ["es", "en"] as const) {
-      const page = await loadHome({ lang });
-      const row = page.items()[2]!;
-      expect(row.getAttribute("data-match")).toBe("N26-46");
-      expect(row.getAttribute("data-time")).toBe("tbc");
-      expect(row.getAttribute("data-state")).toBe("next");
-      const time = row.querySelector("time")!;
-      expect(time.getAttribute("datetime")).toBe("2026-11-19");
-      expect(squash(time.textContent)).toBe(lang === "es" ? "jue 19 nov · Horario por confirmar" : "Thu, Nov 19 · Time to be confirmed");
-      expect(squash(time.textContent)).toContain(COPY[lang].tbc);
-      expect(squash(time.textContent)).not.toMatch(/\d:\d\d|a\. ?m\.|p\. ?m\./); // no hour is shown or invented
-      expect(squash(row.querySelector(".upcoming-chip")!.textContent)).toBe(COPY[lang].next);
-      expect(row.querySelector(".upcoming-opens")).toBeNull(); // and no participation window
-      // the other four have an hour: the words appear once in the whole list
-      expect(page.items().filter((el) => el.getAttribute("data-time") === "set")).toHaveLength(4);
-      expect(page.items().filter((el) => page.itemText(el).includes(COPY[lang].tbc))).toHaveLength(1);
-    }
-  });
-
   it("is placed by its Honduras date: 00:00 Honduras of that date to the end of that date (24 h); an hour-less match sorts among the timed ones by that moment", async () => {
     const page = await loadHome();
     expect({ ...api(page).timing(TBC) }).toEqual({ hasTime: false, start: Date.parse("2026-11-19T06:00:00Z"), leaves: Date.parse("2026-11-20T06:00:00Z") });
@@ -865,27 +357,6 @@ describe("a match with only a date: 'Horario por confirmar', stays through the H
     const after = { ...SRC, id: "A", kickoffAt: "2026-11-20T20:00:00Z", home: "Casa A", away: "Visita A", competition: "Liga" };
     const ids = Array.from(api(page).select([after, TBC, before], [], Date.parse("2026-11-10T00:00:00Z"), 5), (i: any) => i.entry.id);
     expect(ids).toEqual(["B", "D-1", "A"]);
-  });
-
-  it("stays in the list through the WHOLE Honduras date and leaves at 00:00 Honduras of the next day; it is never 'Cerrado' on its own date (no hour, nothing has started)", async () => {
-    const page = await loadHome();
-    const at = (iso: string) => states(api(page).select([TBC], [], Date.parse(iso), 5));
-    expect(at("2026-11-12T06:00:00Z")).toEqual(["next"]); // announced well ahead
-    expect(at("2026-11-19T05:59:59Z")).toEqual(["next"]); // 23:59:59 of the 18th in Honduras
-    expect(at("2026-11-19T06:00:00Z")).toEqual(["next"]); // 00:00 of the 19th: the date begins and the match does not become 'Cerrado'
-    expect(at("2026-11-19T20:00:00Z")).toEqual(["next"]); // 2:00 p. m. of the 19th
-    expect(at("2026-11-20T01:30:00Z")).toEqual(["next"]); // 7:30 p. m. of the 19th
-    expect(at("2026-11-20T05:59:59Z")).toEqual(["next"]); // 23:59:59 of the 19th
-    expect(at("2026-11-20T06:00:00Z")).toEqual([]); // 00:00 of the 20th: it leaves
-    expect(at("2026-11-25T06:00:00Z")).toEqual([]);
-    // and in the page itself, on the evening of its date
-    const evening = await loadHome({ data: { matches: [TBC] }, now: "2026-11-20T03:00:00Z" });
-    expect(evening.states()).toEqual(["next"]);
-    expect(evening.chips()).toEqual([COPY.es.next]);
-    expect(evening.items()[0]!.getAttribute("data-time")).toBe("tbc");
-    const gone = await loadHome({ data: { matches: [TBC] }, now: "2026-11-20T06:00:00Z" });
-    expect(gone.items()).toHaveLength(0);
-    expect(squash(gone.q("#upcoming-list .upcoming-none")!.textContent)).toBe(COPY.es.none);
   });
 
   it("KEY SAFETY PROPERTY: even if the server lists an enabled, available, open match with the same two teams whose kickoff falls on that date, the match stays 'Preselección'", async () => {
@@ -908,46 +379,6 @@ describe("a match with only a date: 'Horario por confirmar', stays through the H
     const server = serverMatch({ kickoffAt: "2026-11-20T01:30:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" } });
     expect(states(api(control).select([timed], [server], Date.parse("2026-11-19T18:00:00Z"), 5))).toEqual(["open"]);
     expect(states(api(control).select([timed], [server], Date.parse("2026-11-20T01:30:00Z"), 5))).toEqual(["closed"]);
-  });
-
-  it("KEY SAFETY PROPERTY, in the page: the ROW stays 'Preselección' however the server lists the same teams (before, at and after its kickoff, and finalized); the sentence under the list speaks only for the server's own list", async () => {
-    const same = (over: Record<string, unknown>) => serverMatch({ kickoffAt: "2026-11-19T20:00:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" }, ...over });
-    for (const [now, server, line] of [
-      ["2026-11-19T05:00:00Z", same({ kickoffAt: "2026-11-19T06:00:00.000Z" }), COPY.es.statusOpen], // the very instant the date begins in Honduras (00:00): the only instant a date could ever be compared with
-      ["2026-11-19T12:00:00Z", same({}), COPY.es.statusOpen],
-      ["2026-11-19T20:00:00Z", same({}), COPY.es.statusNone], // kickoff: the server refuses from this instant
-      ["2026-11-19T21:00:00Z", same({}), COPY.es.statusNone],
-      ["2026-11-19T21:00:00Z", same({ finalized: true, finalResult: { homeScore: 2, awayScore: 2 } }), COPY.es.statusNone],
-      ["2026-11-19T12:00:00Z", same({ participationOpensAt: "2026-11-19T18:00:00.000Z" }), COPY.es.statusNone], // its window has not opened
-    ] as Array<[string, unknown, string]>) {
-      const page = await loadHome({ data: { matches: [TBC] }, now, server: answer(server) });
-      expect(page.states(), now).toEqual(["next"]);
-      expect(page.chips(), now).toEqual([COPY.es.next]);
-      expect(page.items()[0]!.getAttribute("data-time")).toBe("tbc");
-      expect(page.statusLine(), now).toBe(line); // the SERVER has (or has not) a match that accepts participation: the line says so, and points to the Score fixtures
-      expect(squash(page.q("#upcoming-list")!.textContent), now).not.toMatch(OPENING_LANGUAGE); // and the ROW says nothing of the kind
-      expect(page.doc.querySelectorAll("#upcoming-list .upcoming-opens")).toHaveLength(0);
-    }
-    // with the real editorial list: the server opens Valencia–Real Madrid (it has an hour) and cannot open Motagua–Olimpia (it has not)
-    const real = await loadHome({
-      now: "2026-11-07T14:00:00Z",
-      server: answer(
-        serverMatch({ kickoffAt: "2026-11-07T20:00:00.000Z", homeTeam: { name: "Valencia" }, awayTeam: { name: "Real Madrid" } }),
-        serverMatch({ matchId: "m-2", kickoffAt: "2026-11-19T20:00:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" } }),
-        serverMatch({ matchId: "m-3", kickoffAt: "2026-11-20T01:30:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" } }),
-      ),
-    });
-    expect(real.states()).toEqual(["open", "next", "next", "next", "next"]);
-    expect(real.chips()[2]).toBe(COPY.es.next);
-    expect(real.statusLine()).toBe(COPY.es.statusOpen);
-    // only the matches that tie to no row are on the server's list: no row opens, and the line still says what the server says
-    const orphans = await loadHome({
-      now: "2026-11-07T14:00:00Z",
-      server: answer(serverMatch({ matchId: "m-2", kickoffAt: "2026-11-19T20:00:00.000Z", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" } })),
-    });
-    expect(orphans.states()).toEqual(Array(5).fill("next"));
-    expect(orphans.chips()).toEqual(Array(5).fill(COPY.es.next));
-    expect(orphans.statusLine()).toBe(COPY.es.statusOpen);
   });
 });
 
@@ -1040,27 +471,6 @@ describe("the timing of an entry: kickoffAt is a valid ISO instant or the entry 
     for (const entry of [{ ...base, id: "none" }, null, undefined, "2026-11-19", 5, []]) expect(m.timing(entry), String(entry)).toBeNull();
     expect(Array.from(m.select([null, undefined, { ...base, id: "none" }], [], Date.parse("2026-11-10T00:00:00Z"), 5))).toHaveLength(0);
   });
-
-  it("in the page: only the entries that can be placed are drawn; the dropped ones leave no row, no error, and the valid date-only one is kept", async () => {
-    const page = await loadHome({
-      now: NOW_QUIET,
-      data: {
-        matches: [
-          { ...base, id: "ok-1", kickoffAt: "2026-11-02T20:00:00Z" },
-          { ...base, id: "bad-number", kickoffAt: 1793000000000, date: VALID_DATE },
-          { ...base, id: "bad-string", kickoffAt: "pronto", date: VALID_DATE },
-          { ...base, id: "bad-date-1", date: "2026-02-30" },
-          { ...base, id: "bad-date-2", date: "2026-13-01" },
-          { ...base, id: "bad-date-3", date: "19-11-2026" },
-          { ...base, id: "bad-none" },
-          { ...base, id: "ok-2", date: VALID_DATE },
-        ],
-      },
-    });
-    expect(page.ids()).toEqual(["ok-1", "ok-2"]);
-    expect(page.items().map((el) => el.getAttribute("data-time"))).toEqual(["set", "tbc"]);
-    expect(page.cardText()).not.toMatch(/undefined|NaN|Invalid/);
-  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -1068,111 +478,6 @@ describe("the timing of an entry: kickoffAt is a valid ISO instant or the entry 
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 describe("the status line under the list: it speaks for the SERVER's list, and only once that list has been read", () => {
-  it.each(["es", "en"] as const)("%s: after a successful read in which nothing accepts participation it says that nothing is open (visible, polite), and never the sentence that matches are open", async (lang) => {
-    const page = await loadHome({ lang });
-    expect(page.statusLine()).toBe(COPY[lang].statusNone);
-    expect(page.statusHidden()).toBe(false);
-    expect(page.q("#upcoming-status")!.getAttribute("aria-live")).toBe("polite");
-    expect(page.cardText()).not.toContain(COPY[lang].statusOpen);
-    expect(page.cardText()).not.toMatch(OPENING_LANGUAGE);
-  });
-
-  it.each(["es", "en"] as const)("%s: when the SERVER lists a match that accepts participation it says that matches are open and where to see them", async (lang) => {
-    const page = await loadLogic({ lang, now: "2026-11-03T19:00:00Z", server: answer(serverMatch()) });
-    expect(page.states().filter((s) => s === "open")).toHaveLength(1);
-    expect(page.statusLine()).toBe(COPY[lang].statusOpen);
-    expect(page.statusHidden()).toBe(false);
-  });
-
-  it.each([
-    ["the server lists nothing", answer()],
-    ["the venue is not enabled", answer(disabled(serverMatch(), { enabled: false }))],
-    ["the venue is not active", answer(disabled(serverMatch(), { venue: { ...serverMatch().venueActivations[0]!.venue, active: false } }))],
-    ["there is no venue at all", answer(disabled(serverMatch(), { venue: null }))],
-    ["the offer is not available", answer(disabled(serverMatch(), { offer: noOffer }))],
-    ["there is no offer", answer(disabled(serverMatch(), { offer: null }))],
-    ["there is no venue activation", answer(serverMatch({ venueActivations: [] }))],
-    ["enabled is anything but true", answer(disabled(serverMatch(), { enabled: "true" }))],
-    ["the match has an approved window that has not opened (it is only scheduled)", answer(serverMatch({ participationOpensAt: "2026-11-03T19:30:00.000Z" }))],
-    ["the match is cancelled", answer(serverMatch({ cancelledAt: "2026-11-02T10:00:00.000Z" }))],
-    ["the match is finalized", answer(serverMatch({ finalized: true, finalResult: { homeScore: 1, awayScore: 0 } }))],
-    ["the start of the match cannot be read", answer(serverMatch({ kickoffAt: "pronto" }))],
-  ])("after a successful read it says that nothing is open when %s", async (_why, server) => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server });
-    expect(page.states()).not.toContain("open");
-    expect(page.statusLine()).toBe(COPY.es.statusNone);
-    expect(page.statusHidden()).toBe(false);
-  });
-
-  it("after a successful read it says that nothing is open when the matches have started or are finished (nothing is open to participate in)", async () => {
-    const started = await loadLogic({ now: "2026-11-03T21:30:00Z", server: answer(serverMatch()) });
-    expect(started.states().slice(0, 2)).toEqual(["closed", "closed"]);
-    expect(started.statusLine()).toBe(COPY.es.statusNone);
-    const exactly = await loadLogic({ now: "2026-11-03T20:00:00Z", server: answer(serverMatch()) }); // the server refuses from the instant of kickoff
-    expect(exactly.statusLine()).toBe(COPY.es.statusNone);
-    const finished = await loadLogic({ now: "2026-11-03T21:30:00Z", server: answer(serverMatch({ finalized: true, finalResult: { homeScore: 1, awayScore: 0 } })) });
-    expect(finished.states().slice(0, 2)).toEqual(["final", "closed"]);
-    expect(finished.statusLine()).toBe(COPY.es.statusNone);
-  });
-
-  it.each([
-    ["a match with ANOTHER start than any row", serverMatch({ kickoffAt: "2026-11-03T20:01:00.000Z" })],
-    ["a match with other teams", serverMatch({ homeTeam: { name: "Rojo FC" }, awayTeam: { name: "Azul FC" } })],
-    ["a match with other teams and another start", serverMatch({ kickoffAt: "2026-11-05T01:00:00.000Z", homeTeam: { name: "Rojo FC" }, awayTeam: { name: "Azul FC" } })],
-    ["a match with other teams whose approved window HAS opened", serverMatch({ participationOpensAt: "2026-11-03T18:00:00.000Z", homeTeam: { name: "Rojo FC" }, awayTeam: { name: "Azul FC" } })],
-  ])("it says that matches are open when the server lists %s that accepts participation — even though it ties to no row, and every row stays 'Preselección'", async (_why, match) => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(match) });
-    expect(page.states()).toEqual(["next", "next", "next"]); // no row is upgraded: it needs the same instant and both teams
-    expect(page.chips()).toEqual(Array(3).fill(COPY.es.next));
-    expect(page.statusLine()).toBe(COPY.es.statusOpen);
-    expect(page.statusHidden()).toBe(false);
-    expect(squash(page.q("#upcoming-list")!.textContent)).not.toMatch(OPENING_LANGUAGE);
-  });
-
-  it.each([
-    ["'Valencia CF' (another spelling of a row's club)", { kickoffAt: "2026-11-07T20:00:00.000Z", homeTeam: { name: "Valencia CF" }, awayTeam: { name: "Real Madrid" } }],
-    ["'Atlético Madrid' (another spelling of a row's club)", { kickoffAt: "2026-11-08T20:00:00.000Z", homeTeam: { name: "Atlético Madrid" }, awayTeam: { name: "FC Barcelona" } }],
-    ["the right teams at ANOTHER start", { kickoffAt: "2026-11-07T21:00:00.000Z", homeTeam: { name: "Valencia" }, awayTeam: { name: "Real Madrid" } }],
-    ["a match that is not in the editorial list at all", { kickoffAt: "2026-11-10T20:00:00.000Z", homeTeam: { name: "Rojo FC" }, awayTeam: { name: "Azul FC" } }],
-  ])("on the real editorial list: %s, open on the server, leaves the five rows 'Preselección' and still makes the line say that matches are open", async (_why, over) => {
-    const page = await loadHome({ now: "2026-11-07T14:00:00Z", server: answer(serverMatch(over)) });
-    expect(page.states()).toEqual(Array(5).fill("next"));
-    expect(page.chips()).toEqual(Array(5).fill(COPY.es.next));
-    expect(page.statusLine()).toBe(COPY.es.statusOpen);
-  });
-
-  it.each([
-    ["the server answers 500", { status: 500, json: { error: "x" } } as Reply],
-    ["the server answers 401", { status: 401, json: {} } as Reply],
-    ["the answer is not the list", { status: 200, json: { matches: "no" } } as Reply],
-    ["the answer has no body", { status: 200, json: null } as Reply],
-    ["the network fails", "reject" as Reply],
-    ["the answer is not JSON", "badjson" as Reply],
-  ])("when the list could not be read (%s) the sentence is NOT shown — hidden and empty — the chips stay 'Preselección' and nothing says anything is open", async (_why, server) => {
-    for (const load of [loadLogic, loadHome]) { // the fixed fixture and the real editorial list
-      const page = await load({ now: "2026-11-03T19:00:00Z", server });
-      expect(page.statusHidden()).toBe(true);
-      expect(page.statusLine()).toBe("");
-      expect(page.q("#upcoming-status")!.childNodes).toHaveLength(0);
-      expect(page.items().length).toBeGreaterThan(0);
-      expect(new Set(page.states())).toEqual(new Set(["next"]));
-      expect(new Set(page.chips())).toEqual(new Set([COPY.es.next]));
-      expect(page.cardText()).not.toContain(COPY.es.statusNone); // neither "nothing is open"...
-      expect(page.cardText()).not.toContain(COPY.es.statusOpen); // ...nor "some are open": the list says only what it knows
-      expect(page.cardText()).not.toMatch(OPENING_LANGUAGE);
-    }
-  });
-
-  it.each(["es", "en"] as const)("%s: while the list is still being read (a read that never ends) the sentence is not shown — hidden and empty — and the rows are already drawn as 'Preselección'", async (lang) => {
-    const page = await loadLogic({ lang, now: "2026-11-03T19:00:00Z", server: "hang" });
-    expect(page.calls).toHaveLength(1); // it asked once and is still waiting
-    expect(page.statusHidden()).toBe(true);
-    expect(page.statusLine()).toBe("");
-    expect(page.items()).toHaveLength(3);
-    expect(page.chips()).toEqual(Array(3).fill(COPY[lang].next));
-    expect(page.cardText()).not.toContain(COPY[lang].statusNone);
-    expect(page.cardText()).not.toContain(COPY[lang].statusOpen);
-  });
 
   it("at module level: the sentence is hidden and empty from the first drawing until the read ends, and after a read that throws, is rejected, answers something that is not the list or answers other than 200", async () => {
     const page = await loadHome();
@@ -1221,21 +526,6 @@ describe("the status line under the list: it speaks for the SERVER's list, and o
     expect(run([serverMatch()])).toEqual({ text: COPY.es.statusOpen, hidden: false });
     expect(run([serverMatch({ cancelledAt: "2026-11-02T10:00:00.000Z" })])).toEqual({ text: COPY.es.statusNone, hidden: false });
     expect(page.calls.length).toBe(before);
-  });
-
-  it("is HIDDEN (and empty) when the list is empty: every match passed, or no entry at all — even after a successful read", async () => {
-    const passed = await loadHome({ now: "2026-12-30T00:00:00Z" });
-    expect(passed.items()).toHaveLength(0);
-    expect(passed.statusHidden()).toBe(true);
-    expect(passed.statusLine()).toBe("");
-    const none = await loadHome({ data: { matches: [] } });
-    expect(none.items()).toHaveLength(0);
-    expect(none.statusHidden()).toBe(true);
-    expect(none.statusLine()).toBe("");
-    const withOpenServer = await loadHome({ data: { matches: [] }, server: answer(serverMatch({ kickoffAt: "2026-11-30T20:00:00.000Z" })) });
-    expect(withOpenServer.items()).toHaveLength(0); // a server match that is open, but no row to put the sentence under
-    expect(withOpenServer.statusHidden()).toBe(true);
-    expect(withOpenServer.statusLine()).toBe("");
   });
 
   it("follows the list as time passes and the language changes: said again, hidden again, in the other language", async () => {
@@ -1300,193 +590,10 @@ describe("the status line under the list: it speaks for the SERVER's list, and o
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 describe("the states: the card says people can take part only when the server says so", () => {
-  it("PARTICIPACIÓN PROGRAMADA: the server says the match has an approved window that has not opened — with the opening hour in Honduras time", async () => {
-    const page = await loadLogic({ now: "2026-11-03T14:00:00Z", server: answer(serverMatch({ participationOpensAt: "2026-11-03T18:30:00.000Z", venueActivations: [] })) });
-    const barca = page.items().find((el) => page.itemText(el).includes("FC Barcelona"))!;
-    expect(barca.getAttribute("data-state")).toBe("scheduled");
-    expect(squash(barca.querySelector(".upcoming-chip")!.textContent)).toBe(COPY.es.scheduled);
-    expect(squash(barca.querySelector(".upcoming-opens")!.textContent)).toBe("Participación desde las 12:30 p. m. (hora de Honduras)");
-    expect(page.cardText()).not.toMatch(/Abierto para/);
-    expect(page.statusLine()).toBe(COPY.es.statusNone); // scheduled is not open: the line still says that nothing is open
-  });
-
-  it("an enabled venue does not open a match whose window has not opened yet: it is still 'programada'", async () => {
-    const page = await loadLogic({ now: "2026-11-03T14:00:00Z", server: answer(serverMatch({ participationOpensAt: "2026-11-03T18:30:00.000Z" })) });
-    expect(page.states()).toContain("scheduled");
-    expect(page.states()).not.toContain("open");
-  });
-
-  it("ABIERTO PARA PARTICIPAR: an enabled venue activation of an active venue with an available offer, and the approved window (if any) has opened", async () => {
-    const withWindow = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ participationOpensAt: "2026-11-03T18:30:00.000Z" })) });
-    expect(withWindow.states().filter((s) => s === "open")).toHaveLength(1);
-    const noWindow = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch()) });
-    expect(noWindow.chips().filter((c) => c === COPY.es.open)).toHaveLength(1);
-    const en = await loadLogic({ lang: "en", now: "2026-11-03T19:00:00Z", server: answer(serverMatch()) });
-    expect(en.chips().filter((c) => c === COPY.en.open)).toHaveLength(1);
-  });
-
-  it.each([
-    ["the venue is not enabled", (m: any) => disabled(m, { enabled: false })],
-    ["the venue is not active", (m: any) => disabled(m, { venue: { ...m.venueActivations[0].venue, active: false } })],
-    ["there is no venue at all", (m: any) => disabled(m, { venue: null })],
-    ["the offer is not available (no prizes, or a gap)", (m: any) => disabled(m, { offer: noOffer })],
-    ["there is no offer", (m: any) => disabled(m, { offer: null })],
-    ["there is no venue activation", (m: any) => ({ ...m, venueActivations: [] })],
-    ["enabled is anything but true", (m: any) => disabled(m, { enabled: "true" })],
-  ])("is NOT open when %s: it stays 'Aún no abierto'", async (_why, change) => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(change(serverMatch())) });
-    expect(page.states()).toEqual(["next", "next", "next"]);
-    expect(page.cardText()).not.toMatch(/Abierto para|Open to participate/);
-    expect(page.statusLine()).toBe(COPY.es.statusNone);
-  });
-
-  it("CERRADO: the match has started (the server refuses from the instant of kickoff); FINALIZADO: the server has its result", async () => {
-    const started = await loadLogic({ now: "2026-11-03T21:30:00Z", server: answer(serverMatch()) });
-    expect(started.states().slice(0, 2)).toEqual(["closed", "closed"]); // both 20:00 UTC matches have started
-    const finished = await loadLogic({ now: "2026-11-03T21:30:00Z", server: answer(serverMatch({ finalized: true, finalResult: { homeScore: 2, awayScore: 1 } })) });
-    expect(finished.states().slice(0, 2)).toEqual(["final", "closed"]);
-    expect(finished.chips().slice(0, 2)).toEqual([COPY.es.final, COPY.es.closed]);
-    const en = await loadLogic({ lang: "en", now: "2026-11-03T21:30:00Z", server: answer(serverMatch({ finalized: true })) });
-    expect(en.chips().slice(0, 2)).toEqual([COPY.en.final, COPY.en.closed]);
-  });
 
   it("a match that has started is never 'open', even if the server still lists an enabled venue", async () => {
     const page = await loadLogic({ now: "2026-11-03T20:00:00Z", server: answer(serverMatch()) });
     expect(page.states()).not.toContain("open");
-  });
-
-  it("the state is judged again as time passes: a card left open moves from 'programada' to 'abierto' to 'cerrado' without a reload", async () => {
-    const page = await loadLogic({ now: "2026-11-03T18:00:00Z", server: answer(serverMatch({ participationOpensAt: "2026-11-03T18:30:00.000Z" })) });
-    const barca = () => page.items().find((el) => page.itemText(el).includes("FC Barcelona"))!.getAttribute("data-state");
-    expect(barca()).toBe("scheduled");
-    const api = page.win.UrbanoHomeUpcoming;
-    const server = [serverMatch({ participationOpensAt: "2026-11-03T18:30:00.000Z" })];
-    const at = (iso: string) => api.select(page.win.UrbanoUpcomingData.matches, server, Date.parse(iso), 5).find((s: any) => s.entry.home === "FC Barcelona").state;
-    expect([at("2026-11-03T18:00:00Z"), at("2026-11-03T18:30:00Z"), at("2026-11-03T19:59:59Z"), at("2026-11-03T20:00:00Z")]).toEqual(["scheduled", "open", "open", "closed"]);
-  });
-});
-
-// ---------------------------------------------------------------------------------------------------------------------------------
-// Which server match counts: the same start, the same two teams
-// ---------------------------------------------------------------------------------------------------------------------------------
-
-describe("a server match counts only for the announced match it IS", () => {
-  const api = (page: Home) => page.win.UrbanoHomeUpcoming;
-  const entry = { ...SRC, id: "e", kickoffAt: "2026-11-03T20:00:00Z", home: "FC Barcelona", away: "Aston Villa", competition: "Champions League" };
-
-  it("a rehearsal or test match with the same teams but ANOTHER start (even by a minute) does not change the card", async () => {
-    for (const kickoffAt of ["2026-11-03T20:01:00.000Z", "2026-11-03T19:59:00.000Z", "2026-11-04T20:00:00.000Z", "2026-11-03T21:00:00.000Z"]) {
-      const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ kickoffAt })) });
-      expect(page.states(), kickoffAt).toEqual(["next", "next", "next"]); // the announcement is not tied to it: every row stays a preselection
-      // ... but the sentence speaks about the SERVER's list, and that list does have a match that accepts participation: it says so (and points to the lineup, where that card is)
-      expect(page.statusLine(), kickoffAt).toBe(COPY.es.statusOpen);
-    }
-  });
-
-  it("a CANCELLED match of the same teams and start is not that match, and it is not an upcoming one either: its row LEAVES the list (it is neither an announcement nor an opening)", async () => {
-    for (const cancelledAt of ["2026-11-02T10:00:00.000Z", "x"]) {
-      const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ cancelledAt })) });
-      expect(page.ids(), String(cancelledAt)).toEqual(["T-4", "T-5"]); // T-3 (FC Barcelona v Aston Villa) is the one that was cancelled (T-1 and T-2 have already left the list)
-      expect(page.states(), String(cancelledAt)).toEqual(["next", "next"]);
-      expect(page.statusLine(), String(cancelledAt)).toBe(COPY.es.statusNone);
-      expect(page.items().map((li: any) => li.textContent).join(" "), String(cancelledAt)).not.toMatch(/Aston Villa|Cancelad|Cancelled/);
-    }
-    const alive = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ cancelledAt: null })) }); // control: the same match, not cancelled, opens it
-    expect(alive.ids()).toEqual(["T-3", "T-4", "T-5"]);
-    expect(alive.states().filter((s) => s === "open")).toHaveLength(1);
-  });
-
-  it("a match at the SAME start with other teams, or with only one of the two, does not change the card", async () => {
-    for (const [home, away] of [["Rojo FC", "Azul FC"], ["FC Barcelona", "Azul FC"], ["Rojo FC", "Aston Villa"], ["Aston Villa", "FC Barcelona"]]) {
-      const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ homeTeam: { name: home }, awayTeam: { name: away } })) });
-      expect(page.states(), `${home} v ${away}`).toEqual(["next", "next", "next"]);
-    }
-  });
-
-  it("another spelling of a club the crest registry knows is the same club ('Barcelona', 'Bayern Munich', 'Inter de Milán'); a name that merely CONTAINS another is not", async () => {
-    const page = await loadLogic({ crests: true, now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ homeTeam: { name: "Barcelona" } })) }); // the registry of spellings is the crests module's
-    expect(page.states().filter((s) => s === "open")).toHaveLength(1);
-    const plain = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(serverMatch({ homeTeam: { name: "Barcelona" } })) }); // without that module only an exact name counts: it fails closed
-    expect(plain.states().filter((s) => s === "open")).toHaveLength(0);
-    expect(api(page).sameClub("Bayern Munich", "Bayern München")).toBe(true);
-    expect(api(page).sameClub("Bayern Múnich", "Bayern München")).toBe(true);
-    expect(api(page).sameClub("PSG", "Paris Saint-Germain")).toBe(true);
-    expect(api(page).sameClub("Inter de Milán", "Inter")).toBe(true);
-    expect(api(page).sameClub("Man City", "Manchester City")).toBe(true);
-    expect(api(page).sameClub("Inter", "Inter Miami")).toBe(false);
-    expect(api(page).sameClub("Barcelona 4f2a9c", "FC Barcelona")).toBe(false);
-    expect(api(page).sameClub("", "FC Barcelona")).toBe(false);
-    expect(api(page).findServerMatch(entry, [serverMatch({ homeTeam: { name: "Barça B" } })])).toBeNull();
-  });
-
-  it("a cancelled or malformed server row is ignored without an error", async () => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(null, 5, "x", { homeTeam: null }, { kickoffAt: "not a date", homeTeam: { name: "FC Barcelona" }, awayTeam: { name: "Aston Villa" } }) });
-    expect(page.states()).toEqual(["next", "next", "next"]);
-  });
-});
-
-// ---------------------------------------------------------------------------------------------------------------------------------
-// One request, nothing sent, and every failure leaves "Aún no abierto"
-// ---------------------------------------------------------------------------------------------------------------------------------
-
-describe("the card reads the server once, sends nothing, and fails closed", () => {
-  it("makes exactly one request — GET of the public matches list, with no credentials and no body — and none when the language changes", async () => {
-    const page = await loadLogic({ server: answer(serverMatch()) });
-    expect(page.calls.map((c) => c.url)).toEqual([MATCHES_URL]);
-    expect(Object.keys(page.calls[0]!.init).sort()).toEqual(["cache"]);
-    expect(page.calls[0]!.init.cache).toBe("no-store");
-    page.win.document.querySelector('[data-lang="en"], .lang-switch button:last-child')?.dispatchEvent(new page.win.Event("click", { bubbles: true }));
-    await page.settle();
-    expect(page.calls.filter((c) => c.url === MATCHES_URL)).toHaveLength(1);
-  });
-
-  it.each([
-    ["the server answers 500", { status: 500, json: { error: "x" } } as Reply],
-    ["the server answers 401", { status: 401, json: {} } as Reply],
-    ["the answer is not the list", { status: 200, json: { matches: "no" } } as Reply],
-    ["the answer has no body", { status: 200, json: null } as Reply],
-    ["the network fails", "reject" as Reply],
-    ["the answer is not JSON", "badjson" as Reply],
-  ])("%s: every match stays 'Preselección', the sentence under the list is not shown, and nothing breaks", async (_why, server) => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server });
-    expect(page.states()).toEqual(["next", "next", "next"]);
-    expect(page.chips()).toEqual(Array(3).fill(COPY.es.next));
-    expect(page.cardText()).not.toMatch(/Abierto para|Participación programada|Cerrado|Finalizado/);
-    expect(page.statusHidden()).toBe(true);
-    expect(page.statusLine()).toBe("");
-    expect(page.part("#featured-lineup")).toBe(COPY.es.lineup);
-    expect(page.part("#featured-past")).toBe(COPY.es.past);
-    expect(page.consoleErrors).toEqual([]); // an unreadable list is not an error of the page: the card simply says less
-    expect(page.pageErrors).toEqual([]);
-    // the same with the real editorial list: five rows, all announced
-    const real = await loadHome({ server });
-    expect(real.states()).toEqual(Array(5).fill("next"));
-    expect(real.statusHidden()).toBe(true);
-  });
-
-  it("a change of language redraws the list in place, in the other language, with no second copy of the card", async () => {
-    const page = await loadLogic({ server: answer() });
-    expect(page.doc.querySelectorAll("#featured-predictions")).toHaveLength(1);
-    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(5);
-    page.win.UrbanoI18n.setLang("en");
-    await page.settle();
-    expect(page.doc.querySelectorAll("#featured-predictions")).toHaveLength(1);
-    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(5);
-    expect(page.status()).toBe(COPY.en.pill);
-    expect(page.chips()).toEqual(Array(5).fill(COPY.en.next));
-    expect(page.part("#featured-lineup")).toBe(COPY.en.lineup);
-    expect(page.part("#featured-past")).toBe(COPY.en.past);
-    expect(page.statusLine()).toBe(COPY.en.statusNone);
-  });
-
-  it("a change of language redraws the date-only match in the other language too, still without an hour", async () => {
-    const page = await loadHome();
-    expect(page.times()[2]).toEqual(["tbc", "2026-11-19", "jue 19 nov · Horario por confirmar"]);
-    page.win.UrbanoI18n.setLang("en");
-    await page.settle();
-    expect(page.times()[2]).toEqual(["tbc", "2026-11-19", "Thu, Nov 19 · Time to be confirmed"]);
-    expect(page.items()).toHaveLength(5);
-    expect(page.calls.filter((c) => c.url === MATCHES_URL)).toHaveLength(1);
   });
 });
 
@@ -1496,21 +603,6 @@ describe("the card reads the server once, sends nothing, and fails closed", () =
 
 describe("init: a handed server list makes NO request, and stop() unsubscribes and clears the timer", () => {
   const NOW = () => Date.parse("2026-11-03T19:00:00Z");
-
-  it("when serverMatches is an ARRAY the module makes no request at all (neither its own fetch nor the page's) and uses that list", async () => {
-    const page = await loadHome();
-    expect(page.calls).toHaveLength(1); // the page's own card asked once, as it does
-    const own: string[] = [];
-    const host = page.doc.createElement("ul");
-    page.win.UrbanoHomeUpcoming.init({ host, data: FIXTURE, now: NOW, serverMatches: [serverMatch()], fetch: (u: string) => { own.push(u); return Promise.resolve({ status: 200, json: async () => ({ matches: [] }) }); }, refreshMs: 0 });
-    const host2 = page.doc.createElement("ul");
-    page.win.UrbanoHomeUpcoming.init({ host: host2, data: FIXTURE, now: NOW, serverMatches: [serverMatch()], refreshMs: 0 }); // no fetch given: it would use the page's
-    await page.settle();
-    expect(own).toEqual([]);
-    expect(page.calls).toHaveLength(1);
-    expect(host.querySelectorAll(".upcoming-item[data-state=open]")).toHaveLength(1); // the handed list is what decided it
-    expect(host2.querySelectorAll(".upcoming-item[data-state=open]")).toHaveLength(1);
-  });
 
   it("an EMPTY array counts as handed too: still no request, every match announced", async () => {
     const page = await loadHome();
@@ -1615,19 +707,6 @@ describe("the editorial list and the words of the card", () => {
       expect(new Date(Date.parse(m.kickoffAt!) - 6 * 3600_000).getUTCMonth(), m.id).toBe(10); // November, as the Honduras calendar says
     }
     expect(new Date(Date.parse(`${dateOnly[0]!.date}T06:00:00Z`) - 6 * 3600_000).getUTCMonth()).toBe(10);
-  });
-
-  it("is in order of start, and every entry can be placed by the card's own timing (none is silently dropped)", async () => {
-    const page = await loadHome();
-    const api = page.win.UrbanoHomeUpcoming;
-    const placed = data.matches.map((m) => api.timing(m));
-    for (const [i, tm] of placed.entries()) expect(tm, data.matches[i]!.id).not.toBeNull();
-    const starts = placed.map((tm: any) => tm.start as number);
-    expect(starts).toEqual([...starts].sort((a, b) => a - b));
-    expect(placed.map((tm: any) => tm.hasTime)).toEqual([true, true, false, true, true]);
-    // and the page shows exactly this list, in this order
-    expect(page.ids()).toEqual(data.matches.map((m) => m.id));
-    expect(page.win.UrbanoUpcomingData.matches.map((m: Entry) => m.id)).toEqual(data.matches.map((m) => m.id));
   });
 
   it("is the five-match preselection, in order, and does not force any of the ten teams: a match between two of them is announced once", () => {
@@ -1914,60 +993,6 @@ describe("a redraw with nothing new replaces nothing; a change redraws; stop() i
   });
 });
 
-describe("the hour a window opens: 'desde las 12:30' but 'desde la 1:15'", () => {
-  const opens = async (participationOpensAt: string, now: string, lang: "es" | "en" = "es") => {
-    const page = await loadLogic({ lang, now, server: answer(serverMatch({ participationOpensAt })) });
-    return squash(page.qa("#upcoming-list .upcoming-opens")[0]?.textContent);
-  };
-
-  it.each([
-    ["2026-11-03T18:30:00.000Z", "2026-11-03T16:00:00Z", "Participación desde las 12:30 p. m. (hora de Honduras)"],
-    ["2026-11-03T19:15:00.000Z", "2026-11-03T16:00:00Z", "Participación desde la 1:15 p. m. (hora de Honduras)"],
-    ["2026-11-03T19:59:00.000Z", "2026-11-03T16:00:00Z", "Participación desde la 1:59 p. m. (hora de Honduras)"],
-    ["2026-11-03T07:05:00.000Z", "2026-11-03T06:30:00Z", "Participación desde la 1:05 a. m. (hora de Honduras)"],
-    ["2026-11-03T17:45:00.000Z", "2026-11-03T16:00:00Z", "Participación desde las 11:45 a. m. (hora de Honduras)"],
-    ["2026-11-03T08:00:00.000Z", "2026-11-03T06:30:00Z", "Participación desde las 2:00 a. m. (hora de Honduras)"],
-    ["2026-11-03T06:10:00.000Z", "2026-11-03T05:30:00Z", "Participación desde las 12:10 a. m. (hora de Honduras)"],
-  ])("Spanish: a window that opens at %s says «%s»", async (participationOpensAt, now, expected) => {
-    expect(await opens(participationOpensAt, now)).toBe(expected);
-  });
-
-  it("English says the same in both cases ('from 1:15 p.m.', 'from 12:30 p.m.')", async () => {
-    expect(await opens("2026-11-03T19:15:00.000Z", "2026-11-03T16:00:00Z", "en")).toBe("Participation from 1:15 p.m. (Honduras time)");
-    expect(await opens("2026-11-03T18:30:00.000Z", "2026-11-03T16:00:00Z", "en")).toBe("Participation from 12:30 p.m. (Honduras time)");
-  });
-});
-
-describe("the informational list fails alone: the rest of the Home page still draws", () => {
-  const catalogCards = (page: Home) => page.qa("#experiences-carousel > *, #games-carousel > *, #minigames-grid > *").length;
-  let reference: Promise<number> | null = null;
-  const referenceCards = () => (reference ??= loadHome().then((p) => catalogCards(p)));
-
-  it("if the list's own start throws, the catalogs are drawn as usual, the error is logged and nothing escapes the page", async () => {
-    const expected = await referenceCards();
-    expect(expected).toBeGreaterThan(0);
-    const page = await loadHome({ tweak: (w) => { w.UrbanoHomeUpcoming.init = () => { throw new Error("boom"); }; } });
-    expect(catalogCards(page)).toBe(expected);
-    expect(page.consoleErrors.join(" ")).toMatch(/did not start/);
-    expect(page.pageErrors).toEqual([]);
-  });
-
-  it.each([["an object", {}], ["a string", "abc"], ["a number", 5], ["null", null]])("an editorial container that is %s lists nothing (the 'preparing' row), draws the catalogs and logs no error", async (_why, matches) => {
-    const expected = await referenceCards();
-    const page = await loadHome({ data: { lastVerified: "x", matches } });
-    expect(catalogCards(page)).toBe(expected);
-    expect(page.part("#upcoming-list .upcoming-none")).toBe("Estamos preparando los próximos partidos.");
-    expect(page.note().hidden).toBe(true);
-    expect(page.pageErrors).toEqual([]);
-  });
-
-  it("the two lists of the card keep their list semantics even though their bullets are removed", () => {
-    const { card } = staticPage();
-    expect(card.querySelector("ul.ten-crests")!.getAttribute("role")).toBe("list");
-    expect(card.querySelector("ul#upcoming-list")!.getAttribute("role")).toBe("list");
-  });
-});
-
 // ---------------------------------------------------------------------------------------------------------------------------------
 // A match the server says is CANCELLED is not an upcoming match. (The public list that production serves today leaves cancelled matches out of
 // its answer altogether, so there the rule has nothing to read; it is tested for the day the list says so, with the list as the page would get it.)
@@ -2013,21 +1038,6 @@ describe("a match the server says is cancelled leaves the list: neither an annou
     expect(Array.from(api(page).select([BARCA], list, Date.parse("2026-11-03T12:00:00Z"), 5)).map((i: any) => i.entry.id)).toEqual(["c"]);
   });
 
-  it("a cancelled match is never the match an entry is tied to, even when it sits first in the list next to a live match of the same fixture: the live one decides the state (a cancelled twin that looked open must not open the row)", async () => {
-    const page = await loadHome();
-    const gone = cancelled({ matchId: "old" }); // enabled venue, available offer: it would read as OPEN if it were chosen
-    const live = serverMatch({ matchId: "new", venueActivations: [{ venueActivationId: "va-2", enabled: true, venue: { venueId: "v1", name: "Sede", latitude: 14.1, longitude: -87.2, radiusMeters: 150, active: true }, prizeTiers: [], offer: { available: false, maxLevel: 0, levels: [], digest: null, problem: "NO_LEVELS" } }] });
-    expect(api(page).findServerMatch(BARCA, [gone])).toBeNull();
-    for (const list of [[gone, live], [live, gone]]) {
-      expect(api(page).findServerMatch(BARCA, list)?.matchId, JSON.stringify(list.map((m: any) => m.matchId))).toBe("new");
-      const rows = Array.from(api(page).select([BARCA], list, Date.parse("2026-11-03T12:00:00Z"), 5)) as any[];
-      expect(rows.map((r) => [r.entry.id, r.state]), JSON.stringify(list.map((m: any) => m.matchId))).toEqual([["c", "next"]]); // the live match has no valid offer: not open
-    }
-    const shown = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(gone, live) });
-    expect(shown.states()).toEqual(["next", "next", "next"]);
-    expect(shown.ids()).toEqual(["T-3", "T-4", "T-5"]); // nothing left the list: the fixture exists
-  });
-
   it("another spelling that the central club registry knows ('Real Madrid CF' for 'Real Madrid') cancels it too; a spelling it does not know leaves the row (as for an opening: what is not recognised changes nothing)", async () => {
     const page = await loadHome({ crests: true }); // the central crest registry knows the spellings
     const val = { ...SRC, id: "s", kickoffAt: "2026-11-07T20:00:00Z", home: "Valencia", away: "Real Madrid", competition: "LaLiga" };
@@ -2053,52 +1063,6 @@ describe("a match the server says is cancelled leaves the list: neither an annou
     expect(api(page).isCancelled(TBC, [named("Motagua", "Olimpia", { kickoffAt })])).toBe(expected);
     expect(api(page).isCancelled(TBC, [named("Olimpia", "Motagua", { kickoffAt })])).toBe(false); // the clubs the other way round: another fixture
   });
-
-  it("on the card, the cancelled match's row is gone (not relabelled), the others keep their place and state, and the sentence still follows the server's list", async () => {
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(cancelled()) });
-    expect(page.ids()).toEqual(["T-4", "T-5"]);
-    expect(page.states()).toEqual(["next", "next"]);
-    expect(page.statusLine()).toBe(COPY.es.statusNone);
-    expect(page.cardText()).not.toMatch(/Aston Villa|Cancelad|Cancelled|Suspendid/i);
-    expect(page.note().hidden).toBe(false);
-    const withOpen = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(cancelled(), serverMatch({ matchId: "m-2", homeTeam: { name: "Atlético de Madrid" }, awayTeam: { name: "Bayern München" } })) });
-    expect(withOpen.ids()).toEqual(["T-4", "T-5"]);
-    expect(withOpen.states()).toEqual(["open", "next"]); // T-4 is open on the server's word; T-3 (cancelled) left
-    expect(withOpen.statusLine()).toBe(COPY.es.statusOpen);
-  });
-
-  it("when every row is cancelled the card says it is preparing the next ones: no rows, no sentence, no note, no 'cancelled' label", async () => {
-    const list = [cancelled({ matchId: "x3" }), cancelled({ matchId: "x4", homeTeam: { name: "Atlético de Madrid" }, awayTeam: { name: "Bayern München" } }), cancelled({ matchId: "x5", homeTeam: { name: "AEK Athens" }, awayTeam: { name: "Real Madrid" }, kickoffAt: "2026-11-04T17:45:00.000Z" })];
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server: answer(...list) });
-    expect(page.items()).toHaveLength(0);
-    expect(squash(page.q("#upcoming-list .upcoming-none")?.textContent)).toBe(COPY.es.none);
-    expect(page.statusHidden()).toBe(true);
-    expect(page.note().hidden).toBe(true);
-    expect(page.cardText()).not.toMatch(/Cancelad|Cancelled/i);
-  });
-
-  it("the cancellation counts only once the server's list was READ: while it is read, or if it cannot be, every row stays announced (nothing is known)", async () => {
-    for (const server of ["hang", "reject", "badjson", { status: 500, json: { error: "x" } }, { status: 200, json: {} }] as Reply[]) {
-      const page = await loadLogic({ now: "2026-11-03T19:00:00Z", server });
-      expect(page.ids(), JSON.stringify(server)).toEqual(["T-3", "T-4", "T-5"]);
-      expect(page.statusLine(), JSON.stringify(server)).toBe("");
-    }
-  });
-
-  it("the row is removed when the list arrives, without an error: it was announced first (from the editorial list) and leaves with what the server says", async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const page = await loadLogic({ now: "2026-11-03T19:00:00Z", tweak: (w) => { w.__gate = gate; } });
-    expect(page.ids()).toEqual(["T-3", "T-4", "T-5"]);
-    const painted = page.doc.createElement("ul");
-    const handle = page.win.UrbanoHomeUpcoming.init({ host: painted, data: FIXTURE, now: () => Date.parse("2026-11-03T19:00:00Z"), refreshMs: 0, fetch: async () => { await gate; return { status: 200, json: async () => ({ matches: [cancelled()] }) }; } });
-    expect(Array.from(painted.querySelectorAll(".upcoming-item")).map((e) => e.getAttribute("data-match"))).toEqual(["T-3", "T-4", "T-5"]);
-    release();
-    await waitFor(() => painted.querySelectorAll(".upcoming-item").length === 2);
-    expect(Array.from(painted.querySelectorAll(".upcoming-item")).map((e) => e.getAttribute("data-match"))).toEqual(["T-4", "T-5"]);
-    handle.stop();
-    expect(page.pageErrors).toEqual([]);
-  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -2111,47 +1075,6 @@ describe("an hour is shown only with its source and the day it was verified; oth
   const GOOD = { ...BASE, source: "UEFA (uefa.com), 21:00 hora de España", verifiedAt: "2026-10-29" };
   const NOW = Date.parse("2026-11-01T12:00:00Z");
 
-  it("an hour with a source and a verification date is honoured: it is placed at that instant, it can be tied to the server, and the row carries both (data-source, data-verified)", async () => {
-    const page = await loadHome();
-    expect({ ...api(page).timing(GOOD) }).toEqual({ hasTime: true, start: Date.parse("2026-11-03T20:00:00Z"), leaves: Date.parse("2026-11-03T23:00:00Z") });
-    const shown = await loadHome({ data: { matches: [GOOD] } });
-    const row = shown.items()[0]!;
-    expect(row.getAttribute("data-time")).toBe("set");
-    expect(row.getAttribute("data-source")).toBe("UEFA (uefa.com), 21:00 hora de España");
-    expect(row.getAttribute("data-verified")).toBe("2026-10-29");
-    expect(squash(row.querySelector("time")!.textContent)).toMatch(/2:00 p\. m\./);
-  });
-
-  it.each([
-    ["no source", { verifiedAt: "2026-10-29" }],
-    ["an empty source", { source: "", verifiedAt: "2026-10-29" }],
-    ["a blank source", { source: "   ", verifiedAt: "2026-10-29" }],
-    ["a source that is not text", { source: 5, verifiedAt: "2026-10-29" }],
-    ["no verification date", { source: "UEFA" }],
-    ["a verification date that is not text", { source: "UEFA", verifiedAt: 20261029 }],
-    ["a verification date in another format", { source: "UEFA", verifiedAt: "29-10-2026" }],
-    ["a verification date with an hour", { source: "UEFA", verifiedAt: "2026-10-29T10:00:00Z" }],
-    ["an impossible verification date", { source: "UEFA", verifiedAt: "2026-02-30" }],
-    ["a verification date AFTER the match's Honduras day", { source: "UEFA", verifiedAt: "2026-11-04" }],
-    ["neither", {}],
-  ])("an hour with %s is not shown: the match keeps its Honduras date, says 'Horario por confirmar', and can never be tied to a server match", async (_why, fields) => {
-    const page = await loadHome();
-    const entry = { ...BASE, ...fields };
-    expect({ ...api(page).timing(entry) }).toEqual({ hasTime: false, start: Date.parse("2026-11-03T06:00:00Z"), leaves: Date.parse("2026-11-04T06:00:00Z"), unsourced: true });
-    const open = serverMatch();
-    expect(api(page).findServerMatch(entry, [open])).toBeNull();
-    expect({ ...api(page).deriveState(entry, open, Date.parse("2026-11-03T12:00:00Z")) }).toEqual({ state: "next", opensAt: null });
-    const shown = await loadHome({ data: { matches: [entry] }, server: answer(open), now: "2026-11-03T12:00:00Z" });
-    const row = shown.items()[0]!;
-    expect(row.getAttribute("data-time")).toBe("tbc");
-    expect(row.getAttribute("data-state")).toBe("next"); // even with the exact match open on the server: no hour that can be traced, no tie
-    expect(row.querySelector("time")!.getAttribute("datetime")).toBe("2026-11-03");
-    expect(squash(row.querySelector("time")!.textContent)).toBe("mar 3 nov · Horario por confirmar");
-    expect(squash(row.querySelector("time")!.textContent)).not.toMatch(/\d:\d\d|a\. ?m\.|p\. ?m\./);
-    expect(row.hasAttribute("data-source"), "an entry whose hour cannot be traced does not claim a source").toBe(false);
-    expect(row.hasAttribute("data-verified")).toBe(false);
-  });
-
   it("the day of the match, and the day before, are valid verification dates (a verification can be done the same day)", async () => {
     const page = await loadHome();
     for (const verifiedAt of ["2026-11-03", "2026-11-02", "2026-10-01"]) expect(api(page).timing({ ...BASE, source: "UEFA", verifiedAt }).hasTime, verifiedAt).toBe(true);
@@ -2159,16 +1082,6 @@ describe("an hour is shown only with its source and the day it was verified; oth
     const late = { ...BASE, kickoffAt: "2026-11-20T01:30:00Z", source: "Liga", verifiedAt: "2026-11-19" };
     expect(api(page).timing(late).hasTime).toBe(true);
     expect(api(page).timing({ ...late, verifiedAt: "2026-11-20" }).hasTime).toBe(false);
-  });
-
-  it("an hour near midnight that is not traceable lands on the HONDURAS date, not the UTC one (01:30 UTC of the 20th is Thursday the 19th), and leaves at the end of that Honduras day", async () => {
-    const entry = { ...BASE, kickoffAt: "2026-11-20T01:30:00Z" };
-    const shown = await loadHome({ data: { matches: [entry] }, now: "2026-11-19T12:00:00Z" });
-    expect(shown.times()).toEqual([["tbc", "2026-11-19", "jue 19 nov · Horario por confirmar"]]);
-    const stays = await loadHome({ data: { matches: [entry] }, now: "2026-11-20T05:59:00Z" });
-    expect(stays.ids()).toEqual(["h"]);
-    const gone = await loadHome({ data: { matches: [entry] }, now: "2026-11-20T06:00:00Z" });
-    expect(gone.ids()).toEqual([]);
   });
 
   it("an invalid instant is still dropped (it does not degrade to a date), traceable or not", async () => {
@@ -2204,20 +1117,6 @@ describe("the shipped editorial list: every entry says where it was read and whe
     }
   });
 
-  it("the page draws the four hours with their source and verification date, and the one without an hour (Motagua–Olimpia) with 'Horario por confirmar'; no row shows an hour that is not traceable", async () => {
-    const page = await loadHome();
-    for (const [index, entry] of data.matches.entries()) {
-      const row = page.items()[index]!;
-      expect(row.getAttribute("data-match")).toBe(entry.id);
-      expect(row.getAttribute("data-source"), entry.id).toBe(entry.source);
-      expect(row.getAttribute("data-verified"), entry.id).toBe(entry.verifiedAt);
-      const text = squash(row.querySelector("time")!.textContent);
-      if (entry.kickoffAt) { expect(row.getAttribute("data-time"), entry.id).toBe("set"); expect(text, entry.id).toMatch(/\d:\d\d (a|p)\. m\./); expect(text, entry.id).not.toContain(COPY.es.tbc); }
-      else { expect(row.getAttribute("data-time"), entry.id).toBe("tbc"); expect(text, entry.id).toContain(COPY.es.tbc); }
-    }
-    expect(page.items().filter((el) => el.getAttribute("data-time") === "tbc").map((el) => el.getAttribute("data-match"))).toEqual(["N26-46"]);
-  });
-
   it("the Premier League entries cite the Premier League's own notice and the LaLiga entries the clubs and LaLiga (no other source stands behind an hour)", () => {
     const by = Object.fromEntries(data.matches.map((m) => [m.id, m]));
     for (const id of ["N26-22", "N26-24"]) { expect(by[id]!.source).toMatch(/premierleague\.com/); expect(by[id]!.sourceUrl).toContain("premierleague.com/"); }
@@ -2241,99 +1140,6 @@ describe("on a phone the card shows the next three matches and says where the wh
     return { asked, mq, listeners, turn: (to: boolean) => { mq.matches = to; Array.from(listeners).forEach((cb) => cb()); }, tweak: (w: Record<string, any>) => { w.matchMedia = (query: string) => { asked.push(query); mq.media = query; return mq; }; } };
   };
   const link = (page: Home) => page.q("#featured-lineup") as HTMLAnchorElement;
-
-  it("on a phone (max-width: 480px): the first three by date, the link says 'Ver los 5 partidos en la cartelera', and it still goes to the Score lineup", async () => {
-    const m = media(true);
-    const page = await loadHome({ tweak: m.tweak });
-    expect(m.asked).toEqual(["(max-width: 480px)"]);
-    expect(page.ids()).toEqual(FIVE_IDS.slice(0, 3));
-    expect(page.teams()).toEqual(FIVE.slice(0, 3).map((t) => t.replace(" v ", " v ")));
-    expect(squash(link(page).textContent)).toBe("Ver los 5 partidos en la cartelera");
-    expect(link(page).getAttribute("data-i18n")).toBe("home.upcoming.playAll");
-    expect(link(page).getAttribute("data-i18n-vars")).toBe('{"total":5}');
-    expect(link(page).getAttribute("href")).toBe(LINEUP_PAGE);
-    expect(page.note().hidden).toBe(false);
-    expect(page.times().map((t) => t[0])).toEqual(["set", "set", "tbc"]); // Motagua–Olimpia (no hour) is the third: it is seen on a phone too
-  });
-
-  it("not a phone: all five, and the plain link 'Ver cartelera de Score'", async () => {
-    const m = media(false);
-    const page = await loadHome({ tweak: m.tweak });
-    expect(page.ids()).toEqual(FIVE_IDS);
-    expect(squash(link(page).textContent)).toBe(COPY.es.lineup);
-    expect(link(page).getAttribute("data-i18n")).toBe("home.upcoming.play");
-    expect(link(page).hasAttribute("data-i18n-vars")).toBe(false);
-  });
-
-  it("a browser with no matchMedia shows all five (nothing breaks)", async () => {
-    const page = await loadHome({ tweak: (w) => { delete w.matchMedia; } });
-    expect(page.ids()).toEqual(FIVE_IDS);
-    expect(squash(link(page).textContent)).toBe(COPY.es.lineup);
-    expect(page.consoleErrors).toEqual([]);
-    expect(page.pageErrors).toEqual([]);
-  });
-
-  it("turning the phone redraws the list: five when it gets wider, three when it narrows again, with the link following", async () => {
-    const m = media(true);
-    const page = await loadHome({ tweak: m.tweak });
-    expect(m.listeners.size).toBe(1);
-    m.turn(false);
-    expect(page.ids()).toEqual(FIVE_IDS);
-    expect(squash(link(page).textContent)).toBe(COPY.es.lineup);
-    m.turn(true);
-    expect(page.ids()).toEqual(FIVE_IDS.slice(0, 3));
-    expect(squash(link(page).textContent)).toBe("Ver los 5 partidos en la cartelera");
-  });
-
-  it("an old browser that only has addListener is handled too", async () => {
-    const listeners = new Set<() => void>();
-    const mq: any = { matches: true, addListener: (cb: () => void) => { listeners.add(cb); } };
-    const page = await loadHome({ tweak: (w) => { w.matchMedia = () => mq; } });
-    expect(page.ids()).toEqual(FIVE_IDS.slice(0, 3));
-    mq.matches = false;
-    Array.from(listeners).forEach((cb) => cb());
-    expect(page.ids()).toEqual(FIVE_IDS);
-  });
-
-  it("in English the link says 'See all 5 matches in the fixtures', and a change of language while on a phone translates it in place (and the rows)", async () => {
-    const m = media(true);
-    const page = await loadHome({ lang: "en", tweak: m.tweak });
-    expect(squash(link(page).textContent)).toBe("See all 5 matches in the fixtures");
-    const node = link(page);
-    page.win.UrbanoI18n.setLang("es");
-    expect(link(page)).toBe(node);
-    expect(squash(link(page).textContent)).toBe("Ver los 5 partidos en la cartelera");
-    expect(page.chips()).toEqual(["Preselección", "Preselección", "Preselección"]);
-  });
-
-  it("with three or fewer matches in the list a phone shows them all and the plain link (nothing is hidden, so nothing is 'see all')", async () => {
-    const m = media(true);
-    const three = { matches: FIXTURE.matches.slice(2) };
-    const page = await loadHome({ tweak: m.tweak, data: three, now: "2026-11-03T19:00:00Z" });
-    expect(page.ids()).toEqual(["T-3", "T-4", "T-5"]);
-    expect(squash(link(page).textContent)).toBe(COPY.es.lineup);
-  });
-
-  it("the three are the NEXT three: when the first leaves the list, the fourth comes up (and the count in the link follows the list)", async () => {
-    const m = media(true);
-    const page = await loadHome({ tweak: m.tweak, now: "2026-11-08T00:00:00Z" }); // Valencia–Real Madrid (7 Nov) has gone; Atlético–Barça (8 Nov) is next
-    expect(page.ids()).toEqual(FIVE_IDS.slice(1, 4));
-    expect(squash(link(page).textContent)).toBe("Ver los 4 partidos en la cartelera");
-  });
-
-  it("when what the server says changes the TOTAL but not the three shown (the fifth match is cancelled), the link follows the list: 'Ver los 4 partidos', and with only three left it is the plain link again", async () => {
-    const m = media(true);
-    const gone = (home: string, away: string, kickoffAt: string) => serverMatch({ matchId: `g-${home}`, cancelledAt: "2026-11-02T10:00:00.000Z", homeTeam: { name: home }, awayTeam: { name: away }, kickoffAt });
-    const arsenal = gone("Arsenal", "Manchester City", "2026-11-29T16:30:00.000Z"), liverpool = gone("Liverpool", "Manchester United", "2026-11-22T16:30:00.000Z");
-    const one = await loadHome({ tweak: m.tweak, server: answer(arsenal) });
-    expect(one.ids()).toEqual(FIVE_IDS.slice(0, 3)); // the same three rows as before the server was read
-    expect(squash(link(one).textContent)).toBe("Ver los 4 partidos en la cartelera");
-    expect(link(one).getAttribute("data-i18n-vars")).toBe('{"total":4}');
-    const two = await loadHome({ tweak: m.tweak, server: answer(arsenal, liverpool) });
-    expect(two.ids()).toEqual(FIVE_IDS.slice(0, 3));
-    expect(squash(link(two).textContent)).toBe(COPY.es.lineup); // three left and three shown: nothing is hidden, so nothing is "see all"
-    expect(link(two).hasAttribute("data-i18n-vars")).toBe(false);
-  });
 
   it("a row that is NOT drawn can leave the list while the drawn ones stay: the next drawing is made anyway, so the total that the link reports follows (a match later in the day leaves before a date-only one earlier in it)", async () => {
     const page = await loadHome();

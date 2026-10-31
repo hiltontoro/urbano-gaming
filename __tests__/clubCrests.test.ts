@@ -20,6 +20,8 @@ const MODULE_SOURCE = readFileSync(path.join(ROOT, "public/urbanoClubCrests.js")
 const CLUBS_DIR = path.join(ROOT, "public/assets/clubs");
 const PAGES = ["index.html", "soccer-predictions.html", "profile.html"].map((file) => [file, readFileSync(path.join(ROOT, "public", file), "utf8")] as const);
 const INDEX_HTML = PAGES.find(([file]) => file === "index.html")![1];
+// Since 2026-10-31 the Home's rules (the strip of the ten crests among them, unchanged) are in the stylesheet the five pages share, not in a <style> block of the page.
+const EXPERIENCE_CSS = readFileSync(path.join(ROOT, "public/experience.css"), "utf8");
 const UPCOMING_DATA_SOURCE = readFileSync(path.join(ROOT, "public/homeUpcomingData.js"), "utf8");
 
 /** The ten teams, in the order the Founder named them and the Home strip draws them, each with the registry key and the file that crest lives in. */
@@ -92,12 +94,18 @@ function withStatus(keys: string[], status: string, source = MODULE_SOURCE) {
 /** The Home page as a browser has it after the page script decorates the document: the markup, plus (per `crests`) the real module, the module with ENABLED off, or no module at all. */
 function loadHome(crests: "module" | "withdrawn" | "absent", moduleSource = MODULE_SOURCE) {
   const dom = new JSDOM(INDEX_HTML, { url: "http://localhost/", runScripts: "outside-only" });
+  dom.window.document.head.insertAdjacentHTML("beforeend", `<style>${EXPERIENCE_CSS}</style>`); // what <link rel="stylesheet" href="/experience.css"> brings
   const win = dom.window as unknown as { UrbanoClubCrests?: { decorate(root: Document): number } };
   if (crests === "module") dom.window.eval(moduleSource);
   if (crests === "withdrawn") dom.window.eval(moduleSource.replace("var ENABLED = true;", "var ENABLED = false;"));
   if (win.UrbanoClubCrests) win.UrbanoClubCrests.decorate(dom.window.document); // exactly what the Home script does: `if (window.UrbanoClubCrests) ...decorate(document)`
   const doc = dom.window.document;
-  return { dom, doc, chips: [...doc.querySelectorAll<HTMLElement>("#featured-predictions ul.ten-crests > li.crest-chip")] };
+  return { dom, doc, chips: [...doc.querySelectorAll<HTMLElement>("article.xp-score ul.ten-crests > li.crest-chip")] };
+}
+
+/** The rules of a stylesheet given as text: selector text (with whatever comment precedes it) and body. */
+function cssRulesOfCss(css: string) {
+  return [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.replace(/\/\*[\s\S]*?\*\//g, "").trim(), body }));
 }
 
 /** The rules of the first <style> block of a page: selector text (with whatever comment precedes it) and body. */
@@ -105,6 +113,9 @@ function cssRules(html: string) {
   const css = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
   return [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.replace(/\/\*[\s\S]*?\*\//g, "").trim(), body }));
 }
+
+/** The rules a page lives by: the Home's are in the shared stylesheet, every other page's are in its own <style> block. */
+const pageRules = (file: string, html: string) => (file === "index.html" ? cssRulesOfCss(EXPERIENCE_CSS) : cssRules(html));
 
 describe("which team gets which crest", () => {
   const { crests } = loadModule();
@@ -378,7 +389,7 @@ describe("the files and where they came from", () => {
 
   it("nothing in any page turns a crest into a silhouette or dims it: no filter, blend mode, mask, clip-path or opacity on a crest, the strip of ten or its chips", () => {
     for (const [file, html] of PAGES) {
-      const rules = cssRules(html).filter((rule) => /club-crest|ten-crests|crest-chip|part-crests/.test(rule.selector));
+      const rules = pageRules(file, html).filter((rule) => /club-crest|ten-crests|crest-chip|part-crests/.test(rule.selector));
       expect(rules.length, `${file} styles its crests`).toBeGreaterThan(0);
       for (const { selector, body } of rules) expect(body, `${file}: ${selector}`).not.toMatch(/(^|[;\s])(filter|backdrop-filter|mix-blend-mode|mask|-webkit-mask|clip-path|opacity)\s*:/i);
     }
@@ -387,7 +398,7 @@ describe("the files and where they came from", () => {
 
   it("a crest is decoration with a bounded size: every page sizes it (never above 40 px) and gives it no pointer behaviour (no cursor, no pointer-events), and the element carries no interactive attribute", () => {
     for (const [file, html] of PAGES) {
-      const rules = cssRules(html).filter((rule) => /club-crest|ten-crests|crest-chip|crest-name|part-crests/.test(rule.selector));
+      const rules = pageRules(file, html).filter((rule) => /club-crest|ten-crests|crest-chip|crest-name|part-crests/.test(rule.selector));
       const sized = rules.filter((rule) => /club-crest/.test(rule.selector) && !/crest-name/.test(rule.selector));
       const sizes = sized.flatMap((rule) => [...rule.body.matchAll(/(?:^|[;\s])(?:width|height|max-width|max-height)\s*:\s*(\d+(?:\.\d+)?)px/g)].map((match) => Number(match[1])));
       expect(sizes.length, `${file} sizes its crests`).toBeGreaterThan(0);
@@ -418,12 +429,13 @@ describe("the files and where they came from", () => {
   });
 });
 
-describe("the Home card: the strip of the ten crests (the Founder's decision of 2026-10-29)", () => {
+// Home: the Score panel of the four experiences carries the strip (the Founder asked on 2026-10-31 to keep it, as the previous Home's card had it)
+describe("the Home's Score panel: the strip of the ten crests (the Founder's decision of 2026-10-29, kept on 2026-10-31)", () => {
   const names = TEN_TEAMS.map((t) => t.team);
 
   it("is a ul.ten-crests of ten li.crest-chip in the Founder's order, each naming its team in text (span.crest-name), labelled by the visible heading of the strip — and nothing is left of the old two-crest strip", () => {
     const { doc, chips } = loadHome("absent");
-    const card = doc.querySelector("#featured-predictions")!;
+    const card = doc.querySelector("article.xp-score")!;
     const strips = card.querySelectorAll("ul.ten-crests");
     expect(strips).toHaveLength(1);
     const strip = strips[0];
@@ -440,7 +452,7 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
     expect(strip.getAttribute("role")).toBe("list"); // the grid keeps its list semantics (a styled list can lose them in some screen readers)
     expect(card.querySelector(".featured-crests, .featured-crest, .featured-crest-vs")).toBeNull();
     expect(INDEX_HTML).not.toMatch(/featured-crest/);
-    expect(card.querySelector("img")).toBeNull(); // the markup carries no image: the crests are drawn by the central module only
+    expect(card.querySelector(".xp-teams img")).toBeNull(); // the strip carries no image in the markup: the crests are drawn by the central module only
   });
 
   it("with the module, each chip gets its own crest in front of its name: img.club-crest, aria-hidden, empty alt, the registry's key and file, nothing interactive; the name stays beside it as text", () => {
@@ -461,12 +473,12 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
       expect(img.nextElementSibling?.className, team).toBe("crest-name");
       expect(chip.textContent, team).toBe(team);
     });
-    expect(doc.querySelectorAll("#featured-predictions ul.ten-crests img.club-crest")).toHaveLength(10);
+    expect(doc.querySelectorAll("article.xp-score ul.ten-crests img.club-crest")).toHaveLength(10);
     expect(new Set([...doc.querySelectorAll("ul.ten-crests img.club-crest")].map((img) => img.getAttribute("data-crest"))).size).toBe(10);
   });
 
   it("each crest-name is the accessible name of its team: hidden visually ONLY by the rule '.ten-crests .club-crest + .crest-name', so it is hidden while its crest image is drawn and visible as a label when it is not", () => {
-    const rules = cssRules(INDEX_HTML).filter((rule) => /crest-name/.test(rule.selector));
+    const rules = cssRulesOfCss(EXPERIENCE_CSS).filter((rule) => /crest-name/.test(rule.selector));
     expect(rules.map((rule) => rule.selector).sort()).toEqual([".ten-crests .club-crest + .crest-name", ".ten-crests .crest-name"]);
     const hide = rules.find((rule) => rule.selector === ".ten-crests .club-crest + .crest-name")!;
     expect(hide.body).toMatch(/position:\s*absolute/);
@@ -501,7 +513,7 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
   });
 
   it("when no crest is drawn the strip gives the names their own layout: a rule that applies only to a strip with no .club-crest in it (auto-fit columns wide enough for a name), and none that hides or dims anything", () => {
-    const rules = cssRules(INDEX_HTML).filter((rule) => rule.selector === ".ten-crests:not(:has(.club-crest))");
+    const rules = cssRulesOfCss(EXPERIENCE_CSS).filter((rule) => rule.selector === ".ten-crests:not(:has(.club-crest))");
     expect(rules).toHaveLength(1);
     const body = rules[0].body;
     expect(body).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(\d+px,\s*1fr\)\)/);
@@ -510,8 +522,15 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
     expect(body).toMatch(/justify-items:\s*start/);
     expect(body).not.toMatch(/display\s*:\s*none|visibility\s*:\s*hidden|opacity|(^|[;\s])(width|height)\s*:\s*1px|font-size\s*:\s*0\b|clip/);
     // it is declared after the strip's own columns (and wins over the phone's five columns by specificity: a class plus a pseudo-class beats a class)
-    const css = INDEX_HTML.slice(INDEX_HTML.indexOf("<style>"), INDEX_HTML.indexOf("</style>"));
+    const css = EXPERIENCE_CSS;
     expect(css.indexOf(".ten-crests:not(:has(.club-crest))")).toBeGreaterThan(css.indexOf(".ten-crests { list-style"));
+    // and in the Score panel, whose own columns (five, then ten) are declared on ".xp-teams .ten-crests" (two classes), the names' layout is declared AGAIN with the
+    // panel's scope and the same condition (three: two classes and the :not(:has()) of the strip), so it wins over every one of them at every width, wherever they are written
+    const panelRule = cssRulesOfCss(css).filter((rule) => rule.selector === ".xp-teams .ten-crests:not(:has(.club-crest))");
+    expect(panelRule).toHaveLength(1);
+    expect(panelRule[0].body).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(1\d\dpx,\s*1fr\)\)/);
+    const columnsOfThePanel = cssRulesOfCss(css).filter((rule) => rule.selector === ".xp-teams .ten-crests" && /grid-template-columns/.test(rule.body));
+    expect(columnsOfThePanel.length).toBeGreaterThanOrEqual(3); // five (base), ten (tablet, phone), five again (320 px)
     // the selector means what it says on the real page: with the crests drawn the strip does not match, without them it does
     const withCrests = loadHome("module").doc.querySelector("ul.ten-crests")!;
     const without = loadHome("absent").doc.querySelector("ul.ten-crests")!;
@@ -522,7 +541,7 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
   });
 
   it("the small texts of the card are readable: the label of the strip and the legal sentence are 12 px, and the legal sentence is not dimmer than 0.8 alpha", () => {
-    const rules = cssRules(INDEX_HTML);
+    const rules = cssRulesOfCss(EXPERIENCE_CSS);
     const label = rules.find((rule) => rule.selector === ".featured-teams-label")!;
     const legal = rules.find((rule) => rule.selector === ".featured-legal")!;
     expect(label.body).toMatch(/font-size:\s*12px/);
@@ -531,8 +550,8 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
     for (const rule of [label, legal]) expect(rule.body).not.toMatch(/(^|[;\s])(opacity|filter)\s*:/i);
   });
 
-  it("the row of a match keeps its crests in the new markup: each team is a span.upcoming-team with data-club (the away team inside span.upcoming-away, after the 'vs'), and decorating draws a crest in front of the name of every team that has one", () => {
-    const dom = new JSDOM(INDEX_HTML, { url: "http://localhost/", runScripts: "outside-only" });
+  it("the row of a match (the module's own list, as the Score page runs it) keeps its crests in the new markup: each team is a span.upcoming-team with data-club (the away team inside span.upcoming-away, after the 'vs'), and decorating draws a crest in front of the name of every team that has one", () => {
+    const dom = new JSDOM('<!doctype html><html lang="es"><body><ul id="upcoming-list"></ul></body></html>', { url: "http://localhost/", runScripts: "outside-only" }); // the module's own host: the Score page runs it with a list of its own
     dom.window.eval(MODULE_SOURCE);
     dom.window.eval(UPCOMING_DATA_SOURCE);
     dom.window.eval(readFileSync(path.join(ROOT, "public/urbanoI18n.js"), "utf8"));
@@ -582,17 +601,19 @@ describe("the Home card: the strip of the ten crests (the Founder's decision of 
   });
 
   it("is never hidden by CSS at any width (no display:none, visibility:hidden or opacity 0 on the strip, its chips or its holder), and the page asks the module to decorate the whole document after loading it", () => {
-    const rules = cssRules(INDEX_HTML).filter((rule) => /ten-crests|crest-chip|featured-teams/.test(rule.selector));
+    const rules = cssRulesOfCss(EXPERIENCE_CSS).filter((rule) => /ten-crests|crest-chip|featured-teams/.test(rule.selector));
     expect(rules.length).toBeGreaterThan(0);
     for (const { selector, body } of rules) expect(body, selector).not.toMatch(/display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0\b/);
     expect(INDEX_HTML).toMatch(/if \(window\.UrbanoClubCrests\) window\.UrbanoClubCrests\.decorate\(document\);/);
     expect(INDEX_HTML.indexOf('<script src="/urbanoClubCrests.js"></script>')).toBeGreaterThan(0);
-    expect(INDEX_HTML.indexOf('<script src="/urbanoClubCrests.js"></script>')).toBeLessThan(INDEX_HTML.indexOf('<script src="/homeUpcoming.js"></script>')); // the list asks the registry for the club names
+    // the module is loaded BEFORE the inline script that asks it to draw, and the Home no longer carries the list that used to ask the registry for club names
+    expect(INDEX_HTML.indexOf('<script src="/urbanoClubCrests.js"></script>')).toBeLessThan(INDEX_HTML.indexOf("window.UrbanoClubCrests.decorate(document)"));
+    expect(INDEX_HTML).not.toContain("homeUpcoming");
   });
 
   it("does not present the crests as licensed: the card says they only identify the teams and that URBANO is not affiliated with, sponsored by or endorsed by the clubs, leagues or competitions, says nothing about prizes, and promises nothing of the kind", () => {
     const { doc } = loadHome("absent");
-    const card = doc.querySelector("#featured-predictions")!;
+    const card = doc.querySelector("article.xp-score")!;
     const legal = card.querySelector(".featured-legal")!;
     // the sentence is the shared one (key upcoming.disclaimer, also drawn at the foot of the Score page); it no longer lives under home.
     expect(legal.getAttribute("data-i18n")).toBe("upcoming.disclaimer");

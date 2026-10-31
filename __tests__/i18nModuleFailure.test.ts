@@ -12,6 +12,11 @@ import vm from "node:vm";
  * good. Each page now carries a generated Spanish fallback (an inline block right after the module's script tag) that is used only when
  * the module is absent or unusable.
  *
+ * Update of 2026-10-31 (Founder direction: the Home shows four experiences): the Home no longer carries the "Próximos partidos" card or the Become a Host card,
+ * so the tests that proved THOSE cards survive a failing language module (and their negative controls) were retired with them (git history, 98bb902; the old Home is
+ * kept in archive/home.score-card-2026-10-29.html). The differential below now compares the new Home's four panels, the strip of crests on the Score panel and the sentence
+ * beside it, the header's account control and the footer, with and without the module, in every failure mode; the Score page and the profile are unchanged.
+ *
  * Nothing here is simulated at the function level: each page is loaded through jsdom's real subresource pipeline, which really requests
  * /urbanoI18n.js and really reports the failure to the page's <script> element. The failures covered:
  *   missing  — the request fails (no connection, reset): the script never arrives;
@@ -39,6 +44,7 @@ const I18N_SOURCE = read("public/urbanoI18n.js");
 const AUTH_SOURCE = read("public/urbanoAuth.js");
 const HOST_READER_SOURCE = read("public/hostAvailability.js");
 const CRESTS_SOURCE = read("public/urbanoClubCrests.js");
+const FEATURED_SOURCE = read("public/featuredContest.js"); // the featured card's module (one strict read; fail-closed)
 const UPCOMING_DATA_SOURCE = read("public/homeUpcomingData.js");
 const UPCOMING_SOURCE = read("public/homeUpcoming.js");
 
@@ -89,6 +95,7 @@ function interceptorFor(mode: Mode, fetched: string[], upcomingSource: string = 
     }
     if (url.pathname === "/urbanoAuth.js") return js(AUTH_SOURCE);
     if (url.pathname === "/hostAvailability.js") return js(HOST_READER_SOURCE);
+    if (url.pathname === "/featuredContest.js") return js(FEATURED_SOURCE); // the Home's featured card: two buttons that are links only when the server's answer is exactly right
     if (url.pathname === "/urbanoClubCrests.js") return js(CRESTS_SOURCE); // decoration: the crests of the ten teams (Home) and of the teams of a match (Score)
     if (url.pathname === "/homeUpcomingData.js") return js(UPCOMING_DATA_SOURCE);
     if (url.pathname === "/homeUpcoming.js") return js(upcomingSource); // the shipped module (a negative control serves a modified COPY of it)
@@ -256,18 +263,19 @@ function homeSnapshot(page: Page) {
   return {
     lang: doc.documentElement.lang, title: doc.title,
     hero: [text(".hero h1"), text(".hero p")],
+    // the four experience panels of the Home (since 2026-10-31), the strip of the ten crests on the Score panel and the sentence beside it
+    panels: Array.from(doc.querySelectorAll("article.xp")).map((c) => ({
+      cls: c.className, title: norm(c.querySelector(".xp-title")?.textContent), kicker: norm(c.querySelector(".xp-kicker")?.textContent), chip: norm(c.querySelector(".xp-chip")?.textContent),
+      desc: norm(c.querySelector(".xp-desc")?.textContent), cta: norm(c.querySelector(".xp-cta")?.textContent), href: c.querySelector("a.xp-cta")?.getAttribute("href") ?? null,
+    })),
+    featured: {
+      label: text("#featured-contest .xf-label"), product: text("#featured-contest .xp-kicker"), title: text("#featured-contest .xf-title"), meta: text("#featured-contest .xf-meta"), desc: text("#featured-contest .xf-desc"),
+      buttons: Array.from(doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, norm(e.textContent), e.getAttribute("href")]), status: text("#featured-contest [data-feat-status]"),
+    },
+    teams: Array.from(doc.querySelectorAll("article.xp-score li.crest-chip")).map((li) => [li.getAttribute("data-club"), norm(li.querySelector(".crest-name")?.textContent), li.querySelector("img.club-crest")?.getAttribute("data-crest") ?? null]),
+    teamsLabel: text("#featured-teams-label"), teamsLegal: text("article.xp-score .featured-legal"), choose: text(".xp-choose"),
     nav: Array.from(doc.querySelectorAll(".primary-nav a")).map((a) => [a.textContent, a.getAttribute("href")]),
     labels: Array.from(doc.querySelectorAll(".section-label")).map((e) => e.textContent),
-    featured: {
-      status: text("#featured-status"), title: text("#featured-title"), descriptor: text(".featured-descriptor"),
-      past: text("#featured-past"), pastNote: text(".featured-access-note"), teamsLabel: text("#featured-teams-label"),
-      crests: Array.from(doc.querySelectorAll("#featured-teams li.crest-chip")).map((li) => [li.getAttribute("data-club"), norm(li.querySelector(".crest-name")?.textContent), li.querySelector("img.club-crest")?.getAttribute("data-crest") ?? null]),
-      listLabel: doc.getElementById("upcoming-list")?.getAttribute("aria-label") ?? null, listRole: doc.getElementById("upcoming-list")?.getAttribute("role") ?? null,
-      stripRole: doc.querySelector("ul.ten-crests")?.getAttribute("role") ?? null, rows: upcomingRows(doc, "#upcoming-list"), none: text(".upcoming-none"),
-      statusLine: text("#upcoming-status"), statusHidden: (doc.getElementById("upcoming-status") as HTMLElement | null)?.hidden ?? null,
-      note: text("#featured-note"), noteHidden: (doc.getElementById("featured-note") as HTMLElement | null)?.hidden ?? null, lineup: text("#featured-lineup"), legal: text(".featured-legal"),
-      links: Array.from(doc.querySelectorAll("#featured-predictions a")).map((a) => [a.getAttribute("id"), a.getAttribute("href")]), hasAction: page.q("#featured-action, #featured-play") !== null,
-    },
     cards: Array.from(doc.querySelectorAll(".exp-card")).map((c) => ({
       // (the Halloween announcement is a static section above the Score card: its title is an h2 and it carries a date and an availability line of its own)
       title: norm(c.querySelector("h2, h3")?.textContent), tag: c.tagName, href: c.getAttribute("href"), locked: c.className.includes("is-locked"),
@@ -346,143 +354,6 @@ describe("Home without the module: the same content, the same behaviour", () => 
       }
     });
   }
-
-  it("every card is drawn, in the Founder's order, with the access each one had: only URBANO Poker and Trivia are links", async () => {
-    for (const mode of FAILURES) {
-      const page = await open("index.html", mode);
-      const cards = homeSnapshot(page).cards;
-      // (the Halloween announcement, a static section, comes first in the page; the catalog cards follow in the Founder's order)
-      expect(cards.map((c) => c.title), mode).toEqual(["Concurso de disfraces", "URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
-      expect(cards.filter((c) => !c.locked).map((c) => [c.title, c.href, c.pill]), mode).toEqual([["URBANO Poker", "/host.html?experience=poker", "Playtest"], ["Trivia", "/trivia-playtest.html", "Playtest"]]);
-      for (const card of cards.filter((c) => c.locked)) {
-        expect(card.tag).toBe("DIV");
-        expect(card.href).toBeNull();
-        expect(card.pill).toBe("Próximamente");
-      }
-    }
-  });
-
-  it("the Halloween announcement reads the same without the module: the same Spanish words as with it, nothing to press, and no promise of a prize or a vote", async () => {
-    const reference = homeSnapshot(await open("index.html", "ok")).cards[0];
-    expect(reference.title).toBe("Concurso de disfraces");
-    for (const mode of FAILURES) {
-      const page = await open("index.html", mode);
-      const card = page.doc.querySelector("#halloween .exp-card")!;
-      expect(norm(card.textContent), mode).toBe("Halloween · Beer Box Próximamente Concurso de disfraces Sábado 31 de octubre Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación. Las inscripciones y la votación todavía no están disponibles.");
-      expect(card.querySelector("a, button, input, form, [tabindex], [onclick]"), mode).toBeNull();
-      expect(norm(card.textContent), mode).not.toMatch(/premio|conquist|más votado|ganá|se lleva/i);
-      expect(homeSnapshot(page).cards[0], mode).toEqual(reference);
-    }
-  });
-
-  it("a language failure enables nothing: Become a Host stays closed until the server says open, the URBANO Score card stays informational (every match 'Preselección', no call to play) even when the database holds a match that is not an announced one, and no request is made that the working page would not make", async () => {
-    for (const mode of FAILURES) {
-      const closed = await open("index.html", mode, { hostOpen: false, matches: [futureMatch()] });
-      expect(closed.doc.querySelector('a[href="/become-a-host.html"]')).toBeNull();
-      expect(closed.text("#featured-status")).toBe("Próximos partidos");
-      expect(closed.text("#featured-lineup")).toBe("Ver cartelera de Score");
-      expect(closed.text("#featured-past")).toBe("Mis participaciones y premios");
-      expect(Array.from(closed.doc.querySelectorAll(".upcoming-chip")).map((c) => c.textContent), mode).toEqual(Array(5).fill("Preselección"));
-      expect(closed.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar."); // the list was read, and none of its matches accepts participation (no offer)
-      expect((closed.doc.getElementById("upcoming-status") as HTMLElement).hidden).toBe(false);
-      expect(closed.doc.querySelector("#featured-action, #featured-play")).toBeNull();
-      expect(visible(closed.doc)).not.toMatch(/Jugar ahora|Play now|Aún no abierto|Not open yet/); // the chip never says that a match is NOT open: it says what it is
-      expect(Array.from(closed.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href"))).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
-      expect(closed.requests.filter((r) => r.url.includes("/api/gaming/predictions")), mode).toEqual([{ url: "/api/gaming/predictions/matches", method: "GET" }]); // the card's single read of the public matches list
-      const reference = await open("index.html", "ok", { hostOpen: false, matches: [futureMatch()] });
-      expect(closed.requests.map((r) => `${r.method} ${r.url}`).sort(), mode).toEqual(reference.requests.map((r) => `${r.method} ${r.url}`).sort());
-      const openHost = await open("index.html", mode, { hostOpen: true });
-      expect(openHost.doc.querySelectorAll('a[href="/become-a-host.html"]')).toHaveLength(1);
-    }
-  });
-
-  it("the card is complete without the module: five rows in order, the match without an hour says 'Horario por confirmar', the ten crests are drawn in the Founder's order, and the two informational links keep their order", async () => {
-    for (const mode of FAILURES) {
-      const page = await open("index.html", mode);
-      const snapshot = homeSnapshot(page).featured;
-      expect(snapshot.rows.map((r) => [r.id, r.time, r.when]), mode).toEqual([
-        ["N26-26", "set", "sáb 7 nov · 🇭🇳 2:00 p. m."], ["N26-27", "set", "dom 8 nov · 🇭🇳 2:00 p. m."], ["N26-46", "tbc", "jue 19 nov · Horario por confirmar"],
-        ["N26-22", "set", "dom 22 nov · 🇭🇳 10:30 a. m."], ["N26-24", "set", "dom 29 nov · 🇭🇳 10:30 a. m."],
-      ]);
-      expect(snapshot.rows.map((r) => r.chip), mode).toEqual(Array(5).fill("Preselección"));
-      expect(snapshot.rows.map((r) => r.vs), mode).toEqual(Array(5).fill("vs"));
-      expect(snapshot.rows.map((r) => r.teams.join(" vs ")), mode).toEqual(["Valencia vs Real Madrid", "Atlético de Madrid vs FC Barcelona", "Motagua vs Olimpia", "Liverpool vs Manchester United", "Arsenal vs Manchester City"]);
-      expect(snapshot.crests.map((c) => [c[0], c[1]]), mode).toEqual([
-        ["Real Madrid", "Real Madrid"], ["FC Barcelona", "FC Barcelona"], ["Manchester City", "Manchester City"], ["Manchester United", "Manchester United"], ["Arsenal", "Arsenal"],
-        ["Olimpia", "Olimpia"], ["Motagua", "Motagua"], ["Inter de Milán", "Inter de Milán"], ["Bayern Múnich", "Bayern Múnich"], ["Paris Saint-Germain", "Paris Saint-Germain"],
-      ]);
-      expect(snapshot.crests.every((c) => c[2] !== null), mode).toBe(true); // all ten are drawn, whatever happens to the language module
-      expect(snapshot.links, mode).toEqual([["featured-past", "/soccer-predictions.html#historial"], ["featured-lineup", "/soccer-predictions.html"]]);
-      expect(snapshot.listLabel, mode).toBe("Lista de próximos partidos");
-      expect([snapshot.listRole, snapshot.stripRole], mode).toEqual(["list", "list"]); // both lists keep their list semantics whatever the language module does
-      expect(snapshot.teamsLabel, mode).toBe("Equipos que podrían aparecer en URBANO Score");
-      expect([snapshot.note, snapshot.noteHidden], mode).toEqual(["Fechas y horarios informativos: pueden cambiar. Hora de Honduras.", false]);
-      expect(snapshot.legal, mode).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
-      expect(snapshot.legal, mode).not.toMatch(/premio/i); // the card makes no statement about prizes
-      expect(snapshot.past, mode).toBe("Mis participaciones y premios");
-      expect(snapshot.pastNote, mode).toBe("Tus participaciones en partidos finalizados y el estado de tus premios.");
-      expect([snapshot.statusLine, snapshot.statusHidden], mode).toEqual(["Todavía no hay partidos abiertos para participar.", false]); // the list was read: no match is open
-      expect(visible(page.doc), mode).not.toMatch(RAW_KEY);
-    }
-  });
-
-  it("the server's word is honoured without the module, in Spanish, with the same words: an announced match it says is open is 'Abierto para participar'; one with an approved window that has not opened shows the server's hour (one o'clock says «desde la»); the match with no hour never changes", async () => {
-    for (const mode of ["ok", ...FAILURES] as const) {
-      const open1 = await open("index.html", mode, { matches: [announcedMatch(), announcedMatch({ matchId: "n26-46", competition: "Liga Nacional", homeTeam: { name: "Motagua" }, awayTeam: { name: "Olimpia" }, kickoffAt: "2026-11-20T01:00:00.000Z" })] });
-      const rows = homeSnapshot(open1).featured.rows;
-      expect(rows.map((r) => [r.id, r.state, r.chip, r.opens]), mode).toEqual([
-        ["N26-26", "open", "Abierto para participar", ""], ["N26-27", "next", "Preselección", ""], ["N26-46", "next", "Preselección", ""], ["N26-22", "next", "Preselección", ""], ["N26-24", "next", "Preselección", ""],
-      ]);
-      expect(open1.text("#upcoming-status"), mode).toBe("Hay partidos abiertos para participar. Los ves en la cartelera de Score.");
-      const scheduled = await open("index.html", mode, { matches: [announcedMatch({ participationOpensAt: "2026-11-07T17:07:00.000Z" })] });
-      const first = homeSnapshot(scheduled).featured.rows[0];
-      expect([first.state, first.chip, first.opens], mode).toEqual(["scheduled", "Participación programada", "Participación desde las 11:07 a. m. (hora de Honduras)"]);
-      expect(scheduled.text("#upcoming-status"), mode).toBe("Todavía no hay partidos abiertos para participar."); // a window that has not opened is not an open match
-      expect(visible(scheduled.doc), mode).not.toMatch(RAW_KEY);
-      // the hour of the window: «desde las» except for one o'clock, which takes the singular article (a. m. and p. m. alike); the key is in the generated block too
-      for (const [opens, written] of [["2026-11-07T19:07:00.000Z", "la 1:07 p. m."], ["2026-11-07T07:15:00.000Z", "la 1:15 a. m."], ["2026-11-07T18:30:00.000Z", "las 12:30 p. m."], ["2026-11-07T20:00:00.000Z", "las 2:00 p. m."], ["2026-11-07T06:05:00.000Z", "las 12:05 a. m."]] as const) {
-        const one = await open("index.html", mode, { matches: [announcedMatch({ participationOpensAt: opens })] });
-        expect(homeSnapshot(one).featured.rows[0].opens, `${mode} ${opens}`).toBe(`Participación desde ${written} (hora de Honduras)`);
-      }
-      expect(visible(open1.doc), mode).not.toMatch(/Jugar ahora/);
-    }
-  });
-
-  it("the sentence under the list follows the SERVER's list, not the rows: «some are open» for an open match that is not a row or that ties to none (every row stays 'Preselección'), «none» when nothing accepts participation — the same with and without the module", async () => {
-    const OPEN = "Hay partidos abiertos para participar. Los ves en la cartelera de Score.";
-    const NONE = "Todavía no hay partidos abiertos para participar.";
-    const cases: Array<[string, unknown[], string]> = [
-      ["an open match that is not one of the rows", [openElsewhere()], OPEN],
-      ["the announced match under another spelling, open", [respelled()], OPEN],
-      ["one cancelled, one finalized and one already started match", [openElsewhere({ cancelledAt: "2026-10-28T00:00:00.000Z" }), openElsewhere({ finalized: true }), openElsewhere({ kickoffAt: "2026-10-28T20:00:00.000Z" })], NONE],
-      ["a match whose approved window has not opened", [openElsewhere({ participationOpensAt: "2026-11-02T18:00:00.000Z" })], NONE],
-      ["a match whose venue is not active or whose offer is not available", [openElsewhere({ venueActivations: [{ venueActivationId: "a", enabled: true, venue: { active: false }, offer: { available: true } }, { venueActivationId: "b", enabled: true, venue: { active: true }, offer: { available: false } }] })], NONE],
-      ["no matches at all", [], NONE],
-    ];
-    for (const mode of ["ok", "missing"] as const) {
-      for (const [label, matches, sentence] of cases) {
-        const featured = homeSnapshot(await open("index.html", mode, { matches })).featured;
-        expect([featured.statusLine, featured.statusHidden], `${mode}: ${label}`).toEqual([sentence, false]);
-        expect(featured.rows.map((r) => [r.state, r.chip]), `${mode}: ${label}: no row is changed by a match that is not strictly the row`).toEqual(Array(5).fill(["next", "Preselección"]));
-      }
-    }
-  });
-
-  it("fail-closed: while the public matches list has not been read, or when it cannot be read (an error status, no list, no body, not JSON, the network failing), the sentence is NOT shown — empty and hidden — with or without the module; every row stays 'Preselección'; the one request is the single read", async () => {
-    const lists: Array<[string, NonNullable<OpenOptions["list"]>]> = [...UNREADABLE_LISTS, ["no answer yet", "pending"]];
-    for (const mode of ["ok", "missing"] as const) {
-      for (const [label, list] of lists) {
-        const page = await open("index.html", mode, { list, matches: [openElsewhere()] });
-        const featured = homeSnapshot(page).featured;
-        expect([featured.statusLine, featured.statusHidden], `${mode}: ${label}`).toEqual(["", true]);
-        expect(featured.rows.map((r) => [r.state, r.chip]), `${mode}: ${label}`).toEqual(Array(5).fill(["next", "Preselección"]));
-        expect(visible(page.doc), `${mode}: ${label}`).not.toMatch(/Todavía no hay partidos abiertos para participar|Hay partidos abiertos para participar/);
-        expect(page.requests.filter((r) => r.url.includes("/api/gaming/predictions")), `${mode}: ${label}`).toEqual([{ url: "/api/gaming/predictions/matches", method: "GET" }]);
-        expect(featured.note, `${mode}: ${label}: the rest of the card is there`).toBe("Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
-        expect(featured.links, `${mode}: ${label}`).toEqual([["featured-past", "/soccer-predictions.html#historial"], ["featured-lineup", "/soccer-predictions.html"]]);
-      }
-    }
-  });
 
   it("the sign-in panel (shared client) opens in Spanish, not English, even though the module is gone", async () => {
     for (const mode of FAILURES) {
@@ -938,14 +809,6 @@ describe("the generated Spanish blocks never drift from the module's dictionary"
 describe("negative controls", () => {
   const block = (page: PageName) => PAGE_HTML[page].match(/<script id="i18n-fallback">[\s\S]*?<\/script>/)![0];
 
-  it("without the fallback block the Home draws no cards (the original defect)", async () => {
-    const html = PAGE_HTML["index.html"].replace(block("index.html"), "");
-    const page = await open("index.html", "missing", { html, matches: [futureMatch()] });
-    expect(page.doc.querySelectorAll(".card-grid .exp-card")).toHaveLength(0); // the catalog cards are drawn by the page's script, which needs the module
-    expect(page.doc.querySelectorAll("#halloween .exp-card")).toHaveLength(1); // the Halloween announcement is static markup: it is there whatever the script does
-    expect(page.errors.join(" ")).toMatch(/UrbanoI18n is not defined/);
-  });
-
   it("without the fallback block Predictions and the profile stay on 'Cargando…' for good (the original defect)", async () => {
     const { result, rejections } = await expectingUnhandledRejections(async () => {
       const predictions = await open("soccer-predictions.html", "missing", { html: PAGE_HTML["soccer-predictions.html"].replace(block("soccer-predictions.html"), ""), matches: [futureMatch()] });
@@ -957,49 +820,12 @@ describe("negative controls", () => {
     expect(rejections.join(" ")).toMatch(/UrbanoI18n is not defined/); // the cause: the unguarded call
   });
 
-  it("a fallback word that differs from the module's is caught by the differential check", async () => {
-    const html = PAGE_HTML["index.html"].replace('"home.poker.action": "Organizar →"', '"home.poker.action": "Organizar con Soccer Predictions →"');
-    expect(html).not.toBe(PAGE_HTML["index.html"]);
-    const options = { matches: [futureMatch()] };
-    const reference = homeSnapshot(await open("index.html", "ok", options));
-    const mutated = homeSnapshot(await open("index.html", "missing", { ...options, html }));
-    expect(mutated).not.toEqual(reference);
-    expect(mutated.cards.find((c) => c.title === "URBANO Poker")!.action).toBe("Organizar con Soccer Predictions →");
-  });
-
   it("a fallback that replaced a WORKING module (guard removed) is caught: the selector would be hidden and English lost", async () => {
     const html = PAGE_HTML["index.html"].replace(/if \(m && typeof m\.t === "function"[^\n]*\n/, "");
     expect(html).not.toBe(PAGE_HTML["index.html"]);
     const page = await open("index.html", "ok", { html });
     expect(page.win.UrbanoI18n.fallback).toBe(true); // wrong: the real module was thrown away
     expect(selectorHidden(page.doc)).toBe(true);
-  });
-
-  it("a Home whose block lacks one of the shared 'upcoming.' words shows it raw, and both the differential and the raw-key scan catch it", async () => {
-    const line = '    "upcoming.whenTbc": "{weekday} {day} {month} · Horario por confirmar",\n';
-    expect(PAGE_HTML["index.html"].split(line).length - 1).toBe(1);
-    const html = PAGE_HTML["index.html"].replace(line, "");
-    const reference = homeSnapshot(await open("index.html", "ok"));
-    const mutated = await open("index.html", "missing", { html });
-    expect(homeSnapshot(mutated)).not.toEqual(reference);
-    expect(visible(mutated.doc)).toMatch(RAW_KEY);
-    expect(mutated.text('#upcoming-list li[data-time="tbc"] .upcoming-time')).toBe("upcoming.whenTbc");
-  });
-
-  it("a Home whose block lacks the sentence under the list, the chip of a shortlisted match or the singular opening-hour template shows the raw key where the script writes it, and the differential catches it", async () => {
-    const cases: Array<[string, OpenOptions]> = [
-      ['    "upcoming.status.none": "Todavía no hay partidos abiertos para participar.",\n', {}],
-      ['    "upcoming.status.open": "Hay partidos abiertos para participar. Los ves en la cartelera de Score.",\n', { matches: [openElsewhere()] }],
-      ['    "upcoming.state.next": "Preselección",\n', {}],
-      ['    "upcoming.opensAtOne": "Participación desde la {time} (hora de Honduras)",\n', { matches: [announcedMatch({ participationOpensAt: "2026-11-07T19:07:00.000Z" })] }],
-    ];
-    for (const [line, options] of cases) {
-      expect(PAGE_HTML["index.html"].split(line).length - 1, line).toBe(1);
-      const reference = homeSnapshot(await open("index.html", "ok", options));
-      const mutated = await open("index.html", "missing", { ...options, html: PAGE_HTML["index.html"].replace(line, "") });
-      expect(homeSnapshot(mutated), line).not.toEqual(reference);
-      expect(visible(mutated.doc), line).toMatch(RAW_KEY);
-    }
   });
 
   it("a Score page whose block lacks a shared 'upcoming.' word or one of the new section words shows it raw, and the differential catches it", async () => {
@@ -1021,19 +847,6 @@ describe("negative controls", () => {
     }
   });
 
-  it("a list module that shows its sentence before the list has been read (or when it failed) is caught: fail-closed is what the shipped module does, and the test sees the difference", async () => {
-    const guard = 'if (serverState !== "ok" || !items.length) return null;';
-    expect(UPCOMING_SOURCE.split(guard).length - 1).toBe(1);
-    const upcomingSource = UPCOMING_SOURCE.replace(guard, "if (!items.length) return null;");
-    for (const list of ["pending", { status: 500, body: { error: "boom" } }] as const) {
-      const shipped = homeSnapshot(await open("index.html", "ok", { list })).featured;
-      expect([shipped.statusLine, shipped.statusHidden]).toEqual(["", true]);
-      const mutated = homeSnapshot(await open("index.html", "ok", { list, upcomingSource })).featured;
-      expect(mutated.statusLine).toBe("Todavía no hay partidos abiertos para participar."); // said without knowing: exactly what must not happen
-      expect(mutated.statusHidden).toBe(false);
-    }
-  });
-
   it("a Score page that treats an unreadable list as an empty list (the guard removed) tells the person there are no finished matches, and the load-error tests catch it", async () => {
     const guard = 'if (!readable || !data || !Array.isArray(data.matches)) throw new Error("the list of matches could not be read");';
     expect(PAGE_HTML["soccer-predictions.html"].split(guard).length - 1).toBe(1);
@@ -1046,12 +859,5 @@ describe("negative controls", () => {
       expect(mutated.text("#content")).toContain("Todavía no hay partidos finalizados.");
       expect(mutated.doc.getElementById("historial")).not.toBeNull();
     }
-  });
-
-  it("a stub that only defines t (partial) is not trusted: the page still ends up in Spanish words, not '<<key>>'", async () => {
-    const html = PAGE_HTML["index.html"].replace(/if \(m && typeof m\.t === "function" && [^\n]*\) return;/, 'if (m && typeof m.t === "function") return;');
-    expect(html).not.toBe(PAGE_HTML["index.html"]);
-    const page = await open("index.html", "partial", { html });
-    expect(visible(page.doc)).toContain("<<"); // with the guard weakened the half-module is used and raw keys leak onto the page
   });
 });

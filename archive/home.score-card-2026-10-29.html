@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title data-i18n="home.title">URBANO Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /*
+   * URBANO Gaming Application Shell — member-facing landing page.
+   * Reuses the constitutional identity tokens and Experience Layer
+   * purple accent already established in host.html/participant.html
+   * (charcoal/gold/ivory + Montserrat, purple = the Gaming
+   * application layer, gold reserved for Recognition) rather than
+   * introducing a new visual language. See
+   * APPLICATION_SHELL_IMPLEMENTATION_RECORD.md.
+   */
+  :root {
+    --charcoal: #0a0a0a;
+    --bg-page: #0a0a0a;
+    --bg-card: #161616;
+    --surface-2: #1c1c1c;
+    --ink: #f5f1e8;
+    --muted: #9b9689;
+    --line: #2a2a2a;
+    --gold: #d4af37;
+    --gold-bg: rgba(212, 175, 55, 0.12);
+    --accent: #d4af37;
+    --primary-fill: #f5f1e8;
+    --primary-ink: #0a0a0a;
+    --exp-purple: #7c3aed;
+    --exp-purple-glow: rgba(124, 58, 237, 0.45);
+    --exp-purple-bg: rgba(124, 58, 237, 0.12);
+    --exp-purple-soft: #b57cff;
+    --upcoming: #333333;
+    /* Dark scrim laid over the editorial photographs: strongest on the left, where the text sits, lighter over the picture's subject. */
+    --art-scrim: linear-gradient(90deg, rgba(10, 10, 10, 0.9), rgba(10, 10, 10, 0.53) 62%, rgba(10, 10, 10, 0.25)),
+                 linear-gradient(0deg, rgba(10, 10, 10, 0.85), transparent 70%);
+    /* The scrim of the three picture cards (Score, Poker, Halloween). The dark zone is measured in pixels, not in percentages, because the
+       text has a fixed width whatever the width of the card: about 330 px of ivory text on the left stays on a deep dark, and from there the
+       dark opens up quickly so the picture shows at its own brightness. The bottom layer only backs the line of buttons; it is short on
+       purpose, so it does not dim the lower half of the picture. (--art-scrim above is Trivia's and did not change.) */
+    --art-photo-scrim: linear-gradient(90deg, rgba(10, 10, 10, 0.9) 0, rgba(10, 10, 10, 0.78) 240px, rgba(10, 10, 10, 0.38) 360px, rgba(10, 10, 10, 0.08) 470px, rgba(10, 10, 10, 0) 580px),
+                       linear-gradient(0deg, rgba(10, 10, 10, 0.5), transparent 36%);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page);
+    color: var(--ink);
+    margin: 0;
+    padding: 0 0 60px;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* Header — same brand markup as host.html/participant.html, so the
+     mark, wordmark, and Gaming badge read identically everywhere. */
+  .shell-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+    max-width: 1080px; margin: 0 auto; padding: 20px 20px 0;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+  /* The URBANO mark and wordmark are one link to the parent site; the Gaming badge is a separate link back to this application's home. */
+  .brand-link { display: inline-flex; align-items: center; gap: 10px; border-radius: 6px; }
+  /* Founder visual review: the mark previously used
+     filter: drop-shadow(...) directly on the <img>. drop-shadow blurs
+     the *alpha silhouette* of the image — since urbano-mark.svg is a
+     fully opaque square (not just the U shape), that traced a crisp
+     purple-glowing rectangle around the mark, reading as an unwanted
+     box/border. Fixed by moving the glow to a separate, blurred
+     radial-gradient pseudo-element positioned behind the mark, which
+     produces a soft atmospheric halo instead of outlining the image's
+     own rectangular edge. The mark asset itself is untouched. */
+  .brand-mark-wrap { position: relative; display: inline-flex; width: 24px; height: 26px; flex-shrink: 0; }
+  .brand-mark-wrap::before {
+    content: ""; position: absolute; inset: -9px;
+    background: radial-gradient(circle, var(--exp-purple-glow) 0%, transparent 70%);
+    filter: blur(4px); z-index: 0;
+  }
+  .brand-mark { position: relative; z-index: 1; width: 24px; height: 26px; display: block; }
+  .brand-word { font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: 0.02em; }
+  .brand-badge {
+    background: var(--exp-purple-bg); border: 1px solid var(--exp-purple);
+    color: var(--exp-purple); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
+  }
+
+  /* Language selector and account controls sit together on the right. On a phone the header wraps to two rows: the brand on the
+     first, the language selector (left) and the account group (right) on the second, so nothing overflows at 375 px. */
+  .header-tools { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; max-width: 100%; }
+  .lang-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button {
+    font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted);
+    background: transparent; border: none; padding: 9px 12px; min-height: 44px; min-width: 44px; cursor: pointer;
+  }
+  .lang-switch button[aria-pressed="true"] { color: var(--primary-ink); background: var(--primary-fill); }
+  .account-group { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; position: relative; }
+  .account-group [data-urbano-signout] { flex: none; white-space: nowrap; padding: 12px 4px; color: var(--muted); }
+  [hidden] { display: none !important; }
+  .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
+  .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .featured-lineup:focus-visible, .featured-access-link:focus-visible,
+  .exp-card.is-actionable:focus-visible, footer a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+  .signin-btn {
+    font-family: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
+    border-radius: 8px; border: 1px solid var(--ink); background: transparent;
+    color: var(--ink); cursor: pointer;
+    /* UG-CR-GATE-091: it keeps its natural width (so the label is never squeezed or ellipsized at ordinary sizes), is never wider than
+       the header, and is never broken mid-word. Only an extreme display name is truncated with an ellipsis, instead of pushing the
+       page sideways. */
+    white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .signin-btn:hover { background: var(--surface-2); }
+  a.signin-btn { display: inline-block; text-align: center; }
+  .account-group .signin-btn { flex: 0 1 auto; min-width: 0; }
+  .signin-status {
+    display: none; max-width: 1080px; margin: 10px auto 0; padding: 10px 20px 0;
+    font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  }
+
+  /* Primary navigation — the smallest structure that gives URBANO
+     Gaming a durable app shape: Home/Play/Experiences are anchors on
+     this one page; Leaderboards/Rewards are their own small static
+     pages. No router, no framework — plain links, matching every
+     other page in this shell. Horizontally scrollable so it never
+     wraps awkwardly on narrow phones. */
+  .primary-nav {
+    display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    max-width: 1080px; margin: 16px auto 0; padding: 0 20px 2px;
+  }
+  .primary-nav::-webkit-scrollbar { display: none; }
+  .nav-link {
+    flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted);
+    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .nav-link.is-active { color: var(--ink); border-color: var(--ink); }
+
+  /* Hero */
+  .hero { max-width: 1080px; margin: 0 auto; padding: 36px 20px 8px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(28px, 5vw, 40px); font-weight: 800; letter-spacing: -0.01em;
+    margin: 0 0 12px;
+  }
+  .hero p {
+    color: var(--muted); font-size: 15px; max-width: 560px; margin: 0 auto; line-height: 1.6;
+  }
+
+  .section { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .section-label {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700;
+    color: var(--muted); margin: 40px 0 12px;
+  }
+  .section-note { font-size: 12.5px; color: var(--muted); margin: 10px 0 0; }
+
+  /* Featured card */
+  .featured-card {
+    position: relative; overflow: hidden;
+    border-radius: 16px; border: 1px solid var(--exp-purple);
+    background:
+      radial-gradient(120% 140% at 100% 0%, var(--exp-purple-bg), transparent 60%),
+      var(--bg-card);
+    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.14), 0 0 30px var(--exp-purple-glow);
+    padding: 28px 24px;
+  }
+  .featured-eyebrow {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--exp-purple); margin-bottom: 4px;
+  }
+  .featured-card h2 { font-size: 24px; margin: 6px 0 0; font-weight: 800; }
+
+  .featured-card .status-pill { margin-bottom: 4px; }
+  /* Card grids (Experiences, Skill Games, Minigames, Organizers). The element ids keep the historical "-carousel" name that the pages'
+     tests and evidence refer to; the cards are no longer a sideways-scrolling strip, so every card is visible without swiping. */
+  .card-grid { display: grid; gap: 14px; }
+  .games-grid { grid-template-columns: minmax(0, 1fr); }
+  .experiences-grid, .organizers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .minigames-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  /* Experiences holds one card (URBANO Poker) now that the Halloween announcement is its own static card near the top: a lone card spans the
+     row instead of leaving an empty half. With a second experience the grid is two columns again, as before. */
+  .experiences-grid > .exp-card:only-child { grid-column: 1 / -1; }
+  /* Two cards side by side need about 760 px; narrower than that they stack, so the text never gets squeezed into a sliver. */
+  @media (max-width: 760px) { .experiences-grid, .organizers-grid { grid-template-columns: minmax(0, 1fr); } }
+
+  .exp-card {
+    min-width: 0;
+    border: 1px solid var(--line); border-radius: 14px; background: var(--bg-card);
+    padding: 18px 16px; display: flex; flex-direction: column; gap: 10px;
+    min-height: 168px;
+  }
+  .exp-card.is-actionable { cursor: pointer; }
+  .exp-card.is-actionable:active { background: var(--surface-2); }
+  /* An informational card is told apart by its pill, its words and a quieter border: never by fading its text (which left it below
+     the AA contrast ratio). Title, text and action keep at least 4.5:1 on the card. */
+  .exp-card.is-locked { cursor: default; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) { border-color: #232323; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) h3 { color: #d6d1c3; }
+  .exp-card.is-locked:not(.art-card):not(.game-tile) .exp-sub { color: #aaa597; }
+
+  .status-pill {
+    align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+  }
+  .status-featured { background: var(--exp-purple-bg); color: var(--exp-purple); border: 1px solid var(--exp-purple); }
+  .status-playtest { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  .status-soon { background: rgba(255,255,255,0.04); color: var(--muted); border: 1px solid var(--line); }
+
+  /* Icon + status pill share the card's top row so the semantic emoji
+     (Founder direction: lightweight v1 icon layer, not a Brand asset)
+     reads immediately without competing with the title below it. */
+  .exp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .exp-icon { font-size: 20px; line-height: 1; }
+
+  .exp-card h3 { font-size: 16px; margin: 0; font-weight: 700; }
+  .exp-card .exp-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; flex: 1; }
+  .exp-card .exp-action { font-size: 12px; font-weight: 700; color: var(--ink); margin-top: auto; }
+  .exp-card.is-locked .exp-action { color: #aaa597; font-weight: 600; }
+
+  /* Art cards — the composition of the Founder Design Review mockup: a dark editorial photograph, a left-to-right dark scrim so the
+     text sits on the quiet side of the picture, clear ivory titles and purple accents. The photographs are small local WebP derivatives
+     (public/assets/home), purely decorative (empty alt text, never announced) and carry no availability, rule or reward: what a card
+     offers is its status pill and its words, exactly as before. */
+  .art-card { position: relative; isolation: isolate; overflow: hidden; background-color: var(--charcoal); justify-content: flex-end; }
+  .art-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% center; z-index: -2; pointer-events: none; }
+  .art-scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-photo-scrim); }
+  .art-card .exp-card-top { margin-bottom: auto; }
+  /* A chip is its own dark zone behind its own text: with the picture no longer dimmed, a deeper fill keeps its small text above 4.5:1. */
+  .art-card .status-pill { background: rgba(10, 10, 10, 0.86); }
+  .art-card .status-featured { color: var(--exp-purple-soft); }
+  .art-kicker {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--exp-purple-soft); background: rgba(10, 10, 10, 0.7); padding: 4px 8px; border-radius: 5px;
+  }
+  .art-card h3, .art-halloween h2 { font-size: 26px; line-height: 1.15; font-weight: 800; max-width: 16ch; }
+  .art-card .exp-sub { flex: none; max-width: 40ch; font-size: 14px; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .art-card .exp-action { align-self: flex-start; margin-top: 4px; }
+  .art-card.is-actionable .exp-action { background: var(--primary-fill); color: var(--primary-ink); padding: 11px 20px; border-radius: 999px; font-size: 14px; }
+  .art-card.is-actionable:hover { border-color: var(--exp-purple); }
+  .art-card.is-locked .exp-action { color: rgba(245, 241, 232, 0.86); }
+  .art-poker, .art-halloween { min-height: 300px; padding: 24px; }
+  /* Trivia: a card of its own, drawn in code (an original line motif, public/assets/home/trivia-card.svg), in the same dark / purple language. */
+  .art-trivia { min-height: 230px; padding: 24px; }
+  .art-trivia::before { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; background: url("/assets/home/trivia-card.svg") right center / auto 100% no-repeat; }
+  .art-trivia::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-scrim); }
+
+  /* The Halloween costume-contest announcement: a static picture card near the top of the page. Its title is an h2 (it comes before the
+     featured Score card's h2), so it takes the picture cards' title style explicitly; its date and its availability line are plain text on the
+     photograph, ivory with the same shadow as the card's other lines. Nothing in it is a control, so nothing in it has a hover or focus state. */
+  #halloween { margin-top: 28px; }
+  .art-halloween h2 { margin: 0; }
+  /* The event chip takes the status pill's deeper fill (the same value as `.art-card .status-pill`): over this photograph's bright candles the
+     system's lighter chip left its purple text at 2.9:1 (measured in a real browser); with this fill it clears 4.5:1 at every width. */
+  .art-halloween .art-kicker { background: rgba(10, 10, 10, 0.86); }
+  .halloween-date { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .halloween-availability { margin: 4px 0 0; max-width: 40ch; font-size: 13px; font-weight: 600; line-height: 1.5; color: rgba(245, 241, 232, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+
+  /* URBANO Score (historically "Soccer Predictions": the route, ids and code keep that name). The featured card is a static announcement:
+     every word in it is written here and translated by the language table; nothing in it comes from a server answer or from match
+     data. Its art is an original schematic pitch drawn in code (public/assets/home/urbano-score-pitch.svg), a CSS background, never an
+     element: no photograph, no crest, no mark of any club or competition. The team names are plain text. The art is soccer only. */
+  .featured-card.art-card {
+    background: var(--charcoal); min-height: 340px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
+  }
+  .featured-card.art-card::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+    background: url("/assets/home/urbano-score-pitch.svg") right center / auto 100% no-repeat;
+  }
+  .featured-card.art-card::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-photo-scrim); }
+  .featured-card.art-card .status-pill { margin-bottom: auto; background: rgba(10, 10, 10, 0.86); }
+  .featured-card.art-card h2 { font-size: 30px; line-height: 1.15; margin-top: 18px; }
+  /* Club crests (decoration only): the team names are always written in text, so the crest is an addition that can be removed. */
+  .club-crest { width: 24px; height: 24px; object-fit: contain; flex: none; }
+  .featured-descriptor { text-wrap: balance; margin: 6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.95); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  .featured-note { margin: 6px 0 0; font-size: 13px; font-weight: 600; line-height: 1.5; max-width: 46ch; color: rgba(245, 241, 232, 0.88); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+
+  /* "Próximos partidos": the preselection (up to five matches), each with ONE state in words (colour never carries it alone). Before the list: the
+     separate, visible way into earlier participations and prizes, and the crests of the ten teams. */
+  .featured-access { margin: 16px 0 0; width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .featured-access-link {
+    display: inline-flex; align-items: center; min-height: 46px; padding: 10px 18px; border-radius: 999px; border: 1.5px solid var(--exp-purple-soft);
+    background: rgba(10, 10, 10, 0.78); color: var(--ink); font-size: 15px; font-weight: 700; text-decoration: none;
+  }
+  .featured-access-link::after { content: "→"; content: "→" / ""; margin-left: 10px; color: var(--exp-purple-soft); } /* the arrow is decoration: it is not part of the link's name */
+  .featured-access-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: rgba(245, 241, 232, 0.86); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); max-width: 46ch; }
+  .featured-teams { margin: 18px 0 0; width: 100%; max-width: 560px; }
+  .featured-teams-label { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.78); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  /* The ten crests: decoration drawn by /urbanoClubCrests.js. The team's NAME is in the markup (visually hidden while its crest is drawn, visible as a
+     small label when it is not), so the strip is never an unlabelled row of pictures. */
+  .ten-crests { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; align-items: center; justify-items: center; }
+  .ten-crests .crest-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 0; }
+  .ten-crests .club-crest { width: 34px; height: 34px; }
+  .ten-crests .crest-name { font-size: 11px; font-weight: 700; color: var(--ink); text-align: center; line-height: 1.2; }
+  /* the safety net: if no crest is drawn (withdrawn, or none loads) the names get room of their own instead of running into each other */
+  .ten-crests:not(:has(.club-crest)) { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px 12px; justify-items: start; }
+  .ten-crests .club-crest + .crest-name { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
+  .upcoming-list { list-style: none; margin: 16px 0 0; padding: 0; width: 100%; max-width: 560px; display: grid; gap: 10px; }
+  .upcoming-item {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+    padding: 10px 12px; border-radius: 10px; background: rgba(10, 10, 10, 0.74); border: 1px solid rgba(245, 241, 232, 0.14);
+  }
+  .upcoming-teams { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 15px; font-weight: 700; line-height: 1.35; color: var(--ink); }
+  .upcoming-team { display: inline-flex; align-items: center; gap: 6px; }
+  /* "vs." stays with the away team when the pair has to wrap */
+  .upcoming-away { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 8px; }
+  .upcoming-team .club-crest { width: 20px; height: 20px; }
+  .upcoming-vs { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245, 241, 232, 0.62); }
+  .upcoming-meta { font-size: 12.5px; font-weight: 600; line-height: 1.4; color: rgba(245, 241, 232, 0.86); }
+  .upcoming-comp { display: inline-block; margin-right: 8px; color: var(--exp-purple-soft); }
+  .upcoming-time { white-space: nowrap; }
+  .upcoming-item[data-time="tbc"] .upcoming-time { font-style: italic; white-space: normal; }
+  .upcoming-opens { grid-column: 1 / -1; font-size: 12.5px; font-weight: 700; color: var(--exp-purple-soft); }
+  .upcoming-none { font-size: 13px; color: rgba(245, 241, 232, 0.86); }
+  .upcoming-chip {
+    justify-self: end; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05); color: #d6d1c3; border: 1px solid #4a4a4a; white-space: nowrap;
+  }
+  .upcoming-chip.state-scheduled { color: var(--exp-purple-soft); border-color: var(--exp-purple); background: var(--exp-purple-bg); }
+  .upcoming-chip.state-open { color: #0a0a0a; background: #7bd88f; border-color: #7bd88f; }
+  .upcoming-chip.state-closed, .upcoming-chip.state-final { color: #b9b4a8; border-style: dashed; }
+  .upcoming-status { margin: 10px 0 0; font-size: 13px; font-weight: 700; line-height: 1.45; color: rgba(245, 241, 232, 0.95); max-width: 46ch; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+  /* The way into the lineup is information, not an invitation to play: an outlined link, not the filled button the other cards use for an action. */
+  .featured-lineup {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 46px; margin-top: 14px; padding: 10px 20px; border-radius: 999px;
+    border: 1px solid rgba(245, 241, 232, 0.4); background: transparent; color: var(--ink); font-size: 14px; font-weight: 700; text-decoration: none;
+  }
+  .featured-legal { margin: 14px 0 0; max-width: 60ch; font-size: 12px; line-height: 1.5; color: rgba(245, 241, 232, 0.8); }
+
+  /* Minigame tiles (Rutas, Towers): the mockup's compact game card — a tinted purple gradient, a line icon and a plain title. They are
+     informational: a status pill and words, no link and no action. */
+  .game-tile { position: relative; isolation: isolate; overflow: hidden; --tone: var(--exp-purple-soft); }
+  .game-tile::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(150deg, var(--tone), transparent 64%); opacity: 0.28; }
+  .game-tile .exp-card-top { flex-wrap: wrap; align-items: flex-start; }
+  .game-tile .status-pill { background: rgba(10, 10, 10, 0.55); }
+  .game-tile .tile-icon { width: 34px; height: 34px; flex: none; color: var(--tone); color: color-mix(in srgb, var(--tone) 72%, var(--ink)); }
+  .game-tile h3 { font-size: 18px; }
+
+  footer {
+    max-width: 1080px; margin: 48px auto 0; padding: 20px; text-align: center;
+    color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+  }
+  footer p { margin: 0 0 6px; }
+  footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
+
+  @media (max-width: 640px) {
+    .shell-header { padding: 16px 16px 0; }
+    /* On a phone the tools are not one block: the header wraps into two rows. Row 1 is the brand and the language selector; row 2 is
+       the account group alone, the full width, right-aligned, so a real name has room before it is ever truncated. */
+    .header-tools { display: contents; }
+    .lang-switch { margin-left: auto; }
+    .account-group { flex: 1 1 100%; }
+    .brand-word { font-size: 15px; }
+    .signin-btn { font-size: 12px; padding: 9px 12px; min-height: 44px; }
+    .primary-nav { padding: 0 16px 2px; }
+    .hero { padding: 28px 16px 4px; }
+    .section { padding: 0 16px; }
+    .featured-card { padding: 22px 18px; }
+    .featured-card h2 { font-size: 20px; }
+    /* Cards stack on a phone; the two minigame tiles stay side by side while each keeps at least 150 px. On a narrow card the text sits in
+       the lower part, so the scrim is darkest at the bottom and lets the photograph show above it. */
+    .minigames-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    :root { --art-scrim: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.86) 45%, rgba(10, 10, 10, 0.3) 78%, rgba(10, 10, 10, 0.12) 100%),
+                         linear-gradient(90deg, rgba(10, 10, 10, 0.5), rgba(10, 10, 10, 0.2));
+            /* Picture cards on a phone: the text sits low, so the dark is deepest at the bottom and falls away upward; there is no
+               uniform horizontal layer any more, which was dimming the whole picture, text or no text. */
+            --art-photo-scrim: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.9) 34%, rgba(10, 10, 10, 0.5) 52%, rgba(10, 10, 10, 0.1) 70%, rgba(10, 10, 10, 0) 86%); }
+    .art-img { object-position: 68% center; }
+    .art-halloween .art-img { object-position: 84% center; }
+    .featured-card.art-card::before { background-position: 70% center; }
+    .art-poker, .art-halloween { min-height: 320px; padding: 20px 18px; }
+    /* The Halloween announcement carries more words than the other picture cards. On a phone its words sit below a clear band of the
+       photograph instead of over it: the chips stay on the picture, the dark begins where the title does, and no word lies over a bright
+       part of the picture. (Its own scrim, so the shared one above is untouched. Measured in a real browser at 320, 375 and 390 px.) */
+    .art-halloween { --art-photo-scrim: linear-gradient(180deg, rgba(10, 10, 10, 0) 0, rgba(10, 10, 10, 0.12) 50px, rgba(10, 10, 10, 0.5) 96px, rgba(10, 10, 10, 0.9) 136px, rgba(10, 10, 10, 0.96) 100%); }
+    .art-halloween .exp-card-top { margin-bottom: 84px; flex-wrap: wrap; row-gap: 6px; }
+    /* The event chip is one label and is never broken in the middle ("BOX" alone on a line): where it and the status pill do not fit side
+       by side, the pill drops to its own row instead. */
+    .art-halloween .art-kicker { letter-spacing: 0.08em; white-space: nowrap; }
+    .art-trivia { min-height: 250px; padding: 20px 18px; }
+    .art-card h3, .art-halloween h2 { font-size: 24px; }
+    .featured-card.art-card { min-height: 360px; }
+    .featured-card.art-card h2 { font-size: 24px; }
+    .featured-descriptor { font-size: 15px; }
+    /* "Próximos partidos" on a phone, compacted so the card is about twice the height of the one it replaced (not three times): the ten crests in
+       ONE row (two rows of five below 340 px, see the next block), the next three matches (the link under them says where the whole lineup is), the
+       way into earlier participations without its explanatory line (the link names itself), and each match in three short lines: its state and
+       competition, its teams, its date and hour. */
+    .featured-access { margin-top: 12px; }
+    .featured-access-note { display: none; }
+    .featured-teams { margin-top: 14px; }
+    .featured-teams-label { margin-bottom: 6px; font-size: 11.5px; letter-spacing: 0.02em; text-transform: none; font-weight: 600; }
+    .ten-crests { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; }
+    .ten-crests .crest-chip { width: 100%; }
+    .ten-crests .club-crest { width: 100%; max-width: 30px; height: auto; aspect-ratio: 1 / 1; }
+    .upcoming-list { margin-top: 12px; gap: 8px; }
+    .upcoming-item { grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; padding: 9px 11px; }
+    .upcoming-chip { grid-row: 1; grid-column: 1; justify-self: start; }
+    .upcoming-meta { display: contents; } /* its two parts (competition, time) become cells of the match's own grid */
+    .upcoming-comp { grid-row: 1; grid-column: 2; margin: 0; min-width: 0; }
+    .upcoming-teams { grid-row: 2; grid-column: 1 / -1; margin-top: 1px; font-size: 14.5px; }
+    .upcoming-time { grid-row: 3; grid-column: 1 / -1; }
+    .upcoming-opens { grid-row: 4; grid-column: 1 / -1; }
+    .upcoming-status { margin-top: 8px; }
+    .featured-lineup { margin-top: 12px; }
+    .featured-legal { margin-top: 12px; font-size: 11.5px; line-height: 1.45; }
+    /* this card is taller than the one it replaced: keep the pitch drawing at the size it was drawn for (its strokes would otherwise grow to
+       bars) and darken the picture evenly, so a line of the drawing never crosses a line of text */
+    .featured-card.art-card::before { background-position: right top; background-size: auto min(100%, 460px); }
+    .featured-card.art-card::after { background: linear-gradient(0deg, rgba(10, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.88) 45%, rgba(10, 10, 10, 0.8) 100%); }
+  }
+
+  /* Below 340 px (a 320 px phone) ten crests in one row would be about 21 px each: two rows of five keep them at 30 px. */
+  @media (max-width: 339px) {
+    .ten-crests { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 6px; }
+  }
+
+  /* UG-CR-GATE-091 (320 px header). The wordmark, the Gaming badge and "Sign in with URBANO" need about 344 px side by side. At 375 px
+     and wider that fits (this layout is unchanged); below 375 px it does not, and the unwrapped header pushed the whole page about
+     39 px sideways at 320 px. Below 375 px the header may therefore wrap, so the sign-in control drops onto its own row instead of
+     overflowing. The control keeps its label on one line (never broken mid-word) and its 44 px touch target. */
+  @media (max-width: 374px) {
+    .shell-header { flex-wrap: wrap; row-gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="shell-header">
+  <div class="brand">
+    <a class="brand-link" href="https://urbanohn.com/" rel="noopener" aria-label="URBANO — ir a urbanohn.com" data-i18n-attr="aria-label:shell.brand.urbano">
+      <span class="brand-mark-wrap"><img class="brand-mark" src="/urbano-mark.svg" alt="" /></span>
+      <span class="brand-word">URBANO</span>
+    </a>
+    <a class="brand-badge" href="/" aria-label="URBANO Gaming — inicio" data-i18n-attr="aria-label:shell.brand.gaming">Gaming</a>
+  </div>
+  <div class="header-tools">
+    <div class="lang-switch" role="group" aria-label="Idioma" data-i18n-attr="aria-label:shell.lang.label">
+      <button type="button" data-lang="es" lang="es" aria-pressed="true" aria-label="Cambiar a español" data-i18n-attr="aria-label:shell.lang.es">ES</button>
+      <button type="button" data-lang="en" lang="en" aria-pressed="false" aria-label="Cambiar a inglés" data-i18n-attr="aria-label:shell.lang.en">EN</button>
+    </div>
+    <div class="account-group">
+      <a class="signin-btn" id="account-link" href="/profile.html" hidden></a>
+      <button class="signin-btn" id="btn-signin" style="visibility:hidden">Iniciar sesión / Crear cuenta</button>
+    </div>
+  </div>
+</header>
+<p class="signin-status" id="signin-status"></p>
+
+<nav class="primary-nav" aria-label="Navegación principal" data-i18n-attr="aria-label:shell.nav.label">
+  <a class="nav-link is-active" href="/" aria-current="page" data-i18n="shell.nav.home">Inicio</a>
+  <a class="nav-link" href="/#play" data-i18n="shell.nav.play">Jugar</a>
+  <a class="nav-link" href="/#experiences" data-i18n="shell.nav.experiences">Experiencias</a>
+  <a class="nav-link" href="/leaderboards.html" data-i18n="shell.nav.leaderboards">Clasificaciones</a>
+  <a class="nav-link" href="/rewards.html" data-i18n="shell.nav.rewards">Premios</a>
+</nav>
+
+<div class="hero">
+  <h1 data-i18n="home.hero.title">Jugá, predecí y competí con tu comunidad.</h1>
+  <p data-i18n="home.hero.sub">Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.</p>
+</div>
+
+<!-- Halloween costume-contest announcement (Founder gate of 2026-10-29). Static and informational, and in the first paint: every word is written
+     here and translated by the language table, so it needs no script, no session and no server. It says that the contest exists, where and
+     when, and that nothing about it can be done yet: it has no link, no button, no field, no countdown and no focusable element, and it
+     promises no prize, no sponsor, no capacity, no fee and no vote. The rules and the way to take part are published later, by the Founder,
+     in their own change; this card is not where registration or voting will live until that change says so. The photograph is the
+     reviewed Halloween derivative the page already carried (decoration only, empty alt text). -->
+<div class="section" id="halloween">
+  <div class="exp-card art-card art-halloween is-locked">
+    <img class="art-img" src="/assets/home/halloween-community.webp" alt="" width="1280" height="720" loading="lazy" decoding="async"><span class="art-scrim" aria-hidden="true"></span>
+    <div class="exp-card-top">
+      <span class="art-kicker" data-i18n="home.halloween.event">Halloween · Beer Box</span>
+      <span class="status-pill status-soon" data-i18n="home.status.soon">Próximamente</span>
+    </div>
+    <h2 data-i18n="home.halloween.title">Concurso de disfraces</h2>
+    <p class="halloween-date" data-i18n="home.halloween.date">Sábado 31 de octubre</p>
+    <p class="exp-sub" data-i18n="home.halloween.sub">Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.</p>
+    <p class="halloween-availability" data-i18n="home.halloween.availability">Las inscripciones y la votación todavía no están disponibles.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-label" data-i18n="home.featured.label">Destacado</div>
+  <!-- URBANO Score — "Próximos partidos" (historically "Soccer Predictions": the route /soccer-predictions.html and every identifier keep that
+       name). The Clásico is NOT here any more: it is a finished event, found in the Score history ("Mis participaciones y premios", the separate
+       access just under the title). The matches in the list are an EDITORIAL PRESELECTION (/homeUpcomingData.js), only announced: a match without a
+       confirmed hour says "Horario por confirmar", and no participation window is written or invented. The card says that people can take part
+       only for a match the SERVER says is open, and it reads the public matches list once for that (see /homeUpcoming.js, which states the five
+       states and the rule that ties a server match to an announced one). Its one other link goes to the Score lineup and only informs: it is not
+       an invitation to play. The ten crests are decoration drawn by /urbanoClubCrests.js; the teams are always named in text. The card promises no
+       prize, and says that URBANO is not affiliated with any club or competition; showing the crests does not establish a licence for them (see the
+       registry). -->
+  <div class="featured-card art-card" id="featured-predictions">
+    <span class="status-pill status-soon" id="featured-status" data-i18n="home.upcoming.pill">Próximos partidos</span>
+    <h2 id="featured-title">URBANO Score</h2>
+    <p class="featured-descriptor" data-i18n="home.upcoming.intro">Preselección de los próximos partidos de URBANO Score.</p>
+    <div class="featured-access">
+      <a class="featured-access-link" id="featured-past" href="/soccer-predictions.html#historial" data-i18n="home.upcoming.past">Mis participaciones y premios</a>
+      <p class="featured-access-note" data-i18n="home.upcoming.pastNote">Tus participaciones en partidos finalizados y el estado de tus premios.</p>
+    </div>
+    <div class="featured-teams" id="featured-teams">
+      <p class="featured-teams-label" id="featured-teams-label" data-i18n="home.upcoming.teamsLabel">Equipos que podrían aparecer en URBANO Score</p>
+      <ul class="ten-crests" role="list" aria-labelledby="featured-teams-label">
+        <li class="crest-chip" data-club="Real Madrid"><span class="crest-name">Real Madrid</span></li>
+        <li class="crest-chip" data-club="FC Barcelona"><span class="crest-name">FC Barcelona</span></li>
+        <li class="crest-chip" data-club="Manchester City"><span class="crest-name">Manchester City</span></li>
+        <li class="crest-chip" data-club="Manchester United"><span class="crest-name">Manchester United</span></li>
+        <li class="crest-chip" data-club="Arsenal"><span class="crest-name">Arsenal</span></li>
+        <li class="crest-chip" data-club="Olimpia"><span class="crest-name">Olimpia</span></li>
+        <li class="crest-chip" data-club="Motagua"><span class="crest-name">Motagua</span></li>
+        <li class="crest-chip" data-club="Inter de Milán"><span class="crest-name">Inter de Milán</span></li>
+        <li class="crest-chip" data-club="Bayern Múnich"><span class="crest-name">Bayern Múnich</span></li>
+        <li class="crest-chip" data-club="Paris Saint-Germain"><span class="crest-name">Paris Saint-Germain</span></li>
+      </ul>
+    </div>
+    <ul class="upcoming-list" id="upcoming-list" role="list" data-i18n-attr="aria-label:home.upcoming.listLabel" aria-label="Lista de próximos partidos"></ul>
+    <p class="upcoming-status" id="upcoming-status" aria-live="polite" hidden></p>
+    <p class="featured-note" id="featured-note" data-i18n="home.upcoming.note">Fechas y horarios informativos: pueden cambiar. Hora de Honduras.</p>
+    <a class="featured-lineup" id="featured-lineup" href="/soccer-predictions.html" data-i18n="home.upcoming.play">Ver cartelera de Score</a>
+    <p class="featured-legal" data-i18n="upcoming.disclaimer">Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.</p>
+  </div>
+</div>
+
+<div class="section" id="experiences">
+  <div class="section-label" data-i18n="home.exp.label">Experiencias</div>
+  <div class="card-grid experiences-grid" id="experiences-carousel"></div>
+</div>
+
+<div class="section" id="play">
+  <div class="section-label" data-i18n="home.games.label">Juegos de habilidad</div>
+  <div class="card-grid games-grid" id="games-carousel"></div>
+</div>
+
+<div class="section" id="minigames">
+  <div class="section-label" data-i18n="home.minigames.label">Minijuegos</div>
+  <div class="card-grid minigames-grid" id="minigames-grid"></div>
+  <p class="section-note" data-i18n="home.games.note">Vienen más juegos competitivos en camino.</p>
+</div>
+
+<div class="section" id="organizers">
+  <div class="section-label" data-i18n="home.organizers.label">Para organizadores</div>
+  <div class="card-grid organizers-grid" id="organizers-grid"></div>
+</div>
+
+<footer>
+  <p data-i18n="shell.footer.part">URBANO Gaming — parte de URBANO</p>
+  <p><a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a></p>
+  <p>Powered by <a href="https://www.tecnomovi.com/" rel="noopener" aria-label="TecnoMovi — ir a tecnomovi.com" data-i18n-attr="aria-label:shell.footer.tecnomovi">TecnoMovi</a></p>
+</footer>
+
+<script src="/urbanoI18n.js"></script>
+<script src="/urbanoClubCrests.js"></script>
+<script src="/homeUpcomingData.js"></script>
+<script src="/homeUpcoming.js"></script>
+<script id="i18n-fallback">
+/* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
+   If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
+   supplies the language table; nothing here decides what is available or allowed. There is no English without the module, so the
+   language selector is hidden instead of offering a control that does nothing. */
+(function (w) {
+  "use strict";
+  var m = w.UrbanoI18n;
+  if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
+  var ES = {
+    "shell.lang.label": "Idioma",
+    "shell.lang.es": "Cambiar a español",
+    "shell.lang.en": "Cambiar a inglés",
+    "shell.brand.urbano": "URBANO — ir a urbanohn.com",
+    "shell.brand.gaming": "URBANO Gaming — inicio",
+    "shell.nav.label": "Navegación principal",
+    "shell.nav.home": "Inicio",
+    "shell.nav.play": "Jugar",
+    "shell.nav.experiences": "Experiencias",
+    "shell.nav.leaderboards": "Clasificaciones",
+    "shell.nav.rewards": "Premios",
+    "shell.footer.part": "URBANO Gaming — parte de URBANO",
+    "shell.footer.tecnomovi": "TecnoMovi — ir a tecnomovi.com",
+    "shell.footer.legal": "Términos, privacidad y reglas",
+    "home.title": "URBANO Gaming",
+    "home.hero.title": "Jugá, predecí y competí con tu comunidad.",
+    "home.hero.sub": "Trivia, predicciones, minijuegos competitivos y experiencias en vivo — hechos para jugar juntos.",
+    "home.featured.label": "Destacado",
+    "home.upcoming.pill": "Próximos partidos",
+    "home.upcoming.intro": "Preselección de los próximos partidos de URBANO Score.",
+    "home.upcoming.listLabel": "Lista de próximos partidos",
+    "home.upcoming.teamsLabel": "Equipos que podrían aparecer en URBANO Score",
+    "home.upcoming.note": "Fechas y horarios informativos: pueden cambiar. Hora de Honduras.",
+    "home.upcoming.play": "Ver cartelera de Score",
+    "home.upcoming.playAll": "Ver los {total} partidos en la cartelera",
+    "home.upcoming.past": "Mis participaciones y premios",
+    "home.upcoming.pastNote": "Tus participaciones en partidos finalizados y el estado de tus premios.",
+    "upcoming.vs": "vs",
+    "upcoming.state.next": "Preselección",
+    "upcoming.state.scheduled": "Participación programada",
+    "upcoming.state.open": "Abierto para participar",
+    "upcoming.state.closed": "Cerrado",
+    "upcoming.state.final": "Finalizado",
+    "upcoming.opensAt": "Participación desde las {time} (hora de Honduras)",
+    "upcoming.opensAtOne": "Participación desde la {time} (hora de Honduras)",
+    "upcoming.weekdays": "dom|lun|mar|mié|jue|vie|sáb",
+    "upcoming.months": "ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic",
+    "upcoming.am": "a. m.",
+    "upcoming.pm": "p. m.",
+    "upcoming.when": "{weekday} {day} {month} · 🇭🇳 {time}",
+    "upcoming.whenTbc": "{weekday} {day} {month} · Horario por confirmar",
+    "upcoming.none": "Estamos preparando los próximos partidos.",
+    "upcoming.status.none": "Todavía no hay partidos abiertos para participar.",
+    "upcoming.status.open": "Hay partidos abiertos para participar. Los ves en la cartelera de Score.",
+    "upcoming.disclaimer": "Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.",
+    "home.games.label": "Juegos de habilidad",
+    "home.games.note": "Vienen más juegos competitivos en camino.",
+    "home.minigames.label": "Minijuegos",
+    "home.art.community": "Comunidad",
+    "home.exp.label": "Experiencias",
+    "home.organizers.label": "Para organizadores",
+    "home.competitions.sub": "Ligas y torneos de tu comunidad.",
+    "home.status.featured": "Destacado",
+    "home.status.playtest": "Playtest",
+    "home.status.soon": "Próximamente",
+    "home.locked.soon": "Próximamente",
+    "home.open": "Abrir →",
+    "home.poker.sub": "Organizá una mesa privada de No-Limit Hold'em para tu grupo.",
+    "home.poker.action": "Organizar →",
+    "home.trivia.sub": "Organizá o unite a una sesión en vivo — probá el playtest actual de Trivia.",
+    "home.rutas.sub": "Deslizá cada pieza hasta su salida. Elegí un escenario para empezar.",
+    "home.towers.sub": "Llevá toda la pila a la torre objetivo. Una pieza grande nunca queda sobre una más pequeña.",
+    "home.host.title": "Ser anfitrión",
+    "home.host.closed": "Las solicitudes para ser anfitrión todavía no están abiertas.",
+    "home.host.open": "Postulate para organizar un torneo privado, solo por invitación, en tu local, para adultos que conocés.",
+    "home.host.action": "Postularme →",
+    "home.halloween.title": "Concurso de disfraces",
+    "home.halloween.event": "Halloween · Beer Box",
+    "home.halloween.date": "Sábado 31 de octubre",
+    "home.halloween.sub": "Mostrá tu disfraz y preparate para elegir tus favoritos. Próximamente publicaremos las reglas y los detalles de participación.",
+    "home.halloween.availability": "Las inscripciones y la votación todavía no están disponibles.",
+    "auth.btn.signedOut": "Iniciar sesión / Crear cuenta",
+    "auth.btn.finish": "Terminá de crear tu cuenta",
+    "auth.btn.hi": "Hola, {name}",
+    "auth.profile.title": "Ver mi perfil",
+    "auth.signOut": "Cerrar sesión",
+    "auth.panel.aria": "Iniciar sesión o crear una cuenta",
+    "auth.entry.title": "Entrá a URBANO",
+    "auth.entry.note": "Iniciá sesión en tu cuenta o creá una.",
+    "auth.login": "Iniciar sesión",
+    "auth.register": "Crear cuenta",
+    "auth.method.loginNote": "Elegí cómo recibir tu código.",
+    "auth.method.registerNote": "Te enviaremos un código para confirmar que sos vos.",
+    "auth.method.email": "Correo",
+    "auth.method.phone": "Teléfono",
+    "auth.method.phoneSoon": "Teléfono — todavía no disponible",
+    "auth.method.phoneSoonTitle": "El acceso por teléfono todavía no está disponible.",
+    "auth.method.phoneSoonMsg": "El acceso por teléfono todavía no está disponible. Usá tu correo.",
+    "auth.input.emailPlaceholder": "tu@ejemplo.com",
+    "auth.input.emailAria": "Correo electrónico",
+    "auth.input.phoneAria": "Número de teléfono",
+    "auth.sendLogin": "Enviar código de acceso",
+    "auth.sendVerification": "Enviar código de verificación",
+    "auth.phoneHint": "Usá el código de país, por ejemplo +504 9999 9999.",
+    "auth.back": "Volver",
+    "auth.switch.toRegister": "Crear una cuenta en su lugar",
+    "auth.switch.toLogin": "Ya tengo una cuenta",
+    "auth.code.title": "Ingresá tu código",
+    "auth.code.introLoginEmail": "Si {id} tiene una cuenta, te llegará un código en breve. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introLoginPhone": "Si {id} tiene una cuenta, te llegará un mensaje de texto con un código. Puede tardar un minuto.",
+    "auth.code.introRegisterEmail": "Enviamos un código a {id}. Puede tardar un minuto; revisá tu carpeta de spam si no lo ves.",
+    "auth.code.introRegisterPhone": "Enviamos un mensaje de texto con un código a {id}. Puede tardar un minuto.",
+    "auth.code.placeholder": "Código de verificación",
+    "auth.code.verify": "Verificar",
+    "auth.code.resend": "Reenviar código",
+    "auth.code.resendIn": "Reenviar código en {s} s",
+    "auth.code.otherNumber": "Usar otro número",
+    "auth.code.otherEmail": "Usar otro correo",
+    "auth.code.noCodeEmail": "¿No te llegó el código por correo? ",
+    "auth.code.noCodePhone": "¿No te llegó el código por mensaje de texto? ",
+    "auth.name.title": "Elegí tu nombre para mostrar",
+    "auth.name.note": "Así vas a aparecer en los juegos.",
+    "auth.name.placeholder": "Cómo vas a aparecer en los juegos",
+    "auth.name.aria": "Nombre para mostrar",
+    "auth.continue": "Continuar",
+    "auth.welcome.title": "Te damos la bienvenida de nuevo",
+    "auth.welcome.email": "Este correo ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.welcome.phone": "Este número de teléfono ya tiene una cuenta, así que iniciamos tu sesión como {name}.",
+    "auth.msg.phoneEmpty": "Ingresá tu número de teléfono con el código de país, por ejemplo +504 9999 9999.",
+    "auth.msg.phoneNoCountry": "Empezá con el código de país, por ejemplo +504 9999 9999 para Honduras.",
+    "auth.msg.phoneInvalid": "Ese número de teléfono no parece válido. Usá el código de país seguido del número, por ejemplo +504 9999 9999.",
+    "auth.msg.emailEmpty": "Ingresá tu correo electrónico.",
+    "auth.msg.emailInvalid": "Eso no parece un correo electrónico. Revisalo e intentá de nuevo.",
+    "auth.msg.requestingLogin": "Solicitando tu código de acceso...",
+    "auth.msg.sendingVerification": "Enviando tu código de verificación...",
+    "auth.msg.sendingNew": "Enviando un código nuevo...",
+    "auth.msg.resentLogin": "Si existe una cuenta, te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.resentRegister": "Te llegará un código nuevo. Los códigos anteriores ya no funcionan.",
+    "auth.msg.codeEmptyPhone": "Ingresá el código de tu mensaje de texto.",
+    "auth.msg.codeEmptyEmail": "Ingresá el código de tu correo.",
+    "auth.msg.verifying": "Verificando...",
+    "auth.msg.incompleteLogin": "Encontramos tu acceso pero no una cuenta terminada. Elegí un nombre para mostrar para terminarla.",
+    "auth.msg.lastStep": "Un último paso para terminar de crear tu cuenta.",
+    "auth.msg.nameEmpty": "Ingresá un nombre para mostrar.",
+    "auth.msg.saving": "Guardando...",
+    "auth.err.rateLimited": "Demasiadas solicitudes. Esperá {seconds} segundos e intentá de nuevo.",
+    "auth.err.rateLimitedFew": "Demasiadas solicitudes. Esperá unos segundos e intentá de nuevo.",
+    "auth.err.codeInvalid": "Ese código no es válido o venció. Revisá el código o pedí uno nuevo.",
+    "auth.err.signupClosed": "Por ahora no se pueden crear cuentas nuevas.",
+    "auth.err.phoneUnavailable": "El acceso por teléfono no está disponible en este momento.",
+    "auth.err.phoneUnavailableYet": "El acceso por teléfono todavía no está disponible.",
+    "auth.err.invalidPhone": "Ese número de teléfono no se puede usar.",
+    "auth.err.invalidEmail": "Ese correo electrónico no se puede usar.",
+    "auth.err.network": "No pudimos conectarnos con el servidor. Revisá tu conexión e intentá de nuevo.",
+    "auth.err.unknown": "Algo salió mal. Intentá de nuevo.",
+    "auth.err.notSignedIn": "No iniciaste sesión.",
+    "auth.err.identityChanged": "Tu sesión cambió. Intentá de nuevo.",
+    "auth.err.profileFailed": "No se pudo completar el perfil.",
+    "auth.srv.nameEmpty": "El nombre para mostrar no puede estar vacío.",
+    "auth.srv.nameTooLong": "El nombre para mostrar no puede superar los 40 caracteres.",
+    "auth.link.error": "Este enlace de acceso no es válido, ya se usó o venció. Pedí uno nuevo para iniciar sesión.",
+    "auth.link.retry": "Pedir un código nuevo"
+  };
+  var SERVER = {};
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+  function t(key, vars) {
+    var template = own(ES, key) ? ES[key] : key;
+    return String(template).replace(/\{(\w+)\}/g, function (whole, name) {
+      if (!vars || !own(vars, name)) return whole;
+      var value = vars[name];
+      if (value && typeof value === "object" && typeof value.$t === "string") return t(value.$t);
+      return value === null || value === undefined ? "" : String(value);
+    });
+  }
+  w.UrbanoI18n = {
+    fallback: true,
+    STORAGE_KEY: "urbano.lang",
+    DEFAULT_LANG: "es",
+    LANGS: ["es"],
+    getLang: function () { return "es"; },
+    setLang: function () { return false; },
+    t: t,
+    has: function (key) { return own(ES, key); },
+    locale: function () { return "es-HN"; },
+    serverMessageKey: function (message) { return own(SERVER, message) ? SERVER[message] : null; },
+    onChange: function () { return function () {}; },
+    apply: function () {},
+    dictionary: function () { return { es: ES, en: {} }; }
+  };
+  var groups = w.document.querySelectorAll(".lang-switch");
+  for (var i = 0; i < groups.length; i++) { groups[i].hidden = true; groups[i].style.display = "none"; }
+})(window);
+</script>
+<script src="/urbanoAuth.js"></script>
+<script src="/hostAvailability.js"></script>
+<script>
+  UrbanoAuth.attachSignInButton(
+    document.getElementById("btn-signin"),
+    document.getElementById("signin-status"),
+    { accountLink: document.getElementById("account-link") }
+  );
+
+  const t = (key, vars) => UrbanoI18n.t(key, vars);
+  const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // Member-facing catalogs, in the order the page shows them: Experiences (URBANO Poker), the Trivia skill game,
+  // the Minigames, and last the organizers' entries (Become a Host, URBANO Competitions). None is a rendering of the internal Interaction
+  // Engine Taxonomy — see APPLICATION_SHELL_IMPLEMENTATION_RECORD.md. URBANO Score is deliberately not repeated below: it is already the
+  // Featured module above. The Halloween costume-contest announcement is not here either: it is static markup near the top of the page
+  // (#halloween), so it is in the first paint and does not wait for this script. Quiz and Duel are not shown on the Home (their
+  // implementations are untouched).
+  //
+  // Honest availability: a card is actionable ONLY when its status is "playtest" and it has a destination. "soon" is informational — no
+  // link, no operational action. Rutas, Towers, Become a Host and URBANO Competitions are informational ("Próximamente") here
+  // until their availability is established by functional evidence; a page merely answering is not that evidence. The "Level 33" card
+  // was retired from this page; its implementation and documentation are untouched.
+  const EXPERIENCES_CATALOG = [
+    {
+      // Wide art card (the editorial photograph replaces the emoji). Destination and label are exactly as before.
+      art: { src: "/assets/home/urbano-poker.webp", className: "art-poker" },
+      title: "URBANO Poker",
+      subKey: "home.poker.sub",
+      status: "playtest",
+      // Host Unified Entry Slice 003 §18: converges on the canonical
+      // picker shell with Poker preselected, replacing the standalone
+      // /poker-host.html entry point — that page still works
+      // indefinitely as a compatibility surface (§17/§19), it is just
+      // no longer where this card sends a Host.
+      href: "/host.html?experience=poker",
+      actionKey: "home.poker.action",
+    },
+  ];
+
+  // Trivia keeps its destination and Playtest label. Its card is a visual card of its own: an original line motif drawn in code (a CSS
+  // background, no photograph).
+  const SKILL_GAMES_CATALOG = [
+    {
+      art: { className: "art-trivia" },
+      title: "Trivia",
+      subKey: "home.trivia.sub",
+      status: "playtest",
+      href: "/trivia-playtest.html",
+    },
+  ];
+
+  // Minigames. Both are informational tiles ("Próximamente"): no link, no action. The icons are static line drawings (decorative).
+  const TILE_ICON_ROUTE = '<svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8h10M3 2h4v4H3Zm14 16h4v4h-4Z"/></svg>';
+  const TILE_ICON_TOWERS = '<svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h18v18H3ZM3 9h18M9 9v12"/></svg>';
+  const MINIGAMES_CATALOG = [
+    {
+      tileIcon: TILE_ICON_ROUTE,
+      title: "URBANO Rutas",
+      subKey: "home.rutas.sub",
+      status: "soon",
+    },
+    {
+      tileIcon: TILE_ICON_TOWERS,
+      title: "URBANO Towers",
+      subKey: "home.towers.sub",
+      status: "soon",
+    },
+  ];
+
+  // UG-CR-GATE-090: the Become a Host entry fails closed. It is NOT actionable (no link, no "Apply") until the server has said, in
+  // this page load, that applications are open. Every other outcome — the answer is still pending, the request fails or times out,
+  // the response is not exactly the expected shape, the shared reader (/hostAvailability.js) did not load, or the server says
+  // closed — leaves the card as the informational "not open yet" card below. The browser never sees or decides readiness itself:
+  // it only relays the server's bounded yes/no, read by the one reader the application page shares.
+  const HOST_ENTRY_CLOSED = {
+    titleKey: "home.host.title",
+    subKey: "home.host.closed",
+    status: "soon",
+  };
+  const HOST_ENTRY_OPEN = {
+    // The public entry to the Become a Host application. Anyone may read the page; applying requires an URBANO sign-in.
+    titleKey: "home.host.title",
+    subKey: "home.host.open",
+    status: "playtest",
+    href: "/become-a-host.html",
+    actionKey: "home.host.action",
+  };
+
+  // The organizers' entries, last on the page. Become a Host keeps its server-gated behaviour; URBANO Competitions is informational
+  // ("Próximamente") with no link: it does not activate any journey.
+  function organizersCatalog(hostOpen) {
+    return [
+      hostOpen === true ? HOST_ENTRY_OPEN : HOST_ENTRY_CLOSED,
+      {
+        title: "URBANO Competitions",
+        subKey: "home.competitions.sub",
+        status: "soon",
+      },
+    ];
+  }
+
+  // Status vocabulary: Playtest (actionable) and Coming Soon (informational) are what this page shows.
+  const STATUS_KEY = { featured: "home.status.featured", playtest: "home.status.playtest", soon: "home.status.soon" };
+  const STATUS_CLASS = { featured: "status-featured", playtest: "status-playtest", soon: "status-soon" };
+  const NON_ACTIONABLE_STATUSES = new Set(["soon"]);
+  const NON_ACTIONABLE_KEY = { soon: "home.locked.soon" };
+
+  function renderCatalog(items, targetId) {
+    const el = document.getElementById(targetId);
+    el.innerHTML = items.map((item) => {
+      const locked = NON_ACTIONABLE_STATUSES.has(item.status);
+      const tag = locked ? "div" : "a";
+      const hrefAttr = locked ? "" : ` href="${item.href}"`;
+      // The icon slot holds an emoji, a static tile drawing, or an art card's kicker. Every value comes from this page's own constants
+      // (never from a server answer), and the words are escaped regardless.
+      let iconMarkup = "<span></span>";
+      if (item.icon) iconMarkup = `<span class="exp-icon">${item.icon}</span>`;
+      else if (item.tileIcon) iconMarkup = item.tileIcon;
+      else if (item.art && item.art.kickerKey) iconMarkup = `<span class="art-kicker">${escapeHtml(t(item.art.kickerKey))}</span>`;
+      const title = item.titleKey ? t(item.titleKey) : item.title;
+      const actionText = locked ? t(NON_ACTIONABLE_KEY[item.status]) : (item.actionKey ? t(item.actionKey) : t("home.open"));
+      const variant = item.art ? ` art-card ${item.art.className}` : item.tileIcon ? " game-tile" : "";
+      // A photograph is decorative (empty alt), loaded lazily and sized, so it never delays the entries above it. A card whose art is a
+      // CSS background (Trivia) has no element at all.
+      const art = item.art && item.art.src
+        ? `<img class="art-img" src="${item.art.src}" alt="" width="1280" height="720" loading="lazy" decoding="async"><span class="art-scrim" aria-hidden="true"></span>`
+        : "";
+      return `<${tag} class="exp-card${variant} ${locked ? "is-locked" : "is-actionable"}"${hrefAttr}>
+        ${art}
+        <div class="exp-card-top">
+          ${iconMarkup}
+          <span class="status-pill ${STATUS_CLASS[item.status]}">${escapeHtml(t(STATUS_KEY[item.status]))}</span>
+        </div>
+        <h3>${escapeHtml(title)}</h3>
+        <p class="exp-sub">${escapeHtml(t(item.subKey))}</p>
+        <span class="exp-action">${escapeHtml(actionText)}</span>
+      </${tag}>`;
+    }).join("");
+  }
+
+  // True only when the shared reader says the server answered exactly { "available": true }. If the reader itself is missing
+  // (its script failed to load) the answer is "not open".
+  function resolveHostAvailability() {
+    const reader = window.HostAvailability;
+    return reader && typeof reader.resolve === "function" ? reader.resolve() : Promise.resolve(false);
+  }
+
+  // What the server last said about Become a Host (false until it says yes). Kept only so a change of language redraws the same card.
+  let lastHostAnswer = false;
+  // The crests on the Score announcement: decoration only, drawn by the central module (absent or switched off, the card is the same
+  // without them: both teams are named in text).
+  if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(document);
+  // The "Próximos partidos" list: announced matches, upgraded only by what the public matches list says (see /homeUpcoming.js).
+  try {
+    if (window.UrbanoHomeUpcoming) {
+      const note = document.getElementById("featured-note");
+      const lineup = document.getElementById("featured-lineup");
+      // A phone shows the next three matches; the link under them says that the whole lineup is in Score. Wider screens show all of them.
+      const PHONE_ROWS = 3;
+      const phone = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 480px)") : null;
+      const handle = window.UrbanoHomeUpcoming.init({
+        host: document.getElementById("upcoming-list"),
+        statusHost: document.getElementById("upcoming-status"),
+        limit: () => (phone && phone.matches ? PHONE_ROWS : undefined),
+        onPaint: (items, total) => {
+          if (note) note.hidden = items.length === 0;
+          if (lineup) {
+            const more = total > items.length;
+            const key = more ? "home.upcoming.playAll" : "home.upcoming.play";
+            lineup.setAttribute("data-i18n", key);
+            if (more) lineup.setAttribute("data-i18n-vars", JSON.stringify({ total })); else lineup.removeAttribute("data-i18n-vars");
+            lineup.textContent = UrbanoI18n.t(key, more ? { total } : undefined);
+          }
+        },
+      });
+      // turning the phone redraws the list with the number of rows that fits the new width
+      if (phone && handle) {
+        const redraw = () => handle.paint();
+        if (typeof phone.addEventListener === "function") phone.addEventListener("change", redraw);
+        else if (typeof phone.addListener === "function") phone.addListener(redraw);
+      }
+    }
+  } catch (err) {
+    console.error("Home: the list of upcoming matches did not start:", err); // informational: it must never take the rest of the page down
+  }
+  renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
+  renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
+  renderCatalog(MINIGAMES_CATALOG, "minigames-grid");
+  // First paint is always the closed card, so an actionable Become a Host card can never flash before readiness is known.
+  renderCatalog(organizersCatalog(false), "organizers-grid");
+  resolveHostAvailability().then((open) => {
+    lastHostAnswer = open === true;
+    if (open === true) renderCatalog(organizersCatalog(true), "organizers-grid");
+  });
+
+  // A change of language redraws what this page built in script (the cards); the static text, the Score announcement included, is
+  // handled by UrbanoI18n itself.
+  UrbanoI18n.onChange(() => {
+    renderCatalog(EXPERIENCES_CATALOG, "experiences-carousel");
+    renderCatalog(SKILL_GAMES_CATALOG, "games-carousel");
+    renderCatalog(MINIGAMES_CATALOG, "minigames-grid");
+    renderCatalog(organizersCatalog(lastHostAnswer), "organizers-grid");
+  });
+</script>
+
+</body>
+</html>

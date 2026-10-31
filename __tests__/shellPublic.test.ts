@@ -123,38 +123,37 @@ async function loadHome(opts: StorageOpts & { matches?: unknown[]; matchesAnswer
 }
 type HomePage = Awaited<ReturnType<typeof loadHome>>;
 
-/** The Home offers nothing to play from the Score card: no element anywhere on the page says "Jugar ahora" / "Play now", and the card's links are
- *  the way to earlier participations and prizes, then the lineup — both informational. */
+/** The Home offers nothing to play: no element anywhere on the page says "Jugar ahora" / "Play now", and the only links in its body are the four panels'
+ *  "Descubrí más" / "Discover more", each to its experience's own page. (The featured card's two buttons are words in a dashed outline, not links, until the server
+ *  says a contest is listed: see /featuredContest.js and __tests__/experienceHome.test.ts.) */
 function expectNoCallToPlay(page: HomePage, label: string) {
   expect(visibleStrings(page.doc).filter((t) => /Jugar ahora|Play now/i.test(t)), label).toEqual([]);
-  expect(page.doc.querySelector("#featured-play, .featured-play, #featured-action"), label).toBeNull();
-  expect(Array.from(page.doc.querySelectorAll("#featured-predictions a")).map((a) => a.getAttribute("href")), label).toEqual(["/soccer-predictions.html#historial", "/soccer-predictions.html"]);
-  expect(page.doc.querySelectorAll("#featured-predictions button, #featured-predictions form, #featured-predictions input"), label).toHaveLength(0);
+  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/voting.html", "/score.html", "/trivia.html", "/poker.html"]);
+  expect(page.doc.querySelectorAll("main button, main form, main input"), label).toHaveLength(0);
 }
 
 describe("Home — Spanish first, never from the browser", () => {
-  it("opens in Spanish for a browser that says English: <html lang>, hero, navigation, sections, footer and the featured entry", async () => {
+  it("opens in Spanish for a browser that says English: <html lang>, hero, navigation, the four experience panels and the footer", async () => {
     const page = await loadHome();
     expect(page.doc.documentElement.lang).toBe("es");
     expect(page.text(".hero h1")).toBe("Jugá, predecí y competí con tu comunidad.");
+    expect(page.text(".hero p")).toBe("Votaciones, predicciones, trivia y poker: experiencias hechas para vivir juntos.");
     expect(Array.from(page.doc.querySelectorAll(".primary-nav a")).map((a) => a.textContent)).toEqual(["Inicio", "Jugar", "Experiencias", "Clasificaciones", "Premios"]);
-    expect(Array.from(page.doc.querySelectorAll(".section-label")).map((e) => e.textContent)).toEqual(["Destacado", "Experiencias", "Juegos de habilidad", "Minijuegos", "Para organizadores"]);
-    expect(page.text("#featured-status")).toBe("Próximos partidos");
-    expect(page.text("#featured-title")).toBe("URBANO Score");
-    expect(page.text(".featured-descriptor")).toBe("Preselección de los próximos partidos de URBANO Score.");
-    expect(page.text("#featured-past")).toBe("Mis participaciones y premios");
-    expect(page.text(".featured-access-note")).toBe("Tus participaciones en partidos finalizados y el estado de tus premios.");
+    expect(page.text(".xp-choose")).toBe("Elegí tu experiencia");
+    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
+      "Descubrí más: URBANO Voting", "Descubrí más: URBANO Score", "Descubrí más: URBANO Trivia", "Descubrí más: URBANO Poker",
+    ]);
+    // the featured card: Halloween, an URBANO Voting experience, with its two buttons (words, not links, until the server says a contest is listed)
+    expect(page.text("#featured-contest .xf-label")).toBe("Destacado");
+    expect(page.text("#featured-contest .xf-title")).toBe("Halloween");
+    expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · 31 de octubre");
+    expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, e.textContent])).toEqual([["SPAN", "Votar por tu disfraz favorito"], ["SPAN", "Participar como concursante"]]);
+    expect(page.text("#featured-contest [data-feat-status]")).toBe("Las inscripciones y la votación todavía no están disponibles.");
     expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
-    expect(page.doc.querySelectorAll("#featured-teams ul.ten-crests > li.crest-chip")).toHaveLength(10);
-    expect(page.doc.querySelectorAll("#upcoming-list .upcoming-item")).toHaveLength(5);
-    expect(page.chips()).toEqual(["Preselección", "Preselección", "Preselección", "Preselección", "Preselección"]);
-    expect(page.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar."); // the list was read and holds no open match
-    expect(page.text("#featured-note")).toBe("Fechas y horarios informativos: pueden cambiar. Hora de Honduras.");
-    expect(page.doc.querySelector(".featured-window")).toBeNull(); // (the note is #featured-note / .featured-note now)
-    expect(page.text("#featured-lineup")).toBe("Ver cartelera de Score");
-    expect(page.text(".featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
+    expect(page.doc.querySelectorAll("article.xp-score ul.ten-crests > li.crest-chip")).toHaveLength(10);
+    expect(page.text("article.xp-score .featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
     expectNoCallToPlay(page, "es");
-    expect(page.doc.querySelector("#featured-history")).toBeNull(); // history has its own access (My profile)
     expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
   });
 
@@ -177,27 +176,25 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(buttons[1].getAttribute("aria-label")).toBe("Cambiar a inglés");
   });
 
-  it("choosing English changes the page, the pressed state, <html lang> and the saved choice, and the cards are redrawn in English", async () => {
+  it("choosing English changes the page, the pressed state, <html lang> and the saved choice, and the four panels are redrawn in English", async () => {
     const page = await loadHome();
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(page.doc.documentElement.lang).toBe("en");
     expect(page.win.localStorage.getItem("urbano.lang")).toBe("en");
     expect(page.text(".hero h1")).toBe("Play, predict, and compete with your community.");
+    expect(page.text(".hero p")).toBe("Voting, predictions, trivia and poker: experiences made to enjoy together.");
     expect(page.doc.querySelector('[data-lang="en"]')!.getAttribute("aria-pressed")).toBe("true");
-    expect(page.text("#featured-status")).toBe("Upcoming matches");
-    expect(page.card("URBANO Poker")!.textContent).toContain("Host a private No-Limit Hold'em table for your group.");
-    expect(page.card("URBANO Poker")!.textContent).toContain("Host →");
-    expect(page.text("#halloween h2")).toBe("Costume contest"); // the announcement (a static section, not a catalog card) is redrawn in English too
-    expect(page.doc.querySelector("#halloween .exp-card")!.textContent).toContain("Coming Soon");
-    expect(page.text(".featured-descriptor")).toBe("Shortlist of the upcoming URBANO Score matches.");
-    expect(page.text("#featured-past")).toBe("My participations and prizes");
-    expect(page.text(".featured-access-note")).toBe("Your participations in finished matches and the status of your prizes.");
+    expect(page.text(".xp-choose")).toBe("Choose your experience");
+    expect(Array.from(page.doc.querySelectorAll("article.xp .xp-title")).map((e) => e.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
+      "Discover more: URBANO Voting", "Discover more: URBANO Score", "Discover more: URBANO Trivia", "Discover more: URBANO Poker",
+    ]);
+    expect(page.text("#featured-contest .xf-label")).toBe("Featured");
+    expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · October 31");
+    expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => e.textContent)).toEqual(["Vote for your favorite costume", "Take part as a contestant"]);
+    expect(page.text("#featured-contest [data-feat-status]")).toBe("Registration and voting are not available yet.");
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
-    expect(page.chips()).toEqual(["Shortlisted", "Shortlisted", "Shortlisted", "Shortlisted", "Shortlisted"]);
-    expect(page.text("#upcoming-status")).toBe("No match is open for participation yet.");
-    expect(page.text("#featured-note")).toBe("Dates and times are informational and may change. Honduras time.");
-    expect(page.text("#featured-lineup")).toBe("See the Score fixtures");
-    expect(page.text(".featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
+    expect(page.text("article.xp-score .featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
     expectNoCallToPlay(page, "en");
     expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
   });
@@ -277,150 +274,45 @@ describe("Home — header and footer", () => {
   });
 });
 
-describe("Home — honest cards", () => {
-  it("the Founder's order; the playable cards keep their exact destinations; every other card is informational: no link, no operational action", async () => {
+describe("Home — honest panels", () => {
+  it("the Founder's order; every panel is informational: its one control is the link to its own page, and nothing on a panel is a status that promises availability", async () => {
     const page = await loadHome();
-    // (the catalog cards: the Halloween announcement is a static section above the Score card, tested below, no longer one of them)
-    const cards = Array.from(page.doc.querySelectorAll(".card-grid .exp-card")).map((c) => c.querySelector("h3")!.textContent);
-    expect(cards).toEqual(["URBANO Poker", "Trivia", "URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]);
-    const actionable = Array.from(page.doc.querySelectorAll(".exp-card.is-actionable")).map((c) => [c.querySelector("h3")!.textContent, c.getAttribute("href")]);
-    expect(actionable).toEqual([["URBANO Poker", "/host.html?experience=poker"], ["Trivia", "/trivia-playtest.html"]]);
-    for (const title of ["URBANO Rutas", "URBANO Towers", "Ser anfitrión", "URBANO Competitions"]) {
-      const card = page.card(title)!;
-      expect(card.tagName, title).toBe("DIV");
-      expect(card.className, title).toContain("is-locked");
-      expect(card.hasAttribute("href"), title).toBe(false);
-      expect(card.querySelector("a, button"), title).toBeNull();
-      expect(card.textContent, title).toContain("Próximamente");
+    const panels = Array.from(page.doc.querySelectorAll("article.xp"));
+    expect(panels.map((c) => c.querySelector(".xp-title")!.textContent)).toEqual(["URBANO Voting", "URBANO Score", "URBANO Trivia", "URBANO Poker"]);
+    for (const panel of panels) {
+      expect(panel.querySelectorAll("a"), panel.className).toHaveLength(1);
+      expect(panel.querySelector("button, form, input, select, [tabindex]"), panel.className).toBeNull();
+      expect(panel.querySelector(".status-pill"), panel.className).toBeNull();
+      expect(panel.textContent, panel.className).not.toMatch(/Playtest|Próximamente|Coming soon/i);
     }
-    // the Halloween announcement: informational too (no link, no control), in the Home's first section after the introduction
-    const halloween = page.doc.querySelector("#halloween .exp-card") as HTMLElement;
-    expect(halloween.tagName).toBe("DIV");
-    expect(halloween.className).toContain("is-locked");
-    expect(halloween.hasAttribute("href")).toBe(false);
-    expect(halloween.querySelector("a, button, input, form, [tabindex]")).toBeNull();
-    expect(halloween.textContent).toContain("Próximamente");
-    // Quiz and Duel are not shown on the Home (their implementations are untouched); there is no Community Voting card: the Halloween announcement only says that voting is not available yet.
+    // Quiz and Duel are not shown on the Home (their implementations are untouched); there is no Community Voting page linked in the markup: /featuredContest.js decides, from the server's own answer, whether the featured card's two buttons become links.
     expect(visibleStrings(page.doc).join(" ")).not.toMatch(/\bQuiz\b|\bDuel\b/);
-    expect(page.doc.querySelector('a[href*="quiz"], a[href*="competitions"]')).toBeNull();
+    expect(page.doc.querySelector('a[href*="quiz"], a[href*="competitions"], a[href*="community-voting"]')).toBeNull();
   });
 
-  it("no card (and no link anywhere) points at Rutas, Towers, Race or Pulse: a page that merely answers is not evidence that a product is available", async () => {
+  it("no panel (and no link anywhere) points at Rutas, Towers, Race or Pulse: a page that merely answers is not evidence that a product is available", async () => {
     const page = await loadHome();
     expect(page.doc.querySelector('a[href*="rutas"], a[href*="towers"], a[href*="race"], a[href*="pulse"]')).toBeNull();
     expect(INDEX_HTML).not.toMatch(/rutas\.html|towers\.html|race\.html|pulse/i);
   });
 
-  it("the retired Level 33 card is gone from the page and from every language, while Predictions stays the featured entry", async () => {
+  it("the retired Level 33 is gone from the page and from every language, and URBANO Score is a panel of its own", async () => {
     const page = await loadHome();
-    expect(Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i);
+    expect(Array.from(page.doc.querySelectorAll("article.xp")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i);
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(Array.from(page.doc.querySelectorAll(".exp-card")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i);
-    expect(page.doc.querySelector("#featured-predictions h2")!.textContent).toBe("URBANO Score");
+    expect(Array.from(page.doc.querySelectorAll("article.xp")).map((c) => c.textContent).join(" ")).not.toMatch(/Level\s*33/i);
+    expect(page.doc.querySelector("article.xp-score .xp-title")!.textContent).toBe("URBANO Score");
   });
 
-  it("the Predictions entry announces in both languages and stays an announcement even when the database holds an eligible match that is not one of the announced ones: no opening, no call to play, no request beyond the one read", async () => {
-    const page = await loadHome({ matches: [hostileSafeMatch()] });
-    // (the match is open by the server's own conditions, so the ONE sentence under the list says that some matches are open and points to the Score
-    // fixtures; it is the server's list that decides that, not the rows, and every row remains a preselection)
-    for (const [lang, pill, chip, lineup, sentence] of [
-      ["es", "Próximos partidos", "Preselección", "Ver cartelera de Score", "Hay partidos abiertos para participar. Los ves en la cartelera de Score."],
-      ["en", "Upcoming matches", "Shortlisted", "See the Score fixtures", "Some matches are open for participation. You can see them in the Score fixtures."],
-    ] as const) {
-      if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-      expect(page.text("#featured-status"), lang).toBe(pill);
-      expect(page.text("#featured-lineup"), lang).toBe(lineup);
-      expect(page.text("#upcoming-status"), lang).toBe(sentence);
-      expect(page.chips(), lang).toEqual([chip, chip, chip, chip, chip]);
-      expect(page.doc.querySelector("#featured-action"), lang).toBeNull();
-      expect(page.doc.querySelector("#featured-match"), lang).toBeNull();
-      expectNoCallToPlay(page, lang); // the way to earlier participations and prizes, then the lineup: nothing else
-      expect(page.text("#featured-predictions"), lang).not.toMatch(/Alpha FC|Beta FC|Abierto|Open to|Open for|Entrar|Enter URBANO/);
-    }
-    // the card reads the public matches list exactly once, with nothing sent; no other URBANO Score endpoint is touched
-    expect(page.calls.filter((c) => c.url.includes("/api/gaming/predictions"))).toEqual([{ url: MATCHES_URL, method: "GET" }]);
-  });
-
-  it("matches the database holds that are finalized or cancelled change nothing either, in both languages", async () => {
-    const page = await loadHome({ matches: [hostileSafeMatch({ finalized: true }), hostileSafeMatch({ cancelledAt: "2026-10-01T00:00:00Z" })] });
-    expect(page.text("#featured-status")).toBe("Próximos partidos");
-    expect(page.chips()).toEqual(Array(5).fill("Preselección"));
-    expect(page.text("#upcoming-status")).toBe("Todavía no hay partidos abiertos para participar."); // neither a finished nor a cancelled match counts as open
-    expect(page.doc.querySelector("#featured-action a")).toBeNull();
-    (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-    expect(page.text("#featured-status")).toBe("Upcoming matches");
-    expect(page.chips()).toEqual(Array(5).fill("Shortlisted"));
-    expect(page.text("#upcoming-status")).toBe("No match is open for participation yet.");
-    expect(page.doc.querySelector("#featured-action a")).toBeNull();
-    expectNoCallToPlay(page, "en");
-  });
-
-  it("the access to earlier participations and prizes comes BEFORE the list of coming matches and the lineup link after it, so nobody has to look for the history under future matches", async () => {
+  it("the Home page's own code requests nothing from the application: no matches list, no host availability (the one request of the featured card is made by /featuredContest.js, and is tested in experienceHome.test.ts)", async () => {
     const page = await loadHome();
-    const card = page.doc.getElementById("featured-predictions")!;
-    const past = card.querySelector("#featured-past")!;
-    const list = card.querySelector("#upcoming-list")!;
-    const lineup = card.querySelector("#featured-lineup")!;
-    expect(past.compareDocumentPosition(list) & 4 /* FOLLOWING */).toBeTruthy();
-    expect(list.compareDocumentPosition(lineup) & 4).toBeTruthy();
-    expect(past.getAttribute("href")).toBe("/soccer-predictions.html#historial");
-  });
-});
-
-describe("Home — the sentence about participation speaks for the server's list, and only for a list that was read", () => {
-  const OPEN = { es: "Hay partidos abiertos para participar. Los ves en la cartelera de Score.", en: "Some matches are open for participation. You can see them in the Score fixtures." };
-  const NONE = { es: "Todavía no hay partidos abiertos para participar.", en: "No match is open for participation yet." };
-
-  it("a list that was read: 'open' when it holds a match that accepts participation (whether or not it is one of the rows), 'none' otherwise; the rows are a preselection either way", async () => {
-    const accepted = await loadHome({ matches: [hostileSafeMatch()] });
-    const unknownTeams = await loadHome({ matches: [hostileSafeMatch({ homeTeam: { name: "Delta FC" }, awayTeam: { name: "Gamma FC" } })] });
-    const offerGone = await loadHome({ matches: [hostileSafeMatch({ venueActivations: [{ enabled: true, venue: { active: true }, offer: { available: false } }] })] });
-    const started = await loadHome({ matches: [hostileSafeMatch({ kickoffAt: new Date(Date.parse(HOME_NOW) - 3600_000).toISOString() })] });
-    const windowNotOpen = await loadHome({ matches: [hostileSafeMatch({ participationOpensAt: new Date(Date.parse(HOME_NOW) + 3600_000).toISOString() })] });
-    for (const [name, page, which] of [["accepting match", accepted, OPEN], ["other accepting match", unknownTeams, OPEN], ["no offer", offerGone, NONE], ["already started", started, NONE], ["window not open", windowNotOpen, NONE]] as const) {
-      for (const lang of ["es", "en"] as const) {
-        if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-        expect(page.text("#upcoming-status"), `${name} ${lang}`).toBe(which[lang]);
-        expect((page.doc.getElementById("upcoming-status") as HTMLElement).hidden, `${name} ${lang}`).toBe(false);
-        expect(page.chips(), `${name} ${lang}`).toEqual(Array(5).fill(lang === "es" ? "Preselección" : "Shortlisted"));
-      }
-    }
-  });
-
-  it("while the list is being read, and when it cannot be read (an error status, no list in the answer, an unreadable body, a network error), no sentence is shown at all, in either language", async () => {
-    const answers: Record<string, () => Promise<unknown>> = {
-      "pending": () => new Promise(() => {}),
-      "HTTP 500": async () => ({ status: 500, json: async () => ({ matches: [hostileSafeMatch()] }) }),
-      "HTTP 401": async () => ({ status: 401, json: async () => ({ error: "unauthorized" }) }),
-      "not a list": async () => ({ status: 200, json: async () => ({ matches: { 0: hostileSafeMatch() } }) }),
-      "not JSON": async () => ({ status: 200, json: async () => { throw new SyntaxError("Unexpected token <"); } }),
-      "network error": async () => { throw new TypeError("Failed to fetch"); },
-    };
-    for (const [name, matchesAnswer] of Object.entries(answers)) {
-      const page = await loadHome({ matchesAnswer });
-      for (const lang of ["es", "en"] as const) {
-        if (lang === "en") (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
-        const status = page.doc.getElementById("upcoming-status") as HTMLElement;
-        expect(status.textContent, `${name} ${lang}`).toBe("");
-        expect(status.hidden, `${name} ${lang}`).toBe(true);
-        expect(page.text("#featured-predictions"), `${name} ${lang}`).not.toMatch(/partidos abiertos para participar|match is open for participation|matches are open for participation/);
-        expect(page.chips(), `${name} ${lang}`).toEqual(Array(5).fill(lang === "es" ? "Preselección" : "Shortlisted")); // the card itself is intact
-        expectNoCallToPlay(page, `${name} ${lang}`);
-      }
-    }
-  });
-
-  it("the two lists on the card are announced as lists, and the arrow of the access link is not in the page: it is CSS content with an empty alternative text", async () => {
-    const page = await loadHome();
-    expect(page.doc.querySelector("#featured-teams ul.ten-crests")!.getAttribute("role")).toBe("list");
-    expect(page.doc.getElementById("upcoming-list")!.getAttribute("role")).toBe("list");
-    for (const link of Array.from(page.doc.querySelectorAll("#featured-predictions a"))) expect(link.textContent, link.id).not.toMatch(/→/);
-    expect(INDEX_HTML).toMatch(/\.featured-access-link::after\s*\{[^}]*content:\s*"→";\s*content:\s*"→"\s*\/\s*"";/);
+    await tick(60);
+    expect(page.calls).toEqual([]);
   });
 });
 
 describe("Home — the layout contract for phones and tablets (CSS pinned here; measured in a real browser separately)", () => {
-  const css = INDEX_HTML.slice(INDEX_HTML.indexOf("<style>"), INDEX_HTML.indexOf("</style>"));
+  const css = readFileSync(path.join(ROOT, "public/experience.css"), "utf8"); // the shell rules moved, unchanged, from the Home's own <style> into the stylesheet the five pages share
   const rule = (selector: string) => {
     const m = css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
     return m ? m[1] : "";
