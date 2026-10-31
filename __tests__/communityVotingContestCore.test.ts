@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -469,6 +470,42 @@ describe("what the contest tells the public: phases by the server's clock, the r
     });
     expect(out.featured!.categories).toHaveLength(4);
     expect(Object.keys(out.featured!.categories[0]).sort()).toEqual(["key", "name", "phase", "votingClosesAt", "votingOpensAt"]);
+  });
+
+  it("featured: the Home's own reader (public/featuredContest.js) accepts exactly what this endpoint answers, in every phase — and turns the buttons off the moment a field drifts", async () => {
+    const win: Record<string, unknown> = {};
+    vm.runInNewContext(read("public/featuredContest.js"), { window: win });
+    type Seen = { vote: string; join: string; phase: string; registration: string; names: Array<{ es: string; en: string }> };
+    const validate = (win.UrbanoFeaturedContest as { validate: (data: unknown) => Seen | null }).validate;
+    const answerFor = async (info: Record<string, unknown>) =>
+      JSON.parse(JSON.stringify(await getFeaturedContest(fakeRepo({ readFeaturedContest: vi.fn(async () => ID), readContestCategories: vi.fn(async () => refs), readRoundPublicInfo: vi.fn(async () => info) }).repo)));
+    const open = infoFor("OPEN");
+    for (const [phase, info] of [["NOT_OPEN", infoFor("NOT_OPEN")], ["OPEN", open], ["CLOSED", { ...open, closed: true }], ["RESULTS", { ...open, closed: true, published: true }]] as const) {
+      const seen = validate(await answerFor(info));
+      expect(seen, phase).not.toBeNull();
+      expect(seen).toMatchObject({ vote: contestPageUrl(ID), join: contestRegisterUrl(ID), phase });
+      expect(seen!.names).toEqual(CATEGORY_KEYS.map((k) => CATEGORIES[k].name));
+    }
+    for (const [registration, over] of [["NOT_OPEN", { serverNow: "2026-11-01T01:00:00.000Z" }], ["OPEN", {}], ["CLOSED", { serverNow: "2026-11-01T05:30:00.000Z" }], ["NOT_SCHEDULED", { registrationOpensAt: null, contestantCutoffAt: null }]] as const) {
+      expect(validate(await answerFor({ ...infoFor("NOT_OPEN"), ...over }))?.registration, registration).toBe(registration);
+    }
+    // the same reader refuses a drifted answer, so this test is an oracle and not a rubber stamp
+    const good = await answerFor(infoFor("NOT_OPEN"));
+    expect(validate({ featured: null })).toBeNull();
+    for (const [what, mutate] of [
+      ["an absolute url", (f: Record<string, unknown>) => { f.voteUrl = `https://gaming.urbanohn.com${f.voteUrl}`; }],
+      ["two different contests", (f: Record<string, unknown>) => { f.registerUrl = `/community-voting-round.html?c=${ID.replace("1", "2")}&participar=1`; }],
+      ["a phase of another vocabulary", (f: Record<string, unknown>) => { f.phase = "REGISTRATION"; }],
+      ["no categories", (f: Record<string, unknown>) => { f.categories = []; }],
+    ] as const) {
+      const drifted = JSON.parse(JSON.stringify(good));
+      mutate(drifted.featured);
+      expect(validate(drifted), what).toBeNull();
+    }
+    // a category name that loses its English form is not refused by the reader: it is silently left out of the list — which the loop above would catch
+    const unnamed = JSON.parse(JSON.stringify(good));
+    unnamed.featured.categories = unnamed.featured.categories.map((c: Record<string, unknown>) => ({ ...c, name: { es: "x" } }));
+    expect(validate(unnamed)?.names).toEqual([]);
   });
 });
 

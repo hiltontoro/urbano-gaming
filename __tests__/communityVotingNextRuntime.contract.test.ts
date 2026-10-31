@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PUBLIC_PHOTO_CACHE_SECONDS } from "../lib/gaming/communityVoting/rounds/constants";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 import { bind, candidates, castMany, contestants, newRound, openRound, pool, q, repo, serviceKey, sleep, supabaseUrl, voteAs } from "./helpers/roundsFixtures";
+import { individuals, newContest, openCategory } from "./helpers/categoryFixtures";
 
 /**
  * UG-IV-GATE-009 (finding F2 of GATE-008A) — Community Voting's public and per-user reads, through a REAL Next production build and its
@@ -205,11 +206,12 @@ describe("a real Next production build and runtime — Community Voting's public
   });
 
   it("a hidden or withdrawn photograph leaves the gallery, the display and the photograph itself at once", async () => {
-    const h = await newRound("PRELIMINARY");
-    const people = await contestants(h, 3);
-    await openRound(h);
+    // a round of the four-category contest: the public gallery shows each candidacy by its name and its code, and only the contest's rounds have candidacies
+    const h = (await newContest()).rounds.FUNNIEST;
+    const people = await individuals(h, 3);
+    await openCategory(h);
     const voter = await realVoter();
-    await bind(h, voter); // the gallery is for a person who is inside the round
+    await repo.bindVoter({ instanceId: h.instanceId, authUserId: voter.authUserId }); // the gallery is for a person who is inside the round
     const [a0, a1, a2] = await aliasesOf(h.ctx.instanceId);
     const photo = (alias: string, headers: Record<string, string> = {}) => get(route(h.ctx.instanceId, `/photos/${alias}?v=thumb`), headers);
 

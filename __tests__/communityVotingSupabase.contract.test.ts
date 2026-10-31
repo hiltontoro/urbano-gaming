@@ -258,7 +258,7 @@ afterAll(async () => {
 // ============================================================ structure, grants, protected functions
 
 describe("Schema containment and database grants", () => {
-  it("creates exactly the Community Voting tables — the three of the single-choice foundation and the sixteen of the two-round pilot (20261029100000) — with RLS enabled and no policies", async () => {
+  it("creates exactly the Community Voting tables — the three of the single-choice foundation, the sixteen of the two-round pilot (20261029100000) and the six of the four-category contest (20261031120000, 20261031120300) — with RLS enabled and no policies", async () => {
     const tables = await q<{ tablename: string; rowsecurity: boolean }>(
       "select c.relname as tablename, c.relrowsecurity as rowsecurity from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and c.relname like 'community_voting%' order by 1"
     );
@@ -286,6 +286,14 @@ describe("Schema containment and database grants", () => {
         "community_voting_round_reviews",
         "community_voting_schedules",
         "community_voting_withdrawals",
+        // the four-category contest: the contest and its category rounds, the one-candidacy-per-person identity, the public candidacy with its code,
+        // the private registration (the delivery number lives there and nowhere else) and the consent of each member of a group
+        "community_voting_candidacies",
+        "community_voting_category_rounds",
+        "community_voting_contest_identities",
+        "community_voting_contests",
+        "community_voting_member_consents",
+        "community_voting_registrations",
       ]
         .sort()
         .map((tablename) => ({ tablename, rowsecurity: true }))
@@ -1377,11 +1385,11 @@ describe("Ordinary start cannot open an event-bound Session", () => {
     expect((await sessionRepo.getVotingCandidatesForInteraction(started.interactionInstanceId))).toHaveLength(2);
   });
 
-  it("the only SQL functions that write the ballot are the ordinary start (guarded for event-bound Sessions) and the Community Voting starts (single-choice and the pilot's round)", async () => {
+  it("the only SQL functions that write the ballot are the ordinary start (guarded for event-bound Sessions) and the Community Voting starts (single-choice, the pilot's round and the four-category contest's category)", async () => {
     const inserters = (await q<{ proname: string }>("select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'insert\\s+into\\s+(public\\.)?voting_candidates\\y' order by 1")).map((r) => r.proname);
     expect(inserters).toEqual(["start_session_atomically"]);
     const updaters = (await q<{ proname: string }>("select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'update\\s+(public\\.)?voting_candidates\\y' order by 1")).map((r) => r.proname);
-    expect(updaters).toEqual(["start_community_voting_atomically", "start_community_voting_round_atomically"]);
+    expect(updaters).toEqual(["start_community_voting_atomically", "start_community_voting_category_atomically", "start_community_voting_round_atomically"]);
     const deleters = await q("select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'delete\\s+from\\s+(public\\.)?voting_candidates\\y'");
     expect(deleters).toHaveLength(0);
     const interactionInserters = (await q<{ proname: string }>("select proname from pg_proc where pronamespace = 'public'::regnamespace and prosrc ~* 'insert\\s+into\\s+(public\\.)?interaction_instances\\y' order by 1")).map((r) => r.proname);
