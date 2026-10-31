@@ -76,3 +76,11 @@ After the official category-label alignment and the published Home integration, 
 A further concurrent published commit, `637ad0a132834df141bbdaac3870d40688b1bfe5`, changed only the Home footer, its CSS/i18n and shell test (four files). Its diff was reviewed separately; no backend, rules, migrations or featured-reader changes are included. Its integration requires focused Home/shell verification, not another database campaign. All source histories are preserved; no force-push is permitted.
 
 The encrypted snapshot was refreshed again immediately before the release preparation, preserving prior snapshots within the encrypted volume. The snapshot still captured 85 sources / 6,285 rows without movement during capture. The hosted pending set remains subject to the final dry-run and exact twelve-file check. No contest creation or activation is part of this checkpoint.
+
+## 5. Closed publication authorization and final checks
+
+The Founder authorized publication of the closed experience. The final footer integration passed 239 focused Home/shell/i18n tests, TypeScript and the production build. The preparation contract suite passed 33/33 after its induced-failure test was corrected to drop its temporary helper function as well as its trigger. This is test cleanup only, not a migration or product-rule change.
+
+The refreshed hosted-data upgrade rehearsal passed 16/16 checks. The final read-only drift check found 85/85 backed-up sources unchanged, with the ledger still at 296. The dry-run listed exactly the twelve reviewed Community Voting migrations, no seeds or roles. Nine final mobile public-entry browser cases again checked the closed Home, registration and voting previews; no registration or vote submission is authorized by this publication.
+
+The Founder supplied the operator email directly. A private lookup found one verified Auth account with one existing Gaming Member; only that member was saved in the server-only Production operator allowlist. No identity was created or merged, no global authority grant was added, and this does not create, list or open a contest. The new shared name/surname direction remains separate pending an explicit compatible profile contract; this publication is not acceptance of a broader identity change.

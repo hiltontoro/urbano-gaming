@@ -588,6 +588,7 @@ describe("the atomic open (operator-only, readiness-gated, never implied)", () =
       expect(await state()).toEqual(before);
     } finally {
       await q("drop trigger if exists hw_induced_failure_trg on voting_candidates");
+      await q("drop function if exists hw_induced_failure()");
     }
     await expect(repo.startRound({ ...r.ctx, promptText: "Q" })).resolves.toMatchObject({ candidateCount: 3 });
   });

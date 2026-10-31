@@ -155,7 +155,7 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.doc.querySelectorAll("article.xp-score ul.ten-crests > li.crest-chip")).toHaveLength(10);
     expect(page.text("article.xp-score .featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
     expectNoCallToPlay(page, "es");
-    expect(page.text("footer")).toContain("URBANO Gaming — parte de URBANO");
+    expect(page.text("footer")).toContain("URBANO Gaming, parte de URBANO");
   });
 
   it("the Spanish page leaves no English behind (heuristic scan of everything visible, cards included)", async () => {
@@ -199,7 +199,7 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
     expect(page.text("article.xp-score .featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
     expectNoCallToPlay(page, "en");
-    expect(page.text("footer")).toContain("URBANO Gaming — part of URBANO");
+    expect(page.text("footer")).toContain("URBANO Gaming, a part of URBANO");
   });
 
   it("a saved choice is honoured on the next visit; without storage the page opens in Spanish and switching still works", async () => {
@@ -235,8 +235,12 @@ describe("Home — header and footer", () => {
     const links = Array.from(footer.querySelectorAll("a"));
     // Founder-confirmed destinations, not guessed social accounts or contact details.
     const outside = links.filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""));
-    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["www.urbanohn.com", "https://www.urbanohn.com/"], ["Instagram · @realurbanohn", "https://www.instagram.com/realurbanohn/"], ["TecnoMovi", "https://www.tecnomovi.com/"]]);
-    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["info@urbanohn.com", "mailto:info@urbanohn.com"], ["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["URBANO", "https://www.urbanohn.com/"], ["", "https://www.instagram.com/realurbanohn/"], ["TecnoMovi", "https://www.tecnomovi.com/"]]);
+    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["Contactanos", "mailto:info@urbanohn.com"], ["Términos y condiciones", "/legal.html"]]);
+    expect(footer.querySelector('.footer-instagram')!.getAttribute('aria-label')).toBe('Instagram: @realurbanohn');
+    expect(footer.querySelector('.footer-instagram svg')).not.toBeNull();
+    expect(footer.querySelector('.footer-rights em')!.textContent).toBe('Todos los derechos reservados.');
+    expect(footer.querySelector('.footer-bottom a[href="/legal.html"]')).toBeNull();
     expect(footer.querySelector('.footer-powered img')!.getAttribute('src')).toBe('/assets/brand/tecnomovi.svg');
     expect(footer.textContent).toContain('Contactanos');
     expect(outside[0].getAttribute("rel")).toContain("noopener");
@@ -244,6 +248,7 @@ describe("Home — header and footer", () => {
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
     expect(footer.textContent).toContain('Contact us');
+    expect(footer.querySelector('.footer-rights em')!.textContent).toBe('All rights reserved.');
   });
 
   it("name and Sign out live together in ONE group on the right, beside the selector; the shared component is handed exactly those elements", async () => {
@@ -265,7 +270,7 @@ describe("Home — header and footer", () => {
 
   it("keyboard order through the header: logo, Gaming, ES, EN, then the account control; the primary navigation follows and is labelled", async () => {
     const page = await loadHome();
-    const focusable = Array.from(page.doc.querySelectorAll("header a[href], header button, nav a[href]")).filter((e) => !e.closest("[hidden]") && !(e as HTMLElement).hasAttribute("hidden"));
+    const focusable = Array.from(page.doc.querySelectorAll("header a[href], header button, nav.primary-nav a[href]")).filter((e) => !e.closest("[hidden]") && !(e as HTMLElement).hasAttribute("hidden"));
     expect(focusable.map((e) => e.getAttribute("aria-label") ?? e.textContent)).toEqual([
       "URBANO — ir a urbanohn.com", "URBANO Gaming — inicio", "Cambiar a español", "Cambiar a inglés", "Iniciar sesión / Crear cuenta",
       "Inicio", "Experiencias", "Clasificaciones", "Premios",
