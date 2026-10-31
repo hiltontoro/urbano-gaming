@@ -148,7 +148,7 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(page.text("#featured-contest .xf-label")).toBe("Destacado");
     expect(page.text("#featured-contest .xf-title")).toBe("Halloween: La última noche");
     expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("Habrá premios para los ganadores, entregados por The Pub.");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, e.textContent])).toEqual([["SPAN", "Votar por tu disfraz favorito"], ["SPAN", "Participar como concursante"]]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Las inscripciones y la votación todavía no están disponibles.");
     expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
@@ -193,7 +193,7 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(page.text("#featured-contest .xf-label")).toBe("Featured");
     expect(page.text("#featured-contest .xf-title")).toBe("Halloween: The Last Night");
     expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · Saturday, October 31");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("There will be prizes for the winners, delivered by The Pub.");
+    expect(page.text("#featured-contest .xf-prizes")).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
     expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => e.textContent)).toEqual(["Vote for your favorite costume", "Take part as a contestant"]);
     expect(page.text("#featured-contest [data-feat-status]")).toBe("Registration and voting are not available yet.");
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
@@ -217,10 +217,10 @@ describe("Home — header and footer", () => {
   it("the URBANO mark and wordmark are one link to https://urbanohn.com/; the Gaming badge is a separate link back to this application", async () => {
     const page = await loadHome();
     const logo = page.doc.querySelector("a.brand-link") as HTMLAnchorElement;
-    expect(logo.getAttribute("href")).toBe("https://urbanohn.com/");
+    expect(logo.getAttribute("href")).toBe("https://www.urbanohn.com/");
     expect(logo.getAttribute("rel")).toContain("noopener");
-    expect(logo.querySelector("img.brand-mark")).toBeTruthy();
-    expect(logo.querySelector(".brand-word")!.textContent).toBe("URBANO");
+    expect(logo.querySelector("img.brand-logo")!.getAttribute("alt")).toBe("URBANO");
+    expect(logo.querySelector(".brand-mark, .brand-word")).toBeNull();
     expect(logo.getAttribute("aria-label")).toBe("URBANO — ir a urbanohn.com");
     const badge = page.doc.querySelector("a.brand-badge") as HTMLAnchorElement;
     expect(badge.getAttribute("href")).toBe("/");
@@ -233,14 +233,17 @@ describe("Home — header and footer", () => {
     const footer = page.doc.querySelector("footer")!;
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
     const links = Array.from(footer.querySelectorAll("a"));
-    // the only OUTSIDE link is TecnoMovi's; beside it, one internal link to the legal texts (the terms, the privacy notice and the rules)
+    // Founder-confirmed destinations, not guessed social accounts or contact details.
     const outside = links.filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""));
-    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["TecnoMovi", "https://www.tecnomovi.com/"]]);
-    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(outside.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["www.urbanohn.com", "https://www.urbanohn.com/"], ["Instagram · @realurbanohn", "https://www.instagram.com/realurbanohn/"], ["TecnoMovi", "https://www.tecnomovi.com/"]]);
+    expect(links.filter((a) => !outside.includes(a)).map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["info@urbanohn.com", "mailto:info@urbanohn.com"], ["Términos, privacidad y reglas", "/legal.html"]]);
+    expect(footer.querySelector('.footer-powered img')!.getAttribute('src')).toBe('/assets/brand/tecnomovi.svg');
+    expect(footer.textContent).toContain('Contactanos');
     expect(outside[0].getAttribute("rel")).toContain("noopener");
     // The footer line is not translated: it is a name, the same in both languages.
     (page.doc.querySelector('[data-lang="en"]') as HTMLElement).click();
     expect(footer.textContent!.replace(/\s+/g, " ")).toContain("Powered by TecnoMovi");
+    expect(footer.textContent).toContain('Contact us');
   });
 
   it("name and Sign out live together in ONE group on the right, beside the selector; the shared component is handed exactly those elements", async () => {

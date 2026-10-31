@@ -75,7 +75,7 @@ const TOTAL_PHOTO_BUDGET_BYTES = 300_000;
 describe("Home art — the five photographs", () => {
   it("public/assets/home holds exactly the reviewed assets: five photographs and nothing else; no drawing, no Level 33 art, no stadium photograph, no PNG original", () => {
     expect(readdirSync(ASSET_DIR).sort()).toEqual(Object.keys(ASSETS).sort());
-    expect(readdirSync(path.join(ROOT, "public/assets")).sort()).toEqual(["clubs", "home"]); // clubs: the crests of the ten teams, covered by clubCrests.test.ts
+    expect(readdirSync(path.join(ROOT, "public/assets")).sort()).toEqual(["brand", "clubs", "home"]); // official logos are separate from photographs and club crests
     expect(readdirSync(ASSET_DIR).join(" ")).not.toMatch(/level|soccer-predictions|sports|stadium/i);
     expect(PHOTOS).toEqual(["halloween-community.webp", "urbano-poker.webp", "urbano-score.webp", "urbano-trivia.webp", "urbano-voting.webp"]);
   });
@@ -125,10 +125,10 @@ describe("Home art — the five photographs", () => {
   it("the page references exactly these five, each once, and nothing else: no other image file, no remote image, no preload", () => {
     // (the explanatory comments may name a file; what is referenced is what the code references)
     for (const name of Object.keys(ASSETS)) expect(CODE.split(`/assets/home/${name}`).length - 1, name).toBe(1);
-    expect(CODE.match(/\/assets\/[^"')\s]+\.(?:webp|svg)/g)!.sort()).toEqual(Object.keys(ASSETS).map((n) => `/assets/home/${n}`).sort());
-    expect(CODE.match(/\/assets\/[^"')\s]+\.(?!webp|svg)\w+/g) ?? []).toEqual([]);
+    expect(CODE.match(/\/assets\/home\/[^"')\s]+\.(?:webp|svg)/g)!.sort()).toEqual(Object.keys(ASSETS).map((n) => `/assets/home/${n}`).sort());
+    expect(CODE.match(/\/assets\/home\/[^"')\s]+\.(?!webp|svg)\w+/g) ?? []).toEqual([]);
     const imageRefs = CODE.match(/[\w/.-]+\.(png|jpe?g|gif|svg|webp|avif)\b/gi) ?? [];
-    expect(imageRefs.filter((r) => !r.endsWith("urbano-mark.svg") && !r.startsWith("/assets/home/")).sort()).toEqual([]);
+    expect(imageRefs.filter((r) => !r.startsWith("/assets/home/")).sort()).toEqual(["/assets/brand/tecnomovi.svg", "/assets/brand/urbano-horizontal.png"]);
     expect(INDEX_HTML).not.toMatch(/(?:src|href)=["']https?:[^"']*\.(png|jpe?g|gif|svg|webp|avif)/i);
     expect(INDEX_HTML).not.toMatch(/url\(\s*["']?https?:/i);
     expect(INDEX_HTML).not.toMatch(/rel=["']preload["']/i);

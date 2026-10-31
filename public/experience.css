@@ -108,6 +108,17 @@ footer {
 footer p { margin: 0 0 6px; }
 footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
 
+/* Home's official wordmark and contact footer; other pages retain their shell. */
+.home-brand-refresh .brand-logo { display: block; width: 134px; height: auto; }
+.home-brand-refresh .brand { flex-wrap: wrap; }
+.site-footer { text-align: left; }
+.site-footer .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 28px; padding: 12px 0 28px; }
+.site-footer .footer-heading { font-size: 14px; font-weight: 700; color: var(--ink); margin: 0 0 10px; }
+.site-footer a { display: inline-block; overflow-wrap: anywhere; }
+.site-footer .footer-bottom { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; }
+.site-footer .footer-powered { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0; }
+.site-footer .footer-powered img { display: block; width: 142px; height: auto; }
+
 /* ---------- focus: one visible ring everywhere ---------- */
 .brand-link:focus-visible, .brand-badge:focus-visible, .nav-link:focus-visible, .lang-switch button:focus-visible,
 .signin-btn:focus-visible, .account-group [data-urbano-signout]:focus-visible, .xp-cta:focus-visible, .lp-back:focus-visible,
