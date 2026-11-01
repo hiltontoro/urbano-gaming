@@ -62,6 +62,13 @@ describe("public pre-opening entry without a configured contest", () => {
 // ---------------------------------------------------------------- the front door
 
 describe("the contest's front door: public, truthful, and it asks nothing of anyone", () => {
+  it("explains replacement votes per category without adding voter privacy interruptions", async () => {
+    const p=await voter();
+    await p.clickSel("#entryVote");
+    expect(p.text("#oneVotePerCategory")).toContain("hasta cuatro votos, uno en cada categoría");
+    expect(p.text("#oneVotePerCategory")).toContain("reemplaza al anterior, no suma otro");
+    expect(p.$("#contestPrivacy")).toBeNull();
+  });
   it("shows the approved public information in the Founder's words, and the two entries", async () => {
     const p = await voter();
     const t = p.text();
@@ -158,6 +165,10 @@ describe("registration: a person registers THEMSELVES, through their own account
   it("shows the four categories, the name field, the WhatsApp with its country, and the two confirmations — and the texts come from the SERVER", async () => {
     const p = await voter({}, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
     expect(p.$("#registerForm")).toBeTruthy();
+    expect(p.$("#contestPrivacy")!.hasAttribute("open")).toBe(false);
+    expect(p.text("#contestPrivacy")).toContain("7 días desde el cierre del concurso");
+    expect(p.text("#contestPrivacy")).toContain("ni borra automáticamente copias");
+    expect(p.text("#contestPrivacy")).not.toContain("info@urbanohn.com");
     expect(p.$$('input[name="category"]').map((i) => (i as HTMLInputElement).value)).toEqual([...KEYS]);
     expect(p.$("#regCountry")).toBeTruthy();
     expect((p.$("#regCountry") as HTMLSelectElement).value).toBe("504");

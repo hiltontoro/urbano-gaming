@@ -108,7 +108,7 @@ describe("superseded files are not part of the active candidate", () => {
     expect(exists("app/api/gaming/community-voting/instances")).toBe(false);
   });
 
-  it("has exactly thirteen Community Voting migrations, including explicit registration and operator workspaces — additive, none ranked, no historical file edited", () => {
+  it("has exactly fourteen Community Voting migrations, including scoped four-category retention — additive, none ranked, no historical file edited", () => {
     const mine = readdirSync(path.join(ROOT, "supabase/migrations")).filter((f) => /community_voting|event_bound_opening/.test(f)).sort();
     expect(mine).toEqual([
       "20261020190000_create_community_voting_instances.sql",
@@ -124,9 +124,10 @@ describe("superseded files are not part of the active candidate", () => {
       "20261031120200_community_voting_four_category_guards.sql",
       "20261031120300_community_voting_self_registration.sql",
       "20261031234948_community_voting_operator_workspaces.sql",
+      "20261101012411_community_voting_seven_day_retention.sql",
     ]);
     const sql = mine.map((f) => read(`supabase/migrations/${f}`)).join("\n");
-    expect(sql).not.toMatch(/RANKED_TOP_5|community_voting_ballots|ballot_picks|phone_digest|removal_due_at|RETENTION_EXPIRED/);
+    expect(sql).not.toMatch(/RANKED_TOP_5|community_voting_ballots|ballot_picks|phone_digest|removal_due_at/);
   });
 });
 

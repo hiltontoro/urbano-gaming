@@ -87,7 +87,7 @@ describe("the contest's fixed facts are the approved contract, one by one", () =
     expect(PRIZE_PROMISE).toEqual({ es: "Habrá premios en cada categoría", en: "There will be prizes in every category" });
     const server = [read("lib/gaming/communityVoting/contest/categories.ts"), read("lib/gaming/communityVoting/contest/registration.ts"), read("lib/gaming/communityVoting/contest/operations.ts")].join("\n");
     // (the property that carries the promise is named after it; every OTHER word about prizes — a value, a quantity, a redemption — is absent)
-    expect(server.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/Habrá premios en cada categoría|There will be prizes in every category|prizePromise|PRIZE_PROMISE/g, "")).not.toMatch(/premio|prize|canje|redeem|redenci|\bL\.?\s?\d|\$\s?\d|cupo|capacity/i);
+    expect(server.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/Habrá premios en cada categoría|There will be prizes in every category|The Pub define y entrega los premios\.|prizePromise|PRIZE_PROMISE/g, "")).not.toMatch(/premio|prize|canje|redeem|redenci|\bL\.?\s?\d|\$\s?\d|cupo|capacity/i);
   });
 
   it("lives in Honduras: the zone is America/Tegucigalpa and the template is 20:00–23:00 registration and 23:00–midnight voting of 31 October 2026", () => {
@@ -115,7 +115,7 @@ describe("the contest's fixed facts are the approved contract, one by one", () =
 
 // ---------------------------------------------------------------- the two statements a person accepts
 
-describe("the statements a person accepts: draft texts, identified by version and digest, no retention period", () => {
+describe("the statements a person accepts: versioned text and Founder-approved seven-day retention", () => {
   it("each digest is the SHA-256 of exactly its text, and the two are different statements", () => {
     expect(REQUIREMENTS_SHA256).toBe(sha256Hex(REQUIREMENTS_TEXT));
     expect(DELIVERY_SHA256).toBe(sha256Hex(DELIVERY_TEXT));
@@ -124,7 +124,7 @@ describe("the statements a person accepts: draft texts, identified by version an
     expect(DELIVERY_SHA256).not.toBe(GALLERY_CONSENT_SHA256); // the delivery authorization is not the photograph's consent
     expect(REQUIREMENTS_VERSION).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
     expect(DELIVERY_VERSION).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
-    expect(REQUIREMENTS_VERSION).toMatch(/draft/); // marked, in its own name, as pending approval
+    expect(REQUIREMENTS_VERSION).toBe("halloween-2026-v2-requirements-7days");
     expect(DELIVERY_VERSION).toMatch(/draft/);
   });
 
@@ -136,8 +136,11 @@ describe("the statements a person accepts: draft texts, identified by version an
     for (const must of [/de forma manual/, /su propio WhatsApp/, /fotografía, mi código y el enlace/, /no es una autorización de publicidad ni de marketing/i, /tampoco autoriza el uso de mi imagen/, /no se usa para votar ni para identificarme/]) expect(DELIVERY_TEXT).toMatch(must);
   });
 
-  it("states no retention period and promises no deletion, in either statement (none has been approved)", () => {
-    for (const text of [REQUIREMENTS_TEXT, DELIVERY_TEXT]) expect(text).not.toMatch(/\b\d+\s*(d[ií]as?|semanas?|meses|a[ñn]os?|horas)\b|conserv|borr|elimin|plazo|retenci|\bdatos\b/i);
+  it("applies seven days to photos, WhatsApps and winners without extending marketing permission", () => {
+    expect(REQUIREMENTS_TEXT).toContain("7 días desde el cierre del concurso");
+    expect(REQUIREMENTS_TEXT).toContain("también para las fotos de ganadores");
+    expect(REQUIREMENTS_TEXT).toContain("El uso promocional es opcional y no amplía ese plazo");
+    expect(REQUIREMENTS_TEXT).not.toMatch(/30 días|72 horas/);
   });
 });
 

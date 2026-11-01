@@ -5,15 +5,14 @@ import { sha256Hex } from "../rounds/constants";
  * WhatsApp number and a public name are normalized, and how a public code is typed. The database re-validates the SHAPE of everything here; it
  * stores the version and the SHA-256 of the statement that was shown, so approving different wording later is a NEW version, not an edit.
  *
- * PENDING THE FOUNDER'S AND COUNSEL'S APPROVAL: both statements are DRAFT text. Neither states a retention period — none has been approved — and
- * until the policy exists and these texts are approved, capturing a REAL person's number is blocked (synthetic data is not). The pages say nothing
- * about retention, and the implementation record lists this as a pending requirement.
+ * Founder approved seven-day retention for all contest photos (including winners) and registration WhatsApps.
+ * This product decision is not independent legal review. External copies require separate operational removal.
  */
 
 /** What a person accepts to register as a contestant: legal age, the rules of taking part and when their candidacy becomes public. */
-export const REQUIREMENTS_VERSION = "halloween-2026-v1-requirements-draft";
+export const REQUIREMENTS_VERSION = "halloween-2026-v2-requirements-7days";
 export const REQUIREMENTS_TEXT =
-  "Confirmo que soy mayor de edad y que quiero participar como concursante en el concurso de disfraces de The Pub by Beer Box. Participo una sola vez y en una sola categoría. Mi candidatura se hará pública solo después de que el equipo del concurso verifique en la estación mi nombre y mi categoría, tome mi fotografía y yo autorice que se muestre. Entiendo que no puedo votar por mi propia candidatura ni, si participo en un grupo, por mi grupo. Si registro un grupo, soy su representante y todas las personas que aparecen en la fotografía deben aceptar participar.";
+  "Confirmo que soy mayor de edad y que quiero participar como concursante en el concurso de disfraces de The Pub by Beer Box. Participo una sola vez y en una sola categoría. Mi candidatura se hará pública solo después de que el equipo del concurso verifique en la estación mi nombre y mi categoría, tome mi fotografía y yo autorice que se muestre. Entiendo que no puedo votar por mi propia candidatura ni, si participo en un grupo, por mi grupo. Si registro un grupo, soy su representante y todas las personas que aparecen en la fotografía deben aceptar participar. URBANO Gaming y The Pub administran las fotos y los WhatsApps del concurso. El plazo de conservación es de 7 días desde el cierre del concurso, también para las fotos de ganadores. El uso promocional es opcional y no amplía ese plazo. The Pub define y entrega los premios.";
 export const REQUIREMENTS_SHA256 = sha256Hex(REQUIREMENTS_TEXT);
 
 /**

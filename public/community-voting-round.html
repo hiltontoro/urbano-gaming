@@ -735,6 +735,9 @@
         h("label", { class: "check", for: "regDelivery" }, delCheck, h("span", { text: "Autorizo que me envíen mi foto y mi código por WhatsApp." })),
         t ? h("details", { class: "more" }, h("summary", { text: "Leer la autorización" }), h("p", { id: "deliveryAuthText", text: t.whatsappDelivery.text })) : null,
         errs.delivery ? h("div", { class: "bad", role: "alert", id: "err_delivery", text: errs.delivery }) : null),
+      h("details", { class: "more", id: "contestPrivacy" }, h("summary", { text: "Privacidad y conservación" }),
+        h("p", { text: "URBANO Gaming y The Pub administran tus fotos y tu WhatsApp para el concurso y su entrega. El plazo es de 7 días desde el cierre del concurso, incluidos los ganadores. El permiso promocional es opcional y no extiende ese plazo. Podés pedir el retiro al equipo del concurso en la estación." }),
+        h("p", { text: "La plataforma ejecuta el borrado de fotos y WhatsApps cada minuto una vez cumplido el plazo. Conserva los registros de participación, consentimientos, votos y resultados. Esto no elimina tu cuenta URBANO ni borra automáticamente copias entregadas por WhatsApp, publicaciones externas o respaldos: el equipo debe gestionar esas copias por separado." })),
       submit);
   }
 
@@ -1069,7 +1072,8 @@
     const headline = open.length > 0 ? "La votación está abierta. Elegí una categoría." : allClosed ? "La votación ya cerró. Gracias por participar." : "La votación todavía no está abierta.";
     return [
       back(),
-      h("section", { class: "card", id: "voteIntro" }, h("h2", { text: "Votar por tu disfraz favorito" }), h("p", { id: "voteHeadline", text: headline }), planFacts()),
+      h("section", { class: "card", id: "voteIntro" }, h("h2", { text: "Votar por tu disfraz favorito" }), h("p", { id: "voteHeadline", text: headline }),
+        h("p", { id: "oneVotePerCategory", text: "Podés elegir un disfraz por categoría: hasta cuatro votos, uno en cada categoría. Podés cambiar cada elección mientras su votación siga abierta; el nuevo voto reemplaza al anterior, no suma otro." }), planFacts()),
       h("div", { class: "cats", id: "categories" }, cards),
       open.length > 0 && step() === "READY" ? h("div", { class: "card stack" },
         h("p", { id: "voteProgress", text: `Votaste en ${voted} de ${open.length} ${open.length === 1 ? "categoría abierta" : "categorías abiertas"}.` }),
