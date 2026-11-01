@@ -35,13 +35,14 @@ export async function registerCategory(
   contestId: string | null,
   closesAt: string | null = inMs(4 * HOUR),
   cutoffAt: string | null = null,
-  registrationOpensAt: string | null = null
+  registrationOpensAt: string | null = null,
+  purpose: "LIVE" | "REHEARSAL" = "LIVE"
 ): Promise<CatRound> {
   const session = await createSession(sessionRepo);
   await setSessionCapabilities(sessionRepo, session.sessionId, session.hostToken, ["VOTING"] as never);
   const [row] = await q<{ instance_id: string; contest_id: string }>(
-    "select * from register_community_voting_category_round_atomically($1, $2, $3, 1, $4, $5)",
-    [session.sessionId, session.hostToken, operator.gamingMemberId, contestId, key]
+    "select * from register_community_voting_workspace_category($1, $2, $3, 1, $4, $5, $6)",
+    [session.sessionId, session.hostToken, operator.gamingMemberId, contestId, key, purpose]
   );
   const ctx: OperatorContext = { instanceId: row.instance_id, hostToken: session.hostToken, operatorMemberId: operator.gamingMemberId as string };
   if (closesAt !== null || cutoffAt !== null || registrationOpensAt !== null) {
@@ -54,18 +55,21 @@ export async function registerCategory(
 }
 
 /** The whole contest: four category rounds of one operator, each with its own Session. */
-export async function newContest(opts: { operator?: Person; closesAt?: string | null; cutoffAt?: string | null; registrationOpensAt?: string | null } = {}) {
+export async function newContest(opts: { operator?: Person; closesAt?: string | null; cutoffAt?: string | null; registrationOpensAt?: string | null; purpose?: "LIVE" | "REHEARSAL" } = {}) {
   const operator = opts.operator ?? (await newPerson());
-  const first = await registerCategory(operator, CATEGORY_KEYS[0], null, opts.closesAt, opts.cutoffAt ?? null, opts.registrationOpensAt ?? null);
+  const first = await registerCategory(operator, CATEGORY_KEYS[0], null, opts.closesAt, opts.cutoffAt ?? null, opts.registrationOpensAt ?? null, opts.purpose);
   const rounds: Record<CategoryKey, CatRound> = { [CATEGORY_KEYS[0]]: first } as Record<CategoryKey, CatRound>;
-  for (const key of CATEGORY_KEYS.slice(1)) rounds[key] = await registerCategory(operator, key, first.contestId, opts.closesAt, opts.cutoffAt ?? null, opts.registrationOpensAt ?? null);
+  for (const key of CATEGORY_KEYS.slice(1)) rounds[key] = await registerCategory(operator, key, first.contestId, opts.closesAt, opts.cutoffAt ?? null, opts.registrationOpensAt ?? null, opts.purpose);
   return { contestId: first.contestId, operator, rounds };
 }
 
 /** A contest whose registration is OPEN right now (opened an hour ago, ends in two hours; voting closes in four): the window a person registers in. */
 export const registrationWindow = () => ({ registrationOpensAt: inMs(-HOUR), cutoffAt: inMs(2 * HOUR), closesAt: inMs(4 * HOUR) });
 export async function openRegistrationContest(operator?: Person) {
-  return newContest({ operator, ...registrationWindow() });
+  const c = await newContest({ operator, ...registrationWindow() });
+  const r = c.rounds.MOST_ELABORATE;
+  await q("select * from open_community_voting_registration_atomically($1,$2,$3)", [r.instanceId,r.ctx.hostToken,r.ctx.operatorMemberId]);
+  return c;
 }
 export type Contest = Awaited<ReturnType<typeof newContest>>;
 

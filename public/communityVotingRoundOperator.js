@@ -40,6 +40,16 @@ const CommunityVotingOperator = (() => {
   /** The approved Halloween plan, as FORM VALUES (a button that fills a form; it saves and opens nothing). */
   const EVENT_PLAN = { date: "2026-10-31", registrationOpens: "20:00", registrationCloses: "23:00", votingOpens: "23:00", votingCloses: "00:00" };
 
+  function rehearsalPlan(now) {
+    const ms = Date.parse(now);
+    if (!Number.isFinite(ms)) return null;
+    const start = fromEventInstant(new Date(ms - 60000).toISOString());
+    const cut = fromEventInstant(new Date(ms + 15 * 60000).toISOString());
+    const end = fromEventInstant(new Date(ms + 30 * 60000).toISOString());
+    if (start.date !== cut.date) return null;
+    return { date: start.date, registrationOpens: start.time, registrationCloses: cut.time, votingOpens: cut.time, votingCloses: end.time, confirmed: false };
+  }
+
   /** The form's times as the instants the server stores. The closing time at or before the opening time is the NEXT day (voting that runs past midnight). */
   function scheduleFromForm(f) {
     const registrationOpensAt = eventInstant(f.date, f.registrationOpens, 0);
@@ -230,6 +240,7 @@ const CommunityVotingOperator = (() => {
       info: () => call("/info", "GET"),
       schedule: (schedule) => call("/schedule", "PUT", schedule),
       listing: (listed) => call("/operator/listing", "PUT", { listed }),
+      openRegistration: () => call("/operator/registration", "POST", {}),
       find: (code) => call(`/operator/candidacies?code=${encodeURIComponent(code)}`, "GET"),
       createEntry: (kind) => call("/operator/entries", "POST", kind === "GROUP" ? { kind: "GROUP" } : {}),
       removeEntry: (entryId) => call(`/operator/entries/${entryId}`, "DELETE"),
@@ -256,8 +267,8 @@ const CommunityVotingOperator = (() => {
     return {
       createSession: () => request(fetchImpl, getToken, "/api/sessions", "POST", undefined),
       declareVoting: (sessionId, hostToken) => request(fetchImpl, getToken, `/api/sessions/${sessionId}/capabilities`, "POST", { hostToken, capabilities: ["VOTING"] }),
-      registerCategory: (sessionId, hostToken, categoryKey, contestId) =>
-        request(fetchImpl, getToken, "/api/gaming/community-voting/rounds", "POST", Object.assign({ sessionId, categoryKey }, contestId ? { contestId } : {}), { "x-host-token": hostToken }),
+      registerCategory: (sessionId, hostToken, categoryKey, contestId, purpose) =>
+        request(fetchImpl, getToken, "/api/gaming/community-voting/rounds", "POST", Object.assign({ sessionId, categoryKey }, contestId ? { contestId } : {}, purpose ? { purpose } : {}), { "x-host-token": hostToken }),
       contest: (contestId) => request(fetchImpl, getToken, `/api/gaming/community-voting/contests/${contestId}`, "GET"),
     };
   }
@@ -281,14 +292,32 @@ const CommunityVotingOperator = (() => {
           categories[key] = { instanceId: c.instanceId, sessionId: typeof c.sessionId === "string" ? c.sessionId : "", hostToken: c.hostToken };
         }
       }
-      return { contestId: v.contestId, ownerUserId: typeof v.ownerUserId === "string" ? v.ownerUserId : "", categories };
+      return { contestId: v.contestId, ownerUserId: typeof v.ownerUserId === "string" ? v.ownerUserId : "", categories, mode: v.mode === "REHEARSAL" ? "REHEARSAL" : "LIVE" };
     } catch (e) {
       return null;
     }
   }
   const keysComplete = (k) => !!k && CATEGORY_KEYS.every((key) => k.categories[key]);
 
+  function rememberContest(contests, keys) {
+    const parsed = parseKeys(keys);
+    if (!parsed) return contests.slice();
+    const at = contests.findIndex((c) => c.contestId === parsed.contestId);
+    return at < 0 ? [...contests, parsed] : contests.map((c, i) => i === at ? parsed : c);
+  }
+  function parseWorkspace(raw, legacy) {
+    try {
+      const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (Array.isArray(v)) return v.reduce((all, c) => rememberContest(all, c), []);
+    } catch (e) { /* a legacy backup is independently recoverable */ }
+    const p = parseKeys(legacy);
+    return p ? [p] : [];
+  }
+
   return {
+    rehearsalPlan,
+    parseWorkspace,
+    rememberContest,
     EVENT_TIME_ZONE,
     CATEGORY_KEYS,
     EVENT_PLAN,

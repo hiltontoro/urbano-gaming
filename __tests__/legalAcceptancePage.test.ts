@@ -255,7 +255,10 @@ describe("the page itself", () => {
 
   it("the link to the texts is in the footer of the Score pages — and of no other game: the shared sign-in and the other games' pages are untouched", () => {
     for (const file of ["public/index.html", "public/soccer-predictions.html", "public/profile.html", "public/legal.html"]) {
-      expect(read(file), file).toContain('<a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a>');
+      const acceptedLink = file === "public/index.html"
+        ? '<a href="/legal.html" data-i18n="home.footer.terms">Términos y condiciones</a>'
+        : '<a href="/legal.html" data-i18n="shell.footer.legal">Términos, privacidad y reglas</a>';
+      expect(read(file), file).toContain(acceptedLink);
     }
     for (const file of ["public/host.html", "public/participant.html", "public/poker-host.html", "public/urbanoAuth.js"]) {
       expect(read(file), file).not.toContain("legal.html");

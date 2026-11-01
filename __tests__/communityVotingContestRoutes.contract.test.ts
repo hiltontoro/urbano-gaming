@@ -14,6 +14,7 @@ import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 import { SYNTHETIC_JPEG_B64 } from "./helpers/syntheticPhoto";
 
 import { POST as registerCategoryRoute } from "../app/api/gaming/community-voting/rounds/route";
+import { POST as openRegistrationRoute } from "../app/api/gaming/community-voting/rounds/[instanceId]/operator/registration/route";
 import { PUT as scheduleRoute } from "../app/api/gaming/community-voting/rounds/[instanceId]/schedule/route";
 import { POST as registrationRoute } from "../app/api/gaming/community-voting/rounds/[instanceId]/registration/route";
 import { POST as bindingRoute } from "../app/api/gaming/community-voting/rounds/[instanceId]/binding/route";
@@ -130,18 +131,23 @@ afterAll(() => {
   else process.env.COMMUNITY_VOTING_OPERATOR_MEMBER_IDS = savedAllowlist;
 });
 
-async function newContest(schedule: { registrationOpensAt: string | null; contestantCutoffAt: string | null; votingOpensAt: string | null; votingClosesAt: string | null }) {
+async function newContest(schedule: { registrationOpensAt: string | null; contestantCutoffAt: string | null; votingOpensAt: string | null; votingClosesAt: string | null }, openRegistrations = true, purpose: "LIVE" | "REHEARSAL" = "LIVE") {
   const rounds = {} as Record<Key, Round>;
   let contestId: string | null = null;
   for (const key of KEYS) {
     const session = await createSession(sessionRepo);
     await setSessionCapabilities(sessionRepo, session.sessionId, session.hostToken, ["VOTING"] as never);
-    const res = await call(registerCategoryRoute, {}, { headers: { ...operator.bearer, "x-host-token": session.hostToken }, body: { sessionId: session.sessionId, categoryKey: key, ...(contestId ? { contestId } : {}) } });
+    const res = await call(registerCategoryRoute, {}, { headers: { ...operator.bearer, "x-host-token": session.hostToken }, body: { sessionId: session.sessionId, categoryKey: key, purpose, ...(contestId ? { contestId } : {}) } });
     expect(res.status, `${key}: ${res.text}`).toBe(201);
     contestId = res.json.round.contestId;
     rounds[key] = { key, instanceId: res.json.round.instanceId, sessionId: session.sessionId, hostToken: session.hostToken };
     const sch = await call(scheduleRoute, { instanceId: rounds[key].instanceId }, { method: "PUT", headers: { ...operator.bearer, "x-host-token": session.hostToken }, body: { ...schedule, status: "TENTATIVE" } });
     expect(sch.status, sch.text).toBe(200);
+  }
+  if (openRegistrations) {
+    const r=rounds.MOST_ELABORATE;
+    const opened=await call(openRegistrationRoute,{instanceId:r.instanceId},{headers:{...operator.bearer,"x-host-token":r.hostToken},body:{}});
+    expect(opened.status,opened.text).toBe(200);
   }
   return { contestId: contestId as string, rounds };
 }
@@ -189,11 +195,18 @@ describe("the operator registers the contest's categories: only the designated o
     expect((await call(registerCategoryRoute, {}, { headers: { ...operator.bearer, "x-host-token": session.hostToken }, body: { ...body, categoryKey: "BEST_COUPLE" } })).status).toBe(400);
     expect((await call(registerCategoryRoute, {}, { headers: { ...operator.bearer, "x-host-token": session.hostToken }, body: { ...body, windowSeconds: 300 } })).status).toBe(400);
 
-    const contest = await newContest({ registrationOpensAt: inMs(-HOUR), contestantCutoffAt: inMs(2 * HOUR), votingOpensAt: inMs(2 * HOUR), votingClosesAt: inMs(4 * HOUR) });
+    const contest = await newContest({ registrationOpensAt: inMs(-HOUR), contestantCutoffAt: inMs(2 * HOUR), votingOpensAt: inMs(2 * HOUR), votingClosesAt: inMs(4 * HOUR) }, false);
     const info = await get(contestRoute, { contestId: contest.contestId });
     expect(info.status).toBe(200);
     expect(info.json.categories.map((c: { key: string }) => c.key)).toEqual([...KEYS]);
-    expect(info.json.registration.phase).toBe("OPEN");
+    expect(info.json.registration.phase).toBe("NOT_OPEN");
+    const r=contest.rounds.MOST_ELABORATE;
+    expect((await call(openRegistrationRoute,{instanceId:r.instanceId},{body:{}})).status).toBe(401);
+    expect((await operatorCall(openRegistrationRoute,r,{}, {headers:opHeaders(r,stranger),body:{}})).status).toBe(403);
+    expect((await operatorCall(openRegistrationRoute,r,{}, {headers:{...operator.bearer,"x-host-token":"wrong"},body:{}})).status).not.toBe(200);
+    expect((await get(contestRoute,{contestId:contest.contestId})).json.registration.phase).toBe("NOT_OPEN");
+    expect((await operatorCall(openRegistrationRoute,r,{}, {body:{}})).status).toBe(200);
+    expect((await get(contestRoute,{contestId:contest.contestId})).json.registration).toMatchObject({phase:"OPEN",manualOpened:true});
     expect(info.json.texts.requirements.version).toBe(REQUIREMENTS_VERSION);
     expect(info.json.categories.every((c: { phase: string }) => c.phase === "NOT_OPEN")).toBe(true);
     // (the delivery authorization's TEXT is public on purpose — it names WhatsApp; what is never public is a number, an identity, a token or a position)
@@ -260,14 +273,14 @@ describe("self-registration at the HTTP edge: the identity is the verified token
   });
 
   it("says that registration ended after the cutoff — and takes no new candidacy", async () => {
-    const closed = await newContest({ registrationOpensAt: inMs(-3 * HOUR), contestantCutoffAt: inMs(-1000), votingOpensAt: inMs(-1000), votingClosesAt: inMs(2 * HOUR) });
+    const closed = await newContest({ registrationOpensAt: inMs(-3 * HOUR), contestantCutoffAt: inMs(-1000), votingOpensAt: inMs(-1000), votingClosesAt: inMs(2 * HOUR) }, false);
     const person = await fullUser("Tarde");
     const res = await call(registrationRoute, { instanceId: closed.rounds.SEXIEST.instanceId }, { headers: person.bearer, body: registrationBody("Tarde") });
     expect(res.status).toBe(409);
     expect(res.json.code).toBe("CUTOFF_PASSED");
     const info = await get(contestRoute, { contestId: closed.contestId });
     expect(info.json.registration.phase).toBe("CLOSED");
-    const early = await newContest({ registrationOpensAt: inMs(HOUR), contestantCutoffAt: inMs(2 * HOUR), votingOpensAt: inMs(2 * HOUR), votingClosesAt: inMs(4 * HOUR) });
+    const early = await newContest({ registrationOpensAt: inMs(HOUR), contestantCutoffAt: inMs(2 * HOUR), votingOpensAt: inMs(2 * HOUR), votingClosesAt: inMs(4 * HOUR) }, false);
     const e = await call(registrationRoute, { instanceId: early.rounds.SEXIEST.instanceId }, { headers: (await fullUser("Pronto")).bearer, body: registrationBody("Pronto") });
     expect(e.status).toBe(409);
     expect(e.json.code).toBe("REGISTRATION_NOT_OPEN");

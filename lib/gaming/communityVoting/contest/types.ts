@@ -41,6 +41,8 @@ export interface CategoryStructureRow {
 export type DeliveryStatus = "PENDING" | "DELIVERED";
 
 export interface ContestCategoryRef {
+  purpose?: "LIVE" | "REHEARSAL";
+  registrationOpened?: boolean;
   categoryKey: CategoryKey;
   instanceId: string;
   /** Has the operator chosen to show the contest on Home? */

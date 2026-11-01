@@ -1145,6 +1145,7 @@
     if (state.loadFailed) { app.textContent = ""; app.appendChild(renderLoadFailed()); return; }
     who.textContent = state.auth.status === "unauthenticated" ? "" : state.auth.email;
     const parts = [...messages()];
+    if (state.contest && state.contest.mode === "REHEARSAL") parts.push(h("div", { class: "msg", role: "status", id: "rehearsalNotice", text: "ENSAYO · Estas candidaturas y resultados no pertenecen al concurso real." }));
     const s = step();
     if (state.panel === "signin") parts.push(back(), h("p", { class: "sub", text: "Entrá con tu correo para continuar." }), ...identityCards());
     else if (state.panel === "register") parts.push(...renderRegister());

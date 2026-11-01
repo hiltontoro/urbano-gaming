@@ -444,7 +444,12 @@ describe("what the contest tells the public: phases by the server's clock, the r
     deadlineAt: VOTE_CLOSES, serverNow: "2026-11-01T03:00:00.000Z", locationRequired: false, registrationOpensAt: REG_OPENS, contestantCutoffAt: REG_CLOSES, votingOpensAt: VOTE_OPENS, votingClosesAt: VOTE_CLOSES,
     scheduleStatus: "TENTATIVE", approvedContestants: 2, closed: false, published: false, isTest: false,
   });
-  const refs = CATEGORY_KEYS.map((k, i) => ({ categoryKey: k, instanceId: `00000000-0000-4000-8000-00000000000${i + 1}`, listed: true }));
+  const refs = CATEGORY_KEYS.map((k, i) => ({ categoryKey: k, instanceId: `00000000-0000-4000-8000-00000000000${i + 1}`, listed: true, purpose: "LIVE" as const, registrationOpened: true }));
+
+  it("keeps public registration closed without the explicit opening, even inside its scheduled window", async () => {
+    const { repo } = fakeRepo({ readContestCategories: vi.fn(async () => refs.map((r) => ({ ...r, registrationOpened: false }))), readRoundPublicInfo: vi.fn(async () => infoFor("NOT_OPEN")) });
+    expect((await getContestPublicInfo(repo, ID)).registration).toMatchObject({ phase: "NOT_OPEN", manualOpened: false });
+  });
 
   it("describes the contest to anyone: the four categories, their phase, the registration, the plan, the three texts and the ONE sentence about prizes — and no count, rank, total, venue or location", async () => {
     const { repo } = fakeRepo({ readContestCategories: vi.fn(async () => refs), readRoundPublicInfo: vi.fn(async () => infoFor("NOT_OPEN")) });
@@ -516,7 +521,7 @@ describe("the operator's registration of a category: only the designated operato
   it("registers with the caller as the operator when they are on the allow-list", async () => {
     const registerCategoryRound = vi.fn(async (i: unknown) => i);
     const out = await registerCommunityVotingCategoryRound({ registerCategoryRound } as never, input());
-    expect(registerCategoryRound).toHaveBeenCalledWith({ sessionId: ID, hostToken: "h", operatorMemberId: OPERATOR, ruleVersion: 1, contestId: null, categoryKey: "SEXIEST" });
+    expect(registerCategoryRound).toHaveBeenCalledWith({ sessionId: ID, hostToken: "h", operatorMemberId: OPERATOR, ruleVersion: 1, contestId: null, categoryKey: "SEXIEST", purpose: "LIVE" });
     expect(out).toBeTruthy();
   });
 

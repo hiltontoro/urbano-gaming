@@ -88,14 +88,16 @@ export class SupabaseContestRepository extends SupabaseRoundsRepository {
     ruleVersion: number;
     contestId: string | null;
     categoryKey: CategoryKey;
+    purpose?: "LIVE" | "REHEARSAL";
   }): Promise<CategoryRoundRecord> {
-    const [row] = await this.rows<Record<string, unknown>>("register_community_voting_category_round_atomically", {
+    const [row] = await this.rows<Record<string, unknown>>("register_community_voting_workspace_category", {
       p_session_id: input.sessionId,
       p_host_token: input.hostToken,
       p_operator_member_id: input.operatorMemberId,
       p_rule_version: input.ruleVersion,
       p_contest_id: input.contestId,
       p_category_key: input.categoryKey,
+      p_purpose: input.purpose ?? "LIVE",
     });
     return {
       instanceId: row.instance_id as string,
@@ -195,8 +197,13 @@ export class SupabaseContestRepository extends SupabaseRoundsRepository {
   }
 
   async readContestCategories(contestId: string): Promise<ContestCategoryRef[]> {
-    const rows = await this.rows<Record<string, unknown>>("read_community_voting_contest_categories", { p_contest_id: contestId });
-    return rows.map((r) => ({ categoryKey: asCategory(r.category_key), instanceId: r.instance_id as string, listed: Boolean(r.listed) }));
+    const rows = await this.rows<Record<string, unknown>>("read_community_voting_workspace", { p_contest_id: contestId });
+    return rows.map((r) => ({ categoryKey: asCategory(r.category_key), instanceId: r.instance_id as string, listed: Boolean(r.listed), purpose: r.purpose === "REHEARSAL" ? "REHEARSAL" : "LIVE", registrationOpened: r.registration_opened === true }));
+  }
+
+  async openContestRegistration(input: OperatorContext) {
+    const [r] = await this.rows<Record<string, unknown>>("open_community_voting_registration_atomically", operatorArgs(input));
+    return { contestId: r.contest_id as string, openedAt: ts(r.opened_at) };
   }
 
   /** The contest the operator last chose to show on Home, or null. */

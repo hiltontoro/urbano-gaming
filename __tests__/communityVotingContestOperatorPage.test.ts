@@ -86,6 +86,42 @@ const readyWorld = (over: Partial<OpWorld> = {}): OpWorld => ({
 });
 const writes = (p: Page, re: RegExp) => p.posts().filter((c) => re.test(c.url));
 
+describe("rehearsal/live selection and explicit registration", () => {
+  it("offers two explicit creation choices without creating anything on load", async () => {
+    const p = await station({}, { local: {} });
+    await p.clickSel("#goConfig");
+    expect(p.text("#createContest")).toBe("Preparar Halloween real");
+    expect(p.text("#createRehearsal")).toBe("Crear ensayo separado");
+    expect(p.posts()).toEqual([]);
+  });
+  it("keeps the saved live keys when selecting a fresh second contest", async () => {
+    const p = await station();
+    const select = p.$("#contestSelector") as HTMLSelectElement;
+    expect(select.options).toHaveLength(2);
+    select.value = ""; select.dispatchEvent(new p.win.Event("change", { bubbles: true })); await p.settle();
+    expect(p.$("#createRehearsal")).toBeTruthy();
+    expect(JSON.parse(p.win.localStorage.getItem("cv:operator:workspaces:v1")!)[0].contestId).toBe(CONTEST);
+    expect(p.posts()).toEqual([]);
+  });
+  it("requires a confirmation and sends only the manual registration operation, never Voting open", async () => {
+    const p=await station({ reply: (c) => c.url.endsWith("/operator/registration") ? {status:200,json:{registration:{}}} : undefined });
+    await p.clickSel('[data-tab="config"]');
+    await p.clickSel("#openRegistration");
+    expect(p.posts()).toHaveLength(0);
+    expect(p.text("#modalRoot")).toContain("Esto no abre la votación");
+    await p.clickSel("#modalConfirm");
+    expect(writes(p,/\/operator\/registration$/)).toHaveLength(1);
+    expect(writes(p,/\/operator\/open$/)).toHaveLength(0);
+  });
+  it("takes rehearsal status from the server and disables Home listing",async()=>{
+    const p=await station({reply:(c)=>c.url===`${CONTESTS}/${CONTEST}`?{status:200,json:{...contestBody(),mode:"REHEARSAL"}}:undefined});
+    await p.clickSel('[data-tab="config"]');
+    expect(p.text("#workspaceCard")).toContain("ENSAYO");
+    expect((p.$("#toggleListing") as HTMLButtonElement).disabled).toBe(true);
+    expect(p.$("#fillRehearsal")).toBeTruthy();
+  });
+});
+
 // ---------------------------------------------------------------- identity and the operator's keys
 
 describe("the station: who may use it, and what this browser keeps", () => {

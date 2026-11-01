@@ -242,6 +242,7 @@ describe("self-registration: a person registers THEMSELVES from their own accoun
     await selfRegister(r, await newPerson()); // inside the window, it works
     const ready = await newContest({ registrationOpensAt: inMs(-HOUR), cutoffAt: inMs(2 * HOUR), closesAt: inMs(4 * HOUR) });
     const rr = ready.rounds.MOST_ELABORATE;
+    await q("select * from open_community_voting_registration_atomically($1,$2,$3)", [rr.instanceId,rr.ctx.hostToken,rr.ctx.operatorMemberId]);
     for (let i = 0; i < 2; i++) await completeAtStation(rr, (await selfRegister(rr, await newPerson())).entryId);
     await openCategory(rr);
     const afterOpen = await newPerson();

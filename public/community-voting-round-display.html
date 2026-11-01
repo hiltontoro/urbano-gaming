@@ -156,6 +156,7 @@
   function applyContest(next) {
     const before = info ? info.phase : null;
     info = next;
+    document.getElementById("title").textContent = info.mode === "REHEARSAL" ? "ENSAYO · No es el concurso real" : "Concurso de disfraces · The Pub by Beer Box";
     fetchedAt = performance.now();
     deadlineAsked = false;
     if (info.phase !== before) phaseSeenAt = performance.now();

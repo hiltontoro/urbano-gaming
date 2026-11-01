@@ -32,6 +32,7 @@
   nav.tabs { display: flex; gap: 6px; max-width: 880px; margin: 0 auto; padding: 0 16px 10px; }
   nav.tabs button { flex: 1; padding: 10px 4px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 13px; font-weight: 700; min-height: 44px; }
   nav.tabs button[aria-selected="true"] { background: var(--halloween-bg); border-color: var(--halloween); color: var(--halloween); }
+  @media (max-width: 430px) { nav.tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } nav.tabs button { min-width: 0; overflow-wrap: anywhere; } }
   main { max-width: 880px; margin: 0 auto; padding: 0 16px; }
   .card { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
   .card h2 { font-size: 17px; margin: 0 0 6px; }
@@ -141,6 +142,9 @@
   const store = (() => { try { return window.localStorage; } catch (e) { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; } })();
   const fetchImpl = (...a) => window.fetch(...a);
   const token = () => UrbanoAuth.getAccessToken();
+  const WORKSPACE_KEY = "cv:operator:workspaces:v1";
+  let workspaces = Op.parseWorkspace(store.getItem(WORKSPACE_KEY), store.getItem(Op.STORE_KEY));
+  let contextRun = 0;
 
   const state = {
     auth: { status: "unauthenticated", email: "" }, authStep: "email", email: "", code: "", name: "",
@@ -171,7 +175,11 @@
   }
   const say = (code) => Op.describeError(code);
   const step = () => R.identityStep(state.auth.status);
-  const saveKeys = () => { try { if (state.keys) store.setItem(Op.STORE_KEY, JSON.stringify(state.keys)); } catch (e) { /* the backup file is the other copy */ } };
+  const saveKeys = () => { try {
+    if (state.keys) { workspaces = Op.rememberContest(workspaces, state.keys); store.setItem(Op.STORE_KEY, JSON.stringify(state.keys)); }
+    else store.removeItem(Op.STORE_KEY);
+    store.setItem(WORKSPACE_KEY, JSON.stringify(workspaces));
+  } catch (e) { state.error = "No se pudieron guardar las claves. Guardá una copia antes de salir."; } };
   const apiFor = (key) => {
     const c = state.keys && state.keys.categories[key];
     return c ? Op.buildOperatorApi(fetchImpl, token, () => c.hostToken, c.instanceId) : null;
@@ -201,8 +209,10 @@
 
   async function refreshAll() {
     if (!state.keys) return;
+    const currentKeys = state.keys, run = contextRun;
     const keys = KEYS.filter((k) => state.keys.categories[k]);
     const results = await Promise.all(keys.map((k) => apiFor(k).overview()));
+    if (run !== contextRun || currentKeys !== state.keys) return;
     let denied = null;
     results.forEach((r, i) => {
       if (r.status === 200) state.overviews[keys[i]] = r.json;
@@ -210,7 +220,17 @@
     });
     if (state.keys.contestId) {
       const info = await Op.buildSetupApi(fetchImpl, token).contest(state.keys.contestId);
-      if (info.status === 200) { state.publicInfo = info.json; state.serverNow = info.json.serverNow; state.fetchedAt = performance.now(); }
+      if (run !== contextRun || currentKeys !== state.keys) return;
+      if (info.status === 200) {
+        state.publicInfo = info.json; state.serverNow = info.json.serverNow; state.fetchedAt = performance.now();
+        if (info.json.mode === "LIVE" || info.json.mode === "REHEARSAL") { state.keys.mode = info.json.mode; saveKeys(); }
+        const first = info.json.categories && info.json.categories[0];
+        if (!state.loadedOnce && first && first.registrationOpensAt && first.contestantCutoffAt && first.votingOpensAt && first.votingClosesAt) {
+          state.form = { date: Op.fromEventInstant(first.registrationOpensAt).date, registrationOpens: Op.fromEventInstant(first.registrationOpensAt).time,
+            registrationCloses: Op.fromEventInstant(first.contestantCutoffAt).time, votingOpens: Op.fromEventInstant(first.votingOpensAt).time,
+            votingCloses: Op.fromEventInstant(first.votingClosesAt).time, confirmed: !first.tentative };
+        }
+      }
     }
     state.loadedOnce = true;
     if (denied) fail(denied);
@@ -740,6 +760,26 @@
 
   // ---- configuration: the contest itself (away from the station) ----------------------------------------------------------------------
 
+  async function selectContest(id) {
+    if (state.busy) return;
+    contextRun++;
+    state.keys = workspaces.find((c) => c.contestId === id) || null;
+    state.publicInfo = null; state.overviews = {}; state.work = null; state.found = null; state.delivery = null;
+    state.claims = {}; state.memberClaims = {}; state.previews = {}; state.error = null; state.notice = null;
+    state.tab = "config"; state.loadedOnce = false; state.form = { ...Op.EVENT_PLAN, confirmed: false };
+    saveKeys(); render(); await refreshAll(); render();
+  }
+
+  function renderWorkspace() {
+    const mode = state.publicInfo ? state.publicInfo.mode : state.keys && state.keys.mode;
+    return h("section", { class: "card stack", id: "workspaceCard" },
+      h("label", { for: "contestSelector", text: "Concurso seleccionado" }),
+      h("select", { id: "contestSelector", disabled: state.busy, onchange: (e) => selectContest(e.target.value) },
+        h("option", { value: "", selected: !state.keys, text: "Preparar otro concurso" }),
+        ...workspaces.map((c, i) => h("option", { value: c.contestId, selected: !!state.keys && c.contestId === state.keys.contestId, text: `${c.mode === "REHEARSAL" ? "ENSAYO" : "HALLOWEEN REAL"} · ${i + 1}` }))),
+      h("p", { role: "status", text: mode === "REHEARSAL" ? "ENSAYO · Solo fotos ficticias o tuyas. No aparece en Inicio. Comparte el servicio; no es un entorno privado aislado." : mode === "LIVE" ? "HALLOWEEN REAL · Los datos de ensayo no pertenecen a este concurso." : "Elegí qué concurso querés preparar. Crear y guardar horarios no abre las inscripciones." }));
+  }
+
   function renderConfig() {
     const f = state.form;
     const field = (id, label, type, key) => h("div", { class: "field" }, h("label", { for: id, text: label }), h("input", { type, id, value: f[key], oninput: (e) => { f[key] = e.target.value; } }));
@@ -750,22 +790,34 @@
       h("h2", { text: "El concurso" }),
       created ? h("p", { id: "setupState", text: "Las cuatro categorías existen y sus claves están guardadas en este navegador." }) : h("p", { id: "setupState", text: "Todavía no están creadas las cuatro categorías." }),
       state.setupLog.length ? h("ul", { class: "sub", id: "setupLog" }, state.setupLog.map((l) => h("li", { text: l }))) : null,
-      !created ? h("button", { class: "btn primary block", id: "createContest", disabled: state.busy, text: "Crear las cuatro categorías", onclick: createContest }) : null));
+      !created ? h("div", { class: "btnrow" },
+        h("button", { class: "btn primary", id: "createContest", disabled: state.busy, text: state.keys && state.keys.mode === "REHEARSAL" ? "Continuar preparando ensayo" : "Preparar Halloween real", onclick: () => createContest("LIVE") }),
+        h("button", { class: "btn", id: "createRehearsal", disabled: state.busy || !!state.keys, text: "Crear ensayo separado", onclick: () => createContest("REHEARSAL") })) : null));
     if (created) {
+      const manuallyOpened = !!(state.publicInfo && state.publicInfo.registration && state.publicInfo.registration.manualOpened);
+      parts.push(h("section", { class: "card stack", id: "registrationControl" },
+        h("h2", { text: "Inscripciones" }),
+        h("p", { id: "registrationControlState", text: manuallyOpened ? "Apertura registrada. El cierre y la admisión siguen sujetos al horario del servidor." : "Cerradas hasta tu confirmación. Guardar el horario no las abre." }),
+        !manuallyOpened ? h("button", { id: "openRegistration", class: "btn primary block", disabled: state.busy || !state.publicInfo, text: "Abrir inscripciones", onclick: () => confirmModal("¿Abrir inscripciones?", [state.keys.mode === "REHEARSAL" ? "Vas a abrir el ENSAYO, no el concurso real." : "Vas a admitir concursantes al HALLOWEEN REAL. Verificá los consentimientos y el aviso de privacidad antes de continuar.", "Solo se permite dentro del horario guardado. Esto no abre la votación."], "Abrir inscripciones", () => act("registration", async () => { const r = await apiFor(anyKey()).openRegistration(); if (r.status !== 200) fail(r); else state.notice = "Apertura de inscripciones registrada."; })) }) : null));
       parts.push(h("section", { class: "card stack", id: "scheduleCard" },
         h("h2", { text: "Horarios (hora de Honduras)" }),
-        h("p", { text: "Los horarios informan al público. La votación solo abre cuando vos la abrés, y cierra sola a su hora de cierre." }),
+        h("p", { text: "Guardar no abre inscripciones ni votación: cada apertura necesita tu confirmación. El servidor respeta los horarios y sus cierres." }),
         h("div", { class: "grid2" },
           field("fDate", "Día", "date", "date"), field("fRegOpen", "Abre la inscripción", "time", "registrationOpens"), field("fRegClose", "Cierra la inscripción", "time", "registrationCloses"),
           field("fVoteOpen", "Abre la votación (prevista)", "time", "votingOpens"), field("fVoteClose", "Cierra la votación", "time", "votingCloses")),
         h("label", { class: "check", for: "fConfirmed" }, h("input", { type: "checkbox", id: "fConfirmed", checked: f.confirmed, onchange: (e) => { f.confirmed = e.target.checked; } }), h("span", { text: "El horario está confirmado (si no, se muestra como tentativo)." })),
         h("div", { class: "btnrow" },
           h("button", { class: "btn", id: "fillPlan", text: "Rellenar con el horario de Halloween", onclick: () => { state.form = { ...Op.EVENT_PLAN, confirmed: f.confirmed }; render(); } }),
+          state.keys.mode === "REHEARSAL" ? h("button", { class: "btn", id: "fillRehearsal", text: "Ensayar ahora (15 min de inscripción)", onclick: () => {
+            const p = Op.rehearsalPlan(state.serverNow || new Date().toISOString());
+            if (p) state.form = p; else state.error = "Configurá un horario de ensayo válido: la inscripción cruza la medianoche.";
+            render();
+          } }) : null,
           h("button", { class: "btn primary", id: "saveSchedule", disabled: state.busy, text: "Guardar en las cuatro categorías", onclick: saveSchedule }))));
       parts.push(h("section", { class: "card stack", id: "listingCard" },
         h("h2", { text: "Inicio de la app" }),
         h("p", { id: "listingState", text: listed ? "El concurso aparece en Inicio con sus enlaces." : "El concurso no aparece en Inicio todavía: Inicio solo dice lo que es cierto y no muestra enlaces." }),
-        h("button", { class: `btn ${listed ? "" : "primary"} block`, id: "toggleListing", disabled: state.busy, text: listed ? "Quitar el concurso de Inicio" : "Mostrar el concurso en Inicio", onclick: () => toggleListing(!listed) })));
+        h("button", { class: `btn ${listed ? "" : "primary"} block`, id: "toggleListing", disabled: state.busy || state.keys.mode === "REHEARSAL", text: state.keys.mode === "REHEARSAL" ? "El ensayo no se publica en Inicio" : listed ? "Quitar el concurso de Inicio" : "Mostrar el concurso en Inicio", onclick: () => toggleListing(!listed) })));
       parts.push(h("section", { class: "card stack", id: "linksCard" },
         h("h2", { text: "Enlaces" }),
         h("p", { class: "sub", text: "Para compartir o probar. Abrirlos no abre la votación." }),
@@ -784,11 +836,12 @@
     return parts;
   }
 
-  async function createContest() {
+  async function createContest(mode) {
     if (state.busy) return;
     state.busy = true; state.error = null; state.notice = null; state.setupLog = []; render();
     const setup = Op.buildSetupApi(fetchImpl, token);
-    const keys = state.keys || { contestId: "", ownerUserId: "", categories: {} };
+    const keys = state.keys || { contestId: "", ownerUserId: "", categories: {}, mode: mode === "REHEARSAL" ? "REHEARSAL" : "LIVE" };
+    if (!state.keys && keys.mode === "REHEARSAL") state.form = Op.rehearsalPlan(new Date().toISOString()) || { ...Op.EVENT_PLAN, confirmed: false };
     try {
       for (const k of KEYS) {
         if (keys.categories[k]) { state.setupLog.push(`${NAMES[k]}: ya existía`); continue; }
@@ -798,7 +851,7 @@
         // the keys are kept the moment they exist, so a failure further on never loses them
         const cap = await setup.declareVoting(sessionId, hostToken);
         if (cap.status !== 200 && cap.status !== 201) { state.error = say("INTERNAL_ERROR"); state.setupLog.push(`${NAMES[k]}: no se pudo preparar la sesión`); break; }
-        const reg = await setup.registerCategory(sessionId, hostToken, k, keys.contestId || null);
+        const reg = await setup.registerCategory(sessionId, hostToken, k, keys.contestId || null, keys.mode || "LIVE");
         if (reg.status !== 201) { fail(reg); state.setupLog.push(`${NAMES[k]}: no se pudo registrar`); break; }
         keys.contestId = reg.json.round.contestId;
         keys.categories[k] = { instanceId: reg.json.round.instanceId, sessionId, hostToken };
@@ -867,6 +920,7 @@
     who.textContent = state.auth.status === "unauthenticated" ? "" : state.auth.email;
     const s = step();
     const parts = [...messages()];
+    if (s === "READY") parts.push(renderWorkspace());
     if (s !== "READY") { tabsEl.classList.add("hidden"); parts.push(renderSignIn()); }
     else if (!state.keys || (state.tab !== "config" && !Op.keysComplete(state.keys) && !anyKey())) {
       tabsEl.classList.remove("hidden");

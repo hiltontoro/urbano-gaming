@@ -94,10 +94,36 @@ interface Operator {
   STORE_KEY: string;
   parseKeys(raw: unknown): Json | null;
   keysComplete(keys: Json | null): boolean;
+  parseWorkspace(raw: unknown, legacy?: unknown): Json[];
+  rememberContest(contests: Json[], keys: Json): Json[];
+  rehearsalPlan(now: string): Json | null;
 }
 
 const R = load<Voter>("communityVotingRound.js", "CommunityVotingRound");
 const O = load<Operator>("communityVotingRoundOperator.js", "CommunityVotingOperator");
+
+describe("operator workspaces keep rehearsal and live keys separate", () => {
+  const live = { contestId: "live", mode: "LIVE", categories: {} };
+  const rehearsal = { contestId: "rehearsal", mode: "REHEARSAL", categories: {} };
+  it("preserves the legacy contest when no workspace exists", () => {
+    expect(O.parseWorkspace(null, JSON.stringify(live))).toMatchObject([live]);
+  });
+  it("remembers two contests without overwriting either's keys", () => {
+    const both = O.rememberContest([live], rehearsal);
+    expect(both.map((x) => x.contestId)).toEqual(["live", "rehearsal"]);
+    expect(O.rememberContest(both, { ...rehearsal, ownerUserId: "owner" })).toHaveLength(2);
+    expect(both[0]).toMatchObject(live);
+  });
+  it("refuses malformed workspace entries instead of inventing credentials", () => {
+    expect(O.parseWorkspace('{"contests":"bad"}')).toEqual([]);
+    expect(O.parseWorkspace(JSON.stringify([{}, live, live]))).toHaveLength(1);
+  });
+  it("prefills a rehearsal in Honduras without saving or opening anything", () => {
+    expect(O.rehearsalPlan("2026-10-31T23:00:00Z")).toEqual({ date: "2026-10-31", registrationOpens: "16:59", registrationCloses: "17:15", votingOpens: "17:15", votingCloses: "17:30", confirmed: false });
+    expect(O.rehearsalPlan("invalid")).toBeNull();
+    expect(O.rehearsalPlan("2026-11-01T05:55:00Z")).toBeNull();
+  });
+});
 
 const ID = "11111111-2222-4333-8444-555555555555";
 const CAND = "aaaaaaaa-bbbb-4ccc-8ddd-000000000001";

@@ -9,7 +9,7 @@ import { registerCommunityVotingCategoryRound } from "@/lib/gaming/communityVoti
  * Credentials: the Session's host token (`x-host-token`) AND `Authorization: Bearer <access token>` of the Gaming Member who will be
  * THE operator. Only a member on the COMMUNITY_VOTING_OPERATOR_MEMBER_IDS allow-list may register, and with no valid allow-list nobody can.
  * Body: { sessionId, categoryKey, contestId? } — categoryKey is MOST_ELABORATE, SEXIEST, BEST_GROUP or FUNNIEST. There is no role, no venue and no
- * test mode: the contest has one round and no location. The operator's id is recorded, never returned.
+ * location bypass. Optional purpose LIVE/REHEARSAL separates operator workspaces; it cannot be changed or mixed in a contest. The operator's id is recorded, never returned.
  */
 export async function POST(request: Request) {
   return handle("REGISTER_COMMUNITY_VOTING_CATEGORY_ROUND", request, async (env) => {

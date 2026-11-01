@@ -52,7 +52,7 @@ function claimTtl(b: Record<string, unknown>): number | undefined {
 /**
  * Registers ONE category round for a Session, designating the CALLER as its operator, and — with the first one — creating the contest.
  * Only a Gaming Member on the configured allow-list may; with no valid allow-list nobody can (fail closed). The body is
- * { sessionId, categoryKey, contestId? }: nothing in it chooses a role, a venue, a window or a test mode, because none exists.
+ * { sessionId, categoryKey, contestId?, purpose? }: purpose is immutable LIVE/REHEARSAL grouping, not a Session lifecycle or a venue bypass.
  */
 export async function registerCommunityVotingCategoryRound(
   repo: SupabaseContestRepository,
@@ -68,6 +68,8 @@ export async function registerCommunityVotingCategoryRound(
   const sessionId = requireUuid(b.sessionId, "sessionId");
   if (!isCategoryKey(b.categoryKey)) throw invalid(`categoryKey must be one of ${CATEGORY_KEYS.join(", ")}.`);
   const contestId = b.contestId === undefined || b.contestId === null ? null : requireUuid(b.contestId, "contestId");
+  const purpose = b.purpose === undefined ? "LIVE" : b.purpose;
+  if (purpose !== "LIVE" && purpose !== "REHEARSAL") throw invalid("Unknown contest purpose.");
   const ruleVersion = b.ruleVersion === undefined ? 1 : b.ruleVersion;
   if (typeof ruleVersion !== "number" || !Number.isInteger(ruleVersion) || ruleVersion < 1) throw invalid("ruleVersion must be a positive integer.");
   for (const forbidden of ["roundRole", "sourceInstanceId", "venue", "testMode", "windowSeconds"]) {
@@ -80,6 +82,7 @@ export async function registerCommunityVotingCategoryRound(
     ruleVersion,
     contestId,
     categoryKey: b.categoryKey,
+    purpose,
   });
 }
 
@@ -335,7 +338,11 @@ export async function getContestPublicInfo(repo: SupabaseContestRepository, cont
     serverNow: categories[0].serverNow,
     prizePromise: PRIZE_PROMISE,
     phase: summarizePhase(categories),
-    registration: summarizeRegistration(categories),
+    mode: refs[0].purpose ?? "LIVE",
+    registration: (() => {
+      const r = summarizeRegistration(categories);
+      return { ...r, phase: r.phase === "OPEN" && refs[0].registrationOpened !== true ? "NOT_OPEN" as const : r.phase, manualOpened: refs[0].registrationOpened === true };
+    })(),
     texts: {
       requirements: { version: REQUIREMENTS_VERSION, text: REQUIREMENTS_TEXT },
       whatsappDelivery: { version: DELIVERY_VERSION, text: DELIVERY_TEXT },
@@ -382,6 +389,7 @@ export async function getFeaturedContest(repo: SupabaseContestRepository) {
   const contestId = await repo.readFeaturedContest();
   if (contestId === null) return { featured: null };
   const info = await getContestPublicInfo(repo, contestId);
+  if (info.mode !== "LIVE") return { featured: null };
   return {
     featured: {
       contestId,
