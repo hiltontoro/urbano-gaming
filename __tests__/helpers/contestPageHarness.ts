@@ -18,6 +18,7 @@ const read = (f: string) => readFileSync(path.join(ROOT, "public", f), "utf8");
 export const FILES: Record<string, string> = {
   "featuredContest.js": read("featuredContest.js"),
   "communityVotingRound.js": read("communityVotingRound.js"),
+  "communityVotingShareCard.js": read("communityVotingShareCard.js"),
   "communityVotingRoundOperator.js": read("communityVotingRoundOperator.js"),
   "communityVotingSlideshow.js": read("communityVotingSlideshow.js"),
   "urbanoAuth.js": "/* the identity seam is stubbed by the test */",

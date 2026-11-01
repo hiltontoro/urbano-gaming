@@ -172,11 +172,13 @@
 
 <script src="/urbanoAuth.js"></script>
 <script src="/communityVotingRound.js"></script>
+<script src="/communityVotingShareCard.js"></script>
 <script src="/featuredContest.js"></script>
 <script>
 (() => {
   "use strict";
   const R = CommunityVotingRound;
+  const S = CommunityVotingShareCard;
   const V = R;   // the deck, swipe and virtual-grid helpers live in the same module
   const params = new URLSearchParams(window.location.search);
   const contestId = params.get("c") || "";
@@ -213,7 +215,7 @@
     form: loadDraft(), formErrors: {}, registering: false,
     auth: { status: "unauthenticated", email: "" }, authStep: "email", email: "", code: "", name: "",
     entered: false, search: "",
-    busy: false, error: null, notice: null, fatal: null, loadFailed: false,
+    busy: false, downloadBusy: null, error: null, notice: null, fatal: null, loadFailed: false,
     // `epoch` goes up whenever the signed-in person changes or signs out, `castSeq` with every vote tap: a request that finishes after either
     // moved on must not touch what the page shows.
     epoch: 0, castSeq: 0,
@@ -594,6 +596,34 @@
       navigator.share && data ? h("button", { class: "btn", id: "shareFicha", text: "Compartir", onclick: () => shareFicha(data) }) : null);
   }
 
+  async function downloadMine(kind) {
+    const share = state.mine && state.mine.share;
+    if (!share || state.downloadBusy) return;
+    state.downloadBusy = kind;
+    state.error = null;
+    state.notice = null;
+    render();
+    const opts = {
+      imageUrl: share.imageUrl,
+      code: share.code,
+      location: window.location,
+      document,
+      Image: window.Image,
+      fetch: window.fetch.bind(window),
+      urlApi: window.URL,
+    };
+    try {
+      if (kind === "photo") await S.downloadPhoto(opts);
+      else await S.downloadStory(opts);
+      state.notice = kind === "photo" ? "Descargamos tu foto aprobada." : "Descargamos tu story personalizado con tu foto y código.";
+    } catch (_) {
+      state.error = kind === "photo" ? "No pudimos descargar tu foto. Intentá de nuevo." : "No pudimos crear tu story. Intentá de nuevo.";
+    } finally {
+      state.downloadBusy = null;
+      render();
+    }
+  }
+
   function renderMine() {
     const m = state.mine;
     if (!m) return null;
@@ -605,7 +635,10 @@
       h("p", { id: "myCandidacyText", text: R.myCandidacyText(m) }),
       rep && m.deliveryStatus ? h("p", { id: "deliveryText", text: R.deliveryText(m.deliveryStatus) }) : null,
       codeActions(m.publicCode, m.ficheUrl, null),
-      m.state === "PUBLIC" ? h("button", { class: "btn", id: "openMyFicha", text: "Ver mi ficha", onclick: () => openFicha(m.publicCode) }) : null);
+      m.state === "PUBLIC" ? h("button", { class: "btn", id: "openMyFicha", text: "Ver mi ficha", onclick: () => openFicha(m.publicCode) }) : null,
+      m.state === "PUBLIC" && m.share ? h("div", { class: "btnrow", id: "myDownloads" },
+        h("button", { class: "btn", id: "downloadMyPhoto", disabled: !!state.downloadBusy, text: state.downloadBusy === "photo" ? "Descargando…" : "Descargar mi foto", onclick: () => downloadMine("photo") }),
+        h("button", { class: "btn primary", id: "downloadMyStory", disabled: !!state.downloadBusy, text: state.downloadBusy === "story" ? "Creando story…" : "Descargar story para compartir", onclick: () => downloadMine("story") })) : null);
   }
 
   function openFicha(code) {

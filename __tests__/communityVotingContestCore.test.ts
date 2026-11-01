@@ -312,6 +312,34 @@ describe("a person's own candidacy, and a candidacy's public ficha", () => {
     await rejectsWith(getMyCandidacy(fakeRepo().repo, voterDeps(), "Bearer good", "nope"), "CONTEST_NOT_FOUND");
   });
 
+  it("offers the approved public photo for participant-controlled downloads without exposing internal identity", async () => {
+    const mine = { categoryKey: "SEXIEST", instanceId: INSTANCE, role: "INDIVIDUAL", kind: "INDIVIDUAL", publicCode: "HAL-K7M2Q", publicName: "Vampiresa", state: "PUBLIC", deliveryStatus: "DELIVERED" };
+    const found = { categoryKey: "SEXIEST", instanceId: INSTANCE, alias: "#4821", candidateId: null, ordinal: 1, publicCode: "HAL-K7M2Q", publicName: "Vampiresa" };
+    const { repo, raw } = fakeRepo({ readMyCandidacy: vi.fn(async () => mine), readCandidacyByCode: vi.fn(async () => found) });
+
+    const out = await getMyCandidacy(repo, voterDeps(), "Bearer good", ID);
+
+    expect(raw.readCandidacyByCode).toHaveBeenCalledWith(ID, "HAL-K7M2Q");
+    expect(out.candidacy).toMatchObject({
+      publicCode: "HAL-K7M2Q",
+      share: {
+        code: "HAL-K7M2Q",
+        imageUrl: `/api/gaming/community-voting/rounds/${INSTANCE}/photos/4821?v=full`,
+      },
+    });
+    expect(JSON.stringify(out)).not.toMatch(/whatsapp|authUser|email|candidateId|entryId/i);
+  });
+
+  it("does not expose a downloadable photo until the candidacy is public", async () => {
+    const mine = { categoryKey: "SEXIEST", instanceId: INSTANCE, role: "INDIVIDUAL", kind: "INDIVIDUAL", publicCode: "HAL-K7M2Q", publicName: "Vampiresa", state: "REGISTERED", deliveryStatus: "PENDING" };
+    const { repo, raw } = fakeRepo({ readMyCandidacy: vi.fn(async () => mine) });
+
+    const out = await getMyCandidacy(repo, voterDeps(), "Bearer good", ID);
+
+    expect(out.candidacy).toMatchObject({ publicCode: "HAL-K7M2Q", share: null });
+    expect(raw.readCandidacyByCode).not.toHaveBeenCalled();
+  });
+
   const publicInfo = (over: Record<string, unknown> = {}) => ({
     roundRole: "PRELIMINARY", sessionState: "LOBBY_LOCKED", interactionState: null, openedAt: null, windowSeconds: null, deadlineAt: VOTE_CLOSES, serverNow: "2026-11-01T04:00:00.000Z",
     locationRequired: false, registrationOpensAt: REG_OPENS, contestantCutoffAt: REG_CLOSES, votingOpensAt: VOTE_OPENS, votingClosesAt: VOTE_CLOSES, scheduleStatus: "CONFIRMED",

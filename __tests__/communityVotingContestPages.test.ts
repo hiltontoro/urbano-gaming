@@ -300,13 +300,25 @@ describe("registration: a person registers THEMSELVES, through their own account
 
   it("the person who already registered sees their candidacy — never the form again — whatever phase registration is in", async () => {
     for (const registration of ["OPEN", "CLOSED", "NOT_OPEN"] as const) {
-      const p = await voter({ registration, mine: () => myCandidacy({ state: "PUBLIC", deliveryStatus: "DELIVERED" }) }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
+      const p = await voter({ registration, mine: () => myCandidacy({
+        state: "PUBLIC",
+        deliveryStatus: "DELIVERED",
+        share: { code: "HAL-K7M2Q", imageUrl: `${ROUNDS}/${INST.MOST_ELABORATE}/photos/4821?v=full` },
+      }) }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
       expect(p.$("#registerForm"), registration).toBeNull();
       expect(p.text("#myCandidacy"), registration).toContain("HAL-K7M2Q");
       expect(p.text("#myCandidacyText"), registration).toBe("Tu candidatura ya es pública: aparece en la galería con tu foto.");
       expect(p.text("#deliveryText"), registration).toBe("Tu foto y tu código ya te los enviaron por WhatsApp.");
       expect(p.$("#openMyFicha"), registration).toBeTruthy();
+      expect(p.$("#downloadMyPhoto"), registration).toBeTruthy();
+      expect(p.$("#downloadMyStory"), registration).toBeTruthy();
     }
+  });
+
+  it("keeps participant downloads closed while the photo is not public", async () => {
+    const p = await voter({ mine: () => myCandidacy() }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
+    expect(p.$("#downloadMyPhoto")).toBeNull();
+    expect(p.$("#downloadMyStory")).toBeNull();
   });
 
   it("a member of a group sees the group's candidacy and never the representative's delivery", async () => {

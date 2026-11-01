@@ -183,7 +183,29 @@ export async function getMyCandidacy(repo: SupabaseContestRepository, deps: Roun
   const { authUserId } = await resolveRoundVoter(deps, authorizationHeader);
   if (!isUuidLike(contestId)) throw new CommunityVotingError("CONTEST_NOT_FOUND", "No contest exists for this id.");
   const mine = await repo.readMyCandidacy(contestId, authUserId);
-  return { candidacy: mine ? { ...mine, categoryName: CATEGORIES[mine.categoryKey].name, ficheUrl: candidacyPageUrl(contestId, mine.publicCode) } : null };
+  if (!mine) return { candidacy: null };
+
+  let share: { code: string; imageUrl: string } | null = null;
+  if (mine.state === "PUBLIC") {
+    // The public lookup applies the same approval, consent, visibility and withdrawal boundary as the gallery/photo route.
+    // Do not derive a URL from the caller's private record: only offer a download when the public projection still exists.
+    const published = await repo.readCandidacyByCode(contestId, mine.publicCode);
+    if (published) {
+      share = {
+        code: published.publicCode,
+        imageUrl: photoUrl(published.instanceId, published.alias, "full"),
+      };
+    }
+  }
+
+  return {
+    candidacy: {
+      ...mine,
+      categoryName: CATEGORIES[mine.categoryKey].name,
+      ficheUrl: candidacyPageUrl(contestId, mine.publicCode),
+      share,
+    },
+  };
 }
 
 const photoUrl = (instanceId: string, alias: string, variant: "thumb" | "full") =>
