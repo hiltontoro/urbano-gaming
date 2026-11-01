@@ -227,6 +227,7 @@ describe("registration: a person registers THEMSELVES, through their own account
     let registered = false;
     const p = await voter({ mine: () => (registered ? myCandidacy() : null), registerReply: async () => { registered = true; return { status: 201, json: { candidacy: { entryId: uuid(5), publicCode: "HAL-K7M2Q" } } }; } }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
     expect(p.$("#myCandidacy")).toBeNull();
+    expect(p.$("#instagramInvite")).toBeNull();
     await fillGood(p);
     await p.clickSel("#regSubmit");
     expect(p.$("#registerForm")).toBeNull();
@@ -235,6 +236,9 @@ describe("registration: a person registers THEMSELVES, through their own account
     expect(p.text("#myCandidacy")).toContain("Más Elaborado");
     expect(p.text("#myCandidacyText")).toContain("Pasá por la estación del concurso con tu código");
     expect(p.text("#deliveryText")).toContain("Te enviaremos tu foto y tu código por WhatsApp");
+    expect(p.text("#instagramInvite")).toContain("@realurbanohn");
+    expect(p.$("#instagramInvite a")!.getAttribute("href")).toBe("https://www.instagram.com/realurbanohn/");
+    expect(p.text("#instagramInvite")).toContain("Es opcional y no afecta tu participación ni tus votos");
     expect(p.text(".msg.ok")).toContain("Tu candidatura quedó inscrita");
     expect(p.markup()).not.toMatch(/9988|99887766|50499887766/); // the person's number is on no part of what they see once registered
     expect(p.$("#copyCode")).toBeTruthy();
@@ -489,6 +493,7 @@ describe("voting: names and codes, a search, one vote per category — and no po
     expect(votes[1].body.intentNo).toBe(votes[0].body.intentNo);
     expect(p.posts().filter((c) => /intents$/.test(c.url))).toHaveLength(1); // no second intent
     expect(p.text(".msg.ok")).toContain("quedó registrado");
+    expect(p.text("#instagramInvite")).toContain("@realurbanohn");
   });
 
   it("the person's own costume carries its flag and offers no way to vote for it", async () => {

@@ -624,6 +624,13 @@
     }
   }
 
+  function instagramInvite() {
+    return h("aside", { class: "card stack", id: "instagramInvite", "aria-label": "Instagram de URBANO" },
+      h("h3", { text: "¡Compartí tu disfraz! 🎃" }),
+      h("p", null, "Seguinos en ", h("a", { class: "btn link", href: "https://www.instagram.com/realurbanohn/", target: "_blank", rel: "noopener noreferrer", text: "@realurbanohn" }), " y etiquetanos en tu historia de Instagram."),
+      h("p", { class: "hint", text: "Es opcional y no afecta tu participación ni tus votos." }));
+  }
+
   function renderMine() {
     const m = state.mine;
     if (!m) return null;
@@ -638,7 +645,8 @@
       m.state === "PUBLIC" ? h("button", { class: "btn", id: "openMyFicha", text: "Ver mi ficha", onclick: () => openFicha(m.publicCode) }) : null,
       m.state === "PUBLIC" && m.share ? h("div", { class: "btnrow", id: "myDownloads" },
         h("button", { class: "btn", id: "downloadMyPhoto", disabled: !!state.downloadBusy, text: state.downloadBusy === "photo" ? "Descargando…" : "Descargar mi foto", onclick: () => downloadMine("photo") }),
-        h("button", { class: "btn primary", id: "downloadMyStory", disabled: !!state.downloadBusy, text: state.downloadBusy === "story" ? "Creando story…" : "Descargar story para compartir", onclick: () => downloadMine("story") })) : null);
+        h("button", { class: "btn primary", id: "downloadMyStory", disabled: !!state.downloadBusy, text: state.downloadBusy === "story" ? "Creando story…" : "Descargar story para compartir", onclick: () => downloadMine("story") })) : null,
+      instagramInvite());
   }
 
   function openFicha(code) {
@@ -1137,6 +1145,7 @@
     else parts.push(renderVoting(c));
     if (state.entered && c.bound && (p === "OPEN") && state.order.length > 1) parts.push(h("button", { class: "btn", id: "reviewVotes", text: "Revisar mis votos", onclick: () => go("review") }));
     if (state.entered && c.bound && p === "NOT_OPEN" && !c.showClaim) parts.push(h("button", { class: "btn link", id: "showClaim", text: "Tengo un código de participante", onclick: () => { c.showClaim = true; render(); } }));
+    if (state.entered && c.myCandidateId && !state.busy && !c.retry) parts.push(instagramInvite());
     return parts;
   }
 
