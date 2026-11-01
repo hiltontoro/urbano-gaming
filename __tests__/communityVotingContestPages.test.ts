@@ -227,11 +227,14 @@ describe("registration: a person registers THEMSELVES, through their own account
     let registered = false;
     const p = await voter({ mine: () => (registered ? myCandidacy() : null), registerReply: async () => { registered = true; return { status: 201, json: { candidacy: { entryId: uuid(5), publicCode: "HAL-K7M2Q" } } }; } }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
     expect(p.$("#myCandidacy")).toBeNull();
+    expect(p.$("#backToGamingHome")).toBeNull();
     expect(p.$("#instagramInvite")).toBeNull();
     await fillGood(p);
     await p.clickSel("#regSubmit");
     expect(p.$("#registerForm")).toBeNull();
     expect(p.text("#myCode")).toBe("HAL-K7M2Q");
+    expect(p.text("#backToGamingHome")).toBe("Volver al inicio");
+    expect(p.$("#backToGamingHome")!.getAttribute("href")).toBe("/");
     expect(p.text("#myCandidacy")).toContain("Drácula");
     expect(p.text("#myCandidacy")).toContain("Más Elaborado");
     expect(p.text("#myCandidacyText")).toContain("Pasá por la estación del concurso con tu código");
@@ -314,6 +317,8 @@ describe("registration: a person registers THEMSELVES, through their own account
       expect(p.text("#myCandidacyText"), registration).toBe("Tu candidatura ya es pública: aparece en la galería con tu foto.");
       expect(p.text("#deliveryText"), registration).toBe("Tu foto y tu código ya te los enviaron por WhatsApp.");
       expect(p.$("#openMyFicha"), registration).toBeTruthy();
+      expect(p.text("#openMyFicha"), registration).toBe("Ver mi candidatura");
+      expect(p.$("#backToGamingHome")!.getAttribute("href"), registration).toBe("/");
       expect(p.$("#downloadMyPhoto"), registration).toBeTruthy();
       expect(p.$("#downloadMyStory"), registration).toBeTruthy();
     }
@@ -321,6 +326,8 @@ describe("registration: a person registers THEMSELVES, through their own account
 
   it("keeps participant downloads closed while the photo is not public", async () => {
     const p = await voter({ mine: () => myCandidacy() }, { query: `?c=${CONTEST}&participar=1`, auth: signedIn });
+    expect(p.$("#openMyFicha")).toBeNull();
+    expect(p.$("#backToGamingHome")!.getAttribute("href")).toBe("/");
     expect(p.$("#downloadMyPhoto")).toBeNull();
     expect(p.$("#downloadMyStory")).toBeNull();
   });
