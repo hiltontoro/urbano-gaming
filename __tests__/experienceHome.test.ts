@@ -91,13 +91,14 @@ describe("the Home: a featured card, then four experiences with one way into eac
     }
   });
 
-  it("moves Halloween into history, after the experiences, with one closed-event link and no active participation controls", () => {
+  it("keeps Halloween as Past events before the experiences, with one closed-event link and no active participation controls", () => {
     const card = doc.getElementById("halloween-history")!;
     expect(card).not.toBeNull();
     expect(visibleText(card.querySelector(".xf-label")!)).toBe("Evento finalizado");
     expect(visibleText(card.querySelector(".xf-title")!)).toBe("Halloween 2026");
     expect(card.querySelector(".xf-title")!.tagName).toBe("H3");
-    expect(doc.getElementById("history")!.previousElementSibling!.id).toBe("experiences");
+    expect(doc.getElementById("history")!.nextElementSibling!.id).toBe("experiences");
+    expect(doc.getElementById("history-heading")!.textContent).toBe("Past events");
     expect(doc.getElementById("featured-contest")).toBeNull();
     expect(links(card)).toEqual(["/halloween-2026.html"]);
     expect(card.querySelectorAll("[data-feat], [data-feat-cats], [data-feat-status]")).toHaveLength(0);
@@ -115,7 +116,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
 
   it("has no 'play' control and no link into a flow: the only links in the page body are the four panels', the only buttons are the language selector and the account control, and there is no form", () => {
     const main = doc.querySelector("main")!;
-    expect(links(main)).toEqual([...PANEL_ORDER.map((k) => "/" + PAGE_FILE[k]), "/halloween-2026.html"]);
+    expect(links(main)).toEqual(["/halloween-2026.html", ...PANEL_ORDER.map((k) => "/" + PAGE_FILE[k])]);
     expect(Array.from(doc.querySelectorAll("button")).map((b) => b.id || b.getAttribute("data-lang"))).toEqual(["es", "en", "btn-signin"]);
     expect(doc.querySelectorAll("form, input, select, textarea, [role='button'], [onclick]").length).toBe(0);
     for (const lang of [ES, EN]) {
@@ -127,7 +128,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
   it("is static where it matters: its own code makes no request (the featured card's one read is made by /featuredContest.js, the account control's by the shared client), and it carries none of the old Home's data scripts", () => {
     const html = HTML["index.html"];
     const scripts = Array.from(doc.querySelectorAll("script")).map((s) => s.getAttribute("src") ?? (s.id ? `inline#${s.id}` : "inline"));
-    expect(scripts).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "inline#i18n-fallback", "/urbanoAuth.js", "inline"]);
+    expect(scripts).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/halloween-memories.js", "inline#i18n-fallback", "/urbanoAuth.js", "inline"]);
     const inline = Array.from(doc.querySelectorAll("script:not([src])")).filter((s) => s.id !== "i18n-fallback").map((s) => s.textContent).join("\n");
     expect(inline).not.toMatch(/fetch\(|XMLHttpRequest|\/api\//);
     for (const gone of ["hostAvailability.js", "homeUpcoming.js", "homeUpcomingData.js", "/api/gaming/predictions", "/api/gaming/host", "/halloween.html"]) expect(html, gone).not.toContain(gone);

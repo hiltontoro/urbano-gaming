@@ -128,7 +128,7 @@ type HomePage = Awaited<ReturnType<typeof loadHome>>;
  *  says a contest is listed: see /featuredContest.js and __tests__/experienceHome.test.ts.) */
 function expectNoCallToPlay(page: HomePage, label: string) {
   expect(visibleStrings(page.doc).filter((t) => /Jugar ahora|Play now/i.test(t)), label).toEqual([]);
-  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/score.html", "/trivia.html", "/poker.html", "/voting.html", "/halloween-2026.html"]);
+  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/halloween-2026.html", "/score.html", "/trivia.html", "/poker.html", "/voting.html"]);
   expect(page.doc.querySelectorAll("main button, main form, main input"), label).toHaveLength(0);
 }
 

@@ -236,6 +236,13 @@ footer a { color: var(--ink); text-decoration: underline; padding: 8px 2px; }
 .xf-desc { margin: 0; max-width: 48ch; font-size: 15px; line-height: 1.55; color: rgba(245, 241, 232, 0.94); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 .xf-prizes { margin: 0; max-width: 48ch; border-left: 3px solid var(--accent); padding-left: 12px; font-size: 14.5px; font-weight: 700; line-height: 1.5; color: var(--ink); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 .xf-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+.history-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.history-photos img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--line); border-radius: 12px; }
+.history-photos--preview { max-width: 420px; }
+.history-photos--preview img { max-height: 136px; }
+.history-photos--gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.history-photos--gallery img { object-fit: contain; background: var(--bg-card); }
+@media (max-width: 600px) { .history-photos--gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .xf-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 24px; border-radius: 999px;
   font-size: 14px; font-weight: 700; line-height: 1.2; text-align: center;
