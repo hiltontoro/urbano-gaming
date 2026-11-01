@@ -444,7 +444,6 @@
             if (r.status !== 200) fail(r); else state.notice = "Foto rechazada. Tomá otra.";
           }) })));
     }
-    if (cur === "MEMBERS") return h("div", { class: "action", id: "actionMembers" }, h("p", { text: "Un grupo necesita al menos un integrante más, y que todos estén verificados y hayan dado su consentimiento. Agregalos abajo." }));
     return null;
   }
 
@@ -533,9 +532,10 @@
     const ov = overviewOf(w.categoryKey);
     const members = ((ov && ov.entries) || []).filter((m) => m.kind === "GROUP_MEMBER" && m.groupEntryId === e.entryId && !m.withdrawn);
     const photoReady = !!e.photoId && e.media !== "NONE" && e.media !== "REJECTED";
-    return h("div", { class: "action", id: "membersCard" },
-      h("h3", { text: "Integrantes del grupo" }),
-      h("p", { text: "Cada integrante entra con su propio correo, escribe su código y da su consentimiento para la foto del grupo. Una sola candidatura por persona." }),
+    return h("details", { class: "action", id: "membersCard" },
+      h("summary", { text: "Integrantes adicionales (opcional)" }),
+      h("p", { text: "Basta la cuenta del representante para inscribir al dúo o grupo. Confirmá con el representante que todas las personas de la foto son mayores de edad y aceptan participar y mostrar su imagen. Agregar cuentas adicionales es opcional; las pendientes no bloquean la candidatura y no se marcan como verificadas ni con consentimiento." }),
+      h("p", { text: "El sistema solo puede bloquear el autovoto de las cuentas identificadas del grupo." }),
       members.length === 0 ? h("p", { text: "Todavía no agregaste a nadie más." }) : null,
       members.map((m, i) => renderMemberRow(w, e, api, m, i, photoReady)),
       h("button", { class: "btn block", id: "addMember", disabled: state.busy, text: "Agregar un integrante", onclick: () => act("member", async () => {

@@ -742,7 +742,7 @@
     const kinds = state.order.map(cat);
     const catGroup = h("div", { class: "opts", role: "radiogroup", "aria-label": "Categoría" }, kinds.map((c) => {
       const input = h("input", { type: "radio", name: "category", value: c.key, id: `cat_${c.key}`, checked: f.category === c.key, onchange: () => { f.category = c.key; saveDraft(); state.formErrors = Object.assign({}, state.formErrors, { category: undefined }); render(); } });
-      return h("label", { class: `opt${f.category === c.key ? " on" : ""}`, for: `cat_${c.key}` }, input, h("span", null, c.name, c.kind === "GROUP" ? h("small", { text: "Una persona inscribe al grupo; en la estación se registra a las demás." }) : null));
+      return h("label", { class: `opt${f.category === c.key ? " on" : ""}`, for: `cat_${c.key}` }, input, h("span", null, c.name, c.kind === "GROUP" ? h("small", { text: "Una persona representa al dúo o grupo. Las demás cuentas son opcionales; todas las personas de la foto deben aceptar participar." }) : null));
     }));
     const name = h("input", { type: "text", id: "regName", maxlength: "40", autocomplete: "nickname", placeholder: "Por ejemplo, Drácula de Tegucigalpa", value: f.name, "aria-label": "Nombre público" });
     name.addEventListener("input", () => { f.name = name.value; saveDraft(); clearError("name"); });

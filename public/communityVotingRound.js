@@ -504,7 +504,7 @@ const CommunityVotingRound = (() => {
   const HOW_TO_PARTICIPATE = [
     "Para participar como concursante, inscribite con tu cuenta de URBANO Gaming (correo verificado y perfil completo). Es una sola candidatura por persona, en una sola categoría, y solo para mayores de edad.",
     "Pasá por la estación del concurso con tu código: el equipo verifica tu nombre y tu categoría y te toma la foto. Tu candidatura se hace pública solo después de eso.",
-    "En el grupo, una persona lo inscribe como representante y el equipo registra en la estación a las demás. Todas las personas de la foto tienen que aceptar.",
+    "Una persona inscribe al dúo o grupo como representante. Agregar cuentas de otros integrantes es opcional. Todas las personas de la foto tienen que aceptar participar y mostrar su imagen.",
     "Para votar entrás con tu correo. Podés votar desde donde estés: no pedimos tu ubicación. Tenés un voto por categoría y lo podés cambiar hasta que cierre la votación.",
     "No podés votar por tu propio disfraz ni por el de tu grupo.",
     "Gana quien reciba más votos en cada categoría. Si hay empate, hay más de un ganador. Los resultados se publican después de que el equipo los revise.",

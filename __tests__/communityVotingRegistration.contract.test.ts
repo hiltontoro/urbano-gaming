@@ -473,23 +473,22 @@ describe("the operator's station: search the code, verify the person, take the p
 // ============================================================ groups
 
 describe("a self-registered group: the representative registers, the operator attributes the members, and the group is public only when complete", () => {
-  it("is public only when every person in the photograph is associated and has consented — the representative's registration does not shortcut it", async () => {
+  it("is public after the representative completes the station; optional member records and their consents remain independent", async () => {
     const c = await openRegistrationContest();
     const r = c.rounds.BEST_GROUP;
     const rep = await newPerson();
     const reg = await selfRegister(r, rep, { name: "Los Intocables" });
     const photo = await completeAtStation(r, reg.entryId);
-    // the representative alone: a group needs at least one attributed member
-    expect(await gallery(r)).toHaveLength(0);
-    expect(await byCode(c.contestId, reg.public_code)).toHaveLength(0);
+    expect(await gallery(r)).toHaveLength(1);
+    expect(await byCode(c.contestId, reg.public_code)).toHaveLength(1);
 
     const m1 = await createMember(r, reg.entryId);
     const m2 = await createMember(r, reg.entryId);
     const p1 = await associate(r, m1.entryId, m1.claimCode);
     const p2 = await associate(r, m2.entryId, m2.claimCode);
     await memberConsent(r, m1.entryId, photo.photoId);
-    expect(await gallery(r)).toHaveLength(0); // one member has not consented yet
-    expect(await byCode(c.contestId, reg.public_code)).toHaveLength(0);
+    expect(await gallery(r)).toHaveLength(1); // no fabricated consent for the optional member
+    expect(await byCode(c.contestId, reg.public_code)).toHaveLength(1);
     await memberConsent(r, m2.entryId, photo.photoId);
 
     const rows = await gallery(r);

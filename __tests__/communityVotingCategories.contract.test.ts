@@ -265,24 +265,26 @@ describe("one candidacy per person, in one category (the database's own rule)", 
 // ============================================================ groups
 
 describe("a group candidacy: one photograph, a representative, privately attributed members", () => {
-  it("is APPROVED only when every attributed member is associated AND has consented to THAT photograph", async () => {
+  it("accepts one confirmed representative with photo consent; additional member accounts are optional", async () => {
     const c = await newContest();
     const r = c.rounds.BEST_GROUP;
     const state = async (entryId: string) => (await q<{ m_state: string }>("select m_state from community_voting_entry_media($1)", [entryId]))[0].m_state;
     const complete = async (entryId: string, photoId: string) => (await q<{ ok: boolean }>("select community_voting_group_complete($1, $2) ok", [entryId, photoId]))[0].ok;
     const g = await createGroup(r);
     const photo = await approvedPhoto(r, g.entryId);
-    // a group of one is not a group: there must be at least one attributed member
+    // A representative is still required; a photo approval alone is not an association.
     expect(await complete(g.entryId, photo.photoId)).toBe(false);
     expect(await state(g.entryId)).toBe("PENDING_CONSENT");
+    await associate(r,g.entryId,g.claimCode);
+    expect(await complete(g.entryId,photo.photoId)).toBe(true);
     const m1 = await createMember(r, g.entryId);
     const m2 = await createMember(r, g.entryId);
-    expect(await complete(g.entryId, photo.photoId)).toBe(false);
+    expect(await complete(g.entryId, photo.photoId)).toBe(true);
     await memberConsent(r, m1.entryId, photo.photoId);
     await memberConsent(r, m2.entryId, photo.photoId);
-    expect(await complete(g.entryId, photo.photoId)).toBe(false); // consent without association is not enough
+    expect(await complete(g.entryId, photo.photoId)).toBe(true); // pending optional members do not invalidate the representative
     await associate(r, m1.entryId, m1.claimCode);
-    expect(await complete(g.entryId, photo.photoId)).toBe(false);
+    expect(await complete(g.entryId, photo.photoId)).toBe(true);
     await associate(r, m2.entryId, m2.claimCode);
     expect(await complete(g.entryId, photo.photoId)).toBe(true);
     expect(await state(g.entryId)).toBe("APPROVED");
@@ -316,7 +318,7 @@ describe("a group candidacy: one photograph, a representative, privately attribu
     await refused("select * from record_community_voting_member_consent_atomically($1, $2, $3, $4, $5, $6, $7, true)", [r.instanceId, r.ctx.hostToken, (await newPerson()).gamingMemberId, m.entryId, photo.photoId, consent.consentVersion, consent.statementSha256], "CV_OPERATOR_REQUIRED");
   });
 
-  it("opens with the groups that are complete, keeps members OFF the ballot, and refuses to open with a member left out", async () => {
+  it("opens with two represented groups, keeps optional pending members OFF the ballot without inventing associations", async () => {
     const c = await newContest();
     const r = c.rounds.BEST_GROUP;
     const g1 = await group(r, 2);
@@ -329,12 +331,8 @@ describe("a group candidacy: one photograph, a representative, privately attribu
     await repo.bindVoter({ instanceId: r.instanceId, authUserId: lonelyPerson.authUserId });
     await memberConsent(r, lonely.entryId, photo2.photoId);
     await lock(r);
-    await refused("select * from start_community_voting_category_atomically($1, $2, $3, 'p')", [r.instanceId, r.ctx.hostToken, r.ctx.operatorMemberId], "CV_PREPARATION_INCOMPLETE");
-    expect((await q("select 1 from interaction_instances where session_id = $1", [r.session.sessionId])).length).toBe(0);
-    // the lobby is locked now: the person was bound before it, and claiming and confirming need no new participant
-    const claimed = await repo.claimRoundEntry({ instanceId: r.instanceId, authUserId: lonelyPerson.authUserId, claimCode: lonely.claimCode });
-    await repo.confirmRoundAssociation({ ...r.ctx, entryId: lonely.entryId, confirmationCode: claimed.confirmationCode });
     const opened = await openCategory(r);
+    expect((await q("select confirmed_binding_id from community_voting_entries where entry_id=$1",[lonely.entryId]))[0].confirmed_binding_id).toBeNull();
     expect(opened.candidate_count).toBe(2);
     const cands = await candidatesOf(r);
     expect(cands.map((x) => x.kind)).toEqual(["GROUP", "GROUP"]);

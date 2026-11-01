@@ -618,8 +618,8 @@ describe("the station: what each candidacy still needs, and what keeps a categor
     const manual = { ...base, selfRegistered: false, association: "PENDING_CONFIRMATION", media: "NONE", entryConsent: false, photoDecision: null };
     expect(O.stationSteps(manual)[0]).toMatchObject({ key: "ASSOCIATE", state: "current" });
     const group = { ...base, kind: "GROUP", groupComplete: false };
-    expect(O.stationSteps(group).map((s) => s.key)).toEqual(["VERIFY", "PHOTO", "CONSENT", "APPROVE", "MEMBERS"]);
-    expect(O.currentStep(group)).toBe("MEMBERS");
+    expect(O.stationSteps(group).map((s) => s.key)).toEqual(["VERIFY", "PHOTO", "CONSENT", "APPROVE"]);
+    expect(O.currentStep(group)).toBeNull();
     expect(O.currentStep({ ...group, groupComplete: true })).toBeNull();
     expect(O.stationSteps(null)).toEqual([]);
   });

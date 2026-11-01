@@ -3,7 +3,7 @@
 // Pure functions and small injected-dependency helpers (no DOM; the network and the clock are ARGUMENTS), so the exact deployed text is unit-tested.
 // The station is organised around what the operator does with a person standing in front of them: search the code, verify the person, take the
 // photograph, record the consent, approve, confirm — and, afterwards, deliver the photograph by hand from their own WhatsApp. Everything here is a
-// CONVENIENCE: every rule (the host token, the designated operator, one candidacy per person, the consents of everybody in a photograph, the freeze at
+// CONVENIENCE: every rule (the host token, the designated operator, one candidacy per identified person, the representative's photo consent, the freeze at
 // opening) is enforced by the server and the database, and nothing on this page can make an invalid action valid.
 //
 // PRIVACY: the delivery number is requested only when the operator asks to deliver, from the one route that returns it, and it lives in this page's
@@ -111,7 +111,7 @@ const CommunityVotingOperator = (() => {
     steps.push({ key: "PHOTO", label: "Tomar la foto", done: hasPhoto });
     steps.push({ key: "CONSENT", label: "Consentimiento de la foto", done: consented });
     steps.push({ key: "APPROVE", label: "Aprobar la foto", done: approved });
-    if (e.kind === "GROUP") steps.push({ key: "MEMBERS", label: "Integrantes del grupo", done: e.groupComplete === true });
+    // The group is represented by one verified account; extra member accounts are optional.
     let currentSeen = false;
     return steps.map((s) => {
       const state = s.done ? "done" : currentSeen ? "todo" : "current";
