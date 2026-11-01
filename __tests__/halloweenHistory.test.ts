@@ -26,7 +26,7 @@ describe("Halloween 2026 is a finalized history, not a voting flow", () => {
   });
   it("server redirects the real contest, its old no-ID entry and its screen, but not other contest IDs or APIs", async () => {
     const config = (await import("../next.config.mjs")).default;
-    const rules = await config.redirects();
+    const rules = await config.redirects!();
     expect(rules).toHaveLength(3);
     expect(rules.every((rule: any) => rule.destination === "/halloween-2026.html" && rule.permanent === false)).toBe(true);
     expect(rules.map((rule: any) => rule.source)).toEqual(["/community-voting-round.html", "/community-voting-round.html", "/community-voting-round-display.html"]);
