@@ -45,37 +45,9 @@
     <p data-i18n="home.hero.sub">Votaciones, predicciones, trivia y poker: experiencias hechas para vivir juntos.</p>
   </section>
 
-  <!-- Destacado: the Halloween contest at The Pub by Beer Box, an URBANO Voting experience, with its TWO buttons: "Votar por tu disfraz favorito" and
-       "Participar como concursante". The words are written here and nothing else on this card is read from a server except ONE answer, checked strictly by
-       /featuredContest.js: has the operator listed a contest? Until the answer is exactly right the two buttons are words in a dashed outline, NOT links
-       (the sentence under them says that nothing is available yet), so nobody can press a link that leads nowhere; when it is right they become real links
-       to the contest's own page. -->
-  <section class="xf-section" aria-labelledby="featured-title">
-    <article class="xf" id="featured-contest">
-      <img class="xf-art" src="/assets/home/halloween-community.webp" alt="" width="1280" height="720" decoding="async">
-      <span class="xf-scrim" aria-hidden="true"></span>
-      <div class="xf-body">
-        <div class="xf-top">
-          <span class="xf-label" data-i18n="home.feat.label">Destacado</span>
-          <span class="xp-kicker" data-i18n="home.feat.product">URBANO Voting</span>
-        </div>
-        <h2 class="xf-title" id="featured-title"><span data-i18n="home.feat.title">Halloween</span><span class="sr-only">: </span><span class="xf-tagline" data-i18n="home.feat.tagline">La última noche</span></h2>
-        <p class="xf-meta"><span data-i18n="home.feat.sub">Concurso de disfraces</span> · <span data-i18n="home.feat.venue">The Pub by Beer Box</span> · <span data-i18n="home.feat.date">Sábado 31 de octubre</span></p>
-        <p class="xf-desc" data-i18n="home.feat.desc">Elegí a tus favoritos de la noche o sumate como concursante.</p>
-        <p class="xf-prizes" data-i18n="home.feat.prizes">Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.</p>
-        <ul class="xf-cats" data-feat-cats hidden></ul>
-        <div class="xf-actions">
-          <span class="xf-btn" data-feat="vote" data-i18n="home.feat.vote">Votar por tu disfraz favorito</span>
-          <span class="xf-btn" data-feat="join" data-i18n="home.feat.join">Participar como concursante</span>
-        </div>
-        <p class="xf-status" data-feat-status role="status" data-i18n="home.feat.status.default">Las inscripciones y la votación todavía no están disponibles.</p>
-      </div>
-    </article>
-  </section>
-
-  <!-- The four experiences of URBANO Gaming, in this order: Score, Trivia, Poker, Voting (Voting is last because the featured card above is already its Halloween experience). The four panels are static: every word is written here
+  <!-- The four experiences of URBANO Gaming, in this order: Score, Trivia, Poker, Voting. The four panels are static: every word is written here
        (and translated by the language table), every picture is decoration (empty alt text), and nothing in them is read from a server, so they are the
-       same for the first visitor and for the thousandth (the only answer this page asks a server for is the featured card's, above). Each panel has
+       same for the first visitor and for the thousandth. Each panel has
        ONE control: "Descubrí más", a link to that experience's own page (/voting.html, /score.html, /trivia.html, /poker.html), where the information
        is. There is no "play" or "join" button in the panels and no link to anything that is not an existing page. The two anchors (#experiences,
        #play) are what the navigation of every page points at. -->
@@ -163,6 +135,20 @@
       </li>
     </ul>
   </section>
+  <section class="xf-section" id="history" aria-labelledby="history-heading">
+    <h2 id="history-heading" data-i18n="home.history.heading">Nuestra historia</h2>
+    <article class="xf" id="halloween-history" aria-labelledby="history-title">
+      <img class="xf-art" src="/assets/home/halloween-community.webp" alt="" width="1280" height="720" decoding="async" loading="lazy">
+      <span class="xf-scrim" aria-hidden="true"></span>
+      <div class="xf-body">
+        <span class="xf-label" data-i18n="home.history.status">Evento finalizado</span>
+        <h3 class="xf-title" id="history-title" data-i18n="home.history.title">Halloween 2026</h3>
+        <p class="xf-meta">The Pub by Beer Box · 31.10.2026</p>
+        <p class="xf-desc" data-i18n="home.history.description">Una noche de disfraces y comunidad en The Pub by Beer Box. Así vivimos Halloween en URBANO Gaming.</p>
+        <div class="xf-actions"><a class="xf-btn is-primary" href="/halloween-2026.html" data-i18n="home.history.link">Ver el evento</a></div>
+      </div>
+    </article>
+  </section>
 </main>
 
 <footer class="site-footer">
@@ -184,7 +170,6 @@
 
 <script src="/urbanoI18n.js"></script>
 <script src="/urbanoClubCrests.js"></script>
-<script src="/featuredContest.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -195,6 +180,11 @@
   var m = w.UrbanoI18n;
   if (m && typeof m.t === "function" && typeof m.has === "function" && typeof m.locale === "function" && typeof m.getLang === "function" && typeof m.onChange === "function" && typeof m.serverMessageKey === "function") return;
   var ES = {
+    "home.history.heading": "Nuestra historia",
+    "home.history.status": "Evento finalizado",
+    "home.history.title": "Halloween 2026",
+    "home.history.description": "Una noche de disfraces y comunidad en The Pub by Beer Box. Así vivimos Halloween en URBANO Gaming.",
+    "home.history.link": "Ver el evento",
     "shell.lang.label": "Idioma",
     "shell.lang.es": "Cambiar a español",
     "shell.lang.en": "Cambiar a inglés",
@@ -422,8 +412,6 @@
 <script>
   // The crests of the Score panel: decoration drawn by the central module (absent or switched off, the strip is the same without them: every team is named in text).
   if (window.UrbanoClubCrests) window.UrbanoClubCrests.decorate(document);
-  // The featured card's two buttons: links only when the server's answer is exactly the documented one (see /featuredContest.js); otherwise they stay as written.
-  if (window.UrbanoFeaturedContest) window.UrbanoFeaturedContest.bind(document.getElementById("featured-contest"));
   // The header's account control is the only thing on this page that talks to the application. The four panels do not depend on it.
   // (UrbanoAuth is a top-level const of /urbanoAuth.js: a global binding, NOT a property of window, so it is looked for with typeof, never with window.UrbanoAuth.)
   if (typeof UrbanoAuth !== "undefined") {

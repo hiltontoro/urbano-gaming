@@ -175,6 +175,7 @@ describe("the two languages carry the same table", () => {
       "home.xp.voting.title", "home.xp.score.title", "home.xp.trivia.title", "home.xp.poker.title", // "URBANO Voting", "URBANO Score", "URBANO Trivia" and "URBANO Poker" are product names
       "lp.voting.pageTitle", "lp.score.pageTitle", "lp.trivia.pageTitle", "lp.poker.pageTitle", // (and the page titles made of them)
       "home.feat.product", "home.feat.title", "home.feat.venue", // the featured card: "URBANO Voting", "Halloween" and "The Pub by Beer Box" are names, the same in both languages
+      "home.history.title", // event name, unchanged across languages
       "home.title", "pred.title", "pred.vs", "upcoming.vs", "home.status.playtest", "profile.soon.avatar", "profile.part.match", // "vs" is the same word in both languages (the separator between two teams)
     ]);
     for (const key of Object.keys(en)) {

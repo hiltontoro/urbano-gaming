@@ -135,8 +135,8 @@ describe("Home art — the five photographs", () => {
     expect(CODE).not.toMatch(/level[-_ ]?33/i);
   });
 
-  it("brings nothing from the prototype: no illustrative data, no mockup class or navigation hook, and no external script besides the language module, the club crests module, the featured card's module and the shared sign-in", () => {
-    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/featuredContest.js", "/urbanoAuth.js"]);
+  it("brings nothing from the prototype and no external script besides language, crests and shared sign-in; the retired promotion no longer reads featured contests", () => {
+    expect(Array.from(INDEX_HTML.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)).map((m) => m[1])).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/urbanoAuth.js"]);
     expect(CODE).not.toMatch(/\bug-[a-z-]+|data-jump|data-view|data-panel|Founder Design Review|DESIGN PROTOTYPE|Illustrative data|ACRE8M|Community Cup|Community Soccer/);
   });
 });

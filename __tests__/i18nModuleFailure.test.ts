@@ -269,8 +269,8 @@ function homeSnapshot(page: Page) {
       desc: norm(c.querySelector(".xp-desc")?.textContent), cta: norm(c.querySelector(".xp-cta")?.textContent), href: c.querySelector("a.xp-cta")?.getAttribute("href") ?? null,
     })),
     featured: {
-      label: text("#featured-contest .xf-label"), product: text("#featured-contest .xp-kicker"), title: text("#featured-contest .xf-title"), meta: text("#featured-contest .xf-meta"), desc: text("#featured-contest .xf-desc"),
-      buttons: Array.from(doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, norm(e.textContent), e.getAttribute("href")]), status: text("#featured-contest [data-feat-status]"),
+      label: text("#halloween-history .xf-label"), title: text("#halloween-history .xf-title"), meta: text("#halloween-history .xf-meta"), desc: text("#halloween-history .xf-desc"),
+      buttons: Array.from(doc.querySelectorAll("#halloween-history a")).map((e) => [e.tagName, norm(e.textContent), e.getAttribute("href")]),
     },
     teams: Array.from(doc.querySelectorAll("article.xp-score li.crest-chip")).map((li) => [li.getAttribute("data-club"), norm(li.querySelector(".crest-name")?.textContent), li.querySelector("img.club-crest")?.getAttribute("data-crest") ?? null]),
     teamsLabel: text("#featured-teams-label"), teamsLegal: text("article.xp-score .featured-legal"), choose: text(".xp-choose"),

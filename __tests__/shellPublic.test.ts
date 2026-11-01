@@ -128,7 +128,7 @@ type HomePage = Awaited<ReturnType<typeof loadHome>>;
  *  says a contest is listed: see /featuredContest.js and __tests__/experienceHome.test.ts.) */
 function expectNoCallToPlay(page: HomePage, label: string) {
   expect(visibleStrings(page.doc).filter((t) => /Jugar ahora|Play now/i.test(t)), label).toEqual([]);
-  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/score.html", "/trivia.html", "/poker.html", "/voting.html"]);
+  expect(Array.from(page.doc.querySelectorAll("main a")).map((a) => a.getAttribute("href")), label).toEqual(["/score.html", "/trivia.html", "/poker.html", "/voting.html", "/halloween-2026.html"]);
   expect(page.doc.querySelectorAll("main button, main form, main input"), label).toHaveLength(0);
 }
 
@@ -144,13 +144,11 @@ describe("Home — Spanish first, never from the browser", () => {
     expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
       "Descubrí más: URBANO Score", "Descubrí más: URBANO Trivia", "Descubrí más: URBANO Poker", "Descubrí más: URBANO Voting",
     ]);
-    // the featured card: Halloween, an URBANO Voting experience, with its two buttons (words, not links, until the server says a contest is listed)
-    expect(page.text("#featured-contest .xf-label")).toBe("Destacado");
-    expect(page.text("#featured-contest .xf-title")).toBe("Halloween: La última noche");
-    expect(page.text("#featured-contest .xf-meta")).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
-    expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => [e.tagName, e.textContent])).toEqual([["SPAN", "Votar por tu disfraz favorito"], ["SPAN", "Participar como concursante"]]);
-    expect(page.text("#featured-contest [data-feat-status]")).toBe("Las inscripciones y la votación todavía no están disponibles.");
+    expect(page.text("#halloween-history .xf-label")).toBe("Evento finalizado");
+    expect(page.text("#halloween-history .xf-title")).toBe("Halloween 2026");
+    expect(page.text("#halloween-history a")).toBe("Ver el evento");
+    expect(page.doc.querySelector("#halloween-history a")!.getAttribute("href")).toBe("/halloween-2026.html");
+    expect(page.doc.querySelector("[data-feat]")).toBeNull();
     expect(page.text("#featured-teams-label")).toBe("Equipos que podrían aparecer en URBANO Score");
     expect(page.doc.querySelectorAll("article.xp-score ul.ten-crests > li.crest-chip")).toHaveLength(10);
     expect(page.text("article.xp-score .featured-legal")).toBe("Los escudos solo identifican a los equipos. URBANO no está afiliado a estos clubes ni a las ligas o competiciones que se nombran, ni cuenta con su patrocinio o respaldo.");
@@ -190,12 +188,10 @@ describe("Home — the visible, accessible, remembered ES / EN selector", () => 
     expect(Array.from(page.doc.querySelectorAll("a.xp-cta")).map((a) => (a.textContent ?? "").replace(/\s+/g, " "))).toEqual([
       "Discover more: URBANO Score", "Discover more: URBANO Trivia", "Discover more: URBANO Poker", "Discover more: URBANO Voting",
     ]);
-    expect(page.text("#featured-contest .xf-label")).toBe("Featured");
-    expect(page.text("#featured-contest .xf-title")).toBe("Halloween: The Last Night");
-    expect(page.text("#featured-contest .xf-meta")).toBe("Costume contest · The Pub by Beer Box · Saturday, October 31");
-    expect(page.text("#featured-contest .xf-prizes")).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
-    expect(Array.from(page.doc.querySelectorAll("#featured-contest [data-feat]")).map((e) => e.textContent)).toEqual(["Vote for your favorite costume", "Take part as a contestant"]);
-    expect(page.text("#featured-contest [data-feat-status]")).toBe("Registration and voting are not available yet.");
+    expect(page.text("#halloween-history .xf-label")).toBe("Event ended");
+    expect(page.text("#halloween-history .xf-title")).toBe("Halloween 2026");
+    expect(page.text("#halloween-history a")).toBe("View the event");
+    expect(page.doc.querySelector("[data-feat]")).toBeNull();
     expect(page.text("#featured-teams-label")).toBe("Teams that may appear in URBANO Score");
     expect(page.text("article.xp-score .featured-legal")).toBe("Crests only identify the teams. URBANO is not affiliated with, sponsored by or endorsed by these clubs or by the leagues and competitions named here.");
     expectNoCallToPlay(page, "en");

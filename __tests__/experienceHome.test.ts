@@ -91,43 +91,31 @@ describe("the Home: a featured card, then four experiences with one way into eac
     }
   });
 
-  it("the featured card (Destacado) says Halloween: La última noche, Concurso de disfraces, The Pub by Beer Box and Sábado 31 de octubre, promises prizes for the winners delivered by The Pub, is an URBANO Voting experience, and has TWO buttons instead of 'Descubrí más'", () => {
-    const card = doc.getElementById("featured-contest")!;
+  it("moves Halloween into history, after the experiences, with one closed-event link and no active participation controls", () => {
+    const card = doc.getElementById("halloween-history")!;
     expect(card).not.toBeNull();
-    expect(visibleText(card.querySelector(".xf-label")!)).toBe("Destacado");
-    expect(visibleText(card.querySelector(".xp-kicker")!)).toBe("URBANO Voting");
-    expect(visibleText(card.querySelector(".xf-title")!)).toBe("Halloween: La última noche"); // the colon between the two parts is for screen readers
-    expect(card.querySelector(".xf-title")!.tagName).toBe("H2");
-    expect(visibleText(card.querySelector(".xf-title .xf-tagline")!)).toBe("La última noche"); // the motto of the party: it is The Pub's last night
-    expect(doc.querySelector("section.xf-section")!.getAttribute("aria-labelledby")).toBe(card.querySelector(".xf-title")!.id);
-    expect(visibleText(card.querySelector(".xf-meta")!)).toBe("Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(visibleText(card.querySelector(".xf-prizes")!)).toBe("Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.");
-    expect(Array.from(card.querySelectorAll("[data-feat]")).map((b) => [b.getAttribute("data-feat"), visibleText(b)])).toEqual([["vote", "Votar por tu disfraz favorito"], ["join", "Participar como concursante"]]);
-    expect(card.textContent).not.toMatch(/Descubrí más|Discover more/);
-    expect(visibleText(card.querySelector("[data-feat-status]")!)).toBe("Las inscripciones y la votación todavía no están disponibles.");
-    expect(card.querySelector("[data-feat-status]")!.getAttribute("role")).toBe("status");
+    expect(visibleText(card.querySelector(".xf-label")!)).toBe("Evento finalizado");
+    expect(visibleText(card.querySelector(".xf-title")!)).toBe("Halloween 2026");
+    expect(card.querySelector(".xf-title")!.tagName).toBe("H3");
+    expect(doc.getElementById("history")!.previousElementSibling!.id).toBe("experiences");
+    expect(doc.getElementById("featured-contest")).toBeNull();
+    expect(links(card)).toEqual(["/halloween-2026.html"]);
+    expect(card.querySelectorAll("[data-feat], [data-feat-cats], [data-feat-status]")).toHaveLength(0);
+    expect(card.textContent).not.toMatch(/Votar por|Participar como|Destacado/);
     expect(card.querySelector("img")!.getAttribute("alt")).toBe("");
-    expect(EN["home.feat.vote"]).toBe("Vote for your favorite costume");
-    expect(EN["home.feat.join"]).toBe("Take part as a contestant");
-    expect(EN["home.feat.date"]).toBe("Saturday, October 31");
-    expect(EN["home.feat.tagline"]).toBe("The Last Night");
-    expect(EN["home.feat.prizes"]).toBe("Prizes announced by The Pub: Most Elaborate $500 · Sexiest $300 · Duo or Group $250 · Funniest $200.");
+    expect(EN["home.history.status"]).toBe("Event ended");
   });
 
-  it("in the first HTML the featured card's two buttons are NOT links (words in a dashed outline), so nobody can press a link that leads nowhere", () => {
-    const card = doc.getElementById("featured-contest")!;
-    expect(card.querySelectorAll("a, button, form, input")).toHaveLength(0);
-    for (const b of Array.from(card.querySelectorAll("[data-feat]"))) {
-      expect(b.tagName).toBe("SPAN");
-      expect(b.hasAttribute("href")).toBe(false);
-      expect(b.hasAttribute("tabindex")).toBe(false);
-    }
-    expect(card.querySelector("[data-feat-cats]")!.hasAttribute("hidden")).toBe(true);
+  it("the history link works on first paint without scripts, and points to a real page", () => {
+    const card = doc.getElementById("halloween-history")!;
+    expect(card.querySelectorAll("button, form, input")).toHaveLength(0);
+    expect(card.querySelector("a")!.textContent).toBe("Ver el evento");
+    expect(existsSync(path.join(PUBLIC, "halloween-2026.html"))).toBe(true);
   });
 
   it("has no 'play' control and no link into a flow: the only links in the page body are the four panels', the only buttons are the language selector and the account control, and there is no form", () => {
     const main = doc.querySelector("main")!;
-    expect(links(main)).toEqual(PANEL_ORDER.map((k) => "/" + PAGE_FILE[k]));
+    expect(links(main)).toEqual([...PANEL_ORDER.map((k) => "/" + PAGE_FILE[k]), "/halloween-2026.html"]);
     expect(Array.from(doc.querySelectorAll("button")).map((b) => b.id || b.getAttribute("data-lang"))).toEqual(["es", "en", "btn-signin"]);
     expect(doc.querySelectorAll("form, input, select, textarea, [role='button'], [onclick]").length).toBe(0);
     for (const lang of [ES, EN]) {
@@ -139,7 +127,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
   it("is static where it matters: its own code makes no request (the featured card's one read is made by /featuredContest.js, the account control's by the shared client), and it carries none of the old Home's data scripts", () => {
     const html = HTML["index.html"];
     const scripts = Array.from(doc.querySelectorAll("script")).map((s) => s.getAttribute("src") ?? (s.id ? `inline#${s.id}` : "inline"));
-    expect(scripts).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "/featuredContest.js", "inline#i18n-fallback", "/urbanoAuth.js", "inline"]);
+    expect(scripts).toEqual(["/urbanoI18n.js", "/urbanoClubCrests.js", "inline#i18n-fallback", "/urbanoAuth.js", "inline"]);
     const inline = Array.from(doc.querySelectorAll("script:not([src])")).filter((s) => s.id !== "i18n-fallback").map((s) => s.textContent).join("\n");
     expect(inline).not.toMatch(/fetch\(|XMLHttpRequest|\/api\//);
     for (const gone of ["hostAvailability.js", "homeUpcoming.js", "homeUpcomingData.js", "/api/gaming/predictions", "/api/gaming/host", "/halloween.html"]) expect(html, gone).not.toContain(gone);
@@ -148,7 +136,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
   it("every word of the featured card and of the four panels is in the first HTML (no script is needed to see them), in Spanish", () => {
     const text = visibleText(doc.querySelector("main")!);
     for (const k of EXPERIENCES) for (const part of ["kicker", "title", "desc"]) expect(text, `${k}.${part}`).toContain(ES[`home.xp.${k}.${part}`]);
-    for (const key of ["label", "product", "title", "sub", "venue", "date", "desc", "vote", "join"]) expect(text, `feat.${key}`).toContain(ES[`home.feat.${key}`]);
+    for (const key of ["heading", "status", "title", "description", "link"]) expect(text, `history.${key}`).toContain(ES[`home.history.${key}`]);
     expect(doc.documentElement.getAttribute("lang")).toBe("es");
   });
 
@@ -194,7 +182,7 @@ describe("the Home: a featured card, then four experiences with one way into eac
     // the button still comes last in the panel's words
     expect(Array.from(score.querySelector(".xp-body")!.children).map((e) => e.className)).toEqual(["xp-title", "xp-desc", "xp-teams", "xp-cta"]);
     for (const other of ["voting", "trivia", "poker"]) expect(doc.querySelector(`article.xp-${other}`)!.querySelector("[data-club], .club-crest, .ten-crests")).toBeNull();
-    expect(doc.getElementById("featured-contest")!.querySelector("[data-club], .club-crest, .ten-crests")).toBeNull();
+    expect(doc.getElementById("halloween-history")!.querySelector("[data-club], .club-crest, .ten-crests")).toBeNull();
   });
 
   it("the four experience pages carry no crest and name no club (the strip lives on the Home's Score panel)", () => {
@@ -400,12 +388,10 @@ describe("the four experience pages", () => {
     const doc = dom("voting.html");
     const block = doc.getElementById("featured-live")!;
     expect(block).not.toBeNull();
-    expect(Array.from(block.querySelectorAll("[data-feat]")).map((b) => [b.tagName, b.getAttribute("data-feat"), visibleText(b)])).toEqual([["SPAN", "vote", ES["home.feat.vote"]], ["SPAN", "join", ES["home.feat.join"]]]);
-    expect(block.querySelectorAll("a")).toHaveLength(0);
-    expect(visibleText(block.querySelector(".lp-live-title")!)).toBe("Halloween: La última noche · Concurso de disfraces · The Pub by Beer Box · Sábado 31 de octubre");
-    expect(visibleText(block.querySelector(".lp-live-prizes")!)).toBe(ES["home.feat.prizes"]);
-    expect(visibleText(block.querySelector("[data-feat-status]")!)).toBe(ES["home.feat.status.default"]);
-    expect(HTML["voting.html"]).toContain('<script src="/featuredContest.js"></script>');
+    expect(block.querySelectorAll("[data-feat]")).toHaveLength(0);
+    expect(links(block)).toEqual(["/halloween-2026.html"]);
+    expect(visibleText(block)).toContain("Halloween 2026 · Evento finalizado");
+    expect(HTML["voting.html"]).not.toContain('<script src="/featuredContest.js"></script>');
   });
 
   it("Score names the access it already has (cartelera, historial) with the words the application already uses; the other three have no link into any flow", () => {
@@ -518,7 +504,10 @@ describe("the featured card: fixed read-only entry links, replaced by contest li
 
   const WHERE = { home: { file: "index.html", root: "featured-contest" }, voting: { file: "voting.html", root: "featured-live" } } as const;
   async function open(where: keyof typeof WHERE, answer: unknown, opts: { module?: boolean; lang?: "es" | "en" } = {}) {
-    const w = new JSDOM(htmlOf(WHERE[where].file), { url: "https://gaming.example/" + WHERE[where].file, runScripts: "outside-only", pretendToBeVisual: true }).window as any;
+    // The retired promotion no longer mounts this module. Preserve its validation/security
+    // coverage on an explicit fixture, rather than reintroducing active controls on public pages.
+    const fixture = `<div id="${WHERE[where].root}"><span data-feat="vote" data-i18n="home.feat.vote">${ES["home.feat.vote"]}</span><span data-feat="join" data-i18n="home.feat.join">${ES["home.feat.join"]}</span><p data-feat-status data-i18n="home.feat.status.default">${ES["home.feat.status.default"]}</p><ul data-feat-cats hidden></ul></div>`;
+    const w = new JSDOM(fixture, { url: "https://gaming.example/" + WHERE[where].file, runScripts: "outside-only", pretendToBeVisual: true }).window as any;
     closers.push(() => w.close());
     const calls: Array<{ url: string; init: any }> = [];
     w.fetch = vi.fn((url: string, init: any) => {

@@ -164,6 +164,11 @@
       "home.xp.voting.desc": "Elegí a tus favoritos en las votaciones de tu comunidad.",
 
       // ---- Home: the featured card ("Destacado"): Halloween, an URBANO Voting experience ----
+      "home.history.heading": "Nuestra historia",
+      "home.history.status": "Evento finalizado",
+      "home.history.title": "Halloween 2026",
+      "home.history.description": "Una noche de disfraces y comunidad en The Pub by Beer Box. Así vivimos Halloween en URBANO Gaming.",
+      "home.history.link": "Ver el evento",
       "home.feat.label": "Destacado",
       "home.feat.product": "URBANO Voting",
       "home.feat.title": "Halloween",
@@ -768,6 +773,11 @@
       "home.xp.voting.title": "URBANO Voting",
       "home.xp.voting.desc": "Choose your favorites in your community's votes.",
 
+      "home.history.heading": "Our story",
+      "home.history.status": "Event ended",
+      "home.history.title": "Halloween 2026",
+      "home.history.description": "A night of costumes and community at The Pub by Beer Box. A look back at Halloween with URBANO Gaming.",
+      "home.history.link": "View the event",
       "home.feat.label": "Featured",
       "home.feat.product": "URBANO Voting",
       "home.feat.title": "Halloween",

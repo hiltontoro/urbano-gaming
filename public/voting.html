@@ -57,14 +57,10 @@
 
   <section class="lp-section" aria-labelledby="live-title">
     <div class="lp-live" id="featured-live">
-      <h2 class="lp-h2" id="live-title"><span data-i18n="home.feat.label">Destacado</span></h2>
-      <p class="lp-live-title"><strong><span data-i18n="home.feat.title">Halloween</span>: <span data-i18n="home.feat.tagline">La última noche</span></strong> · <span data-i18n="home.feat.sub">Concurso de disfraces</span> · <span data-i18n="home.feat.venue">The Pub by Beer Box</span> · <span data-i18n="home.feat.date">Sábado 31 de octubre</span></p>
-      <p class="lp-live-prizes" data-i18n="home.feat.prizes">Premios anunciados por The Pub: Más Elaborado $500 · Más Sexy $300 · Dúo o Grupo $250 · Más Divertido $200.</p>
-      <p class="lp-live-status" data-feat-status role="status" data-i18n="home.feat.status.default">Las inscripciones y la votación todavía no están disponibles.</p>
-      <ul class="lp-chips" data-feat-cats hidden></ul>
+      <h2 class="lp-h2" id="live-title" lang="es">Halloween 2026 · Evento finalizado</h2>
+      <p lang="es">Concurso de disfraces · The Pub by Beer Box · 31.10.2026</p>
       <div class="lp-links">
-        <span class="xf-btn" data-feat="vote" data-i18n="home.feat.vote">Votar por tu disfraz favorito</span>
-        <span class="xf-btn" data-feat="join" data-i18n="home.feat.join">Participar como concursante</span>
+        <a class="xf-btn is-primary" href="/halloween-2026.html" lang="es">Ver el evento</a>
       </div>
     </div>
   </section>
@@ -103,7 +99,6 @@
 </footer>
 
 <script src="/urbanoI18n.js"></script>
-<script src="/featuredContest.js"></script>
 <script id="i18n-fallback">
 /* Spanish fallback — GENERATED from the Spanish dictionary of /urbanoI18n.js; __tests__/i18nModuleFailure.test.ts fails if it drifts.
    If /urbanoI18n.js does not load, or fails to start, this page keeps working in Spanish: the same words and the same behaviour. It only
@@ -289,8 +284,6 @@
 </script>
 <script src="/urbanoAuth.js"></script>
 <script>
-  // The two buttons of the Halloween block: links only when the server's answer is exactly the documented one (see /featuredContest.js); otherwise they stay as written.
-  if (window.UrbanoFeaturedContest) window.UrbanoFeaturedContest.bind(document.getElementById("featured-live"));
   // The header's account control is the only other part of this page that talks to the application.
   // (UrbanoAuth is a top-level const of /urbanoAuth.js: a global binding, NOT a property of window, so it is looked for with typeof, never with window.UrbanoAuth.)
   if (typeof UrbanoAuth !== "undefined") {

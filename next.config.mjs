@@ -1,5 +1,29 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Retire only Halloween's public entry points. Other contest IDs and the
+  // reusable operator/API remain available for future Community Voting events.
+  async redirects() {
+    return [
+      {
+        source: "/community-voting-round.html",
+        has: [{ type: "query", key: "c", value: "94297d45-986a-423c-a1e9-9438bf1127c5" }],
+        destination: "/halloween-2026.html",
+        permanent: false,
+      },
+      {
+        source: "/community-voting-round.html",
+        missing: [{ type: "query", key: "c" }],
+        destination: "/halloween-2026.html",
+        permanent: false,
+      },
+      {
+        source: "/community-voting-round-display.html",
+        has: [{ type: "query", key: "c", value: "94297d45-986a-423c-a1e9-9438bf1127c5" }],
+        destination: "/halloween-2026.html",
+        permanent: false,
+      },
+    ];
+  },
   // The redemption station page of the venue: never cached, never indexed, never framed, and it may only load its own script and talk to its own server.
   async headers() {
     return [
