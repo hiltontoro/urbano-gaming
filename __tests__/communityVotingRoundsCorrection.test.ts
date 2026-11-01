@@ -78,7 +78,7 @@ describe("superseded files are not part of the active candidate", () => {
     expect(families.filter((f) => f !== "route.ts")).toEqual(["contests", "rounds"]);
   });
 
-  it("mentions no five-option ballot, telephone possession, messaging provider or Instagram in the contest's code, routes or pages — WhatsApp appears only as the person's own number for a delivery BY HAND", () => {
+  it("mentions no five-option ballot, telephone possession or automated messaging/social provider in the contest's code, routes or pages — manual delivery and ordinary profile links remain non-integrated", () => {
     const files = [
       ...walk(path.join(ROOT, "lib/gaming/communityVoting/rounds")),
       ...walk(path.join(ROOT, "lib/gaming/communityVoting/contest")),
@@ -88,9 +88,9 @@ describe("superseded files are not part of the active candidate", () => {
     expect(files.length).toBeGreaterThan(40);
     for (const f of files) {
       const code = stripComments(readFileSync(f, "utf8"));
-      expect(code, rel(f)).not.toMatch(/ranked|RANK_POINTS|phoneDigest|phone_digest|twilio|\bsms\b|instagram|PUBLIC_PHOTO_RETENTION|removal_due|media-purge|purge/i);
-      // no provider, no API, no automatic sending: the only WhatsApp URL is the wa.me link the operator opens themself, and nothing is posted to one
-      expect(code, rel(f)).not.toMatch(/api\.whatsapp|graph\.facebook|whatsapp-web|WhatsApp Business|cloud api|sendMessage|messages\.create/i);
+      expect(code, rel(f)).not.toMatch(/ranked|RANK_POINTS|phoneDigest|phone_digest|twilio|\bsms\b|PUBLIC_PHOTO_RETENTION|removal_due|media-purge|purge/i);
+      // no provider, SDK, OAuth or automatic sending: ordinary wa.me and instagram.com profile links stay user-initiated
+      expect(code, rel(f)).not.toMatch(/api\.whatsapp|graph\.(?:facebook|instagram)|api\.instagram|instagram[^\n]{0,24}(?:sdk|oauth)|whatsapp-web|WhatsApp Business|cloud api|sendMessage|messages\.create/i);
     }
     // the five-option ballot of the retired ranked format has no trace in the code the contest ships
     for (const f of files) expect(stripComments(readFileSync(f, "utf8")), rel(f)).not.toMatch(/community_voting_ballots|ballot_picks|RANKED_TOP_5/);
