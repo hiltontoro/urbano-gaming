@@ -18,6 +18,11 @@ const CommunityVotingShareCard = (() => {
     url: "gaming.urbanohn.com",
     event: "LA ÚLTIMA NOCHE · THE PUB",
   });
+  const LAYOUT = Object.freeze({
+    photo: Object.freeze({ x: 105, y: 555, width: 870, height: 750, fit: "contain" }),
+    code: Object.freeze({ x: 130, y: 1325, width: 820, height: 205 }),
+    cta: Object.freeze({ x: 170, y: 1580, width: 740, height: 104 }),
+  });
 
   function safeCode(raw) {
     const code = typeof raw === "string" ? raw.trim().toUpperCase() : "";
@@ -117,7 +122,7 @@ const CommunityVotingShareCard = (() => {
     if (!code || !photoUrl) throw new Error("PHOTO_NOT_AVAILABLE");
     if (opts.document.fonts && opts.document.fonts.ready) await opts.document.fonts.ready;
 
-    const [photo, gaming, pub] = await Promise.all([
+    const [participantPhoto, gaming, pub] = await Promise.all([
       loadImage(photoUrl, opts.Image),
       loadImage("/community-voting-urbano-gaming-lockup.png", opts.Image),
       loadImage("/community-voting-the-pub-logo.jpg", opts.Image),
@@ -131,13 +136,20 @@ const CommunityVotingShareCard = (() => {
 
     ctx.fillStyle = "#08070a";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    cover(ctx, photo, 0, 0, WIDTH, HEIGHT);
+
+    // The participant remains recognizable without sacrificing the costume: a softened photo supplies depth while
+    // the approved image is rendered in full inside the foreground card below.
+    ctx.save();
+    ctx.filter = "blur(28px)";
+    ctx.globalAlpha = .28;
+    cover(ctx, participantPhoto, -45, -45, WIDTH + 90, HEIGHT + 90);
+    ctx.restore();
 
     const shade = ctx.createLinearGradient(0, 0, 0, HEIGHT);
     shade.addColorStop(0, "rgba(8,7,10,.72)");
-    shade.addColorStop(.24, "rgba(8,7,10,.22)");
-    shade.addColorStop(.60, "rgba(8,7,10,.12)");
-    shade.addColorStop(1, "rgba(8,7,10,.94)");
+    shade.addColorStop(.35, "rgba(8,7,10,.54)");
+    shade.addColorStop(.72, "rgba(8,7,10,.76)");
+    shade.addColorStop(1, "rgba(8,7,10,.98)");
     ctx.fillStyle = shade;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -161,26 +173,46 @@ const CommunityVotingShareCard = (() => {
     ctx.arc(930, 139, 68, 0, Math.PI * 2);
     ctx.stroke();
 
-    centeredText(ctx, COPY.eyebrow, 350, 30, 700, "#e8b932");
-    centeredText(ctx, "ENTRÁ Y VOTÁ", 455, 70, 800, "#f4f0e8");
-    centeredText(ctx, "POR MÍ", 565, 112, 800, "#e8b932");
-    centeredText(ctx, COPY.instruction, 655, 27, 600, "#f4f0e8");
+    centeredText(ctx, COPY.eyebrow, 300, 28, 700, "#e8b932");
+    centeredText(ctx, "ENTRÁ Y VOTÁ", 385, 66, 800, "#f4f0e8");
+    centeredText(ctx, "POR MÍ", 475, 92, 800, "#e8b932");
+    centeredText(ctx, COPY.instruction, 530, 25, 600, "#f4f0e8");
 
-    roundedRect(ctx, 130, 1390, 820, 260, 46);
+    const photo = LAYOUT.photo;
+    ctx.save();
+    roundedRect(ctx, photo.x, photo.y, photo.width, photo.height, 38);
+    ctx.clip();
+    ctx.fillStyle = "#050507";
+    ctx.fillRect(photo.x, photo.y, photo.width, photo.height);
+    ctx.save();
+    ctx.filter = "blur(18px)";
+    ctx.globalAlpha = .34;
+    cover(ctx, participantPhoto, photo.x - 24, photo.y - 24, photo.width + 48, photo.height + 48);
+    ctx.restore();
+    if (photo.fit === "contain") contain(ctx, participantPhoto, photo.x, photo.y, photo.width, photo.height);
+    ctx.restore();
+    roundedRect(ctx, photo.x, photo.y, photo.width, photo.height, 38);
+    ctx.strokeStyle = "rgba(232,185,50,.9)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    const codeBox = LAYOUT.code;
+    roundedRect(ctx, codeBox.x, codeBox.y, codeBox.width, codeBox.height, 42);
     ctx.fillStyle = "rgba(8,7,10,.88)";
     ctx.fill();
     ctx.strokeStyle = "#e8b932";
     ctx.lineWidth = 4;
     ctx.stroke();
-    centeredText(ctx, COPY.code, 1450, 25, 700, "#e8b932");
-    centeredText(ctx, code, 1535, 69, 800, "#f4f0e8");
+    centeredText(ctx, COPY.code, 1372, 24, 700, "#e8b932");
+    centeredText(ctx, code, 1450, 65, 800, "#f4f0e8");
 
-    roundedRect(ctx, 170, 1695, 740, 104, 52);
+    const cta = LAYOUT.cta;
+    roundedRect(ctx, cta.x, cta.y, cta.width, cta.height, 52);
     ctx.fillStyle = "#e8b932";
     ctx.fill();
-    centeredText(ctx, COPY.cta, 1747, 31, 800, "#08070a");
-    centeredText(ctx, COPY.url, 1840, 24, 600, "#f4f0e8");
-    centeredText(ctx, COPY.event, 1882, 19, 700, "#e8b932");
+    centeredText(ctx, COPY.cta, 1632, 31, 800, "#08070a");
+    centeredText(ctx, COPY.url, 1748, 24, 600, "#f4f0e8");
+    centeredText(ctx, COPY.event, 1792, 19, 700, "#e8b932");
 
     return canvas;
   }
@@ -192,5 +224,5 @@ const CommunityVotingShareCard = (() => {
     saveBlob(blob, filename("story", code), opts.document, opts.urlApi);
   }
 
-  return Object.freeze({ WIDTH, HEIGHT, COPY, safeCode, approvedPhotoUrl, filename, renderStory, downloadPhoto, downloadStory });
+  return Object.freeze({ WIDTH, HEIGHT, COPY, LAYOUT, safeCode, approvedPhotoUrl, filename, renderStory, downloadPhoto, downloadStory });
 })();

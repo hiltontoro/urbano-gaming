@@ -6,6 +6,10 @@ interface ShareCard {
   WIDTH: number;
   HEIGHT: number;
   COPY: Record<string, string>;
+  LAYOUT: {
+    photo: { x: number; y: number; width: number; height: number; fit: string };
+    code: { x: number; y: number; width: number; height: number };
+  };
   safeCode(raw: unknown): string;
   approvedPhotoUrl(raw: unknown, location: { origin: string }): string;
   filename(kind: "photo" | "story", code: string, contentType?: string): string;
@@ -31,6 +35,14 @@ describe("participant share assets", () => {
       url: "gaming.urbanohn.com",
       event: "LA ÚLTIMA NOCHE · THE PUB",
     });
+  });
+
+  it("preserves the full costume in a large portrait card with the code directly below", () => {
+    expect(S.LAYOUT.photo).toMatchObject({ fit: "contain" });
+    expect(S.LAYOUT.photo.width).toBeGreaterThanOrEqual(760);
+    expect(S.LAYOUT.photo.height).toBeGreaterThanOrEqual(680);
+    expect(S.LAYOUT.code.y).toBeGreaterThanOrEqual(S.LAYOUT.photo.y + S.LAYOUT.photo.height);
+    expect(S.LAYOUT.code.y - (S.LAYOUT.photo.y + S.LAYOUT.photo.height)).toBeLessThanOrEqual(40);
   });
 
   it("accepts only the public full-photo route on the current origin", () => {
