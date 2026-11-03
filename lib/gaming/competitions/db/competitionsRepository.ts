@@ -52,6 +52,8 @@ import type {
   ProposePlanAmendmentResult,
   DecidePlanAmendmentResult,
   WithdrawPlanAmendmentResult,
+  CompetitionDrawRead,
+  CreateCompetitionDrawResult,
 } from "../types";
 
 /**
@@ -223,4 +225,21 @@ export interface CompetitionPlanAmendmentStore {
   withdrawPlanAmendment(competitionId: string, organizerGamingMemberId: string, amendmentDigest: string): Promise<WithdrawPlanAmendmentResult>;
   /** The latest proposal as ONE caller may see it, or null for anyone but the active organizer and the four frozen captains (and for an unknown competition). */
   getPlanAmendmentStatus(competitionId: string, callerGamingMemberId: string): Promise<PlanAmendmentStatusRecord | null>;
+}
+
+/**
+ * UG-CR-GATE-SSS-019 — the two operations the auditable four-team draw is built on. Kept apart from {@link CompetitionsRepository}, {@link CompetitionPlanningStore}
+ * and {@link CompetitionPlanAmendmentStore} for the same reason as they are: the draw is its own bounded surface, and it neither widens nor changes any existing read
+ * or command.
+ *
+ * The write is ONE atomic database operation that makes every decision itself — the lock, who is acting (the competition's own ACTIVE organizer, exactly and
+ * null-safely, with the host-revocation guard), the exact replay of the same request, the lifecycle, the consistent freeze of exactly four accepted teams, a plan
+ * change that genuinely awaits the captains, the entropy and the one permanent record. It takes no seed, no teams, no order, no pairing and no time of any kind, and
+ * it relies on no caller having checked first. The read answers for the caller alone.
+ */
+export interface CompetitionDrawStore {
+  /** MAKE_COMPETITION_DRAW: the one permanent draw, or the existing one for an exact replay of the same request (`alreadyDrawn`). Anything else after a draw is a conflict. */
+  createCompetitionDraw(competitionId: string, organizerGamingMemberId: string, intentId: string): Promise<CreateCompetitionDrawResult>;
+  /** The draw as ONE caller may see it: the active organizer (the draw, or null draw before one exists) and, once a draw exists, the four frozen captains; null for anyone else. */
+  getCompetitionDraw(competitionId: string, callerGamingMemberId: string): Promise<CompetitionDrawRead | null>;
 }

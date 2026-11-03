@@ -59,6 +59,7 @@ import {
 } from "../lib/gaming/competitions/types";
 import { parsePlanningPlan, planToRpcPayload } from "../lib/gaming/competitions/planning";
 import { PlanAmendmentError } from "../lib/gaming/competitions/planAmendment";
+import { CompetitionDrawError } from "../lib/gaming/competitions/draw";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1336,6 +1337,9 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // window refusal (PlanAmendmentWindowClosedError) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for them.
   { rpc: "propose_competition_plan_amendment_atomically", label: "propose a post-freeze plan change", call: (c, a) => compRepo.proposePlanAmendment(c.competitionId, a, randomUUID(), amendmentFacts()) },
   { rpc: "withdraw_competition_plan_amendment_atomically", label: "withdraw a post-freeze plan change", call: (c, a) => compRepo.withdrawPlanAmendment(c.competitionId, a, "0".repeat(64)) },
+  // UG-CR-GATE-SSS-019: the permanent four-team draw. A published matrix competition is past READY_TO_PUBLISH, so for its OWN active organizer this reports the draw's state
+  // refusal (CompetitionDrawError, WRONG_STATE) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
+  { rpc: "create_competition_draw_atomically", label: "make the four-team draw", call: (c, a) => compRepo.createCompetitionDraw(c.competitionId, a, randomUUID()) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
@@ -1521,8 +1525,8 @@ describe("[T14, T15, T16, T17] ownership and revocation hold on every organizer 
       if (outcome !== null) {
         expect(outcome, `${entry.label}: an active host must not be refused as a stranger or as revoked`).not.toBeInstanceOf(CompetitionAccessDeniedError);
         expect(outcome, `${entry.label}`).not.toBeInstanceOf(HostAccessRevokedError);
-        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change operations' own typed refusals (their routes answer for them).
-        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError;
+        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change or draw operations' own typed refusals (their routes answer for them).
+        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError;
         expect(known, `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).toBe(true);
       }
     }

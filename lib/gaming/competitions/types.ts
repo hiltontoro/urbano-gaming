@@ -939,3 +939,49 @@ export interface PlanAmendmentStatusRecord {
   /** Organizer only: the most recent proposals, oldest first. null for a captain. */
   history: Array<{ sequenceNumber: number; status: PlanAmendmentStatus; createdAt: string; resolvedAt: string | null }> | null;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-019 — the auditable four-team draw
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+/** One frozen team in the canonical (byte) order of the team identifiers: the draw's input. */
+export interface CompetitionDrawInputTeam {
+  inputPosition: number;
+  teamId: string;
+  teamName: string;
+}
+
+/** One team in the drawn order. A draw position is a bracket slot (positions 1–2 meet in Semifinal 1, 3–4 in Semifinal 2) — never a rank, a seed or a priority. */
+export interface CompetitionDrawOrderedTeam {
+  drawPosition: number;
+  inputPosition: number;
+  teamId: string;
+  teamName: string;
+}
+
+/**
+ * The stored evidence of ONE competition's permanent draw, as the server reads it. Seed, index, input order and drawn order reproduce the result; the freeze
+ * digest ties it to the frozen registration and the draw digest to the whole of it. It carries no identifier of a member, an intent or a freeze record.
+ */
+export interface CompetitionDrawRecord {
+  algorithm: string;
+  /** The database's instant of the draw: UTC, exactly six fractional digits, a final Z. */
+  drawnAt: string;
+  seed: string;
+  permutationIndex: number;
+  freezeDigest: string;
+  drawDigest: string;
+  input: CompetitionDrawInputTeam[];
+  order: CompetitionDrawOrderedTeam[];
+}
+
+export interface CreateCompetitionDrawResult {
+  draw: CompetitionDrawRecord;
+  /** True when this was an exact replay of the same request: the existing draw, nothing written. */
+  alreadyDrawn: boolean;
+}
+
+/** What the database tells ONE caller about a competition's draw: the draw, or null when there is none yet (the active organizer only). */
+export interface CompetitionDrawRead {
+  draw: CompetitionDrawRecord | null;
+}

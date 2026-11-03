@@ -219,6 +219,18 @@ async function atInstant(instant: string, statement: string, params: unknown[] =
   });
 }
 
+/**
+ * UG-CR-GATE-SSS-019A: the same rolled-back clock seam as atInstant, for a decision that must be READ BACK before its transaction ends. The database clock is put on an exact
+ * instant for the whole of one transaction that is ALWAYS rolled back, and the caller's statements run inside it, on the one connection that shares that clock. (A request
+ * through the service API runs on another connection and never sees a transaction-local clock.)
+ */
+async function withClockAt<T>(instant: string, fn: (db: Client) => Promise<T>): Promise<T> {
+  return rawTransaction(async (db) => {
+    await db.query(`create or replace function public.competition_registration_clock() returns timestamptz language sql volatile set search_path to 'public' as $clock$ select '${instant}'::timestamptz $clock$`);
+    return fn(db);
+  });
+}
+
 /** An ISO-8601 UTC instant a given number of microseconds from another (the offset is within one second). */
 function shiftMicros(isoSecond: string, micros: number): string {
   const base = new Date(isoSecond);
@@ -269,8 +281,12 @@ async function savePlan(competitionId: string, organizerId: string, opts: { dead
   return compRepo.savePlanningRevision(competitionId, organizerId, randomUUID(), plan);
 }
 
-/** What a service-side fixture may change about the plan it records: the roster bounds, or (with foreign keys off) the format. Everything else is copied. */
-interface PlanOverride { rosterMinimum?: number; rosterMaximum?: number; formatKey?: string }
+/**
+ * What a service-side fixture may change about the plan it records: the roster bounds, the deadline's recorded UTC offset, or (with foreign keys off) the format.
+ * Everything else is copied. (UG-CR-GATE-SSS-019A: the offset is copied from the previous revision unless given; the planning validation requires the local time, the
+ * zone, the offset and the UTC instant of the deadline to describe one and the same moment, so a deadline pinned in another season of the zone gives its own offset.)
+ */
+interface PlanOverride { rosterMinimum?: number; rosterMaximum?: number; formatKey?: string; deadlineOffsetMinutes?: number }
 
 /**
  * Service-side fixture: records a later planning revision as the database owner, with exactly the deadline given (any instant, to the microsecond). The
@@ -288,7 +304,7 @@ async function supersedePlan(competitionId: string, deadlineIso: string, overrid
        values ($1,$2,$3,$4,$5,gen_random_uuid(),$6,$7,$8,$9,$10,$11,$12,$13, ($14::timestamptz at time zone $15), $15, $16, $14::timestamptz, $17,$18,$19) returning planning_revision_id`,
       [competitionId, override.formatKey ?? cur.format_key, cur.revision_number + 1, cur.planning_revision_id, cur.authored_by_gaming_member_id, cur.payload_digest, cur.venue_name, cur.venue_location_description,
         cur.venue_time_zone, cur.simultaneous_match_capacity, cur.venue_restriction_notes, override.rosterMinimum ?? cur.roster_minimum, override.rosterMaximum ?? cur.roster_maximum, deadlineIso, cur.registration_deadline_time_zone,
-        cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
+        override.deadlineOffsetMinutes ?? cur.registration_deadline_utc_offset_minutes, cur.rules_version, cur.rules_snapshot, cur.rules_snapshot_digest])).rows[0].planning_revision_id;
     await db.query("insert into competition_planning_pitches (planning_revision_id, position, label, is_usable, restriction_notes) select $2::uuid, position, label, is_usable, restriction_notes from competition_planning_pitches where planning_revision_id = $1::uuid", [cur.planning_revision_id, next]);
     await db.query(
       `insert into competition_planning_pitch_formats (planning_pitch_id, format_key)
@@ -1065,7 +1081,11 @@ describe("[8][9] four distinct frozen captains must confirm, and the fourth conf
     const { TeamRegistrationNotOpenError } = await import("../lib/gaming/competitions/types");
     await expectRejects(registerForCompetition(compRepo, ctx.competitionId, pool[41].gamingMemberId, true), TeamRegistrationNotOpenError);
     expect((await rawQuery("select count(*)::int n from competition_fixtures where competition_id = $1", [ctx.competitionId]))[0].n).toBe(0);
-    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' order by relname")).toEqual([]);
+    // UG-CR-GATE-SSS-019A: the four-team draw foundation (SSS-019) owns exactly two draw tables, and only those two exact names are permitted here; any OTHER draw table, and every
+    // pairing, schedule, fixture-slot, appeal, adjudication or unexpected amendment table, still fails.
+    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' and relname not in ('competition_draws', 'competition_draw_entries') order by relname")).toEqual([]);
+    // The two permitted tables exist now, so "no draw" is judged on their rows: activating a plan change makes no draw for this competition.
+    expect((await rawQuery("select (select count(*)::int from competition_draws where competition_id = $1) as draws, (select count(*)::int from competition_draw_entries where competition_id = $1) as entries", [ctx.competitionId]))[0]).toEqual({ draws: 0, entries: 0 });
   }, 180000);
 });
 
@@ -1742,23 +1762,69 @@ describe("[20] the amendment window: READY_TO_PUBLISH, one freeze, an unchanged 
 // [dst] the venue's own clock changes
 // =============================================================================================================================================
 
+/**
+ * UG-CR-GATE-SSS-019A — calendar-independent. New York's clocks change on fixed civil dates, so the vectors below are fixed dates; what must never be tied to the real
+ * calendar is the DECISION. This test therefore pins the whole timeline: registration closed on Thursday 29 October 2026 at 18:00 EDT (a service-side fixture, like
+ * passDeadline but at a pinned instant instead of "now"), and every proposal is decided on Friday 30 October 2026 at 10:00 EDT, by putting the database clock on exactly that
+ * instant inside a transaction that is always rolled back (atInstant / withClockAt — the seam every clock test in this file uses). A request through the service API runs
+ * on another connection and cannot see a transaction-local clock, so no decision below is taken that way.
+ */
+const DST_DEADLINE_UTC = "2026-10-29T22:00:00.000Z"; // Thu 29 Oct 2026 18:00 EDT (UTC-04:00)
+const DST_DEADLINE_OFFSET_MINUTES = -240;
+const DST_DECISION_INSTANT = "2026-10-30T14:00:00.000Z"; // Fri 30 Oct 2026 10:00 EDT: more than 12 hours before every window below
+
 describe("[3] a window time that the venue's clock skips or repeats is refused by the database itself, in the venue's preserved time zone", () => {
   it("nonexistent and ambiguous local times are refused with the planning codes; a time on an ordinary day passes", async () => {
-    const ctx = await frozen("Dst", { timeZone: "America/New_York", offsetMs: -4 * 3600_000 });
-    const RAW = (date: string, start: string, end: string) => service.rpc("propose_competition_plan_amendment_atomically", {
-      p_competition_id: ctx.competitionId, p_organizer_gaming_member_id: ctx.organizer.gamingMemberId, p_intent_id: randomUUID(),
-      p_amendment: rpcPayload(facts({ dates: [{ date, windows: [{ start, end }] }] })),
-    });
-    expect((await RAW("2026-11-01", "01:30", "03:00")).error?.message ?? "no error").toMatch(/WINDOW_AMBIGUOUS_LOCAL_TIME/);
-    expect((await RAW("2027-03-14", "02:30", "03:30")).error?.message ?? "no error").toMatch(/WINDOW_NONEXISTENT_LOCAL_TIME/);
-    expect((await RAW("2026-11-01", "10:00", "02:00")).error?.message ?? "no error").toMatch(/WINDOW_CROSSES_MIDNIGHT/);
+    // The usual frozen competition, except that its deadline passes at the pinned instant. No decision below reads the wall clock. The wall clock is read only by the public
+    // save's future deadline (noon UTC, two to three days ahead: a New York hour that can never fall in a gap or an overlap, and replaced below before anything is decided), by the
+    // real close (which needs the pinned deadline to be past: true on every date after it) and by facts(), whose default date every vector below replaces with its own.
+    const clockDefinition = async () => (await rawQuery("select pg_get_functiondef('public.competition_registration_clock()'::regprocedure) as def"))[0].def as string;
+    const clockBefore = await clockDefinition();
+    const ctx = await setUp("Dst", { teamCount: 4, timeZone: "America/New_York", offsetMs: -4 * 3600_000, deadlineMs: Math.ceil((Date.now() + 2 * DAY) / DAY) * DAY + 12 * 3600_000 });
+    await fillRosters(ctx, [5, 5, 5, 5]);
+    await supersedePlan(ctx.competitionId, DST_DEADLINE_UTC, { deadlineOffsetMinutes: DST_DEADLINE_OFFSET_MINUTES });
+    expect((await closeTeamRegistration(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId)).state).toBe("READY_TO_PUBLISH");
+
+    const windowFacts = (date: string, start: string, end: string) => facts({ dates: [{ date, windows: [{ start, end }] }] });
+    const proposeArgs = (f: Facts) => [ctx.competitionId, ctx.organizer.gamingMemberId, randomUUID(), JSON.stringify(rpcPayload(f))];
+    const refusedAt = async (date: string, start: string, end: string) => {
+      const out = await atInstant(DST_DECISION_INSTANT, PROPOSE_SQL, proposeArgs(windowFacts(date, start, end)));
+      return out.ok ? "no error" : out.message;
+    };
+    expect(await refusedAt("2026-11-01", "01:30", "03:00")).toMatch(/WINDOW_AMBIGUOUS_LOCAL_TIME/); // 01:30 happens twice when the clocks fall back
+    expect(await refusedAt("2027-03-14", "02:30", "03:30")).toMatch(/WINDOW_NONEXISTENT_LOCAL_TIME/); // 02:30 does not exist when the clocks spring forward
+    expect(await refusedAt("2026-11-01", "10:00", "02:00")).toMatch(/WINDOW_CROSSES_MIDNIGHT/);
     expect((await amendmentCounts(ctx.competitionId)).proposals).toBe(0);
+
+    // An ordinary day after the clocks have changed: accepted. Decided on the pinned clock and read back inside the SAME rolled-back transaction, so that nothing is kept.
+    const ordinaryFacts = windowFacts("2026-11-02", "10:00", "12:00");
+    expect(rpcPayload(ordinaryFacts).venue).not.toHaveProperty("time_zone"); // the request carries no time zone
+    const ordinary = await withClockAt(DST_DECISION_INSTANT, async (db) => {
+      const instant = (await db.query("select competition_registration_clock() as instant")).rows[0].instant as Date;
+      const result = (await db.query(PROPOSE_SQL, proposeArgs(ordinaryFacts))).rows[0].r as { sequence_number: number; created_at: string; expires_at: string; amendment_digest: string };
+      const stored = (await db.query("select proposed_plan -> 'venue' ->> 'time_zone' as time_zone from competition_plan_change_proposals where amendment_digest = $1", [result.amendment_digest])).rows[0];
+      const current = (await db.query("select venue_time_zone from competition_planning_revisions where competition_id = $1 order by revision_number desc limit 1", [ctx.competitionId])).rows[0];
+      return { instant, result, proposedTimeZone: stored.time_zone as string, currentTimeZone: current.venue_time_zone as string };
+    });
+    expect(ordinary.instant.toISOString()).toBe(DST_DECISION_INSTANT); // the seam was in force for the decision
+    expect(ordinary.result.sequence_number).toBe(1);
+    expect(new Date(ordinary.result.created_at).toISOString()).toBe(DST_DECISION_INSTANT); // ...and the proposal was decided at it
+    expect(new Date(ordinary.result.expires_at).toISOString()).toBe("2026-10-31T14:00:00.000Z"); // exactly 24 hours later: the first window is days away
+    expect(ordinary.proposedTimeZone).toBe("America/New_York");
+    expect(ordinary.proposedTimeZone).toBe(ordinary.currentTimeZone); // composed from the accepted current revision, never from the request
+
+    // Nothing survives the pinned clock: every decision above ran in a transaction that was rolled back, and the clock function is exactly what it was and still the accepted one.
+    expect((await amendmentCounts(ctx.competitionId)).proposals).toBe(0);
+    expect(await clockDefinition()).toBe(clockBefore);
+    const [clock] = await rawQuery("select prosrc from pg_proc where oid = 'public.competition_registration_clock()'::regprocedure");
+    expect(String(clock.prosrc).replace(/\s+/g, " ").trim().toLowerCase()).toBe("select clock_timestamp()");
+
+    // The same refusal through the service API, for the typed mapping. This call is on its own connection (the real clock, not the pinned one) and needs none: the validation
+    // refuses the window before any clock is read. The code is asserted so that no OTHER validation refusal can satisfy the line.
     const { PlanAmendmentValidationError } = await loadAmend();
-    await expectRejectsLazy(propose(ctx, facts({ offsetMs: -4 * 3600_000, dates: [{ date: "2026-11-01", windows: [{ start: "01:30", end: "03:00" }] }] })), async () => PlanAmendmentValidationError);
-    const ok = await propose(ctx, facts({ offsetMs: -4 * 3600_000, dates: [{ date: "2026-11-02", windows: [{ start: "10:00", end: "12:00" }] }] }));
-    expect(ok.sequenceNumber).toBe(1);
-    const stored = (await rawQuery("select proposed_plan -> 'venue' ->> 'time_zone' as tz from competition_plan_change_proposals where amendment_digest = $1", [ok.digest]))[0];
-    expect(stored.tz).toBe("America/New_York"); // composed from the current revision, never from the request
+    const mapped = await expectRejectsLazy(propose(ctx, windowFacts("2026-11-01", "01:30", "03:00")), async () => PlanAmendmentValidationError);
+    expect(mapped.violations.map((v) => v.code)).toEqual(["WINDOW_AMBIGUOUS_LOCAL_TIME"]);
+    expect((await amendmentCounts(ctx.competitionId)).proposals).toBe(0);
   }, 300000);
 });
 

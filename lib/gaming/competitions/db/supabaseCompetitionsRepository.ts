@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
@@ -9,11 +9,12 @@ import type {
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
   ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
   RegistrationStatusRead, RegistrationFreezeRecord, PlanAmendmentFacts, PlanAmendmentDecision, PlanAmendmentStatusRecord, ProposePlanAmendmentResult,
-  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult,
+  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult, CompetitionDrawRead, CreateCompetitionDrawResult,
 } from "../types";
 import { PlanningIntentMismatchError, PlanningValidationError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
 import { PlanAmendmentValidationError, planAmendmentErrorFromDatabase, planAmendmentRpcPayload, planAmendmentStatusFromDatabase } from "../planAmendment";
 import { registrationFreezeErrorFromDatabase, registrationOpeningErrorFromDatabase } from "../registrationFreeze";
+import { assertDrawVerifies, drawErrorFromDatabase, drawRecordFromDatabase } from "../draw";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
   CompetitionTeamCountInvalidError, CompetitionPairingInvalidError, CompetitionNotPublishedError, CompetitionTeamNotFoundError,
@@ -45,6 +46,13 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    // UG-CR-GATE-SSS-019: the draw's refusals have their own typed errors (the shared status table does not know them; the draw route answers for them). They come
+    // first, as the amendment and freeze entries did: a code is matched by containment, in this order.
+    ["COMPETITION_DRAW_WRONG_STATE", () => drawErrorFromDatabase(msg)!],
+    ["COMPETITION_DRAW_FREEZE_REQUIRED", () => drawErrorFromDatabase(msg)!],
+    ["COMPETITION_DRAW_FREEZE_INCONSISTENT", () => drawErrorFromDatabase(msg)!],
+    ["COMPETITION_DRAW_AMENDMENT_PENDING", () => drawErrorFromDatabase(msg)!],
+    ["COMPETITION_DRAW_ALREADY_DRAWN", () => drawErrorFromDatabase(msg)!],
     // UG-CR-GATE-SSS-011: the plan-amendment refusals have their own typed errors (the shared status table does not know them; the three amendment routes
     // answer for them). They come first, as the freeze entries did: a code is matched by containment, in this order.
     ["PLAN_AMENDMENT_INVALID", () => planAmendmentErrorFromDatabase(msg)!],
@@ -190,7 +198,7 @@ function mapPlanningRevision(row: any): CompetitionPlanningRevisionRecord {
   };
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore {
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
@@ -312,6 +320,29 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository, C
     const { data, error } = await this.client.rpc("get_competition_plan_amendment_status", { p_competition_id: competitionId, p_caller_gaming_member_id: callerGamingMemberId });
     if (error) throw translateAmendmentError(error);
     return planAmendmentStatusFromDatabase(data);
+  }
+
+  async createCompetitionDraw(competitionId: string, organizerGamingMemberId: string, intentId: string): Promise<CreateCompetitionDrawResult> {
+    const { data, error } = await this.client.rpc("create_competition_draw_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_intent_id: intentId,
+    });
+    if (error) throw translateError(error);
+    // The evidence is reproduced from itself before it is returned: evidence that does not verify is never handed on.
+    const draw = drawRecordFromDatabase(data?.draw);
+    assertDrawVerifies(competitionId, draw);
+    return { draw, alreadyDrawn: data.already_drawn === true };
+  }
+
+  async getCompetitionDraw(competitionId: string, callerGamingMemberId: string): Promise<CompetitionDrawRead | null> {
+    const { data, error } = await this.client.rpc("get_competition_draw", { p_competition_id: competitionId, p_caller_gaming_member_id: callerGamingMemberId });
+    if (error) throw translateError(error);
+    // SQL NULL is "no part in this draw"; { draw: null } is the organizer before a draw. Anything else must be genuine evidence: a response without the key is not
+    // read as "no draw yet" (the database never sends one), it is a failure.
+    if (data === null || data === undefined) return null;
+    if (data.draw === null) return { draw: null };
+    const draw = drawRecordFromDatabase(data.draw);
+    assertDrawVerifies(competitionId, draw);
+    return { draw };
   }
 
   async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {
