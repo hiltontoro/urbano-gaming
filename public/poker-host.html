@@ -260,7 +260,15 @@ async function refreshTable(table) {
       seat.folded ? '<span class="badge">Folded</span>' : "",
     ].join("");
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${seat.seatNumber}</td><td>${seat.displayName}</td><td>${seat.stack}</td><td>${state.currentHandId && seat.inCurrentHand ? "Yes" : "—"}</td><td>${badges}</td>`;
+    // The seat name is chosen by whoever joined the table: text nodes only, never markup. Only the fixed badge strings above are parsed as HTML.
+    for (const value of [seat.seatNumber, seat.displayName, seat.stack, state.currentHandId && seat.inCurrentHand ? "Yes" : "—"]) {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      tr.appendChild(td);
+    }
+    const badgesTd = document.createElement("td");
+    badgesTd.innerHTML = badges;
+    tr.appendChild(badgesTd);
     tbody.appendChild(tr);
   }
 }

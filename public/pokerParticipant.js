@@ -56,6 +56,16 @@
     return div.firstElementChild;
   }
 
+  // A seat's display name is chosen by whoever joined the table, so it is escaped wherever it is written into the HTML templates below.
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   async function pokerApiFetch(path, options) {
     let res;
     try {
@@ -161,7 +171,7 @@
         const name = seatNumber === mySeatNumber ? "You" : (seatInfo ? seatInfo.displayName : `Seat ${seatNumber}`);
         const outcome = (payoutBySeat[seatNumber] || 0) > 0 ? "won" : "lost";
         const descr = cleanHandDescr(entry.descr || entry.rankName);
-        return `<div class="poker-result-row"><span>${name} ${outcome} — ${descr}</span></div>`;
+        return `<div class="poker-result-row"><span>${escapeHtml(name)} ${outcome} — ${descr}</span></div>`;
       });
 
     return rows.join("");
@@ -213,7 +223,7 @@
         ? `<div class="hole-cards" style="margin:4px 0 0;">${s.revealedHoleCards.map(renderCard).join("")}</div>`
         : "";
       return `<div class="${classes.join(" ")}">
-        <span class="seat-name">${s.displayName}${s.seatNumber === mySeatNumber ? " (you)" : ""}${cardsRow}</span>
+        <span class="seat-name">${escapeHtml(s.displayName)}${s.seatNumber === mySeatNumber ? " (you)" : ""}${cardsRow}</span>
         <span><span class="seat-stack">${s.stack} chips${s.committedThisHand ? " (" + s.committedThisHand + " in)" : ""}</span>${badges}</span>
       </div>`;
     }).join("");
