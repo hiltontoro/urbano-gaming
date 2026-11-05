@@ -594,8 +594,9 @@ describe("[save] the organizer saves an immutable, versioned plan for their DRAF
       "competition_format_rules", "competition_planning_dates", "competition_planning_pitches", "competition_planning_revisions", "competitions", "gaming_members",
     ]);
     // UG-CR-GATE-SSS-019A: the four-team draw foundation (SSS-019) owns exactly two draw tables, and only those two exact names are permitted here; any OTHER draw table, and every
-    // schedule or format-capability table, still fails.
-    const tables = await rawQuery<{ relname: string }>("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' and (c.relname like '%format\\_capab%' or c.relname like '%approved%format%' or (c.relname like 'competition\\_draw%' and c.relname not in ('competition_draws', 'competition_draw_entries')) or c.relname like 'competition\\_schedule%')");
+    // schedule or format-capability table, still fails. UG-CR-GATE-SSS-022: the schedule proposal foundation owns exactly two schedule tables, and only those two exact names are
+    // permitted; any OTHER schedule table still fails.
+    const tables = await rawQuery<{ relname: string }>("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' and (c.relname like '%format\\_capab%' or c.relname like '%approved%format%' or (c.relname like 'competition\\_draw%' and c.relname not in ('competition_draws', 'competition_draw_entries')) or (c.relname like 'competition\\_schedule%' and c.relname not in ('competition_schedule_proposals', 'competition_schedule_proposal_placements')))");
     expect(tables).toEqual([]);
     // The two permitted tables exist now, so "no draw" is judged on their rows: saving a draft plan makes no draw for this competition.
     expect((await rawQuery("select (select count(*)::int from competition_draws where competition_id = $1) as draws, (select count(*)::int from competition_draw_entries where competition_id = $1) as entries", [competitionId]))[0]).toEqual({ draws: 0, entries: 0 });

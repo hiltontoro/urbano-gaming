@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
@@ -9,12 +9,13 @@ import type {
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
   ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
   RegistrationStatusRead, RegistrationFreezeRecord, PlanAmendmentFacts, PlanAmendmentDecision, PlanAmendmentStatusRecord, ProposePlanAmendmentResult,
-  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult, CompetitionDrawRead, CreateCompetitionDrawResult,
+  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult, CompetitionDrawRead, CreateCompetitionDrawResult, ScheduleRequestPlacement, CreateScheduleProposalResult, ScheduleProposalRead,
 } from "../types";
 import { PlanningIntentMismatchError, PlanningValidationError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
 import { PlanAmendmentValidationError, planAmendmentErrorFromDatabase, planAmendmentRpcPayload, planAmendmentStatusFromDatabase } from "../planAmendment";
 import { registrationFreezeErrorFromDatabase, registrationOpeningErrorFromDatabase } from "../registrationFreeze";
 import { assertDrawVerifies, drawErrorFromDatabase, drawRecordFromDatabase } from "../draw";
+import { assertScheduleProposalVerifies, scheduleProposalErrorFromDatabase, scheduleProposalRecordFromDatabase, scheduleReadFromDatabase, scheduleRpcPlacements } from "../scheduleProposal";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
   CompetitionTeamCountInvalidError, CompetitionPairingInvalidError, CompetitionNotPublishedError, CompetitionTeamNotFoundError,
@@ -46,6 +47,16 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    // UG-CR-GATE-SSS-022: the schedule proposal's refusals have their own typed errors (the shared status table does not know them; the proposal route answers for them). They
+    // come first, as the draw, amendment and freeze entries did: a code is matched by containment, in this order. The validation code carries the stable code of the rule.
+    ["SCHEDULE_PROPOSAL_INVALID", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_WRONG_STATE", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_FREEZE_REQUIRED", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_FREEZE_INCONSISTENT", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_DRAW_REQUIRED", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_PLAN_REQUIRED", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_AMENDMENT_PENDING", () => scheduleProposalErrorFromDatabase(msg)!],
+    ["SCHEDULE_PROPOSAL_INTENT_MISMATCH", () => scheduleProposalErrorFromDatabase(msg)!],
     // UG-CR-GATE-SSS-019: the draw's refusals have their own typed errors (the shared status table does not know them; the draw route answers for them). They come
     // first, as the amendment and freeze entries did: a code is matched by containment, in this order.
     ["COMPETITION_DRAW_WRONG_STATE", () => drawErrorFromDatabase(msg)!],
@@ -198,7 +209,7 @@ function mapPlanningRevision(row: any): CompetitionPlanningRevisionRecord {
   };
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore {
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
@@ -343,6 +354,27 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository, C
     const draw = drawRecordFromDatabase(data.draw);
     assertDrawVerifies(competitionId, draw);
     return { draw };
+  }
+
+  async createScheduleProposal(competitionId: string, organizerGamingMemberId: string, intentId: string, placements: readonly ScheduleRequestPlacement[]): Promise<CreateScheduleProposalResult> {
+    const { data, error } = await this.client.rpc("create_competition_schedule_proposal_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_intent_id: intentId, p_placements: scheduleRpcPlacements(placements),
+    });
+    if (error) throw translateError(error);
+    // The evidence is reproduced from itself before it is returned: evidence that does not verify is never handed on.
+    const proposal = scheduleProposalRecordFromDatabase(data?.proposal);
+    assertScheduleProposalVerifies(competitionId, proposal);
+    return { proposal, alreadyProposed: data.already_proposed === true };
+  }
+
+  async getScheduleProposals(competitionId: string, callerGamingMemberId: string): Promise<ScheduleProposalRead | null> {
+    const { data, error } = await this.client.rpc("get_competition_schedule_proposals", { p_competition_id: competitionId, p_caller_gaming_member_id: callerGamingMemberId });
+    if (error) throw translateError(error);
+    // SQL NULL is "no part in this"; anything else must be exactly the organizer's read — a response without its keys is a failure, never "nothing yet".
+    if (data === null || data === undefined) return null;
+    const read = scheduleReadFromDatabase(data);
+    if (read.proposal) assertScheduleProposalVerifies(competitionId, read.proposal);
+    return read;
   }
 
   async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {

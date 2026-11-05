@@ -985,3 +985,112 @@ export interface CreateCompetitionDrawResult {
 export interface CompetitionDrawRead {
   draw: CompetitionDrawRecord | null;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-022 — the four-team schedule proposal
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// Plain data shapes only; the evaluator, the digests, the typed refusals and the bounded views live in scheduleProposal.ts (an error exported from this file would have to be
+// mapped in httpAuth.ts's status table, and the schedule proposal refusals are judged by the one route that raises them).
+
+/** The three matches a four-team competition is played in: the two semifinals (positions one and two of the draw meet in the first, three and four in the second) and the final. */
+export type ScheduleFixtureRole = "SEMIFINAL_1" | "SEMIFINAL_2" | "FINAL";
+
+/**
+ * CURRENT: the latest proposal, resting on the current accepted plan revision and the same draw. STALE: the latest proposal, but its plan revision is no longer the current one
+ * (or its draw digest no longer matches) — a new proposal against the current plan is required. SUPERSEDED: a later proposal exists. Publication is not part of this gate: a
+ * CURRENT proposal is the necessary condition a later publication will require, not a promise that anything can be published.
+ */
+export type ScheduleProposalStatus = "CURRENT" | "STALE" | "SUPERSEDED";
+
+/** One placement as a client states it: a role, a planning pitch of the current plan, a plan date, and a start time in the venue's own clock (HH:MM). Nothing else. */
+export interface ScheduleRequestPlacement {
+  fixtureRole: ScheduleFixtureRole;
+  planningPitchId: string;
+  planDate: string;
+  startTime: string;
+}
+
+/** The reserved timing the format registry gives a match, in whole minutes. */
+export interface ScheduleTimingRecord {
+  occupancyMinutes: number;
+  pitchTransitionMinutes: number;
+  minimumTeamRestMinutes: number;
+}
+
+export interface ScheduleProposalTeam {
+  teamId: string;
+  teamName: string;
+}
+
+/** One placement as the server derived and recorded it. Every instant is UTC, YYYY-MM-DDTHH:MM:SS.mmmZ. The final names no team: its finalists are not known. */
+export interface ScheduleProposalPlacementRecord {
+  fixtureRole: ScheduleFixtureRole;
+  planningPitchId: string;
+  pitchLabel: string;
+  planDate: string;
+  startTime: string;
+  startUtc: string;
+  /** The end of the reserved occupancy (first half, halftime, second half and the full shootout reserve) — not of the match. */
+  endUtc: string;
+  windowStartUtc: string;
+  windowEndUtc: string;
+  teamA: ScheduleProposalTeam | null;
+  teamB: ScheduleProposalTeam | null;
+}
+
+/**
+ * The stored evidence of ONE schedule proposal, as the server reads it. It names the plan revision, the draw and the draw's digest it was made on, and carries a digest of the
+ * whole and of the request it answered. It is never returned to a browser as is: see publicScheduleProposal() in scheduleProposal.ts.
+ */
+export interface ScheduleProposalRecord {
+  sequenceNumber: number;
+  /** The database's instant of the proposal: UTC, exactly six fractional digits, a final Z. */
+  createdAt: string;
+  status: ScheduleProposalStatus;
+  planningRevisionCurrent: boolean;
+  drawDigestMatches: boolean;
+  proposalDigest: string;
+  requestDigest: string;
+  supersedesDigest: string | null;
+  planningRevisionId: string;
+  planningRevisionNumber: number;
+  drawId: string;
+  drawDigest: string;
+  formatKey: SoccerFormatKey;
+  timeZone: string;
+  simultaneousMatchCapacity: number;
+  timing: ScheduleTimingRecord;
+  /** Exactly three, in role order. */
+  placements: ScheduleProposalPlacementRecord[];
+}
+
+export interface ScheduleProposalSummary {
+  sequenceNumber: number;
+  createdAt: string;
+  status: ScheduleProposalStatus;
+  proposalDigest: string;
+}
+
+/** The current accepted plan, as the active organizer needs it to compose a proposal. */
+export interface ScheduleContextRecord {
+  planningRevisionNumber: number;
+  formatKey: SoccerFormatKey;
+  timeZone: string;
+  simultaneousMatchCapacity: number;
+  timing: ScheduleTimingRecord;
+  pitches: Array<{ planningPitchId: string; label: string; usable: boolean; supportedFormats: string[] }>;
+  dates: Array<{ date: string; windows: Array<{ start: string; end: string }> }>;
+}
+
+export interface CreateScheduleProposalResult {
+  proposal: ScheduleProposalRecord;
+  /** True when this was an exact replay of the same request: the existing proposal, nothing written. */
+  alreadyProposed: boolean;
+}
+
+/** What the database tells the ACTIVE ORGANIZER about a competition's schedule proposals: the plan, the latest proposal in full (null before the first) and the bounded history. */
+export interface ScheduleProposalRead {
+  context: ScheduleContextRecord | null;
+  proposal: ScheduleProposalRecord | null;
+  history: ScheduleProposalSummary[];
+}

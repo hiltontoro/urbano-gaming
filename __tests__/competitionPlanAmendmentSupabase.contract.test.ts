@@ -1082,8 +1082,9 @@ describe("[8][9] four distinct frozen captains must confirm, and the fourth conf
     await expectRejects(registerForCompetition(compRepo, ctx.competitionId, pool[41].gamingMemberId, true), TeamRegistrationNotOpenError);
     expect((await rawQuery("select count(*)::int n from competition_fixtures where competition_id = $1", [ctx.competitionId]))[0].n).toBe(0);
     // UG-CR-GATE-SSS-019A: the four-team draw foundation (SSS-019) owns exactly two draw tables, and only those two exact names are permitted here; any OTHER draw table, and every
-    // pairing, schedule, fixture-slot, appeal, adjudication or unexpected amendment table, still fails.
-    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' and relname not in ('competition_draws', 'competition_draw_entries') order by relname")).toEqual([]);
+    // pairing, schedule, fixture-slot, appeal, adjudication or unexpected amendment table, still fails. UG-CR-GATE-SSS-022: the schedule proposal foundation owns exactly two
+    // schedule tables, and only those two exact names are permitted too.
+    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' and relname not in ('competition_draws', 'competition_draw_entries', 'competition_schedule_proposals', 'competition_schedule_proposal_placements') order by relname")).toEqual([]);
     // The two permitted tables exist now, so "no draw" is judged on their rows: activating a plan change makes no draw for this competition.
     expect((await rawQuery("select (select count(*)::int from competition_draws where competition_id = $1) as draws, (select count(*)::int from competition_draw_entries where competition_id = $1) as entries", [ctx.competitionId]))[0]).toEqual({ draws: 0, entries: 0 });
   }, 180000);

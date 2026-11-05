@@ -60,6 +60,7 @@ import {
 import { parsePlanningPlan, planToRpcPayload } from "../lib/gaming/competitions/planning";
 import { PlanAmendmentError } from "../lib/gaming/competitions/planAmendment";
 import { CompetitionDrawError } from "../lib/gaming/competitions/draw";
+import { ScheduleProposalError } from "../lib/gaming/competitions/scheduleProposal";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1223,6 +1224,11 @@ const planningPlan = () => parsePlanningPlan({
 }, "SOCCER_5V5");
 
 /** A valid set of amendable facts for the post-freeze plan change calls below. */
+/** Three well-formed placements for the organizer matrix (UG-CR-GATE-SSS-022): they are never judged against a plan, because every matrix competition is refused for its state first. */
+const schedulePlacements = () => (["SEMIFINAL_1", "SEMIFINAL_2", "FINAL"] as const).map((fixtureRole, i) => ({
+  fixtureRole, planningPitchId: randomUUID(), planDate: "2026-12-01", startTime: ["09:00", "09:00", "10:08"][i],
+}));
+
 const amendmentFacts = () => ({
   venue: { name: `Matrix Amended Venue ${RUN}`, locationDescription: "A fictional venue used only by the local contract suite.", restrictionNotes: "", simultaneousMatchCapacity: 1 },
   pitches: [{ label: "A", usable: true, supportedFormats: ["SOCCER_5V5" as const], restrictionNotes: "" }],
@@ -1340,6 +1346,9 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // UG-CR-GATE-SSS-019: the permanent four-team draw. A published matrix competition is past READY_TO_PUBLISH, so for its OWN active organizer this reports the draw's state
   // refusal (CompetitionDrawError, WRONG_STATE) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
   { rpc: "create_competition_draw_atomically", label: "make the four-team draw", call: (c, a) => compRepo.createCompetitionDraw(c.competitionId, a, randomUUID()) },
+  // UG-CR-GATE-SSS-022: the schedule proposal. A published matrix competition is past READY_TO_PUBLISH, so for its OWN active organizer this reports the proposal's state refusal
+  // (ScheduleProposalError, WRONG_STATE) — after, never instead of, the ownership check, the host-revocation guard and the request's shape the rest of this matrix proves for it.
+  { rpc: "create_competition_schedule_proposal_atomically", label: "propose the four-team schedule", call: (c, a) => compRepo.createScheduleProposal(c.competitionId, a, randomUUID(), schedulePlacements()) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
@@ -1526,7 +1535,7 @@ describe("[T14, T15, T16, T17] ownership and revocation hold on every organizer 
         expect(outcome, `${entry.label}: an active host must not be refused as a stranger or as revoked`).not.toBeInstanceOf(CompetitionAccessDeniedError);
         expect(outcome, `${entry.label}`).not.toBeInstanceOf(HostAccessRevokedError);
         // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change or draw operations' own typed refusals (their routes answer for them).
-        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError;
+        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError || outcome instanceof ScheduleProposalError;
         expect(known, `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).toBe(true);
       }
     }

@@ -54,6 +54,9 @@ import type {
   WithdrawPlanAmendmentResult,
   CompetitionDrawRead,
   CreateCompetitionDrawResult,
+  ScheduleRequestPlacement,
+  CreateScheduleProposalResult,
+  ScheduleProposalRead,
 } from "../types";
 
 /**
@@ -242,4 +245,22 @@ export interface CompetitionDrawStore {
   createCompetitionDraw(competitionId: string, organizerGamingMemberId: string, intentId: string): Promise<CreateCompetitionDrawResult>;
   /** The draw as ONE caller may see it: the active organizer (the draw, or null draw before one exists) and, once a draw exists, the four frozen captains; null for anyone else. */
   getCompetitionDraw(competitionId: string, callerGamingMemberId: string): Promise<CompetitionDrawRead | null>;
+}
+
+/**
+ * UG-CR-GATE-SSS-022 — the two operations the four-team schedule proposal is built on. Kept apart from {@link CompetitionsRepository}, {@link CompetitionPlanningStore},
+ * {@link CompetitionPlanAmendmentStore} and {@link CompetitionDrawStore} for the same reason as they are: a schedule proposal is its own bounded surface, and it neither widens
+ * nor changes any existing read or command.
+ *
+ * The write is ONE atomic database operation that makes every decision itself — the lock, who is acting (the competition's own ACTIVE organizer, exactly and null-safely, with
+ * the host-revocation guard), the shape of the request, the exact replay of the same request or the conflict, the lifecycle (READY_TO_PUBLISH, a consistent freeze, the one
+ * permanent draw, the current accepted plan, no plan change awaiting the captains, no fixture), every scheduling rule against the current plan and the format registry, the
+ * decision instant, the next sequence number and the supersession. It takes no team, no pairing, no instant, no zone, no duration, no capacity, no format, no timing and no
+ * actor beyond the verified caller, and it relies on no caller having checked first. The read answers for the active organizer alone.
+ */
+export interface CompetitionScheduleProposalStore {
+  /** PROPOSE_COMPETITION_SCHEDULE: the next version, or the existing proposal for an exact replay of the same request (`alreadyProposed`). The same intent for anything else is a conflict. */
+  createScheduleProposal(competitionId: string, organizerGamingMemberId: string, intentId: string, placements: readonly ScheduleRequestPlacement[]): Promise<CreateScheduleProposalResult>;
+  /** The plan, the latest proposal and the bounded history as the ACTIVE ORGANIZER may see them; null for anyone else (and for an unknown competition). */
+  getScheduleProposals(competitionId: string, callerGamingMemberId: string): Promise<ScheduleProposalRead | null>;
 }

@@ -1628,11 +1628,11 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
       else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
     });
 
-    it("discovered exactly the 34 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw)", () => {
-      expect(routeFiles).toHaveLength(34);
+    it("discovered exactly the 35 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw; UG-CR-GATE-SSS-022 added [competitionId]/schedule-proposal)", () => {
+      expect(routeFiles).toHaveLength(35);
     });
 
-    it("with readiness disabled, every one of the 38 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment and on [competitionId]/draw) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
+    it("with readiness disabled, every one of the 40 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment, on [competitionId]/draw and on [competitionId]/schedule-proposal) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
       delete process.env.COMPETITIONS_SCHEMA_READY;
       let handlersTested = 0;
 
@@ -1669,7 +1669,7 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
         }
       }
 
-      expect(handlersTested).toBe(38);
+      expect(handlersTested).toBe(40);
     });
   });
 });

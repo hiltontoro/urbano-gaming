@@ -1034,8 +1034,8 @@ describe("the migration (static contract): exactly one new, append-only migratio
     expect(found[0]).toMatch(/^\d{14}_[a-z0-9_]*four_team_draw[a-z0-9_]*\.sql$/);
     expect(found[0] > NEWEST_KNOWN_MAIN).toBe(true);
     expect(found[0] > BASE_NEWEST).toBe(true);
-    // nothing else was added beyond the base: every other migration sorts at or before the base's newest
-    expect(readdirSync(DIR).filter((f) => f > BASE_NEWEST)).toEqual(found);
+    // UG-CR-GATE-SSS-022 adds one LATER migration (the schedule proposal): the draw's migration is still the only one between the base's newest and itself.
+    expect(readdirSync(DIR).filter((f) => f > BASE_NEWEST && f <= found[0])).toEqual(found);
   });
 
   it("creates exactly the two evidence tables, server-only: row-level security on, no policy, no privilege for anyone", () => {
