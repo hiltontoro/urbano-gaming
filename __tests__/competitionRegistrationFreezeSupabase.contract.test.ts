@@ -21,7 +21,6 @@ import { registerForCompetition } from "../lib/gaming/competitions/registerForCo
 import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
 import { decideJoinRequest } from "../lib/gaming/competitions/decideJoinRequest";
 import { organizerReviewJoinRequest } from "../lib/gaming/competitions/organizerReviewJoinRequest";
-import { publishCompetition } from "../lib/gaming/competitions/publishCompetition";
 import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
 import { declareRoster } from "../lib/gaming/competitions/declareRoster";
 import { getCompetitionView } from "../lib/gaming/competitions/getCompetitionView";
@@ -358,6 +357,29 @@ const rowCounts = async (competitionId: string) => (await rawQuery(
 
 interface Ctx { competitionId: string; organizer: Person; format: Format; deadlineMs: number; teams: Array<{ teamId: string; captain: Person; members: string[] }> }
 
+/**
+ * UG-CR-GATE-SSS-025: a frozen competition is published from its schedule proposal, never from chosen teams and times (the database refuses the manual publication for any
+ * competition with a freeze, a draw or a proposal). The organizer draws, proposes the plan's first window on its first usable pitch - the three matches one after the other at the
+ * format's own minimum separations - and publishes that exact proposal. The teams of the semifinals are the DRAW's, so the first semifinal's team A is returned for the tests to use.
+ */
+async function publishFromSchedule(ctx: Ctx) {
+  const organizerId = ctx.organizer.gamingMemberId;
+  await compRepo.createCompetitionDraw(ctx.competitionId, organizerId, randomUUID());
+  const plan = (await compRepo.getScheduleProposals(ctx.competitionId, organizerId))!.context!;
+  const pitch = plan.pitches.find((p) => p.usable && p.supportedFormats.includes(ctx.format))!;
+  const day = plan.dates[0];
+  const [h, m] = day.windows[0].start.split(":").map(Number);
+  const at = (offset: number) => { const t = h * 60 + m + offset; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+  const { occupancyMinutes, pitchTransitionMinutes, minimumTeamRestMinutes } = plan.timing;
+  const second = occupancyMinutes + pitchTransitionMinutes;
+  const final = second + occupancyMinutes + Math.max(pitchTransitionMinutes, minimumTeamRestMinutes);
+  const placements = [["SEMIFINAL_1", 0], ["SEMIFINAL_2", second], ["FINAL", final]].map(([fixtureRole, offset]) => ({ fixtureRole, planningPitchId: pitch.planningPitchId, planDate: day.date, startTime: at(offset as number) }));
+  const proposal = await compRepo.createScheduleProposal(ctx.competitionId, organizerId, randomUUID(), placements as never);
+  const published = await compRepo.publishScheduledCompetition(ctx.competitionId, organizerId, proposal.proposal.proposalDigest);
+  const first = published.publication.fixtures[0];
+  return { state: (await compRepo.getCompetitionById(ctx.competitionId))!.state, semifinal1FixtureId: first.competitionFixtureId, semifinal1TeamId: first.teamAId! };
+}
+
 /** A competition with a saved plan and (optionally) open registration. A non-5v5 format is a bounded service-side fixture, applied BEFORE the plan. */
 async function setUp(label: string, opts: { format?: Format; deadlineMs?: number; open?: boolean; minimum?: number; maximum?: number; teamCount?: number } = {}): Promise<Ctx> {
   await ensurePool();
@@ -493,6 +515,11 @@ afterAll(async () => {
       const revs = "(select planning_revision_id from competition_planning_revisions where competition_id = any($1))";
       const fx = "(select competition_fixture_id from competition_fixtures where competition_id = any($1))";
       const statements = [
+        "delete from competition_schedule_publications where competition_id = any($1)",
+        "delete from competition_schedule_proposal_placements where competition_id = any($1)",
+        "delete from competition_schedule_proposals where competition_id = any($1)",
+        "delete from competition_draw_entries where competition_id = any($1)",
+        "delete from competition_draws where competition_id = any($1)",
         "delete from competition_registration_freeze_members where competition_id = any($1)",
         "delete from competition_registration_freeze_teams where competition_id = any($1)",
         "delete from competition_registration_freezes where competition_id = any($1)",
@@ -1289,13 +1316,13 @@ describe("[freeze] the close operation freezes registration atomically, once, an
     expect(await compRepo.getRegistrationFreeze(ctx.competitionId)).toEqual(frozenBefore);
 
     // Still true once the bracket is published: the freeze, not the state, is what keeps registration closed.
-    const published = await publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[0].teamId, ctx.teams[1].teamId, ctx.teams[2].teamId, ctx.teams[3].teamId,
-      new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+    const published = await publishFromSchedule(ctx);
     expect(published.state).toBe("PUBLISHED");
     await expectRejects(registerForCompetition(compRepo, ctx.competitionId, pool[42].gamingMemberId, true), TeamRegistrationNotOpenError);
     await expectRejects(requestJoinTeam(compRepo, ctx.competitionId, ctx.teams[0].teamId, pool[40].gamingMemberId), TeamRegistrationNotOpenError);
     // The frozen roster is what fixtures are declared from.
-    const declared = await declareRoster(compRepo, published.semifinal1FixtureId, ctx.teams[0].teamId, ctx.teams[0].captain.gamingMemberId, false, null, ctx.teams[0].members);
+    const first = ctx.teams.find((t) => t.teamId === published.semifinal1TeamId)!; // the draw decided who plays the first semifinal
+    const declared = await declareRoster(compRepo, published.semifinal1FixtureId, first.teamId, first.captain.gamingMemberId, false, null, first.members);
     expect(declared.competitionRosterRevisionId).toBeTruthy();
   }, 180000);
 
@@ -1704,10 +1731,10 @@ describe("[regression] existing behavior that must not change", () => {
     }
     await passDeadline(ctx.competitionId);
     expect((await closeTeamRegistration(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId)).state).toBe("READY_TO_PUBLISH");
-    const published = await publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[0].teamId, ctx.teams[1].teamId, ctx.teams[2].teamId, ctx.teams[3].teamId,
-      new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+    const published = await publishFromSchedule(ctx);
     expect(published.state).toBe("PUBLISHED");
-    const roster = await declareRoster(compRepo, published.semifinal1FixtureId, ctx.teams[0].teamId, ctx.teams[0].captain.gamingMemberId, false, null, ctx.teams[0].members);
+    const first = ctx.teams.find((t) => t.teamId === published.semifinal1TeamId)!; // the draw decided who plays the first semifinal
+    const roster = await declareRoster(compRepo, published.semifinal1FixtureId, first.teamId, first.captain.gamingMemberId, false, null, first.members);
     expect(roster.fixtureState).toBe("SCHEDULED");
   }, 240000);
 

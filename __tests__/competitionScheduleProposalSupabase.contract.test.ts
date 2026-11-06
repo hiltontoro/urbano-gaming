@@ -727,9 +727,28 @@ async function expectInvalid(promise: Promise<unknown>, code: string) {
   expect((caught as { violations: Array<{ code: string }> }).violations.map((v) => v.code)).toEqual([code]);
 }
 
-/** Publishes the bracket the OLD way (the competition leaves READY_TO_PUBLISH and fixtures exist). */
-const publishNow = (ctx: Ctx, order = [0, 1, 2, 3]) => publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[order[0]].teamId, ctx.teams[order[1]].teamId, ctx.teams[order[2]].teamId, ctx.teams[order[3]].teamId,
+/** The REAL manual publication call (the legacy path): chosen teams and times. The database now refuses it for every competition that has a freeze, a draw or a proposal. */
+const manualPublish = (ctx: Ctx, order = [0, 1, 2, 3]) => publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[order[0]].teamId, ctx.teams[order[1]].teamId, ctx.teams[order[2]].teamId, ctx.teams[order[3]].teamId,
   new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+
+/**
+ * Publishes the bracket "the OLD way" (the competition leaves READY_TO_PUBLISH and fixtures exist) by a SERVICE-SIDE FIXTURE (UG-CR-GATE-SSS-025). The manual publication now serves
+ * only competitions outside the schedule journey - the database refuses it for any competition with a freeze, a draw or a proposal - but a competition that was frozen, drawn and
+ * then published by hand BEFORE that gate (the manual path was open) is still a real shape, and the proposal's refusals after publication have to hold for it. This writes exactly
+ * what the manual publication wrote: three fixtures (the semifinals' teams as chosen, the final's slots empty and its sources the semifinals) and the PUBLISHED state with its
+ * instant. It carries no publication resolution, as such a competition never had one.
+ */
+async function publishNow(ctx: Ctx, order = [0, 1, 2, 3]) {
+  const team = (i: number) => ctx.teams[order[i]].teamId;
+  const insert = async (role: string, hours: number, a: string | null, b: string | null, sa: string | null, sb: string | null) => (await rawQuery(
+    "insert into competition_fixtures (competition_id, fixture_role, scheduled_at, team_a_competition_team_id, team_b_competition_team_id, team_a_source_fixture_id, team_b_source_fixture_id, state) values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, $6, $7, 'SCHEDULED') returning competition_fixture_id",
+    [ctx.competitionId, role, String(hours), a, b, sa, sb]))[0].competition_fixture_id as string;
+  const sf1 = await insert("SEMIFINAL_1", 1, team(0), team(1), null, null);
+  const sf2 = await insert("SEMIFINAL_2", 2, team(2), team(3), null, null);
+  const fin = await insert("FINAL", 3, null, null, sf1, sf2);
+  const [row] = await rawQuery("update competitions set state = 'PUBLISHED', published_at = now() where competition_id = $1 returning published_at", [ctx.competitionId]);
+  return { competitionId: ctx.competitionId, state: "PUBLISHED" as const, publishedAt: (row.published_at as Date).toISOString(), semifinal1FixtureId: sf1, semifinal2FixtureId: sf2, finalFixtureId: fin };
+}
 
 /** An amendable proposal (a plan change): a new venue, the same pitch labels, one new date. */
 function amendmentFacts(name = `Amended Venue ${RUN}`) {
@@ -801,11 +820,11 @@ describe("[18] the data boundary: two server-only append-only tables, two servic
          from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname = any($1) order by c.relname`, [[...TABLES]]);
     expect(rows.map((r) => r.relname)).toEqual([...TABLES]);
     for (const r of rows) expect({ table: r.relname, rls: r.rls, policies: r.policies, grants: r.grants, publicGrants: r.public_grants }).toEqual({ table: r.relname, rls: true, policies: 0, grants: 0, publicGrants: 0 });
-    expect((await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname like 'competition\\_schedule%' order by relname")).map((r) => r.relname)).toEqual([...TABLES]);
+    expect((await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname like 'competition\\_schedule%' and relname <> 'competition_schedule_publications' order by relname")).map((r) => r.relname)).toEqual([...TABLES]);
   });
 
   it("the migration adds exactly these functions: the two operations and the internal helpers — nothing else with 'schedule' in its name", async () => {
-    const names = (await rawQuery("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ 'schedule' order by p.proname")).map((r) => r.proname);
+    const names = (await rawQuery("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ 'schedule' and p.proname !~ 'schedule_publication' and p.proname <> 'publish_competition_schedule_atomically' order by p.proname")).map((r) => r.proname);
     expect(names).toEqual([...RPCS, ...HELPERS].sort());
   });
 
@@ -1851,13 +1870,14 @@ describe("[19] a proposal creates no fixture, publishes nothing, changes no stat
     expect(after.competition!.state).toBe("READY_TO_PUBLISH");
   }, 240000);
 
-  it("the legacy manual publication still works exactly as it did, whatever proposals exist (it is not retired, not bound to a proposal, and not changed here)", async () => {
+  it("[closed by UG-CR-GATE-SSS-025] the legacy manual publication is REFUSED, in the database, for a competition that has a proposal; the proposal is untouched evidence and nothing else changes", async () => {
     const ctx = await live("Legacy Publish");
     await propose(ctx, GOOD(ctx));
-    const published = await publishNow(ctx);
-    expect(published.state).toBe("PUBLISHED");
-    expect(await fixtureCount(ctx.competitionId)).toBe(3);
-    // the proposal is untouched evidence; nothing derived from it was scheduled
+    const before = await collateralHash(ctx.competitionId);
+    await expect(manualPublish(ctx)).rejects.toMatchObject({ code: "SCHEDULE_PROPOSAL_PUBLICATION_REQUIRED" });
+    expect(await fixtureCount(ctx.competitionId)).toBe(0);
+    expect((await stateOf(ctx.competitionId)).state).toBe("READY_TO_PUBLISH");
+    expect(await collateralHash(ctx.competitionId)).toBe(before);
     expect(await proposalCount(ctx.competitionId)).toEqual({ proposals: 1, placements: 3 });
   }, 300000);
 });

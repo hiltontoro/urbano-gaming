@@ -1094,3 +1094,45 @@ export interface ScheduleProposalRead {
   proposal: ScheduleProposalRecord | null;
   history: ScheduleProposalSummary[];
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-025 — the atomic schedule publication
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+/**
+ * One of the three fixtures a publication created, as the resolution records it: the facts that never change. A semifinal carries its two TEAMS (the draw's, by position) and no
+ * source; the final carries its two SOURCE fixtures (the two semifinals) and no team. What the fixtures become afterwards — their states, the final's finalists, a scorekeeper —
+ * is the fixtures' own and is not part of the resolution.
+ */
+export interface SchedulePublicationFixtureRecord {
+  fixtureRole: ScheduleFixtureRole;
+  competitionFixtureId: string;
+  /** The proposal's kickoff: UTC, exactly three fractional digits, a final Z. */
+  startsAt: string;
+  teamAId: string | null;
+  teamBId: string | null;
+  sourceFixtureAId: string | null;
+  sourceFixtureBId: string | null;
+}
+
+/** The permanent resolution of a publication: what was published, from which proposal, plan revision and draw, by whom, when, and the digest of all of it. */
+export interface SchedulePublicationRecord {
+  scheduleProposalSequence: number;
+  scheduleProposalDigest: string;
+  planningRevisionId: string;
+  drawId: string;
+  drawDigest: string;
+  publishedByGamingMemberId: string;
+  /** The database's instant of the publication, which is also the competition's published instant: UTC, exactly six fractional digits, a final Z. */
+  publishedAt: string;
+  publicationDigest: string;
+  /** Exactly three, in role order. */
+  fixtures: SchedulePublicationFixtureRecord[];
+}
+
+export interface PublishScheduledCompetitionResult {
+  competitionId: string;
+  /** True when this was an exact replay by the still-authorized organizer: the existing publication, nothing written. */
+  alreadyPublished: boolean;
+  publication: SchedulePublicationRecord;
+}

@@ -57,6 +57,7 @@ import type {
   ScheduleRequestPlacement,
   CreateScheduleProposalResult,
   ScheduleProposalRead,
+  PublishScheduledCompetitionResult,
 } from "../types";
 
 /**
@@ -263,4 +264,20 @@ export interface CompetitionScheduleProposalStore {
   createScheduleProposal(competitionId: string, organizerGamingMemberId: string, intentId: string, placements: readonly ScheduleRequestPlacement[]): Promise<CreateScheduleProposalResult>;
   /** The plan, the latest proposal and the bounded history as the ACTIVE ORGANIZER may see them; null for anyone else (and for an unknown competition). */
   getScheduleProposals(competitionId: string, callerGamingMemberId: string): Promise<ScheduleProposalRead | null>;
+}
+
+/**
+ * UG-CR-GATE-SSS-025 — the one operation a four-team competition is published by. Kept apart from {@link CompetitionsRepository} and the other stores for the same reason they are
+ * kept apart: it is its own bounded surface and neither widens nor changes any existing read or command (the manual publication stays on {@link CompetitionsRepository}, guarded
+ * in the database).
+ *
+ * It is ONE atomic database operation that makes every decision itself — the lock, who is acting (the competition's own ACTIVE organizer, exactly and null-safely, with the
+ * host-revocation guard, both BEFORE an exact replay), the proposal named by its digest, the replay, the lifecycle, the freeze, the permanent draw and its evidence, a plan change
+ * awaiting the captains, the latest and CURRENT proposal, the reproduction of its evidence, every scheduling rule again at the publication instant, the three fixtures, the
+ * resolution and the state transition. It takes the competition, the verified caller and ONE digest: no team, pairing, instant, pitch, venue, zone, duration, capacity, format,
+ * draw, plan revision, fixture or actor beyond the caller.
+ */
+export interface CompetitionSchedulePublicationStore {
+  /** PUBLISH_COMPETITION from a schedule proposal: the publication, or the existing one for an exact replay (`alreadyPublished`). Any other call after publication is a conflict. */
+  publishScheduledCompetition(competitionId: string, organizerGamingMemberId: string, scheduleProposalDigest: string): Promise<PublishScheduledCompetitionResult>;
 }

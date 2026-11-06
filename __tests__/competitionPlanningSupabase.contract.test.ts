@@ -320,6 +320,18 @@ function futurePlanOverrides(): Record<string, unknown> {
   };
 }
 
+/**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises what planning leaves unchanged on a PUBLISHED bracket, and publication here is only the set-up.
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await service.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
 async function publishedBracket(label: string) {
   const organizer = await makeOperator(`${label} Organizer`);
   const created = await createCompetition(compRepo, organizer.gamingMemberId, `Plan ${label} ${RUN}`, "SOCCER_5V5");
@@ -335,7 +347,7 @@ async function publishedBracket(label: string) {
   }
   await buildRostersBeforeFreeze(created.competitionId, teamsForRoster, newPerson);
   await passDeadlineFixture(created.competitionId);
-  await closeTeamRegistration(compRepo, created.competitionId, organizer.gamingMemberId);
+  await reachReadyToPublishWithoutFreeze(created.competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
   const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
   const published = await publishCompetition(compRepo, created.competitionId, organizer.gamingMemberId, teams[0], teams[1], teams[2], teams[3], inMs(3600_000), inMs(7200_000), inMs(10800_000));
   // UG-CR-GATE-SSS-007: a bracket now carries the plan that opening required (and the later revision the deadline fixture records): the rows a test must see UNCHANGED.
@@ -596,7 +608,7 @@ describe("[save] the organizer saves an immutable, versioned plan for their DRAF
     // UG-CR-GATE-SSS-019A: the four-team draw foundation (SSS-019) owns exactly two draw tables, and only those two exact names are permitted here; any OTHER draw table, and every
     // schedule or format-capability table, still fails. UG-CR-GATE-SSS-022: the schedule proposal foundation owns exactly two schedule tables, and only those two exact names are
     // permitted; any OTHER schedule table still fails.
-    const tables = await rawQuery<{ relname: string }>("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' and (c.relname like '%format\\_capab%' or c.relname like '%approved%format%' or (c.relname like 'competition\\_draw%' and c.relname not in ('competition_draws', 'competition_draw_entries')) or (c.relname like 'competition\\_schedule%' and c.relname not in ('competition_schedule_proposals', 'competition_schedule_proposal_placements')))");
+    const tables = await rawQuery<{ relname: string }>("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' and (c.relname like '%format\\_capab%' or c.relname like '%approved%format%' or (c.relname like 'competition\\_draw%' and c.relname not in ('competition_draws', 'competition_draw_entries')) or (c.relname like 'competition\\_schedule%' and c.relname not in ('competition_schedule_proposals', 'competition_schedule_proposal_placements', 'competition_schedule_publications')))");
     expect(tables).toEqual([]);
     // The two permitted tables exist now, so "no draw" is judged on their rows: saving a draft plan makes no draw for this competition.
     expect((await rawQuery("select (select count(*)::int from competition_draws where competition_id = $1) as draws, (select count(*)::int from competition_draw_entries where competition_id = $1) as entries", [competitionId]))[0]).toEqual({ draws: 0, entries: 0 });

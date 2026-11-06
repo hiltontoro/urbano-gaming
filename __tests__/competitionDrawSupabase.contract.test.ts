@@ -536,9 +536,28 @@ async function age(digest: string, hours: number): Promise<void> {
     await db.query("update competition_plan_change_proposals set created_at = created_at - ($2 || ' hours')::interval, expires_at = expires_at - ($2 || ' hours')::interval where amendment_digest = $1", [digest, String(hours)]);
   } finally { await db.end().catch(() => {}); }
 }
-/** Publishes the bracket the OLD way (the competition leaves READY_TO_PUBLISH and fixtures exist). */
-const publishNow = (ctx: Ctx, order = [0, 1, 2, 3]) => publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[order[0]].teamId, ctx.teams[order[1]].teamId, ctx.teams[order[2]].teamId, ctx.teams[order[3]].teamId,
+/** The REAL manual publication call (the legacy path): chosen teams and times. The database now refuses it for every competition that has a freeze, a draw or a proposal. */
+const manualPublish = (ctx: Ctx, order = [0, 1, 2, 3]) => publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[order[0]].teamId, ctx.teams[order[1]].teamId, ctx.teams[order[2]].teamId, ctx.teams[order[3]].teamId,
   new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+
+/**
+ * Publishes the bracket "the OLD way" (the competition leaves READY_TO_PUBLISH and fixtures exist) by a SERVICE-SIDE FIXTURE (UG-CR-GATE-SSS-025). The manual publication now serves
+ * only competitions outside the schedule journey - the database refuses it for any competition with a freeze, a draw or a proposal - but a competition that was drawn and then
+ * published by hand BEFORE that gate (the manual path was open) is still a real shape, and the draw's refusals after publication have to hold for it. This writes exactly what the
+ * manual publication wrote: three fixtures (the semifinals' teams as chosen, the final's slots empty and its sources the semifinals) and the PUBLISHED state with its instant.
+ * It carries no publication resolution, as such a competition never had one.
+ */
+async function publishNow(ctx: Ctx, order = [0, 1, 2, 3]) {
+  const team = (i: number) => ctx.teams[order[i]].teamId;
+  const insert = async (role: string, hours: number, a: string | null, b: string | null, sa: string | null, sb: string | null) => (await rawQuery(
+    "insert into competition_fixtures (competition_id, fixture_role, scheduled_at, team_a_competition_team_id, team_b_competition_team_id, team_a_source_fixture_id, team_b_source_fixture_id, state) values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, $6, $7, 'SCHEDULED') returning competition_fixture_id",
+    [ctx.competitionId, role, String(hours), a, b, sa, sb]))[0].competition_fixture_id as string;
+  const sf1 = await insert("SEMIFINAL_1", 1, team(0), team(1), null, null);
+  const sf2 = await insert("SEMIFINAL_2", 2, team(2), team(3), null, null);
+  const fin = await insert("FINAL", 3, null, null, sf1, sf2);
+  const [row] = await rawQuery("update competitions set state = 'PUBLISHED', published_at = now() where competition_id = $1 returning published_at", [ctx.competitionId]);
+  return { competitionId: ctx.competitionId, state: "PUBLISHED" as const, publishedAt: (row.published_at as Date).toISOString(), semifinal1FixtureId: sf1, semifinal2FixtureId: sf2, finalFixtureId: fin };
+}
 
 const CREATE_SQL = "select create_competition_draw_atomically($1, $2, $3) as r";
 const READ_SQL = "select get_competition_draw($1, $2) as r";
@@ -1475,16 +1494,18 @@ describe("[18][24][25][27] the draw creates no fixture, publishes nothing, chang
     expect(rules.map((r) => r.format_key)).toEqual(["SOCCER_5V5", "SOCCER_6V6", "SOCCER_7V7", "SOCCER_8V8"]);
   }, 120000);
 
-  it("[known incompleteness] the draw is NOT yet binding on publication: the old manual publication still publishes ANY pairing, and the draw stays exactly as it was — the later publication gate closes this", async () => {
-    const ctx = await frozen("Incomplete");
+  it("[closed by UG-CR-GATE-SSS-025] the draw is now binding on publication: the manual publication is REFUSED for a drawn competition — whatever pairing it is sent, the drawn one included — and the draw stays exactly as it was", async () => {
+    const ctx = await frozen("Binding");
     const made = await draw(ctx);
     const evidence = await drawEvidenceHash(ctx.competitionId);
     const drawnOrder = made.draw.order.map((t) => t.teamId);
-    // publish with a pairing that is NOT the drawn one: the first and the last team of the draw meet in Semifinal 1
     const byId = (id: string) => ctx.teams.findIndex((t) => t.teamId === id);
-    await publishNow(ctx, [byId(drawnOrder[0]), byId(drawnOrder[3]), byId(drawnOrder[1]), byId(drawnOrder[2])]);
-    expect((await stateOf(ctx.competitionId)).state).toBe("PUBLISHED");
-    expect(await fixtureCount(ctx.competitionId)).toBe(3);
+    // a pairing that is NOT the drawn one (the first and the last team of the draw meet in Semifinal 1), and the drawn pairing itself: neither may be sent by hand
+    for (const order of [[byId(drawnOrder[0]), byId(drawnOrder[3]), byId(drawnOrder[1]), byId(drawnOrder[2])], [byId(drawnOrder[0]), byId(drawnOrder[1]), byId(drawnOrder[2]), byId(drawnOrder[3])]]) {
+      await expect(manualPublish(ctx, order)).rejects.toMatchObject({ code: "SCHEDULE_PROPOSAL_PUBLICATION_REQUIRED" });
+    }
+    expect((await stateOf(ctx.competitionId)).state).toBe("READY_TO_PUBLISH");
+    expect(await fixtureCount(ctx.competitionId)).toBe(0);
     expect(await drawEvidenceHash(ctx.competitionId)).toBe(evidence);
     expect((await readDraw(ctx, ctx.organizer.gamingMemberId))!.draw).toEqual(made.draw);
   }, 240000);

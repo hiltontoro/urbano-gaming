@@ -203,6 +203,18 @@ async function buildRostersBeforeFreeze(competitionId: string, teams: Array<{ id
   }));
 }
 
+/**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises the administration reads of a PUBLISHED bracket, and publication here is only the set-up.
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await service.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
 /** Opens registration (it needs a plan), adds four captained teams, builds their rosters, lets the deadline pass, freezes registration and publishes the bracket. */
 async function publishedBracket(competitionId: string, organizerId: string, label: string) {
   await saveFixturePlan(competitionId, organizerId);
@@ -217,7 +229,7 @@ async function publishedBracket(competitionId: string, organizerId: string, labe
   }
   await buildRostersBeforeFreeze(competitionId, teamsForRoster, newPerson);
   await passDeadlineFixture(competitionId);
-  await closeTeamRegistration(compRepo, competitionId, organizerId);
+  await reachReadyToPublishWithoutFreeze(competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
   return publishCompetition(compRepo, competitionId, organizerId, teamIds[0], teamIds[1], teamIds[2], teamIds[3], inMs(3_600_000), inMs(7_200_000), inMs(10_800_000));
 }
 

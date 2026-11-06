@@ -1315,8 +1315,8 @@ describe("[20] no page offers a schedule proposal, and no format other than five
     for (const file of SURFACE) expect(strip(read(file)), file).not.toMatch(/SOCCER_[5-8]V[5-8]/);
   });
 
-  it("no discovery read, no creation function and no publication function mentions schedule proposals", () => {
-    for (const file of ["lib/gaming/competitions/getCompetitionView.ts", "lib/gaming/competitions/publishCompetition.ts", "lib/gaming/competitions/createCompetition.ts", "lib/gaming/competitions/organizerAccess.ts",
+  it("no discovery read, no creation function and no administration function mentions schedule proposals (the legacy publication module says it is closed to them: pinned in competitionSchedulePublication.test.ts)", () => {
+    for (const file of ["lib/gaming/competitions/getCompetitionView.ts", "lib/gaming/competitions/createCompetition.ts", "lib/gaming/competitions/organizerAccess.ts",
       "lib/gaming/competitions/administration.ts", "lib/gaming/competitions/resolveCompetitionByPublicCode.ts"]) {
       expect(read(file), file).not.toMatch(/schedule[-_ ]?proposal|ScheduleProposal/);
     }
@@ -1347,7 +1347,7 @@ describe("the migration (static contract): exactly one new, append-only migratio
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^\d{14}_[a-z0-9_]*schedule_proposal[a-z0-9_]*\.sql$/);
     expect(files[0] > DRAW_MIGRATION).toBe(true);
-    expect(readdirSync(DIR).filter((f) => f > DRAW_MIGRATION)).toEqual(files);
+    expect(readdirSync(DIR).filter((f) => f > DRAW_MIGRATION && f <= files[0])).toEqual(files); // a later migration (the schedule publication's) is that gate's own
   });
 
   it("creates exactly the two proposal tables, server-only: row-level security on, no policy, no privilege for anyone", () => {

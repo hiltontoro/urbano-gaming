@@ -323,6 +323,18 @@ const frozenRosterByTeam = new Map<string, string[]>();
 const nextRosterIndex = new Map<string, number>();
 
 /**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises what comes AFTER a manual publication (fixtures, rosters, evidence, finalization, corrections, forfeits, voids, disputes, cancellation).
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await cleanupClient.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
+/**
  * A competition with four organizer-created teams whose rosters were built through the real operations (register, ask to join, the captain approves), the
  * deadline passed (fixture) and the registration frozen: READY_TO_PUBLISH. `alsoRegister` registers further members before the deadline.
  */
@@ -363,7 +375,7 @@ async function setUpCompetitionWith4Teams(options: { alsoRegister?: string[] } =
   }));
   for (const gamingMemberId of options.alsoRegister ?? []) await registerForCompetition(repo, competition.competitionId, gamingMemberId, true);
   await passDeadlineFixture(competition.competitionId);
-  await closeTeamRegistration(repo, competition.competitionId, organizer.gamingMemberId);
+  await reachReadyToPublishWithoutFreeze(competition.competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
   return { organizerId: organizer.gamingMemberId, competitionId: competition.competitionId, teams };
 }
 

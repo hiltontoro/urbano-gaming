@@ -61,6 +61,7 @@ import { parsePlanningPlan, planToRpcPayload } from "../lib/gaming/competitions/
 import { PlanAmendmentError } from "../lib/gaming/competitions/planAmendment";
 import { CompetitionDrawError } from "../lib/gaming/competitions/draw";
 import { ScheduleProposalError } from "../lib/gaming/competitions/scheduleProposal";
+import { SchedulePublicationError } from "../lib/gaming/competitions/schedulePublication";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -1235,6 +1236,18 @@ const amendmentFacts = () => ({
   dates: [{ date: planLocal(PLAN_START_MS + 34 * 24 * 3600_000).slice(0, 10), windows: [{ start: "09:00", end: "13:00" }] }],
 });
 
+/**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises the host-revocation boundary of every operation on a PUBLISHED bracket, and publication here is only the set-up.
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await serviceClient.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
 async function publishBracket(competitionId: string, organizerId: string, labelPrefix: string) {
   const captains: Member[] = [];
   for (let i = 0; i < 4; i++) captains.push(await createMember(`${labelPrefix} Captain ${i}`));
@@ -1251,7 +1264,7 @@ async function publishBracket(competitionId: string, organizerId: string, labelP
   const joinRequest = await requestJoinTeam(compRepo, competitionId, teams[0].competitionTeamId, member.gamingMemberId);
   await decideJoinRequest(compRepo, joinRequest.competitionJoinRequestId, teams[0].captainId, "REJECT", false);
   await passDeadlineFixture(competitionId);
-  await closeTeamRegistration(compRepo, competitionId, organizerId);
+  await reachReadyToPublishWithoutFreeze(competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
   const published = await publishCompetition(
     compRepo, competitionId, organizerId,
     teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,
@@ -1349,6 +1362,10 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // UG-CR-GATE-SSS-022: the schedule proposal. A published matrix competition is past READY_TO_PUBLISH, so for its OWN active organizer this reports the proposal's state refusal
   // (ScheduleProposalError, WRONG_STATE) — after, never instead of, the ownership check, the host-revocation guard and the request's shape the rest of this matrix proves for it.
   { rpc: "create_competition_schedule_proposal_atomically", label: "propose the four-team schedule", call: (c, a) => compRepo.createScheduleProposal(c.competitionId, a, randomUUID(), schedulePlacements()) },
+  // UG-CR-GATE-SSS-025: the schedule publication. A matrix competition has no schedule proposal, so for its OWN active organizer a well-formed digest reports the publication's
+  // refusal for a digest that names no proposal (SchedulePublicationError, PROPOSAL_NOT_FOUND) — after, never instead of, the ownership check and the host-revocation guard the
+  // rest of this matrix proves for it.
+  { rpc: "publish_competition_schedule_atomically", label: "publish the scheduled four-team bracket", call: (c, a) => compRepo.publishScheduledCompetition(c.competitionId, a, "0".repeat(64)) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
@@ -1534,8 +1551,8 @@ describe("[T14, T15, T16, T17] ownership and revocation hold on every organizer 
       if (outcome !== null) {
         expect(outcome, `${entry.label}: an active host must not be refused as a stranger or as revoked`).not.toBeInstanceOf(CompetitionAccessDeniedError);
         expect(outcome, `${entry.label}`).not.toBeInstanceOf(HostAccessRevokedError);
-        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change or draw operations' own typed refusals (their routes answer for them).
-        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError || outcome instanceof ScheduleProposalError;
+        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change, draw, proposal or publication operations' own typed refusals (their routes answer for them).
+        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError || outcome instanceof ScheduleProposalError || outcome instanceof SchedulePublicationError;
         expect(known, `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).toBe(true);
       }
     }

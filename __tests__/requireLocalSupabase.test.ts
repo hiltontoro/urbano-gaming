@@ -118,9 +118,9 @@ describe("contract-test registry and guard placement (static inventory)", () => 
 
   const registered = extractEntryFiles(packageJson.scripts["test:contract"]);
 
-  it("package.json registers exactly thirty-one unique contract entry files", () => {
-    expect(registered.length).toBe(31);
-    expect(new Set(registered).size).toBe(31);
+  it("package.json registers exactly thirty-two unique contract entry files", () => {
+    expect(registered.length).toBe(32);
+    expect(new Set(registered).size).toBe(32);
   });
 
   it("the new behavioral/meta test is registered in the ordinary npm test script, not test:contract", () => {

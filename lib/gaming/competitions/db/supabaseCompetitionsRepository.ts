@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore } from "./competitionsRepository";
+import type { CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore, CompetitionSchedulePublicationStore } from "./competitionsRepository";
 import type {
   CompetitionRecord, CompetitionTeamRecord, CompetitionRegistrationRecord, CompetitionJoinRequestRecord,
   CompetitionTeamMembershipRecord, CompetitionFixtureRecord, CompetitionRosterRevisionRecord,
@@ -9,13 +9,14 @@ import type {
   CompetitionFixtureFinalizationRecord, CompetitionMemberParticipationRecord, GoalEventInput, AssistEventInput,
   ParticipationAttestationInput, CompetitionPlanningPlan, CompetitionPlanningRevisionRecord, SavePlanningRevisionResult,
   RegistrationStatusRead, RegistrationFreezeRecord, PlanAmendmentFacts, PlanAmendmentDecision, PlanAmendmentStatusRecord, ProposePlanAmendmentResult,
-  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult, CompetitionDrawRead, CreateCompetitionDrawResult, ScheduleRequestPlacement, CreateScheduleProposalResult, ScheduleProposalRead,
+  DecidePlanAmendmentResult, WithdrawPlanAmendmentResult, CompetitionDrawRead, CreateCompetitionDrawResult, ScheduleRequestPlacement, CreateScheduleProposalResult, ScheduleProposalRead, PublishScheduledCompetitionResult,
 } from "../types";
 import { PlanningIntentMismatchError, PlanningValidationError, formatUtcOffset, planToRpcPayload, planningValidationFromDatabase } from "../planning";
 import { PlanAmendmentValidationError, planAmendmentErrorFromDatabase, planAmendmentRpcPayload, planAmendmentStatusFromDatabase } from "../planAmendment";
 import { registrationFreezeErrorFromDatabase, registrationOpeningErrorFromDatabase } from "../registrationFreeze";
 import { assertDrawVerifies, drawErrorFromDatabase, drawRecordFromDatabase } from "../draw";
 import { assertScheduleProposalVerifies, scheduleProposalErrorFromDatabase, scheduleProposalRecordFromDatabase, scheduleReadFromDatabase, scheduleRpcPlacements } from "../scheduleProposal";
+import { assertSchedulePublicationVerifies, schedulePublicationErrorFromDatabase, schedulePublicationRecordFromDatabase } from "../schedulePublication";
 import {
   CompetitionNotFoundError, CompetitionAccessDeniedError, OperationalAuthorityRequiredError, CompetitionNotDraftError,
   CompetitionTeamCountInvalidError, CompetitionPairingInvalidError, CompetitionNotPublishedError, CompetitionTeamNotFoundError,
@@ -47,6 +48,24 @@ function minimumParticipationFrom(message: string): number | null {
 export function translateError(error: { code?: string; message?: string }): Error {
   const msg = typeof error.message === "string" ? error.message : "";
   const table: Array<[string, () => Error]> = [
+    // UG-CR-GATE-SSS-025: the schedule publication's refusals — and the manual publication's retirement for a competition that belongs to the schedule journey — have their own
+    // typed errors (the shared status table does not know them; the publish route answers for them). They come first, as the proposal, draw, amendment and freeze entries did:
+    // a code is matched by containment, in this order. The not-publishable code carries the stable code of the rule it breaks.
+    ["SCHEDULE_PROPOSAL_PUBLICATION_REQUIRED", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_NOT_PUBLISHABLE", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_INVALID", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_WRONG_STATE", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_FREEZE_REQUIRED", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_FREEZE_INCONSISTENT", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_DRAW_REQUIRED", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_PLAN_REQUIRED", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_AMENDMENT_PENDING", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_DRAW_NOT_VERIFIABLE", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_PROPOSAL_NOT_FOUND", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_PROPOSAL_SUPERSEDED", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_PROPOSAL_STALE", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_PROPOSAL_NOT_VERIFIABLE", () => schedulePublicationErrorFromDatabase(msg)!],
+    ["SCHEDULE_PUBLICATION_CONFLICT", () => schedulePublicationErrorFromDatabase(msg)!],
     // UG-CR-GATE-SSS-022: the schedule proposal's refusals have their own typed errors (the shared status table does not know them; the proposal route answers for them). They
     // come first, as the draw, amendment and freeze entries did: a code is matched by containment, in this order. The validation code carries the stable code of the rule.
     ["SCHEDULE_PROPOSAL_INVALID", () => scheduleProposalErrorFromDatabase(msg)!],
@@ -209,7 +228,7 @@ function mapPlanningRevision(row: any): CompetitionPlanningRevisionRecord {
   };
 }
 
-export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore {
+export class SupabaseCompetitionsRepository implements CompetitionsRepository, CompetitionAdministrationReads, CompetitionPlanningStore, CompetitionPlanAmendmentStore, CompetitionDrawStore, CompetitionScheduleProposalStore, CompetitionSchedulePublicationStore {
   private client: SupabaseClient;
 
   constructor(supabaseUrl: string, supabaseServiceKey: string) {
@@ -375,6 +394,17 @@ export class SupabaseCompetitionsRepository implements CompetitionsRepository, C
     const read = scheduleReadFromDatabase(data);
     if (read.proposal) assertScheduleProposalVerifies(competitionId, read.proposal);
     return read;
+  }
+
+  async publishScheduledCompetition(competitionId: string, organizerGamingMemberId: string, scheduleProposalDigest: string): Promise<PublishScheduledCompetitionResult> {
+    const { data, error } = await this.client.rpc("publish_competition_schedule_atomically", {
+      p_competition_id: competitionId, p_organizer_gaming_member_id: organizerGamingMemberId, p_schedule_proposal_digest: scheduleProposalDigest,
+    });
+    if (error) throw translateError(error);
+    // The evidence is reproduced from itself before it is returned: evidence that does not verify is never handed on.
+    const publication = schedulePublicationRecordFromDatabase(data?.publication);
+    assertSchedulePublicationVerifies(competitionId, publication);
+    return { competitionId, alreadyPublished: data.already_published === true, publication };
   }
 
   async createCompetition(organizerGamingMemberId: string, name: string, activityKey: string, publicCode: string) {

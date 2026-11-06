@@ -237,6 +237,18 @@ interface Ctx {
   cursor: number[];
 }
 
+/**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises the fixture-scope boundary on a PUBLISHED bracket, and publication here is only the set-up.
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await serviceClient.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
 async function publishBracket(competitionId: string, organizerId: string, label: string, captainOverride?: string): Promise<Ctx> {
   const teams: Team[] = [];
   for (let i = 0; i < 4; i++) {
@@ -247,7 +259,7 @@ async function publishBracket(competitionId: string, organizerId: string, label:
   // UG-CR-GATE-SSS-007: closing is the FREEZE — the rosters are built first, the deadline passes, and nobody can join afterwards.
   const rosters = await buildRosters(competitionId, teams);
   await passDeadlineFixture(competitionId);
-  await closeTeamRegistration(compRepo, competitionId, organizerId);
+  await reachReadyToPublishWithoutFreeze(competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
   const published = await publishCompetition(
     compRepo, competitionId, organizerId,
     teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,

@@ -21,7 +21,6 @@ import { registerForCompetition } from "../lib/gaming/competitions/registerForCo
 import { requestJoinTeam } from "../lib/gaming/competitions/requestJoinTeam";
 import { decideJoinRequest } from "../lib/gaming/competitions/decideJoinRequest";
 import { organizerReviewJoinRequest } from "../lib/gaming/competitions/organizerReviewJoinRequest";
-import { publishCompetition } from "../lib/gaming/competitions/publishCompetition";
 import { cancelCompetition } from "../lib/gaming/competitions/cancelCompetition";
 import { appointScorekeeper } from "../lib/gaming/competitions/appointScorekeeper";
 import { declareRoster } from "../lib/gaming/competitions/declareRoster";
@@ -615,9 +614,23 @@ async function age(digest: string, hours: number): Promise<void> {
     await db.query("update competition_plan_change_proposals set created_at = created_at - ($2 || ' hours')::interval, expires_at = expires_at - ($2 || ' hours')::interval where amendment_digest = $1", [digest, String(hours)]);
   } finally { await db.end().catch(() => {}); }
 }
-/** Publishes the bracket (the competition leaves READY_TO_PUBLISH and fixtures exist). */
-const publishNow = (ctx: Ctx) => publishCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, ctx.teams[0].teamId, ctx.teams[1].teamId, ctx.teams[2].teamId, ctx.teams[3].teamId,
-  new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+/**
+ * Publishes the bracket "the old way" (the competition leaves READY_TO_PUBLISH and fixtures exist) by a SERVICE-SIDE FIXTURE (UG-CR-GATE-SSS-025). The manual publication now serves
+ * only competitions outside the schedule journey - the database refuses it for any competition with a freeze, a draw or a proposal - but a competition that was frozen and then
+ * published by hand BEFORE that gate (the manual path was open) is still a real shape, and the amendment window's refusals after publication have to hold for it. This writes
+ * exactly what the manual publication wrote: three fixtures (the semifinals' teams as chosen, the final's slots empty and its sources the semifinals) and the PUBLISHED state with its
+ * instant. It carries no publication resolution, as such a competition never had one.
+ */
+async function publishNow(ctx: Ctx) {
+  const insert = async (role: string, hours: number, a: string | null, b: string | null, sa: string | null, sb: string | null) => (await rawQuery(
+    "insert into competition_fixtures (competition_id, fixture_role, scheduled_at, team_a_competition_team_id, team_b_competition_team_id, team_a_source_fixture_id, team_b_source_fixture_id, state) values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, $6, $7, 'SCHEDULED') returning competition_fixture_id",
+    [ctx.competitionId, role, String(hours), a, b, sa, sb]))[0].competition_fixture_id as string;
+  const sf1 = await insert("SEMIFINAL_1", 1, ctx.teams[0].teamId, ctx.teams[1].teamId, null, null);
+  const sf2 = await insert("SEMIFINAL_2", 2, ctx.teams[2].teamId, ctx.teams[3].teamId, null, null);
+  const fin = await insert("FINAL", 3, null, null, sf1, sf2);
+  const [row] = await rawQuery("update competitions set state = 'PUBLISHED', published_at = now() where competition_id = $1 returning published_at", [ctx.competitionId]);
+  return { competitionId: ctx.competitionId, state: "PUBLISHED" as const, publishedAt: (row.published_at as Date).toISOString(), semifinal1FixtureId: sf1, semifinal2FixtureId: sf2, finalFixtureId: fin };
+}
 /** The existing cancellation (allowed in READY_TO_PUBLISH). */
 const cancelNow = (ctx: Ctx) => cancelCompetition(compRepo, ctx.competitionId, ctx.organizer.gamingMemberId, "Closed after a plan change was recorded.");
 /** A hash of every proposal, decision and resolution of one competition and the identity of its planning revisions: a retry must leave it exactly as it was. */
@@ -1084,7 +1097,7 @@ describe("[8][9] four distinct frozen captains must confirm, and the fourth conf
     // UG-CR-GATE-SSS-019A: the four-team draw foundation (SSS-019) owns exactly two draw tables, and only those two exact names are permitted here; any OTHER draw table, and every
     // pairing, schedule, fixture-slot, appeal, adjudication or unexpected amendment table, still fails. UG-CR-GATE-SSS-022: the schedule proposal foundation owns exactly two
     // schedule tables, and only those two exact names are permitted too.
-    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' and relname not in ('competition_draws', 'competition_draw_entries', 'competition_schedule_proposals', 'competition_schedule_proposal_placements') order by relname")).toEqual([]);
+    expect(await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and relname ~ '(draw|pairing|schedule|fixture_slot|appeal|adjudicat|amend)' and relname !~ '^competition_plan_change_' and relname not in ('competition_draws', 'competition_draw_entries', 'competition_schedule_proposals', 'competition_schedule_proposal_placements', 'competition_schedule_publications') order by relname")).toEqual([]);
     // The two permitted tables exist now, so "no draw" is judged on their rows: activating a plan change makes no draw for this competition.
     expect((await rawQuery("select (select count(*)::int from competition_draws where competition_id = $1) as draws, (select count(*)::int from competition_draw_entries where competition_id = $1) as entries", [ctx.competitionId]))[0]).toEqual({ draws: 0, entries: 0 });
   }, 180000);
@@ -1564,8 +1577,7 @@ describe("[18][19] no authority and no visibility for anyone but the active orga
 
     // A scorekeeper of ANOTHER competition: a published bracket there, the appointment, and nothing here.
     const other = await frozen("Authority Other");
-    const published = await publishCompetition(compRepo, other.competitionId, other.organizer.gamingMemberId, other.teams[0].teamId, other.teams[1].teamId, other.teams[2].teamId, other.teams[3].teamId,
-      new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+    const published = await publishNow(other);
     const scorekeeper = await newPerson("Bystander Scorekeeper");
     await appointScorekeeper(compRepo, published.semifinal1FixtureId, other.organizer.gamingMemberId, scorekeeper.gamingMemberId);
     const bystanderOperator = await makeOperator("Bystander Operator");
@@ -1695,8 +1707,7 @@ describe("[20] the amendment window: READY_TO_PUBLISH, one freeze, an unchanged 
     await expectRejectsLazy(propose(open), async () => PlanAmendmentWindowClosedError);
     const live = await frozen("Window Published");
     const pending = await propose(live);
-    await publishCompetition(compRepo, live.competitionId, live.organizer.gamingMemberId, live.teams[0].teamId, live.teams[1].teamId, live.teams[2].teamId, live.teams[3].teamId,
-      new Date(Date.now() + 3600_000).toISOString(), new Date(Date.now() + 7200_000).toISOString(), new Date(Date.now() + 10800_000).toISOString());
+    await publishNow(live);
     expect(await stateOf(live.competitionId)).toBe("PUBLISHED");
     await expectRejectsLazy(propose(live, facts({ name: `After publish ${RUN}` })), async () => PlanAmendmentWindowClosedError);
     await expectRejectsLazy(decide(live, 0, pending.digest, "CONFIRMED"), async () => PlanAmendmentWindowClosedError);

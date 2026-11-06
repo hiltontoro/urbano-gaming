@@ -225,8 +225,41 @@ function nextFrozenMember(rosters: string[][], cursor: number[], teamIndex: numb
 interface Team { competitionTeamId: string; captainId: string }
 interface Bracket { competitionId: string; organizerId: string; teams: Team[]; sf1: string; sf2: string; final: string; rosters: string[][]; cursor: number[] }
 
+/**
+ * UG-CR-GATE-SSS-025: the manual publication serves ONLY competitions outside the schedule journey - the database refuses it for every competition that has a registration freeze, a
+ * draw or a schedule proposal (competitionSchedulePublicationSupabase.contract.test.ts pins that). This suite exercises the null-safe organizer boundary of the legacy operations, publication among them, on a PUBLISHED bracket.
+ * So this set-up reaches READY_TO_PUBLISH the way a competition from before the registration freeze existed did: the rosters are built, the deadline has passed and the state is
+ * READY_TO_PUBLISH, with no freeze. A service-side fixture; the schedule journey itself is proved in competitionSchedulePublicationSupabase.contract.test.ts.
+ */
+async function reachReadyToPublishWithoutFreeze(competitionId: string): Promise<void> {
+  const { data, error } = await serviceClient.from("competitions").update({ state: "READY_TO_PUBLISH" }).eq("competition_id", competitionId).eq("state", "TEAM_REGISTRATION_OPEN").select("competition_id");
+  if (error || data?.length !== 1) throw error ?? new Error("The competition could not be put in READY_TO_PUBLISH for the legacy-shaped set-up.");
+}
+
+
+/**
+ * UG-CR-GATE-SSS-025: publishes a FROZEN competition "the old way" by a service-side fixture - the manual publication now refuses any competition with a freeze, a draw or a
+ * proposal, but one frozen and then published by hand before the schedule publication existed is still a real shape. It writes exactly what the manual publication wrote: three
+ * fixtures (the semifinals' teams as given, the final's slots empty and its sources the semifinals) and the PUBLISHED state with its instant. It carries no resolution.
+ */
+async function publishFrozenTheOldWay(competitionId: string, teamIds: string[]): Promise<{ semifinal1FixtureId: string; semifinal2FixtureId: string; finalFixtureId: string }> {
+  const insert = async (role: string, hours: number, row: Record<string, string | null>) => {
+    const { data, error } = await serviceClient.from("competition_fixtures")
+      .insert({ competition_id: competitionId, fixture_role: role, scheduled_at: new Date(Date.now() + hours * 3600_000).toISOString(), state: "SCHEDULED", ...row })
+      .select("competition_fixture_id").single();
+    if (error || !data) throw error ?? new Error("The fixture could not be written.");
+    return data.competition_fixture_id as string;
+  };
+  const sf1 = await insert("SEMIFINAL_1", 1, { team_a_competition_team_id: teamIds[0], team_b_competition_team_id: teamIds[1] });
+  const sf2 = await insert("SEMIFINAL_2", 2, { team_a_competition_team_id: teamIds[2], team_b_competition_team_id: teamIds[3] });
+  const fin = await insert("FINAL", 3, { team_a_source_fixture_id: sf1, team_b_source_fixture_id: sf2 });
+  const { error } = await serviceClient.from("competitions").update({ state: "PUBLISHED", published_at: new Date().toISOString() }).eq("competition_id", competitionId);
+  if (error) throw error;
+  return { semifinal1FixtureId: sf1, semifinal2FixtureId: sf2, finalFixtureId: fin };
+}
+
 /** A published four-team bracket run by an internal OPERATIONAL organizer. */
-async function buildBracket(label: string): Promise<Bracket> {
+async function buildBracket(label: string, opts: { frozen?: boolean } = {}): Promise<Bracket> {
   const operator = await createMember(`${label} Operator`);
   await grantOperational(operator.gamingMemberId);
   const created = await createCompetition(compRepo, operator.gamingMemberId, `NullSafe ${label} ${RUN}`, "SOCCER_5V5");
@@ -241,12 +274,17 @@ async function buildBracket(label: string): Promise<Bracket> {
   // UG-CR-GATE-SSS-007: closing is the FREEZE — the rosters are built first, the deadline passes, and nobody can join afterwards.
   const rosters = await buildRosters(created.competitionId, teams);
   await passDeadlineFixture(created.competitionId);
-  await closeTeamRegistration(compRepo, created.competitionId, operator.gamingMemberId);
-  const published = await publishCompetition(
-    compRepo, created.competitionId, operator.gamingMemberId,
-    teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,
-    iso(3600_000), iso(7200_000), iso(10800_000)
-  );
+  // SSS-025: a legacy-shaped competition (no freeze) is published by the real manual publication (see the helper); a FROZEN one - which the manual publication now refuses - is
+  // published "the old way" by a service-side fixture, the shape of a competition that was frozen and then published by hand before the schedule publication existed.
+  if (opts.frozen) await closeTeamRegistration(compRepo, created.competitionId, operator.gamingMemberId);
+  else await reachReadyToPublishWithoutFreeze(created.competitionId);
+  const published = opts.frozen
+    ? await publishFrozenTheOldWay(created.competitionId, teams.map((t) => t.competitionTeamId))
+    : await publishCompetition(
+        compRepo, created.competitionId, operator.gamingMemberId,
+        teams[0].competitionTeamId, teams[1].competitionTeamId, teams[2].competitionTeamId, teams[3].competitionTeamId,
+        iso(3600_000), iso(7200_000), iso(10800_000)
+      );
   return { competitionId: created.competitionId, organizerId: operator.gamingMemberId, teams, sf1: published.semifinal1FixtureId, sf2: published.semifinal2FixtureId, final: published.finalFixtureId, rosters, cursor: [0, 0, 0, 0] };
 }
 
@@ -887,6 +925,13 @@ function publishedBracket(): Promise<Bracket> {
   return publishedPromise;
 }
 
+/** A bracket that was FROZEN and then published by hand (UG-CR-GATE-SSS-025): the close answers an exact retry on a frozen competition with the freeze that exists, which the close control below needs. */
+let frozenPublishedPromise: Promise<Bracket> | undefined;
+function frozenPublishedBracket(): Promise<Bracket> {
+  if (!frozenPublishedPromise) frozenPublishedPromise = buildBracket("frozen-published", { frozen: true });
+  return frozenPublishedPromise;
+}
+
 /** A DRAFT competition with its own OPERATIONAL organizer. */
 async function newCompetition(label: string): Promise<Comp> {
   const operator = await createMember(`${label} Operator`);
@@ -1255,7 +1300,7 @@ describe("close_team_registration_atomically (GATE-094)", () => {
   let fourthCaptain: string;
   beforeAll(async () => {
     o = await openCompetition("close", 3);
-    published = await publishedBracket();
+    published = await frozenPublishedBracket(); // frozen, then published by hand: see frozenPublishedBracket
     stranger = await strangerId();
     fourthCaptain = (await captains())[3];
   }, 240000);
@@ -1342,7 +1387,7 @@ describe("publish_competition_atomically (GATE-094)", () => {
     const pool = await captains();
     await buildRosters(ready.competitionId, ready.teamIds.map((competitionTeamId, i) => ({ competitionTeamId, captainId: pool[i] })));
     await passDeadlineFixture(ready.competitionId);
-    await closeTeamRegistration(compRepo, ready.competitionId, ready.organizerId);
+    await reachReadyToPublishWithoutFreeze(ready.competitionId); // SSS-025: the manual publication below serves a legacy-shaped competition (see the helper)
     published = await publishedBracket();
     stranger = await strangerId();
   }, 240000);
