@@ -270,8 +270,12 @@ describe("the scorekeeper experience: contextual to ONE addressed competition, n
     expect(page.doc.getElementById("comp-title")!.textContent).toBe("Their Cup");
     expect(page.doc.getElementById("page-title")!.textContent).toBe("Competitions — Scorekeeping");
     expect(page.visible(page.doc.getElementById("scorekeeper-note"))).toBe(true);
-    for (const id of ["organizer-only", "select-section", "create-section", "admin-gate", "btn-open-registration", "btn-close-registration", "btn-publish", "btn-open-cancel", "btn-create-competition", "comp-select", "table-teams"]) {
+    // UG-CR-GATE-SSS-028: the manual publication form is retired; what stands where it stood (the schedule section's host and its two status lines) is organizer-only too.
+    for (const id of ["organizer-only", "select-section", "create-section", "admin-gate", "btn-open-registration", "btn-close-registration", "schedule-host", "msg-schedule", "btn-open-cancel", "btn-create-competition", "comp-select", "table-teams"]) {
       expect(page.visible(page.doc.getElementById(id)), id).toBe(false);
+    }
+    for (const gone of ["btn-publish", "publish-form", "p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b", "p-sf1-time", "p-sf2-time", "p-final-time", "schedule-section", "schedule-publish", "schedule-propose"]) {
+      expect(page.doc.getElementById(gone), `${gone} does not exist for a scorekeeper (or for anyone: the manual form is retired)`).toBeNull();
     }
     const blocks = [...page.doc.querySelectorAll("#fixtures-list .fixture-block")];
     expect(blocks).toHaveLength(1);
@@ -295,9 +299,13 @@ describe("the scorekeeper experience: contextual to ONE addressed competition, n
   it("organizer actions cannot run from this view even if a hidden control is clicked programmatically", async () => {
     const page = await context();
     await page.settle(() => page.visible(page.doc.getElementById("competition-detail")), "the scorekeeper view");
-    for (const id of ["btn-open-registration", "btn-close-registration", "btn-publish", "btn-cancel-confirm", "btn-create-competition"]) (page.doc.getElementById(id) as HTMLButtonElement).click();
+    // (UG-CR-GATE-SSS-028: there is no publish control to click any more, hidden or not; the schedule section is built only for an organizer view, never here.)
+    for (const id of ["btn-open-registration", "btn-close-registration", "btn-cancel-confirm", "btn-create-competition"]) (page.doc.getElementById(id) as HTMLButtonElement).click();
+    expect(page.doc.getElementById("btn-publish")).toBeNull();
+    expect(page.doc.querySelector("#schedule-host")!.children).toHaveLength(0);
     await new Promise((r) => setTimeout(r, 40));
     expect(page.calls.filter((c) => c.method !== "GET")).toEqual([]);
+    expect(page.calls.filter((c) => c.url.includes("schedule-proposal") || c.url.endsWith("/publish"))).toEqual([]);
     page.close();
   });
 

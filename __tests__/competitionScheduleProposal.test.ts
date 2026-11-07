@@ -1295,15 +1295,53 @@ describe("no clock, no randomness and no environment in the application: the dec
   });
 });
 
-describe("[20] no page offers a schedule proposal, and no format other than five-a-side is made available", () => {
+describe("[20] no page offers a schedule proposal — except the organizer page (UG-CR-GATE-SSS-028) — and no format other than five-a-side is made available", () => {
   const PUBLIC = () => walk(path.join(REPO_ROOT, "public"), (f) => /\.(html|js)$/.test(f));
 
-  it("no public page or script calls the proposal endpoint or carries a proposal control", () => {
+  // UG-CR-GATE-SSS-028A. SSS-028 authorized ONE public file to consume the proposal endpoint: the organizer page. The exception is that exact path and two exact lines in it: the bounded constants
+  // for the proposals path and for the key that carries a proposal's digest (the publication request's field; its own exception is pinned in competitionSchedulePublication.test.ts).
+  // Nothing is skipped: every public file, the organizer page included, still gets both assertions below, with only those two lines taken out of the organizer page first.
+  const ORGANIZER_PAGE = path.join("public", "competitions-admin.html");
+  const SANCTIONED = ['const SCHED_PATH = "/schedule-proposal";', 'const SCHED_DIGEST_KEY = "scheduleProposalDigest";'];
+  const NAMES_THE_PROPOSAL = /schedule-proposal|schedule_proposal|scheduleProposal/i;
+  /** The top-level functions (declared at column 0 in the page's one inline script) in which a constant is read. Its own declaration is not a reading. */
+  const functionsReading = (source: string, constant: string) => {
+    let current = "";
+    const reading = new Set<string>();
+    for (const line of source.split("\n")) {
+      current = /^(?:async\s+)?function\s+(\w+)\(/.exec(line)?.[1] ?? current;
+      if (new RegExp(`\\b${constant}\\b`).test(line) && !line.startsWith(`const ${constant} =`)) reading.add(current);
+    }
+    return Array.from(reading).sort();
+  };
+
+  it("no public page or script calls the proposal endpoint or carries a proposal control — the organizer page's two bounded constants excepted", () => {
     for (const file of PUBLIC()) {
       const source = readFileSync(file, "utf8");
       const where = path.relative(REPO_ROOT, file);
-      expect(source, `${where}: a /schedule-proposal path`).not.toMatch(/schedule-proposal/);
-      expect(source, `${where}: a schedule_proposal name`).not.toMatch(/schedule_proposal|scheduleProposal/i);
+      const scanned = where === ORGANIZER_PAGE ? source.split("\n").filter((line) => !SANCTIONED.includes(line.trim())).join("\n") : source;
+      expect(scanned, `${where}: a /schedule-proposal path`).not.toMatch(/schedule-proposal/);
+      expect(scanned, `${where}: a schedule_proposal name`).not.toMatch(/schedule_proposal|scheduleProposal/i);
+    }
+  });
+
+  it("the organizer page is the one exception: the only public file that names the proposal endpoint, once, as its bounded path constant, read only to load the schedule and to propose", () => {
+    const named = PUBLIC().filter((file) => NAMES_THE_PROPOSAL.test(readFileSync(file, "utf8"))).map((file) => path.relative(REPO_ROOT, file));
+    expect(named).toEqual([ORGANIZER_PAGE]);
+    const page = readFileSync(path.join(REPO_ROOT, ORGANIZER_PAGE), "utf8");
+    // Every line of the page that names the proposal contract at all is one of the two sanctioned lines, each exactly once (the filter above would hide a duplicate).
+    expect(page.split("\n").filter((line) => NAMES_THE_PROPOSAL.test(line)).map((line) => line.trim())).toEqual(SANCTIONED);
+    // The path constant is read by exactly two functions: the one that loads the schedule and the one that proposes.
+    expect(functionsReading(page, "SCHED_PATH")).toEqual(["readSchedule", "submitSchedule"]);
+  });
+
+  it("no captain, member-discovery or Home surface gains the control: those files are among the ones scanned, and none names the proposal contract or carries the proposal section", () => {
+    // The scorekeeper-only mode is part of the organizer page itself; that it gets no schedule read and no schedule control is proved at runtime (competitionScheduleOrganizerPage.test.ts, test 4).
+    const scanned = PUBLIC().map((file) => path.relative(REPO_ROOT, file));
+    for (const surface of ["competitions.html", "competitionsIntent.js", "index.html"].map((name) => path.join("public", name))) {
+      expect(scanned, `${surface} is scanned`).toContain(surface);
+      expect(NAMES_THE_PROPOSAL.test(read(surface)), `${surface} names the proposal contract`).toBe(false);
+      expect(/schedule-section|schedule-propose/.test(read(surface)), `${surface} carries the organizer's proposal section or its Propose control`).toBe(false);
     }
   });
 

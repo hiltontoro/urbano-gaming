@@ -3,6 +3,9 @@ import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
+import { publicScheduleProposal } from "../lib/gaming/competitions/scheduleProposal";
+import { PITCH_A, PITCH_B, makeFacts, makeRecord } from "./helpers/competitionScheduleOrganizerPageHarness";
+
 /**
  * UG-CR-GATE-083 Correction B (per UG-CR-REV-054 finding 2) — proves,
  * against the ACTUAL shipped browser code (extracted verbatim from the
@@ -507,4 +510,90 @@ describe("UG-CR-GATE-SSS-014 — the plan-change comparison (both pages), the re
       expect(code).not.toMatch(/\bel\(|insertAdjacentHTML|outerHTML\s*=|document\.write|new Function|\beval\(/);
     });
   }
+});
+
+describe("UG-CR-GATE-SSS-028 — the schedule-and-publish section: no server text is ever parsed as markup (the real shipped functions, executed)", () => {
+  /** The whole page script in a jsdom window with only the auth bridge stubbed (the same way the team-table tests above load it). */
+  function loadScheduleRealm() {
+    const dom = new JSDOM(adminHtml.replace(/<script[^>]*src=[^>]*><\/script>/g, ""), { runScripts: "outside-only", url: "https://urbano.example.test/competitions-admin.html" });
+    const w = dom.window as unknown as Window & Record<string, any>;
+    w.eval(readFileSync(path.join(process.cwd(), "public/competitionsLifecycle.js"), "utf8"));
+    w.eval("window.UrbanoAuth = { attachSignInButton() {}, onAuthStateChange() {}, async getState() { return { status: 'unauthenticated' }; }, async getAccessToken() { return null; } };");
+    const inline = /<script>([\s\S]*?)<\/script>/.exec(adminHtml);
+    if (!inline) throw new Error("the page's inline script was not found");
+    w.eval(inline[1]);
+    return w;
+  }
+
+  const hostileContext = (value: string) => ({
+    planningRevisionNumber: 2, formatKey: value, timeZone: value, simultaneousMatchCapacity: 2, timing: { occupancyMinutes: 38, pitchTransitionMinutes: 10, minimumTeamRestMinutes: 30 },
+    pitches: [
+      { planningPitchId: PITCH_A, label: value, usable: true, supportedFormats: [value] },
+      { planningPitchId: PITCH_B, label: `${value} B`, usable: false, supportedFormats: [value] },
+    ],
+    dates: [{ date: "2026-11-14", windows: [{ start: "09:00", end: "13:00" }] }],
+  });
+  const hostileProposal = (value: string) => {
+    const facts = makeFacts();
+    facts.pitches = facts.pitches.map((p) => ({ ...p, label: value }));
+    const wire = JSON.parse(JSON.stringify(publicScheduleProposal(makeRecord({ facts, teamNames: [value, `${value} 2`, `${value} 3`, `${value} 4`] }))));
+    wire.timeZone = value;
+    return wire;
+  };
+
+  for (const { label, value } of HOSTILE_PAYLOADS) {
+    it(`a hostile value (${label}) in the plan, a pitch label, a team name or a time zone is shown as literal text, never as a live element`, () => {
+      const w = loadScheduleRealm();
+      const host = w.document.createElement("div");
+      w.document.body.appendChild(host);
+      const state = { proposal: hostileProposal(value), history: [{ sequenceNumber: 2, createdAt: "2026-11-07T14:12:00.123456Z", status: "SUPERSEDED", proposalDigest: "a".repeat(64) }, { sequenceNumber: 1, createdAt: "2026-11-07T14:11:00.123456Z", status: "SUPERSEDED", proposalDigest: "b".repeat(64) }] };
+      const parts = [w.buildScheduleContext(hostileContext(value)), w.buildScheduleReview(state), w.buildScheduleHistory(state)];
+      for (const part of parts) {
+        host.appendChild(part);
+        assertNoLiveInjection(part);
+        expect(part.querySelectorAll("img, svg, b, script")).toHaveLength(0);
+      }
+      expect(host.textContent).toContain(value);
+      // the choices: an option's text is the label, literally; its value is the identifier the server gave
+      const select = w.schedSelect("probe", "Choose a pitch", [[PITCH_A, value]], PITCH_A);
+      host.appendChild(select);
+      assertNoLiveInjection(select);
+      expect(select.options[1].textContent).toBe(value);
+      expect(select.options[1].value).toBe(PITCH_A);
+      // the server's own reasons for a rejection are listed as text
+      const list = w.document.createElement("ul");
+      list.id = "schedule-problems";
+      host.appendChild(list);
+      w.schedShowProblems([{ field: "schedule", code: "X", message: value }, null, 7, { message: 5 }, { message: "   " }]);
+      expect(list.querySelectorAll("li")).toHaveLength(1);
+      expect(list.textContent).toBe(value.trim());
+      assertNoLiveInjection(list);
+      expect((w as any).__xss).toBeUndefined();
+    });
+  }
+
+  it("the server's reasons are bounded: at most twelve, each cut to 240 characters, and anything that is not a message is skipped", () => {
+    const w = loadScheduleRealm();
+    const list = w.document.createElement("ul");
+    list.id = "schedule-problems";
+    w.document.body.appendChild(list);
+    w.schedShowProblems(Array.from({ length: 30 }, (_, i) => ({ message: `${i}:` + "x".repeat(500) })));
+    expect(list.querySelectorAll("li")).toHaveLength(12);
+    expect((list.querySelector("li")!.textContent as string).length).toBe(240);
+    w.schedShowProblems("nope");
+    expect(list.querySelectorAll("li")).toHaveLength(0);
+  });
+
+  it("no sink in the schedule code parses server text as markup: it never assigns innerHTML at all, and el(), insertAdjacentHTML, outerHTML, document.write, new Function and eval are not used there", () => {
+    // the block begins at its own header (the small hooks in older functions carry the gate's id too, but not this heading)
+    const start = adminHtml.indexOf('UG-CR-GATE-SSS-028 — "Schedule and publish"');
+    expect(start, "the schedule code block was found").toBeGreaterThan(-1);
+    const code = adminHtml.slice(start, adminHtml.indexOf("UrbanoAuth.onAuthStateChange(", start));
+    expect(code.length).toBeGreaterThan(2000);
+    expect(code).not.toMatch(/innerHTML/);
+    expect(code).not.toMatch(/\bel\(|elRow\(|insertAdjacentHTML|outerHTML\s*=|document\.write|new Function|\beval\(|srcdoc|createContextualFragment/);
+    // every piece of server text reaches the page through textContent, a form value, or an attribute that is set as data — never an `on*` attribute or a URL
+    expect(code).not.toMatch(/setAttribute\(\s*["']on/i);
+    expect(code).not.toMatch(/\.href\s*=|\.src\s*=|location\.(assign|replace|href)|window\.open/);
+  });
 });

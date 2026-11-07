@@ -196,6 +196,35 @@
     .plan-change-card button { min-height: 44px; }
     .plan-change-row input[type="text"], .plan-change-row input[type="date"], .plan-change-row input[type="time"] { flex: 1 1 100%; }
   }
+  /* UG-CR-GATE-SSS-028: the schedule-and-publish section (built only after the server has answered the schedule read exactly). */
+  .schedule-card h3 { margin-top: 0; }
+  .schedule-card h4 { margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .schedule-card .msg, .schedule-card li, .schedule-card td, .schedule-card dd, .schedule-card legend, .schedule-card label { overflow-wrap: break-word; }
+  .schedule-card fieldset { margin: 12px 0; }
+  .schedule-card .field { display: block; margin: 0 0 10px; }
+  .schedule-card .field > label { display: block; margin-bottom: 3px; }
+  .schedule-card select { width: 100%; max-width: 320px; }
+  .schedule-card select[aria-invalid="true"] { border-color: var(--bad); }
+  .schedule-facts { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0; }
+  .schedule-facts dt { color: var(--muted); }
+  .schedule-facts dd { margin: 0; min-width: 0; overflow-wrap: break-word; }
+  .schedule-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 0 0 8px; }
+  .schedule-head .msg { margin: 0; }
+  #schedule-problems { margin: 6px 0 0; padding-left: 18px; color: var(--bad); font-size: 14px; }
+  #schedule-history { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+  #schedule-publish-area { margin: 12px 0; }
+  table.schedule-table th:nth-child(1) { width: 14%; }
+  table.schedule-table th:nth-child(2) { width: 30%; }
+  table.schedule-table th:nth-child(3) { width: 12%; }
+  table.schedule-table th:nth-child(4) { width: 22%; }
+  table.schedule-table th:nth-child(5) { width: 22%; }
+  #schedule-read-note:focus, #msg-schedule:focus, .schedule-card h3:focus { outline: 2px solid var(--exp-purple); outline-offset: 3px; border-radius: 4px; }
+  @media (pointer: coarse) { .schedule-card button, .schedule-card select { min-height: 44px; } }
+  @media (max-width: 720px) {
+    .schedule-facts { grid-template-columns: 1fr; }
+    .schedule-card button, .schedule-card select { min-height: 44px; }
+    .schedule-card select { max-width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -311,14 +340,13 @@
     <table id="table-rejected-teams" class="stack-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Proposed by</th><th role="columnheader">Reason</th></tr></thead><tbody role="rowgroup"></tbody></table>
     <p class="msg" id="msg-rejected-teams">No rejected proposals.</p>
 
-    <h3>Publish</h3>
-    <div id="publish-form">
-      <div class="row"><label>SF1: </label><select id="p-sf1a"></select> vs <select id="p-sf1b"></select> <input type="datetime-local" id="p-sf1-time" /></div>
-      <div class="row"><label>SF2: </label><select id="p-sf2a"></select> vs <select id="p-sf2b"></select> <input type="datetime-local" id="p-sf2-time" /></div>
-      <div class="row"><label>Final: </label><input type="datetime-local" id="p-final-time" /></div>
-      <button id="btn-publish">Publish Competition</button>
-    </div>
-    <p class="msg" id="msg-publish"></p>
+    <!-- UG-CR-GATE-SSS-028: the manual team-and-time publication form that stood here is retired for good. Scheduling and publishing are one server-backed
+         journey: the section is BUILT by the script below (it is never shipped in this markup) only after the server has answered the schedule read exactly, for
+         the active organizer of a frozen READY_TO_PUBLISH competition. The two lines are status text only: the first says that the read failed, the second
+         reports what became of a publication. -->
+    <p class="msg" id="schedule-read-note" tabindex="-1" aria-live="polite" hidden></p>
+    <p class="msg" id="msg-schedule" tabindex="-1" aria-live="polite"></p>
+    <div id="schedule-host"></div>
     </div>
 
     <h3>Fixtures</h3>
@@ -428,6 +456,11 @@ async function refreshAuthState() {
   // UG-CR-GATE-SSS-014: any authorization event removes the plan-change section in this very turn and invalidates its outstanding answers;
   // it returns only when the server confirms everything again (see reestablishAmendment); unsent edits wait in memory for that, and no longer than that.
   removeAmendmentSection(true);
+  // UG-CR-GATE-SSS-028: the same event removes the schedule section in this very turn and aborts what it was waiting for; it returns only when the server's read is
+  // exact again (see reestablishSchedule). A publication that was in flight is not known to have happened, and the page says so.
+  const publicationInterrupted = !!(scheduleState && scheduleState.publishing);
+  removeScheduleSection();
+  if (publicationInterrupted) setMsg("msg-schedule", SCHED_COPY.pubInterrupted, "error");
   const state = await UrbanoAuth.getState();
   const statusEl = document.getElementById("auth-status");
   const sections = document.getElementById("admin-sections");
@@ -438,11 +471,13 @@ async function refreshAuthState() {
     // which lists only the competitions the caller actively organizes.
     const code = scorekeeperCodeFromUrl();
     if (code) await loadScorekeeperContext(code);
-    else { await loadCompetitions(); reestablishAmendment(); }
+    else { await loadCompetitions(); reestablishAmendment(); reestablishSchedule(); }
   } else {
     statusEl.textContent = "Not signed in.";
     sections.style.display = "none";
     amendDraft = null;
+    scheduleAttempt = null;
+    schedClearNotes();
   }
 }
 
@@ -459,6 +494,9 @@ function closeAdministration(message, offerOtherEntries, operations) {
   currentAccess = null;
   removePlanningSection();
   removeAmendmentSection(false);
+  removeScheduleSection();
+  scheduleAttempt = null;
+  schedClearNotes();
   document.getElementById("select-section").hidden = true;
   document.getElementById("competition-detail").style.display = "none";
   document.getElementById("comp-select").innerHTML = "";
@@ -517,7 +555,7 @@ async function loadCompetitions() {
   }
   applyOperations(res.json.operations);
   cachedCompetitions = entries;
-  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) removeAmendmentSection(false);
+  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) { removeAmendmentSection(false); removeScheduleSection(); }
   select.innerHTML = "";
   document.getElementById("admin-gate").hidden = true;
   document.getElementById("admin-gate").textContent = "";
@@ -598,10 +636,17 @@ document.getElementById("btn-create-competition").addEventListener("click", asyn
 });
 
 // UG-CR-GATE-SSS-014: changing the selection removes the plan-change section in the same turn (it is asked for again only when a competition is loaded).
-document.getElementById("comp-select").addEventListener("change", () => { removeAmendmentSection(false); });
+document.getElementById("comp-select").addEventListener("change", () => {
+  removeAmendmentSection(false);
+  // UG-CR-GATE-SSS-028: so does the schedule section, with its requests and what it held; another competition's feedback and unsent request are not carried over.
+  removeScheduleSection();
+  schedClearNotes();
+  if (scheduleAttempt && scheduleAttempt.competitionId !== document.getElementById("comp-select").value) scheduleAttempt = null;
+});
 
 document.getElementById("btn-load-competition").addEventListener("click", async () => {
   removeAmendmentSection(false);
+  removeScheduleSection();
   const competitionId = document.getElementById("comp-select").value;
   if (!competitionId) { setMsg("msg-load", "Select a competition.", "error"); return; }
   // Switching to a (possibly different) competition must never carry over
@@ -614,7 +659,8 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
   setMsg("msg-registration", "", "");
   setMsg("freeze-status", "", "");
   document.getElementById("freeze-confirm").hidden = true;
-  setMsg("msg-publish", "", "");
+  schedClearNotes();
+  if (scheduleAttempt && scheduleAttempt.competitionId !== competitionId) scheduleAttempt = null;
   setMsg("cancel-status", "", "");
   document.getElementById("cancel-panel").hidden = true;
   document.getElementById("cancel-reason").value = "";
@@ -623,6 +669,9 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
 });
 
 async function loadCompetitionDetail(competitionId) {
+  // UG-CR-GATE-SSS-028: reloading the detail removes the schedule section in this very turn (its requests aborted, its proposal and digest forgotten); it is built
+  // again, from fresh answers, only if the reloaded detail still calls for it.
+  removeScheduleSection();
   // Only a competition the scoped source returned can be opened here, so a tampered selector value is simply ignored.
   const entry = cachedCompetitions.find((c) => c.competitionId === competitionId);
   if (!entry) { setMsg("msg-load", "Select a competition.", "error"); return; }
@@ -905,20 +954,6 @@ function renderCompetitionDetail() {
     rejectedTbody.appendChild(tr);
   }
 
-  document.getElementById("publish-form").style.display = (competition.state === "READY_TO_PUBLISH" && teams.length === 4) ? "block" : "none";
-  if (competition.state === "READY_TO_PUBLISH" && teams.length === 4) {
-    for (const selId of ["p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b"]) {
-      const sel = document.getElementById(selId);
-      sel.innerHTML = "";
-      for (const t of teams) {
-        const opt = document.createElement("option");
-        opt.value = t.competitionTeamId;
-        opt.textContent = t.name;
-        sel.appendChild(opt);
-      }
-    }
-  }
-
   const fixturesList = document.getElementById("fixtures-list");
   fixturesList.innerHTML = "";
   for (const f of fixtures) {
@@ -934,6 +969,9 @@ function renderCompetitionDetail() {
   // UG-CR-GATE-SSS-014: the post-freeze plan change is asked for only for an organizer view of a READY_TO_PUBLISH competition whose view carries the exact
   // organizer signal; the section itself appears only after the server has answered both required reads.
   ensureAmendment(competition, currentView);
+
+  // UG-CR-GATE-SSS-028: the schedule-and-publish section is asked for on the same terms; it exists only after the server has answered its read exactly.
+  ensureSchedule(competition, currentView);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -1141,24 +1179,6 @@ document.getElementById("btn-freeze-confirm").addEventListener("click", async ()
   const code = res.json && typeof res.json === "object" && typeof res.json.code === "string" ? res.json.code : null;
   setFreezeStatus((code && Object.prototype.hasOwnProperty.call(FREEZE_MESSAGES, code) && FREEZE_MESSAGES[code]) || "Could not freeze registration.", "error");
   setFreezeBusy(false);
-});
-
-document.getElementById("btn-publish").addEventListener("click", async () => {
-  if (!isOrganizerView()) return;
-  const body = {
-    semifinal1TeamAId: document.getElementById("p-sf1a").value,
-    semifinal1TeamBId: document.getElementById("p-sf1b").value,
-    semifinal2TeamAId: document.getElementById("p-sf2a").value,
-    semifinal2TeamBId: document.getElementById("p-sf2b").value,
-    semifinal1ScheduledAt: new Date(document.getElementById("p-sf1-time").value).toISOString(),
-    semifinal2ScheduledAt: new Date(document.getElementById("p-sf2-time").value).toISOString(),
-    finalScheduledAt: new Date(document.getElementById("p-final-time").value).toISOString(),
-  };
-  const res = await authedFetch(`/api/gaming/competitions/${currentView.competition.competitionId}/publish`, { method: "POST", body: JSON.stringify(body) });
-  if (res.status === 200) {
-    setMsg("msg-publish", "Published.", "success");
-    await loadCompetitionDetail(currentView.competition.competitionId);
-  } else setMsg("msg-publish", (res.json && res.json.error) || "Failed to publish.", "error");
 });
 
 function teamNameOf(teams, teamId) {
@@ -2753,6 +2773,900 @@ async function withdrawAmendment(state) {
     return;
   }
   await refreshAmendment(state, (json && amendIsText(json.error) && json.error) || "The proposed change could not be withdrawn.", "error", false);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-028 — "Schedule and publish": the organizer's server-backed way from a frozen, drawn four-team competition to its published fixtures.
+//
+// The manual form that used to stand here (four team selectors, three free date-and-time inputs, a button) is gone for good: the browser no longer chooses a
+// pairing, an instant, a fixture, a venue, a format or any evidence. It does two things only. It lets the active organizer ask the server for a schedule — by
+// naming, for each of the three matches, one of the plan's own usable pitches, one of the plan's own dates and one start time that fits one of the plan's own
+// windows — and it lets the organizer publish ONE exact proposal the server derived and the organizer has seen, by naming nothing but that proposal's digest.
+// Everything that matters is decided by the server, and decided again at the moment it matters: who the organizer is, the state, the freeze, the draw, the plan,
+// every scheduling rule, the sequence, whether a proposal is still the latest and still current, the kickoffs at the publication instant, the three fixtures. This
+// code SHOWS those answers and sends the organizer's requests; every check it makes before sending is a convenience for the person using it, never authority.
+//
+// The section exists only after the server has answered the schedule read exactly, and only for an organizer view of a READY_TO_PUBLISH competition whose view carries
+// the server's own organizer signal (the same signal the plan-change section relies on). Until then — while the authorization source, the detail or the read is
+// pending, and after any failed, refused, silent or malformed read — there is nothing of it on the page, and the manual form does not come back: one plain
+// sentence says the schedule could not be loaded. Whenever the selection, the session, the authorization or the loaded detail changes, the section is removed in the
+// same turn, its outstanding requests are aborted, the proposal it held (and so its digest) is forgotten, and no late answer can render, enable or confirm anything.
+//
+// The proposal's digest lives only in this script's memory, in the state the section was built from. It is never written into the page, never stored, never shown.
+// A request whose outcome is unknown (silence, a lost connection, an answer that cannot be read) keeps its intent identifier for the same choices, so a retry can
+// never record a second proposal; any edit, and any answer that is definite, ends it. Every server string is placed with textContent or a value, never as markup.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// A schedule request that neither answers nor fails within this time is treated as FAILED (and aborted).
+let SCHEDULE_TIMEOUT_MS = 20000;
+// The one live section (or the one being loaded); null when there is none. Everything it knows lives here and nowhere else.
+let scheduleState = null;
+// The last proposal request whose outcome is not known: { competitionId, payloadJson, intentId }. It outlives a rebuild of the section, never a change of competition.
+let scheduleAttempt = null;
+// The control that had the keyboard focus when a request began: disabling it would drop the focus to the page, so it is given back when the section is usable again.
+let scheduleFocusId = "";
+
+const SCHED_ROLES = ["SEMIFINAL_1", "SEMIFINAL_2", "FINAL"];
+const SCHED_ROLE_KEYS = { SEMIFINAL_1: "sf1", SEMIFINAL_2: "sf2", FINAL: "final" };
+const SCHED_STATUSES = ["CURRENT", "STALE", "SUPERSEDED"];
+const SCHED_STATUS_TEXT = { CURRENT: "Current", STALE: "Stale", SUPERSEDED: "Superseded" };
+const SCHED_STATUS_NOTE = {
+  CURRENT: "This is the latest proposal, and it still matches the accepted plan and the draw.",
+  STALE: "The accepted plan or the draw has changed since this schedule was proposed.",
+  SUPERSEDED: "A later proposal replaced this one.",
+};
+// Start times are offered every five minutes inside each operating window (the plan decides the windows; the server decides what is valid).
+const SCHED_STEP_MINUTES = 5;
+// The most proposals the server ever lists in a history.
+const SCHED_HISTORY_LIMIT = 50;
+const SCHED_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SCHED_DIGEST = /^[0-9a-f]{64}$/;
+const SCHED_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const SCHED_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const SCHED_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+// The two names the accepted routes use: the proposals path under a competition, and the key that carries a proposal's digest (in a publication request and in its evidence).
+const SCHED_PATH = "/schedule-proposal";
+const SCHED_DIGEST_KEY = "scheduleProposalDigest";
+
+/** What this section says in its own words. The server's words are never shown, except the reasons it lists for a rejected or no-longer-publishable schedule. */
+const SCHED_COPY = {
+  readFailed: "The schedule could not be loaded, so nothing can be proposed or published from here right now. Choose Load to try again.",
+  intro: "Choose where and when each match is played. The choices below come from your accepted plan, as a convenience. The server works out the teams from the draw and every kickoff time, and the server checks every rule again when you propose a schedule and again when you publish it.",
+  noPlan: "This competition has no accepted plan to schedule against, so a schedule cannot be proposed here.",
+  noPitch: "The accepted plan has no usable pitch for this format, so a schedule cannot be proposed here. Change the plan first.",
+  noWindow: "No operating window in the accepted plan is long enough for one match, so a schedule cannot be proposed here. Change the plan first.",
+  formHint: "Proposing a new schedule replaces the current proposal. Only the latest proposal can be published.",
+  incomplete: "Choose a pitch, a date and a start time for every match.",
+  sameAsCurrent: "These choices are already the current proposal. Change something to propose a different schedule.",
+  sending: "Sending…",
+  proposed: "Schedule proposed as proposal ",
+  proposedTail: ". Review it above, then publish it while it is the current proposal.",
+  replay: "This exact schedule was already recorded. The latest proposal is shown above.",
+  notValid: "The schedule is not valid. The reasons the server gave are listed below.",
+  signedOut: "Your session could not be confirmed. Sign in again and try once more.",
+  noAccess: "You can no longer propose or publish a schedule for this competition.",
+  timeout: "The server did not answer in time, so it is not known whether the schedule was recorded. Check the latest proposal shown above, then send the same choices again if it is not there.",
+  network: "The server could not be reached, so it is not known whether the schedule was recorded. Check the latest proposal shown above, then send the same choices again if it is not there.",
+  unreadable: "The server's answer could not be understood, so it is not known whether the schedule was recorded. Check the latest proposal shown above, then send the same choices again if it is not there.",
+  unknown: "The server could not complete the request, so it is not known whether the schedule was recorded. Check the latest proposal shown above, then send the same choices again if it is not there.",
+  refused: "The server refused this schedule proposal.",
+  publishNote: "Publishing creates the two semifinals and the final from this exact proposal and makes the competition live. The server checks the proposal again at that moment.",
+  publishWithheld: "This proposal cannot be published. Propose the schedule again, then publish the new proposal.",
+  publishOther: "Publishing is not available for this proposal right now.",
+  publishing: "Publishing…",
+  published: "Schedule published. The competition is now live with its two semifinals and the final.",
+  publishedReplay: "This schedule had already been published. The competition is live.",
+  nowPublished: "The competition is now published. The server's answer did not arrive, but its current state shows it as published.",
+  pubUnknown: "It is not known whether the competition was published. Its current state is being reloaded.",
+  pubInterrupted: "The publication was interrupted before the server answered, so it is not known whether the competition was published. Reload the competition to see its current state.",
+  pub400: "The server did not accept the publication request. Nothing was published.",
+  pub401: "Your session could not be confirmed, so nothing was published. Sign in again and try once more.",
+  pub403: "Only this competition's active organizer can publish it. Nothing was published.",
+  pub404: "The server could not find this competition or this proposal. Nothing was published.",
+  pub409: "The server refused to publish this schedule. Nothing was published.",
+  pubNotPublishable: "This schedule can no longer be published as proposed. Propose the schedule again and publish the new proposal. Nothing was published.",
+};
+
+/** The page's own sentence for each refusal the server states by code when a schedule is proposed. */
+const SCHED_PROPOSAL_MESSAGES = {
+  WRONG_STATE: "A schedule can be proposed only while the competition is ready to publish and nothing has been scheduled yet.",
+  FREEZE_REQUIRED: "Registration must be closed and frozen before a schedule can be proposed.",
+  FREEZE_INCONSISTENT: "The frozen registration no longer matches this competition, so a schedule cannot be proposed.",
+  DRAW_REQUIRED: "The draw must be made before a schedule can be proposed.",
+  PLAN_REQUIRED: "The competition has no accepted plan to schedule against.",
+  AMENDMENT_PENDING: "A plan change is still waiting for the captains' answers. Wait until it is decided, withdrawn or expired, then propose the schedule.",
+  INTENT_MISMATCH: "The server could not accept this request as sent. Check the proposals shown above, then propose the schedule again.",
+};
+
+/** The page's own sentence for each refusal the server states by code when a competition is published. */
+const SCHED_PUBLICATION_MESSAGES = {
+  WRONG_STATE: "The competition is no longer in a state that can be published from a schedule. Nothing was published.",
+  FREEZE_REQUIRED: "Registration must be closed and frozen before the competition can be published. Nothing was published.",
+  FREEZE_INCONSISTENT: "The frozen registration no longer matches this competition, so it cannot be published. Nothing was published.",
+  DRAW_REQUIRED: "The draw must be made before the competition can be published. Nothing was published.",
+  PLAN_REQUIRED: "The competition has no accepted plan to publish against. Nothing was published.",
+  AMENDMENT_PENDING: "A plan change is still waiting for the captains' answers. Wait until it is decided, withdrawn or expired, then publish. Nothing was published.",
+  DRAW_NOT_VERIFIABLE: "The draw could not be verified, so the competition cannot be published. Nothing was published.",
+  PROPOSAL_NOT_FOUND: "The server has no proposal like this one for this competition. Nothing was published.",
+  PROPOSAL_SUPERSEDED: "A later schedule was proposed. Review the latest proposal and publish that one. Nothing was published.",
+  PROPOSAL_STALE: "The accepted plan or the draw changed after this schedule was proposed. Propose the schedule again and publish the new proposal. Nothing was published.",
+  PROPOSAL_NOT_VERIFIABLE: "The proposal could not be verified, so the competition cannot be published from it. Nothing was published.",
+  PUBLICATION_CONFLICT: "This competition was already published from a different proposal. Its current state is shown above.",
+  PUBLICATION_NOT_VERIFIABLE: "The publication could not be verified and was not made. Nothing was changed.",
+};
+
+const schedIsObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const schedIsText = (v) => typeof v === "string" && v.length > 0;
+const schedIsInt = (v, min) => typeof v === "number" && Number.isInteger(v) && v >= min;
+const schedMinutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+const schedClock = (minutes) => String(Math.floor(minutes / 60)).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0");
+
+function schedRealDate(value) {
+  const m = typeof value === "string" ? SCHED_DATE.exec(value) : null;
+  if (!m) return false;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  const probe = new Date(Date.UTC(y, mo - 1, d));
+  return probe.getUTCFullYear() === y && probe.getUTCMonth() === mo - 1 && probe.getUTCDate() === d;
+}
+
+// ---- What the page accepts as the server's answer: the exact shapes of the accepted routes, and nothing looser ----------------------------------
+
+function schedValidContext(c) {
+  if (!schedIsObject(c) || !schedIsInt(c.planningRevisionNumber, 1) || !schedIsText(c.formatKey) || !schedIsText(c.timeZone) || !schedIsInt(c.simultaneousMatchCapacity, 1)) return false;
+  const t = c.timing;
+  if (!schedIsObject(t) || !schedIsInt(t.occupancyMinutes, 1) || !schedIsInt(t.pitchTransitionMinutes, 0) || !schedIsInt(t.minimumTeamRestMinutes, 0)) return false;
+  if (!Array.isArray(c.pitches) || c.pitches.length > 64 || !Array.isArray(c.dates) || c.dates.length > 31) return false;
+  const ids = new Set();
+  for (const p of c.pitches) {
+    if (!schedIsObject(p) || typeof p.planningPitchId !== "string" || !SCHED_UUID.test(p.planningPitchId) || !schedIsText(p.label) || typeof p.usable !== "boolean"
+      || !Array.isArray(p.supportedFormats) || !p.supportedFormats.every(schedIsText)) return false;
+    const id = p.planningPitchId.toLowerCase();
+    if (ids.has(id)) return false;
+    ids.add(id);
+  }
+  const days = new Set();
+  for (const d of c.dates) {
+    if (!schedIsObject(d) || !schedRealDate(d.date) || days.has(d.date) || !Array.isArray(d.windows) || d.windows.length > 8) return false;
+    days.add(d.date);
+    for (const w of d.windows) {
+      if (!schedIsObject(w) || !SCHED_TIME.test(w.start) || !SCHED_TIME.test(w.end) || schedMinutes(w.start) >= schedMinutes(w.end)) return false;
+    }
+  }
+  return true;
+}
+
+/** Exactly the three placements, one per role, in role order. */
+function schedPlacementsInOrder(list) {
+  return Array.isArray(list) && list.length === 3 && list.every((p, i) => schedIsObject(p) && p.fixtureRole === SCHED_ROLES[i]);
+}
+
+function schedValidPlacement(p, role) {
+  if (!schedIsObject(p) || p.fixtureRole !== role) return false;
+  if (typeof p.planningPitchId !== "string" || !SCHED_UUID.test(p.planningPitchId) || !schedIsText(p.pitchLabel) || !schedRealDate(p.planDate) || !SCHED_TIME.test(p.startTime)) return false;
+  for (const key of ["startUtc", "endUtc", "windowStartUtc", "windowEndUtc"]) if (typeof p[key] !== "string" || !SCHED_INSTANT.test(p[key])) return false;
+  const team = (side) => schedIsObject(side) && schedIsText(side.teamId) && schedIsText(side.teamName);
+  // A semifinal names its two teams (the draw's); the final names none — its finalists are not known.
+  if (role === "FINAL") return p.teamA === null && p.teamB === null;
+  return team(p.teamA) && team(p.teamB);
+}
+
+function schedValidProposal(p) {
+  if (!schedIsObject(p) || !schedIsInt(p.sequenceNumber, 1) || typeof p.createdAt !== "string" || !SCHED_INSTANT.test(p.createdAt)) return false;
+  if (SCHED_STATUSES.indexOf(p.status) === -1 || typeof p.planningRevisionCurrent !== "boolean" || typeof p.drawDigestMatches !== "boolean") return false;
+  if (typeof p.proposalDigest !== "string" || !SCHED_DIGEST.test(p.proposalDigest) || typeof p.drawDigest !== "string" || !SCHED_DIGEST.test(p.drawDigest)) return false;
+  if (!(p.supersedesDigest === null || (typeof p.supersedesDigest === "string" && SCHED_DIGEST.test(p.supersedesDigest)))) return false;
+  if (!schedIsInt(p.planningRevisionNumber, 1) || !schedIsText(p.formatKey) || !schedIsText(p.timeZone) || !schedIsInt(p.simultaneousMatchCapacity, 1)) return false;
+  const t = p.timing;
+  if (!schedIsObject(t) || !schedIsInt(t.occupancyMinutes, 1) || !schedIsInt(t.pitchTransitionMinutes, 0) || !schedIsInt(t.minimumTeamRestMinutes, 0)) return false;
+  return schedPlacementsInOrder(p.placements) && p.placements.every((x, i) => schedValidPlacement(x, SCHED_ROLES[i]));
+}
+
+/**
+ * The read exactly as GET answers it, or null. The three keys must all be present; the plan and the latest proposal either null or exact; the history a bounded,
+ * newest-first list of distinct proposals that BEGINS with the latest proposal (same number, same digest, same status) — so a read that disagrees with itself is
+ * never believed, and the proposal shown is always the latest one the history knows.
+ */
+function schedValidRead(json) {
+  if (!schedIsObject(json) || !("context" in json) || !("proposal" in json) || !Array.isArray(json.history)) return null;
+  if (json.context !== null && !schedValidContext(json.context)) return null;
+  if (json.proposal !== null && !schedValidProposal(json.proposal)) return null;
+  if (json.history.length > SCHED_HISTORY_LIMIT) return null;
+  let previous = Infinity;
+  for (const h of json.history) {
+    if (!schedIsObject(h) || !schedIsInt(h.sequenceNumber, 1) || h.sequenceNumber >= previous || typeof h.createdAt !== "string" || !SCHED_INSTANT.test(h.createdAt)
+      || SCHED_STATUSES.indexOf(h.status) === -1 || typeof h.proposalDigest !== "string" || !SCHED_DIGEST.test(h.proposalDigest)) return null;
+    previous = h.sequenceNumber;
+  }
+  const p = json.proposal;
+  if (p === null) {
+    if (json.history.length !== 0) return null;
+  } else {
+    const first = json.history[0];
+    if (!first || json.context === null || first.sequenceNumber !== p.sequenceNumber || first.proposalDigest !== p.proposalDigest || first.status !== p.status) return null;
+  }
+  return { context: json.context, proposal: p, history: json.history };
+}
+
+function schedSamePlacements(a, b) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === 3 && b.length === 3
+    && a.every((x, i) => x.fixtureRole === b[i].fixtureRole && String(x.planningPitchId).toLowerCase() === String(b[i].planningPitchId).toLowerCase() && x.planDate === b[i].planDate && x.startTime === b[i].startTime);
+}
+
+/** A publication answer is believed only when it is exactly the evidence of THIS proposal in THIS competition, 201 for a new publication and 200 for a replay. */
+function schedValidPublication(json, digest, competitionId, replay) {
+  if (!schedIsObject(json) || !schedIsObject(json.result) || !schedIsObject(json.publication)) return false;
+  const r = json.result, p = json.publication;
+  if (typeof r.competitionId !== "string" || r.competitionId.toLowerCase() !== String(competitionId).toLowerCase() || r.state !== "PUBLISHED") return false;
+  if (p.alreadyPublished !== replay || p[SCHED_DIGEST_KEY] !== digest || typeof p.publicationDigest !== "string" || !SCHED_DIGEST.test(p.publicationDigest)) return false;
+  if (typeof p.publishedAt !== "string" || !SCHED_INSTANT.test(p.publishedAt) || p.publishedAt !== r.publishedAt) return false;
+  if (!Array.isArray(p.fixtures) || p.fixtures.length !== 3) return false;
+  const ids = [];
+  for (let i = 0; i < 3; i++) {
+    const f = p.fixtures[i];
+    if (!schedIsObject(f) || f.fixtureRole !== SCHED_ROLES[i] || typeof f.competitionFixtureId !== "string" || !SCHED_UUID.test(f.competitionFixtureId) || typeof f.startsAt !== "string" || !SCHED_INSTANT.test(f.startsAt)) return false;
+    ids.push(f.competitionFixtureId);
+  }
+  return new Set(ids).size === 3 && r.semifinal1FixtureId === ids[0] && r.semifinal2FixtureId === ids[1] && r.finalFixtureId === ids[2];
+}
+
+// ---- What decides whether publication may be OFFERED (never whether it may be done: the server decides that) ----------------------------------
+
+/** Every client-observable fact, each judged alone and each exactly. */
+function scheduleFacts(state) {
+  const p = state ? state.proposal : null;
+  const view = currentView;
+  return {
+    organizerView: !!state && isOrganizerView() && !!view && !!view.competition && view.competition.competitionId === state.competitionId && currentAccess.competitionId === state.competitionId,
+    readyToPublish: !!view && !!view.competition && view.competition.state === "READY_TO_PUBLISH",
+    readSucceeded: !!state && state.readOk === true,
+    hasProposal: !!p,
+    statusCurrent: !!p && p.status === "CURRENT",
+    planCurrent: !!p && p.planningRevisionCurrent === true,
+    drawMatches: !!p && p.drawDigestMatches === true,
+    digestValid: !!p && typeof p.proposalDigest === "string" && SCHED_DIGEST.test(p.proposalDigest),
+    placementsValid: !!p && schedPlacementsInOrder(p.placements),
+    idle: !!state && state.busy !== true,
+  };
+}
+
+function schedulePublishable(state) {
+  if (!state || scheduleState !== state) return false;
+  const facts = scheduleFacts(state);
+  return Object.keys(facts).every((key) => facts[key] === true);
+}
+
+// ---- Lifecycle: the section exists only for as long as the server's answers and the page's context agree ----------------------------------------
+
+function schedNode(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function schedClear(node) { node.textContent = ""; }
+
+function schedButton(text, className, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "secondary";
+  if (id) button.id = id;
+  button.textContent = text;
+  return button;
+}
+
+/** Hides the read note and empties both status lines. */
+function schedClearNotes() {
+  const note = document.getElementById("schedule-read-note");
+  note.hidden = true;
+  note.textContent = "";
+  note.className = "msg";
+  setMsg("msg-schedule", "", "");
+}
+
+/** Removes the section in this very turn: its requests are aborted, what it held (the proposal, so its digest) is dropped, and nothing it was waiting for can arrive. */
+function removeScheduleSection() {
+  const state = scheduleState;
+  scheduleState = null;
+  scheduleFocusId = "";
+  if (state) {
+    for (const controller of state.controllers) { try { controller.abort(); } catch (err) { /* already finished */ } }
+    state.proposal = null;
+    state.context = null;
+    state.history = [];
+    state.readOk = false;
+  }
+  const existing = document.getElementById("schedule-section");
+  if (existing) existing.remove();
+}
+
+/** The section may be considered only for the organizer view of a READY_TO_PUBLISH competition whose view carries the server's organizer signal. */
+function ensureSchedule(competition, view) {
+  if (!amendmentEligible(competition, view)) { removeScheduleSection(); return; }
+  if (scheduleState && scheduleState.competitionId === competition.competitionId) return;
+  removeScheduleSection();
+  loadSchedule(competition.competitionId);
+}
+
+/** After an authorization event the section is asked for again from the server's own answers; nothing returns unless the read is exact again. */
+function reestablishSchedule() {
+  if (currentView && isOrganizerView() && cachedCompetitions.some((c) => c.competitionId === currentAccess.competitionId)) ensureSchedule(currentView.competition, currentView);
+}
+
+/** One uncached, abortable request through the existing authenticated fetch, bounded by SCHEDULE_TIMEOUT_MS. */
+function scheduleFetch(state, method, suffix, body) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  if (controller) state.controllers.add(controller);
+  const path = "/api/gaming/competitions/" + encodeURIComponent(state.competitionId) + suffix;
+  const options = { method, cache: "no-store" };
+  if (controller) options.signal = controller.signal;
+  if (body !== undefined) options.body = JSON.stringify(body);
+  let timer;
+  const timeout = new Promise((_resolve, reject) => { timer = setTimeout(() => { if (controller) { try { controller.abort(); } catch (err) { /* already finished */ } } reject(new Error("timeout")); }, SCHEDULE_TIMEOUT_MS); });
+  return Promise.race([authedFetch(path, options), timeout]).finally(() => { clearTimeout(timer); if (controller) state.controllers.delete(controller); });
+}
+
+/** The read, or null for anything but an exact 200. Whether the section it was asked for still exists is for the caller to judge, the moment the answer arrives. */
+async function readSchedule(state) {
+  let res;
+  try {
+    res = await scheduleFetch(state, "GET", SCHED_PATH);
+  } catch (err) { return null; }
+  return res.status === 200 ? schedValidRead(res.json) : null;
+}
+
+async function loadSchedule(competitionId) {
+  const state = { competitionId, controllers: new Set(), context: null, proposal: null, history: [], readOk: false, busy: false, publishing: false };
+  scheduleState = state;
+  await refreshSchedule(state, "", "", false, false);
+}
+
+/** A failed read closes the section and says so in one sentence of the page's own; it never offers anything in its place. */
+function failSchedule() {
+  scheduleFocusId = "";
+  const old = document.getElementById("schedule-section");
+  const hadFocus = !!old && old.contains(document.activeElement);
+  removeScheduleSection();
+  const note = document.getElementById("schedule-read-note");
+  note.textContent = SCHED_COPY.readFailed;
+  note.className = "msg error";
+  note.hidden = false;
+  if (hadFocus) note.focus();
+}
+
+/** Reads the server's state again and rebuilds the section from it; anything but an exact answer removes the section. */
+async function refreshSchedule(state, message, kind, focusHeading, keepDraft) {
+  const draft = keepDraft ? schedCaptureDraft() : null;
+  const read = await readSchedule(state);
+  if (scheduleState !== state) return;
+  if (!read) { failSchedule(); return; }
+  applyScheduleRead(state, read, message, kind, focusHeading, draft);
+}
+
+function applyScheduleRead(state, read, message, kind, focusHeading, draft) {
+  state.context = read.context;
+  state.proposal = read.proposal;
+  state.history = read.history;
+  state.readOk = true;
+  state.busy = false;
+  state.publishing = false;
+  const existing = document.getElementById("schedule-section");
+  const activeId = (existing && existing.contains(document.activeElement) ? document.activeElement.id : "") || scheduleFocusId;
+  scheduleFocusId = "";
+  const built = buildScheduleSection(state, draft);
+  if (existing) existing.replaceWith(built);
+  else document.getElementById("schedule-host").appendChild(built);
+  const note = document.getElementById("schedule-read-note");
+  note.hidden = true;
+  note.textContent = "";
+  setScheduleStatus(message, kind);
+  if (focusHeading) document.getElementById("schedule-heading").focus();
+  else if (activeId) {
+    const again = document.getElementById(activeId);
+    if (again && !again.disabled) again.focus();
+  }
+}
+
+/** After an outcome that is not known the server is asked what it holds: the section is rebuilt only if that differs from what is on screen. */
+async function reconcileSchedule(state, message, kind) {
+  const before = JSON.stringify([state.context, state.proposal, state.history]);
+  const draft = schedCaptureDraft();
+  const read = await readSchedule(state);
+  if (scheduleState !== state) return;
+  if (!read) { failSchedule(); return; }
+  if (JSON.stringify([read.context, read.proposal, read.history]) !== before) { applyScheduleRead(state, read, message, kind, false, draft); return; }
+  state.busy = false;
+  setScheduleBusy(false);
+  setScheduleStatus(message, kind);
+}
+
+// ---- What is shown --------------------------------------------------------------------------------------------------------------------------
+
+function setScheduleStatus(text, kind) {
+  const status = document.getElementById("schedule-status");
+  if (!status) return;
+  status.className = "msg" + (kind ? " " + kind : "");
+  status.textContent = text;
+}
+
+/** While a request is out nothing in the section can start another. */
+function setScheduleBusy(busy) {
+  const section = document.getElementById("schedule-section");
+  if (!section) return;
+  if (busy && section.contains(document.activeElement) && document.activeElement.id) scheduleFocusId = document.activeElement.id;
+  for (const control of section.querySelectorAll("button, select")) control.disabled = busy;
+  if (busy) section.setAttribute("aria-busy", "true");
+  else { section.removeAttribute("aria-busy"); schedRestoreFocus(); }
+}
+
+function schedRestoreFocus() {
+  const id = scheduleFocusId;
+  scheduleFocusId = "";
+  const section = document.getElementById("schedule-section");
+  const control = id && section ? document.getElementById(id) : null;
+  if (control && !control.disabled && section.contains(control)) control.focus();
+}
+
+function schedPitchOffered(context, pitch) {
+  return pitch.usable === true && pitch.supportedFormats.indexOf(context.formatKey) !== -1;
+}
+
+function buildScheduleContext(context) {
+  const wrap = document.createElement("div");
+  wrap.id = "schedule-context";
+  wrap.appendChild(schedNode("h4", "The accepted plan"));
+  const list = document.createElement("dl");
+  list.className = "schedule-facts";
+  const add = (term, value) => { list.appendChild(schedNode("dt", term)); list.appendChild(schedNode("dd", value)); };
+  add("Format", amendFormatLabel(context.formatKey));
+  add("Venue time zone", context.timeZone + " — every date and time here is in this time zone unless it says UTC");
+  for (const d of context.dates) add("Tournament date", d.date + ": " + d.windows.map((w) => w.start + "–" + w.end).join(", "));
+  const offered = context.pitches.filter((p) => schedPitchOffered(context, p));
+  add("Usable pitches", offered.length > 0 ? offered.map((p) => p.label).join(", ") : "None");
+  const withheld = context.pitches.filter((p) => !schedPitchOffered(context, p));
+  if (withheld.length > 0) add("Pitches not offered", withheld.map((p) => p.label + (p.usable === true ? " — not set up for this format" : " — marked not usable")).join("; "));
+  add("Matches at the same time", String(context.simultaneousMatchCapacity));
+  add("Each match reserves", context.timing.occupancyMinutes + " minutes on its pitch (playing time, halftime and the full shootout reserve)");
+  add("Between matches on a pitch", context.timing.pitchTransitionMinutes + " minutes before the next kickoff");
+  add("Rest for a finalist", context.timing.minimumTeamRestMinutes + " minutes after the later semifinal's reserved time ends");
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function buildScheduleTable(proposal) {
+  const table = document.createElement("table");
+  table.id = "schedule-table";
+  table.className = "stack-table schedule-table";
+  table.setAttribute("role", "table");
+  table.setAttribute("aria-label", "Proposed schedule");
+  const head = document.createElement("thead");
+  head.setAttribute("role", "rowgroup");
+  // (rows come from makeRow / makeCell like every other table on this page; the page's static checks count the places that call them)
+  head.appendChild(makeRow());
+  for (const label of ["Match", "Teams", "Pitch", "Starts (venue time)", "Starts (UTC)"]) {
+    const th = schedNode("th", label);
+    th.setAttribute("role", "columnheader");
+    head.firstChild.appendChild(th);
+  }
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  body.setAttribute("role", "rowgroup");
+  for (const placement of proposal.placements) {
+    body.appendChild(makeRow());
+    const row = body.lastChild;
+    row.appendChild(makeCell("Match", fixtureLabel(placement.fixtureRole)));
+    row.appendChild(makeCell("Teams", placement.fixtureRole === "FINAL" ? "Winner of Semifinal 1 vs Winner of Semifinal 2" : placement.teamA.teamName + " vs " + placement.teamB.teamName));
+    row.appendChild(makeCell("Pitch", placement.pitchLabel));
+    row.appendChild(makeCell("Starts (venue time)", placement.planDate + " " + placement.startTime));
+    row.appendChild(makeCell("Starts (UTC)", amendFormatUtc(placement.startUtc)));
+  }
+  table.appendChild(body);
+  return table;
+}
+
+function buildScheduleReview(state) {
+  const p = state.proposal;
+  const wrap = document.createElement("div");
+  wrap.id = "schedule-latest";
+  wrap.appendChild(schedNode("h4", "Latest proposal"));
+  if (!p) {
+    wrap.appendChild(schedNode("p", "No schedule has been proposed yet.", "msg"));
+    return wrap;
+  }
+  wrap.setAttribute("data-status", p.status);
+  const head = schedNode("p", undefined, "schedule-head");
+  head.appendChild(schedNode("strong", "Proposal " + p.sequenceNumber));
+  head.appendChild(schedNode("span", SCHED_STATUS_TEXT[p.status], "pill" + (p.status === "CURRENT" ? " good" : p.status === "STALE" ? " gold" : "")));
+  head.appendChild(schedNode("span", "proposed " + amendFormatUtc(p.createdAt) + ", on plan revision " + p.planningRevisionNumber, "msg"));
+  wrap.appendChild(head);
+  wrap.appendChild(schedNode("p", SCHED_STATUS_NOTE[p.status], "msg"));
+  wrap.appendChild(buildScheduleTable(p));
+  wrap.appendChild(schedNode("p", "Times are in " + p.timeZone + ", the venue's time zone. The UTC time of each kickoff is shown beside it for reference.", "msg"));
+  return wrap;
+}
+
+function buildScheduleHistory(state) {
+  const earlier = state.history.slice(1);
+  if (earlier.length === 0) return null;
+  const wrap = document.createElement("div");
+  wrap.appendChild(schedNode("h4", "Earlier proposals"));
+  const list = document.createElement("ul");
+  list.id = "schedule-history";
+  for (const h of earlier) list.appendChild(schedNode("li", "Proposal " + h.sequenceNumber + ": " + SCHED_STATUS_TEXT[h.status] + " (proposed " + amendFormatUtc(h.createdAt) + ")"));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/** The publication control, present only when every fact is exactly true; otherwise one sentence says that it is not available. */
+function buildSchedulePublishArea(state) {
+  if (!state.proposal) return null;
+  const area = document.createElement("div");
+  area.id = "schedule-publish-area";
+  const publishable = schedulePublishable(state);
+  const note = schedNode("p", publishable ? SCHED_COPY.publishNote : (state.proposal.status === "CURRENT" ? SCHED_COPY.publishOther : SCHED_COPY.publishWithheld), "msg");
+  note.id = "schedule-publish-note";
+  area.appendChild(note);
+  if (publishable) {
+    const button = schedButton("Publish Competition Schedule", "dominant", "schedule-publish");
+    button.setAttribute("aria-describedby", "schedule-publish-note");
+    button.addEventListener("click", () => { publishSchedule(state); });
+    area.appendChild(button);
+  }
+  return area;
+}
+
+// ---- The proposal form: three rows, and only what the plan offers ---------------------------------------------------------------------------
+
+/** The start times the plan's windows allow on a date: every five minutes, as long as the whole reserved time of a match fits inside one window. */
+function schedStartTimes(context, date, keep) {
+  const day = context.dates.find((d) => d.date === date);
+  if (!day) return [];
+  const occupancy = context.timing.occupancyMinutes;
+  const fits = (m) => day.windows.some((w) => m >= schedMinutes(w.start) && m + occupancy <= schedMinutes(w.end));
+  const found = new Set();
+  for (const w of day.windows) for (let m = schedMinutes(w.start); m + occupancy <= schedMinutes(w.end); m += SCHED_STEP_MINUTES) found.add(m);
+  if (typeof keep === "string" && SCHED_TIME.test(keep) && fits(schedMinutes(keep))) found.add(schedMinutes(keep));
+  return Array.from(found).sort((a, b) => a - b).map(schedClock);
+}
+
+function schedSelect(id, placeholder, options, selected) {
+  const select = document.createElement("select");
+  select.id = id;
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = placeholder;
+  select.appendChild(first);
+  for (const pair of options) {
+    const option = document.createElement("option");
+    option.value = pair[0];
+    option.textContent = pair[1];
+    select.appendChild(option);
+  }
+  select.value = options.some((pair) => pair[0] === selected) ? selected : "";
+  return select;
+}
+
+function schedFillTimes(context, date, select, keep) {
+  const times = date ? schedStartTimes(context, date, keep) : [];
+  schedClear(select);
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = date ? "Choose a start time" : "Choose a date first";
+  select.appendChild(first);
+  for (const time of times) {
+    const option = document.createElement("option");
+    option.value = time;
+    option.textContent = time;
+    select.appendChild(option);
+  }
+  select.value = keep && times.indexOf(keep) !== -1 ? keep : "";
+}
+
+function schedField(labelText, control) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  label.htmlFor = control.id;
+  wrap.appendChild(label);
+  wrap.appendChild(control);
+  return wrap;
+}
+
+/** The choices to start from: the organizer's own unsent choices if there are any, else the latest proposal's — each kept only where the plan still offers it. */
+function schedStartValues(state, draft) {
+  const context = state.context;
+  const source = draft || (state.proposal ? schedValuesOfProposal(state.proposal) : null);
+  const out = {};
+  for (const role of SCHED_ROLES) {
+    const s = source && source[role] ? source[role] : { pitch: "", date: "", time: "" };
+    const pitchOk = context.pitches.some((p) => p.planningPitchId === s.pitch && schedPitchOffered(context, p));
+    const dateOk = context.dates.some((d) => d.date === s.date);
+    out[role] = { pitch: pitchOk ? s.pitch : "", date: dateOk ? s.date : "", time: dateOk ? s.time : "" };
+  }
+  return out;
+}
+
+function schedValuesOfProposal(proposal) {
+  const out = {};
+  for (const x of proposal.placements) out[x.fixtureRole] = { pitch: x.planningPitchId, date: x.planDate, time: x.startTime };
+  return out;
+}
+
+/** The choices on screen right now, or null when there is no form. */
+function schedCaptureDraft() {
+  const form = document.getElementById("schedule-form");
+  if (!form) return null;
+  const out = {};
+  for (const role of SCHED_ROLES) {
+    const key = SCHED_ROLE_KEYS[role];
+    out[role] = { pitch: form.querySelector("#schedule-" + key + "-pitch").value, date: form.querySelector("#schedule-" + key + "-date").value, time: form.querySelector("#schedule-" + key + "-time").value };
+  }
+  return out;
+}
+
+function buildScheduleRow(state, role, pitches, start) {
+  const key = SCHED_ROLE_KEYS[role];
+  const context = state.context;
+  const row = document.createElement("fieldset");
+  row.setAttribute("data-role", role);
+  row.appendChild(schedNode("legend", fixtureLabel(role)));
+  const pitch = schedSelect("schedule-" + key + "-pitch", "Choose a pitch", pitches.map((p) => [p.planningPitchId, p.label]), start.pitch);
+  const date = schedSelect("schedule-" + key + "-date", "Choose a date", context.dates.map((d) => [d.date, d.date]), start.date);
+  const time = schedSelect("schedule-" + key + "-time", "Choose a date first", [], "");
+  schedFillTimes(context, date.value, time, start.time);
+  date.addEventListener("change", () => { schedFillTimes(context, date.value, time, time.value); });
+  row.appendChild(schedField("Pitch", pitch));
+  row.appendChild(schedField("Date", date));
+  row.appendChild(schedField("Start time (venue time)", time));
+  return row;
+}
+
+function buildScheduleForm(state, draft) {
+  const context = state.context;
+  const wrap = document.createElement("div");
+  wrap.appendChild(schedNode("h4", state.proposal ? "Propose a different schedule" : "Propose a schedule"));
+  const pitches = context.pitches.filter((p) => schedPitchOffered(context, p));
+  if (pitches.length === 0) { wrap.appendChild(schedNode("p", SCHED_COPY.noPitch, "msg")); return wrap; }
+  if (!context.dates.some((d) => schedStartTimes(context, d.date).length > 0)) { wrap.appendChild(schedNode("p", SCHED_COPY.noWindow, "msg")); return wrap; }
+  const form = document.createElement("form");
+  form.id = "schedule-form";
+  form.noValidate = true;
+  form.addEventListener("submit", (e) => { e.preventDefault(); submitSchedule(state); });
+  form.appendChild(schedNode("p", SCHED_COPY.formHint, "msg"));
+  const start = schedStartValues(state, draft);
+  for (const role of SCHED_ROLES) form.appendChild(buildScheduleRow(state, role, pitches, start[role]));
+  const actions = document.createElement("div");
+  actions.className = "row";
+  const propose = schedButton(state.proposal ? "Replace Schedule Proposal" : "Propose Schedule", "dominant", "schedule-propose");
+  propose.addEventListener("click", () => { submitSchedule(state); });
+  actions.appendChild(propose);
+  form.appendChild(actions);
+  wrap.appendChild(form);
+  return wrap;
+}
+
+function buildScheduleSection(state, draft) {
+  const section = document.createElement("div");
+  section.id = "schedule-section";
+  section.className = "card schedule-card";
+  section.setAttribute("role", "region");
+  section.setAttribute("aria-labelledby", "schedule-heading");
+  const heading = schedNode("h3", "Schedule and publish");
+  heading.id = "schedule-heading";
+  heading.tabIndex = -1;
+  section.appendChild(heading);
+  const intro = schedNode("p", SCHED_COPY.intro, "msg");
+  intro.id = "schedule-intro";
+  section.appendChild(intro);
+  if (state.context === null) {
+    section.appendChild(schedNode("p", SCHED_COPY.noPlan, "msg"));
+  } else {
+    section.appendChild(buildScheduleContext(state.context));
+    section.appendChild(buildScheduleReview(state));
+    const publishArea = buildSchedulePublishArea(state);
+    if (publishArea) section.appendChild(publishArea);
+    const history = buildScheduleHistory(state);
+    if (history) section.appendChild(history);
+    section.appendChild(buildScheduleForm(state, draft));
+  }
+  const problems = document.createElement("ul");
+  problems.id = "schedule-problems";
+  section.appendChild(problems);
+  const status = schedNode("p", "", "msg");
+  status.id = "schedule-status";
+  status.setAttribute("aria-live", "polite");
+  section.appendChild(status);
+  return section;
+}
+
+// ---- Proposing a schedule -------------------------------------------------------------------------------------------------------------------
+
+function schedReadForm(form) {
+  const placements = [];
+  const missing = [];
+  for (const role of SCHED_ROLES) {
+    const key = SCHED_ROLE_KEYS[role];
+    const pitch = form.querySelector("#schedule-" + key + "-pitch");
+    const date = form.querySelector("#schedule-" + key + "-date");
+    const time = form.querySelector("#schedule-" + key + "-time");
+    for (const select of [pitch, date, time]) if (select.value === "") missing.push(select.id);
+    placements.push({ fixtureRole: role, planningPitchId: pitch.value, planDate: date.value, startTime: time.value });
+  }
+  return { complete: missing.length === 0, placements, missing };
+}
+
+function schedMarkInvalid(ids) {
+  for (const el of document.querySelectorAll("#schedule-section [aria-invalid]")) el.removeAttribute("aria-invalid");
+  for (const id of ids) {
+    const select = document.getElementById(id);
+    if (select) select.setAttribute("aria-invalid", "true");
+  }
+}
+
+/** Marks the choices a server reason refers to (for example placements[0].startTime is the first semifinal's start time). */
+function schedMarkProblems(problems) {
+  if (!Array.isArray(problems)) return;
+  const part = { planningPitchId: "pitch", planDate: "date", startTime: "time" };
+  const ids = [];
+  for (const problem of problems) {
+    if (!schedIsObject(problem) || typeof problem.field !== "string") continue;
+    const m = /^placements\[(\d)\]\.(planningPitchId|planDate|startTime)$/.exec(problem.field);
+    if (!m || !SCHED_ROLES[Number(m[1])]) continue;
+    ids.push("schedule-" + SCHED_ROLE_KEYS[SCHED_ROLES[Number(m[1])]] + "-" + part[m[2]]);
+  }
+  schedMarkInvalid(ids);
+}
+
+/** The server's list of reasons, one sentence each, as plain text and bounded. */
+function schedShowProblems(problems) {
+  const list = document.getElementById("schedule-problems");
+  if (!list) return;
+  schedClear(list);
+  if (!Array.isArray(problems)) return;
+  let shown = 0;
+  for (const problem of problems) {
+    if (shown >= 12 || !schedIsObject(problem) || typeof problem.message !== "string" || problem.message.trim() === "") continue;
+    list.appendChild(schedNode("li", problem.message.trim().slice(0, 240)));
+    shown += 1;
+  }
+}
+
+/** A short run of the reasons the server gave, appended to the page's own sentence. */
+function schedProblemSuffix(json) {
+  if (!schedIsObject(json) || !Array.isArray(json.problems)) return "";
+  const reasons = json.problems.filter((p) => schedIsObject(p) && typeof p.message === "string" && p.message.trim() !== "").slice(0, 3).map((p) => p.message.trim().slice(0, 200));
+  return reasons.length > 0 ? " " + reasons.join(" ") : "";
+}
+
+async function submitSchedule(state) {
+  const form = document.getElementById("schedule-form");
+  if (scheduleState !== state || !form || state.busy || !isOrganizerView()) return;
+  schedMarkInvalid([]);
+  schedShowProblems([]);
+  const picked = schedReadForm(form);
+  if (!picked.complete) {
+    schedMarkInvalid(picked.missing);
+    setScheduleStatus(SCHED_COPY.incomplete, "error");
+    document.getElementById(picked.missing[0]).focus();
+    return;
+  }
+  const latest = state.proposal;
+  if (latest && latest.status === "CURRENT" && schedSamePlacements(latest.placements, picked.placements)) {
+    setScheduleStatus(SCHED_COPY.sameAsCurrent, "error");
+    return;
+  }
+  // A retry of exactly the choices just sent, when the outcome is not known, keeps its intent (so a lost answer can never record a second proposal);
+  // any edit, and any attempt that ended in a definite answer, is a new one.
+  const payloadJson = JSON.stringify(picked.placements);
+  const reuse = !!scheduleAttempt && scheduleAttempt.competitionId === state.competitionId && scheduleAttempt.payloadJson === payloadJson;
+  const intentId = reuse ? scheduleAttempt.intentId : newPlanningIntentId();
+  scheduleAttempt = { competitionId: state.competitionId, payloadJson, intentId };
+  state.busy = true;
+  setScheduleBusy(true);
+  setScheduleStatus(SCHED_COPY.sending, "");
+  const sent = picked.placements;
+  const finish = (text, kind) => { if (scheduleState === state) { state.busy = false; setScheduleBusy(false); setScheduleStatus(text, kind); } };
+
+  let res;
+  try {
+    res = await scheduleFetch(state, "POST", SCHED_PATH, { intentId, placements: sent });
+  } catch (err) {
+    if (scheduleState !== state) return;
+    await reconcileSchedule(state, err && err.message === "timeout" ? SCHED_COPY.timeout : SCHED_COPY.network, "error");
+    return;
+  }
+  if (scheduleState !== state) return;
+  const json = res.json;
+  const created = res.status === 201 || res.status === 200;
+  if (created && schedIsObject(json) && json.alreadyProposed === (res.status === 200) && schedValidProposal(json.proposal) && schedSamePlacements(json.proposal.placements, sent)) {
+    scheduleAttempt = null;
+    await refreshSchedule(state, json.alreadyProposed ? SCHED_COPY.replay : SCHED_COPY.proposed + json.proposal.sequenceNumber + SCHED_COPY.proposedTail, "success", true, false);
+    return;
+  }
+  if (created) { await reconcileSchedule(state, SCHED_COPY.unreadable, "error"); return; }
+  if (res.status === 400) {
+    scheduleAttempt = null;
+    const problems = schedIsObject(json) && Array.isArray(json.problems) ? json.problems : [];
+    schedShowProblems(problems);
+    schedMarkProblems(problems);
+    finish(SCHED_COPY.notValid, "error");
+    return;
+  }
+  if (res.status === 401) { scheduleAttempt = null; finish(SCHED_COPY.signedOut, "error"); return; }
+  if (res.status === 403 || res.status === 404) {
+    scheduleAttempt = null;
+    removeScheduleSection();
+    setMsg("msg-schedule", SCHED_COPY.noAccess, "error");
+    return;
+  }
+  if (res.status === 409) {
+    scheduleAttempt = null;
+    const code = schedIsObject(json) && typeof json.code === "string" ? json.code : "";
+    await refreshSchedule(state, Object.prototype.hasOwnProperty.call(SCHED_PROPOSAL_MESSAGES, code) ? SCHED_PROPOSAL_MESSAGES[code] : SCHED_COPY.refused, "error", false, true);
+    return;
+  }
+  await reconcileSchedule(state, SCHED_COPY.unknown, "error");
+}
+
+// ---- Publishing -----------------------------------------------------------------------------------------------------------------------------
+
+/** The page's own sentence for a definite refusal of a publication. */
+function schedPublicationRefusal(status, json) {
+  const code = schedIsObject(json) && typeof json.code === "string" ? json.code : "";
+  if (status === 409 && code === "SCHEDULE_NOT_PUBLISHABLE") return SCHED_COPY.pubNotPublishable + schedProblemSuffix(json);
+  if ((status === 409 || status === 404) && Object.prototype.hasOwnProperty.call(SCHED_PUBLICATION_MESSAGES, code)) return SCHED_PUBLICATION_MESSAGES[code];
+  if (status === 400) return SCHED_COPY.pub400;
+  if (status === 401) return SCHED_COPY.pub401;
+  if (status === 403) return SCHED_COPY.pub403;
+  if (status === 404) return SCHED_COPY.pub404;
+  return SCHED_COPY.pub409;
+}
+
+/** After any outcome other than a verified success the competition is read again — and with it the schedule — before anything can be offered or sent. */
+async function reconcilePublication(competitionId, message, unknownOutcome) {
+  setMsg("msg-schedule", message, "error");
+  await loadCompetitionDetail(competitionId);
+  if (unknownOutcome && currentView && currentView.competition && currentView.competition.competitionId === competitionId && currentView.competition.state === "PUBLISHED") {
+    setMsg("msg-schedule", SCHED_COPY.nowPublished, "success");
+  }
+  const line = document.getElementById("msg-schedule");
+  if (line) line.focus();
+}
+
+async function publishSchedule(state) {
+  if (!schedulePublishable(state)) return;
+  // The digest the page sends is the digest of the proposal it is showing, read at this moment from the state that was built from the server's answer.
+  const digest = state.proposal.proposalDigest;
+  const competitionId = state.competitionId;
+  state.busy = true;
+  state.publishing = true;
+  setScheduleBusy(true);
+  setMsg("msg-schedule", SCHED_COPY.publishing, "");
+
+  let res;
+  try {
+    res = await scheduleFetch(state, "POST", "/publish", { [SCHED_DIGEST_KEY]: digest });
+  } catch (err) {
+    if (scheduleState !== state) return;
+    await reconcilePublication(competitionId, SCHED_COPY.pubUnknown, true);
+    return;
+  }
+  if (scheduleState !== state) return;
+  const replay = res.status === 200;
+  if ((res.status === 201 || res.status === 200) && schedValidPublication(res.json, digest, competitionId, replay)) {
+    state.publishing = false;
+    setMsg("msg-schedule", replay ? SCHED_COPY.publishedReplay : SCHED_COPY.published, "success");
+    await loadCompetitionDetail(competitionId);
+    const line = document.getElementById("msg-schedule");
+    if (line) line.focus();
+    return;
+  }
+  if ([400, 401, 403, 404, 409].indexOf(res.status) !== -1) {
+    await reconcilePublication(competitionId, schedPublicationRefusal(res.status, res.json), false);
+    return;
+  }
+  // Silence, a lost connection, a server error, or an answer that is not exactly this proposal's evidence: nothing is claimed either way.
+  await reconcilePublication(competitionId, SCHED_COPY.pubUnknown, true);
 }
 
 UrbanoAuth.onAuthStateChange(refreshAuthState);

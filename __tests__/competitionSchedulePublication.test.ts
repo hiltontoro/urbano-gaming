@@ -706,14 +706,41 @@ describe("no clock, no randomness and no environment in the module: the publicat
   });
 });
 
-describe("[26][27] no page offers a publication control, and no format other than five-a-side is made available", () => {
-  it("no public page or script sends the digest, names the schedule publication or calls the publish route's new shape", () => {
+describe("[26][27] no page offers a publication control — except the organizer page (UG-CR-GATE-SSS-028) — and no format other than five-a-side is made available", () => {
+  // UG-CR-GATE-SSS-028A. SSS-028 authorized ONE public file to send the digest: the organizer page, where the key is one bounded constant (the only field of the publish request it builds).
+  // The exception is that exact path and that one exact line. Nothing is skipped: every public file, the organizer page included, still gets both assertions below; the wording assertion is
+  // untouched, and only that one line is taken out of the organizer page before the digest assertion.
+  const ORGANIZER_PAGE = path.join("public", "competitions-admin.html");
+  const SANCTIONED_KEY = 'const SCHED_DIGEST_KEY = "scheduleProposalDigest";';
+  /** The top-level functions (declared at column 0 in the page's one inline script) in which a constant is read. Its own declaration is not a reading. */
+  const functionsReading = (source: string, constant: string) => {
+    let current = "";
+    const reading = new Set<string>();
+    for (const line of source.split("\n")) {
+      current = /^(?:async\s+)?function\s+(\w+)\(/.exec(line)?.[1] ?? current;
+      if (new RegExp(`\\b${constant}\\b`).test(line) && !line.startsWith(`const ${constant} =`)) reading.add(current);
+    }
+    return Array.from(reading).sort();
+  };
+
+  it("no public page or script sends the digest, names the schedule publication or calls the publish route's new shape — the organizer page's one bounded constant excepted", () => {
     for (const file of PUBLIC()) {
       const source = readFileSync(file, "utf8");
       const where = path.relative(REPO_ROOT, file);
-      expect(source, `${where}: scheduleProposalDigest`).not.toMatch(/scheduleProposalDigest/);
+      const withoutKey = where === ORGANIZER_PAGE ? source.split("\n").filter((line) => line.trim() !== SANCTIONED_KEY).join("\n") : source;
+      expect(withoutKey, `${where}: scheduleProposalDigest`).not.toMatch(/scheduleProposalDigest/);
       expect(source, `${where}: a schedule publication name`).not.toMatch(/schedule[_ ]?publication|SchedulePublication|competition_schedule_publication/i);
     }
+  });
+
+  it("the organizer page is the one exception: the only public file that carries the digest key, once, as its bounded constant, read only to build the publish request and to check what the server answered", () => {
+    const carrying = PUBLIC().filter((file) => /scheduleProposalDigest/.test(readFileSync(file, "utf8"))).map((file) => path.relative(REPO_ROOT, file));
+    expect(carrying).toEqual([ORGANIZER_PAGE]);
+    const page = readFileSync(path.join(REPO_ROOT, ORGANIZER_PAGE), "utf8");
+    // The sanctioned line occurs exactly once (the filter above would hide a duplicate), and no other line of the page carries the key.
+    expect(page.split("\n").filter((line) => /scheduleProposalDigest/.test(line)).map((line) => line.trim())).toEqual([SANCTIONED_KEY]);
+    // The constant is read by exactly two functions: the one that publishes and the one that checks the publication the server answered with.
+    expect(functionsReading(page, "SCHED_DIGEST_KEY")).toEqual(["publishSchedule", "schedValidPublication"]);
   });
 
   it("the creation routes and functions still take no format, no draw, no schedule and no publication from this gate", () => {

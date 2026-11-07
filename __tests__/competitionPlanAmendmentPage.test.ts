@@ -32,10 +32,11 @@ const HEX64 = /[0-9a-f]{64}/i;
 const HOSTILE = '<img src=x onerror="window.__xss=(window.__xss||0)+1">';
 const HOSTILE_BREAKOUT = '"><script>window.__xss=(window.__xss||0)+1</script>';
 
+// UG-CR-GATE-SSS-028A: SSS-028 retired the client-selected team/time publication form (four team selects, three kickoff inputs, Publish), so its eight controls are no longer in this baseline.
+// The schedule section that replaced it is NOT added here on purpose: it is built only after its own server read succeeds, which these transports never answer, so in every state asserted below it does not exist.
 const BASELINE_ADMIN_READY_CONTROLS = [
   "select#comp-select", "button#btn-load-competition", "button#btn-open-cancel", "button[Copy Invitation Link]", "button[Copy Invitation Link]",
-  "button[Copy Invitation Link]", "button[Copy Invitation Link]", "select#p-sf1a", "select#p-sf1b", "input#p-sf1-time", "select#p-sf2a", "select#p-sf2b",
-  "input#p-sf2-time", "input#p-final-time", "button#btn-publish",
+  "button[Copy Invitation Link]", "button[Copy Invitation Link]",
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
