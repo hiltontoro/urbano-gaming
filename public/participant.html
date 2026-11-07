@@ -321,102 +321,254 @@
   .winner-banner.exp-celebrate { animation: expWinnerPulse 1.4s ease-in-out 3; }
 
   /* ============================================================
-     Participant Unified Entry Slice 002: Poker gameplay markup,
-     shared verbatim with /poker-table.html via pokerParticipant.js.
-     Reuses this file's own existing --gold/--gold-bg/--line/--muted/
-     --bg-card/.card tokens where the two files' meanings already
-     agree; only genuinely Poker-specific tokens/classes are added
-     here. Poker's "result" classes are prefixed (.poker-result-card/
-     -row) because this file's own pre-existing .result-card already
-     means something different (a per-participant Trivia/Quiz result
-     row) — reusing that name would silently pull in the wrong box
-     styling.
+     Poker (Participant Unified Entry Slice 002, restyled by Player
+     Table UI Slice 001). The Poker markup is produced by
+     pokerParticipant.js, shared verbatim with /poker-table.html. Its
+     rules live in the self-contained POKER-PLAYER-TABLE-UI block
+     below: everything hangs off .pk-root and no token is borrowed
+     from this page. Poker's "result" classes are prefixed
+     (.poker-result-card/-row) because this file's own pre-existing
+     .result-card means something different (a per-participant
+     Trivia/Quiz result row).
+     The :root tokens and the .msg rules just below are LEFT
+     UNCHANGED from before this slice. Nothing else in this page
+     uses them, and the Poker block overrides .msg inside .pk-root,
+     so here they are inert; removing them is a separate cleanup.
      ============================================================ */
   :root {
     --good: #4ade80; --bad: #f87171;
     --card-white: #f5f1e8; --card-ink: #0a0a0a; --card-red: #d64545;
     --felt: #123524;
   }
-  /* Poker Playtest UX Slice: small, restrained table-depth treatment —
-     one inset shadow, no new asset, no structural change. */
-  .felt { background: var(--felt); border-color: #1e5c3d; box-shadow: inset 0 0 28px rgba(0,0,0,0.35); }
   .msg { font-size: 13px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
   .msg.error { color: var(--bad); }
   .msg.success { color: var(--good); }
-  .hole-cards, .board-cards { display: flex; gap: 8px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
-  .playing-card {
-    width: 52px; height: 74px; border-radius: 7px; background: var(--card-white);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px; font-weight: 800; color: var(--card-ink);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+
+  /* POKER-PLAYER-TABLE-UI:BEGIN
+     Player Table UI Slice 001 (unified green table revision). Everything below hangs off .pk-root — the element pokerParticipant.js
+     renders into — so it cannot reach Session UI or any shared rule (one deliberate exception: .pk-root ~ .btn-ghost, the room's own
+     "Join a different room" button next to the Poker container). The identical block lives in participant.html and
+     poker-table.html (shared stylesheet extraction is deferred); __tests__/pokerParticipantUi.test.ts fails if the two copies drift
+     apart. The green felt is ONE panel (.pk-table) holding everything needed to act; the page itself, and the information panel
+     below the table, stay on the ordinary URBANO background. Purple means "happening now" (turn), gold means "decided" (a win). */
+  .pk-root {
+    --pk-charcoal: #0a0a0a;
+    --pk-surface: #161616;
+    --pk-surface-2: #1f1f23;
+    --pk-line: #3a3640;
+    --pk-ivory: #f5f1e8;
+    --pk-muted: #b8b4ad;
+    --pk-purple: #7c3aed;
+    --pk-purple-soft: #261a45;
+    --pk-lilac: #b57cff;
+    --pk-gold: #d4af37;
+    --pk-felt: #0f3a28;
+    --pk-felt-deep: #0a2a1d;
+    --pk-felt-line: #1f5a40;
+    --pk-felt-ink: #d6e6dd;
+    --pk-felt-divider: rgba(255, 255, 255, 0.18);
+    --pk-felt-shade: rgba(0, 0, 0, 0.32);
+    --pk-card-red: #b3191f;
+    --pk-card-ink: #15131a;
+    --pk-danger: #ff9a9a;
+    --pk-danger-line: #d46f6f;
+    --pk-warn: #ffd866;
+    --pk-focus: #ffffff;
+    color: var(--pk-ivory);
+    font-size: 16px;
+    line-height: 24px;
+    text-align: left;
   }
-  .hole-cards .playing-card { width: 64px; height: 92px; font-size: 22px; }
-  .playing-card.red { color: var(--card-red); }
-  .playing-card.face-down {
-    background: linear-gradient(135deg, #2a2a2a 25%, #1c1c1c 25%, #1c1c1c 50%, #2a2a2a 50%, #2a2a2a 75%, #1c1c1c 75%, #1c1c1c);
-    background-size: 12px 12px; color: transparent;
+  .pk-root *, .pk-root *::before, .pk-root *::after { box-sizing: border-box; }
+  .pk-root [hidden] { display: none !important; }
+  .pk-root .pk-sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
-  .pot-row { text-align: center; font-size: 14px; color: var(--gold); font-weight: 700; margin: 6px 0 14px; }
-  .street-label { text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
-  .seat-list { display: flex; flex-direction: column; gap: 8px; }
-  .seat-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card);
-    font-size: 13.5px;
+  .pk-root button:focus-visible, .pk-root input:focus-visible {
+    outline: 3px solid var(--pk-focus); outline-offset: 2px; box-shadow: 0 0 0 6px var(--pk-purple);
   }
-  .seat-row.is-me { border-color: var(--gold); }
-  .seat-row.is-turn { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); }
-  .seat-row.is-folded { opacity: 0.45; }
-  .seat-name { font-weight: 600; }
-  .seat-stack { color: var(--muted); font-size: 12px; }
-  .seat-badge {
-    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-    padding: 3px 7px; border-radius: 999px; background: var(--gold-bg); color: var(--gold);
-    margin-left: 6px;
+  .pk-root .msg { margin: 0; font-size: 14px; line-height: 20px; color: var(--pk-felt-ink); }
+  .pk-root .pk-info .msg, .pk-root .poker-result-card .msg { color: var(--pk-muted); }
+  .pk-root .msg.error { color: var(--pk-danger); }
+  .pk-root .msg:empty { display: none; }
+
+  /* panels */
+  .pk-root .pk-panel {
+    min-width: 0; margin: 0 0 14px; padding: 14px;
+    background: var(--pk-surface); border: 1px solid var(--pk-line); border-radius: 14px;
   }
-  .seat-badge.turn { background: rgba(74,222,128,0.14); color: var(--good); }
-  .seat-badge.allin { background: rgba(248,113,113,0.14); color: var(--bad); }
-  .status-pill {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,0.04);
-    color: var(--muted); border: 1px solid var(--line); display: inline-block; margin-bottom: 14px;
+  .pk-root .pk-title {
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 8px; margin: 0 0 10px;
+    font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pk-muted);
   }
-  .action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-  .action-btn {
-    flex: 1 1 auto; min-width: 80px; font-family: inherit; font-size: 13.5px; font-weight: 700;
-    padding: 13px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-card);
-    color: var(--ink); cursor: pointer; min-height: 48px; margin: 0;
+  .pk-root .pk-count { font-weight: 600; letter-spacing: 0; text-transform: none; }
+  .pk-root .pk-private { font-size: 13px; line-height: 18px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--pk-muted); }
+  .pk-root .pk-note { margin: 8px 0 0; font-size: 13px; line-height: 18px; color: var(--pk-muted); }
+
+  /* THE GREEN PLAYING TABLE: one continuous felt surface. The sections inside it (turn, pot, community cards, your cards, actions) are
+     told apart by labels, spacing and hairline dividers, not by separate cards. The felt is this panel only, never the page. */
+  .pk-root .pk-table {
+    position: relative; min-width: 0; margin: 0 0 18px; padding: 22px 14px 14px;
+    background: radial-gradient(120% 140% at 50% 0%, var(--pk-felt) 0%, var(--pk-felt-deep) 100%);
+    border: 1px solid var(--pk-felt-line); border-radius: 18px;
+    box-shadow: inset 0 0 28px rgba(0, 0, 0, 0.35);
   }
-  .action-btn.fold { border-color: var(--bad); color: var(--bad); }
-  .action-btn.aggressive { border-color: var(--gold); color: var(--gold); }
-  .action-btn.primary { background: var(--primary-fill); color: var(--primary-ink); border: none; }
-  .amount-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-  .amount-row input {
-    flex: 1; font-family: inherit; font-size: 15px; padding: 11px 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--bg-card); color: var(--ink); min-height: 44px;
+  .pk-root .pk-table .pk-sec { margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--pk-felt-divider); }
+  .pk-root .pk-table .pk-turn + .pk-sec { padding-top: 0; border-top: 0; }
+  .pk-root .pk-table #poker-action-area:not(:empty) { margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--pk-felt-divider); }
+  .pk-root .pk-table .pk-title { margin: 0 0 8px; color: var(--pk-felt-ink); }
+  .pk-root .pk-table .pk-private, .pk-root .pk-table .pk-count { color: var(--pk-felt-ink); }
+
+  /* whose turn it is: always words (the colour and the bar are only emphasis); it is the first line of the table */
+  .pk-root .pk-turn {
+    margin: 0; padding: 8px 12px; overflow-wrap: anywhere;
+    font-size: 16px; line-height: 22px; font-weight: 700; color: var(--pk-ivory);
+    background: var(--pk-felt-shade); border-left: 4px solid var(--pk-felt-ink); border-radius: 10px;
   }
-  /* Poker Playtest UX Slice: truthful "Bet"/"Raise to" labeling (the
-     backend's own semantics — computeLegalActions()'s minRaiseTo/
-     maxAmount are already totals, not deltas) plus a cheap, already-
-     available min/all-in helper line, replacing the previously
-     unlabeled bare number box. */
-  .amount-label { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
-  .amount-help { font-size: 11.5px; color: var(--muted); margin: 4px 0 0; }
-  .poker-result-card { border-color: var(--gold); }
-  .poker-result-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
-  /* Poker Playtest UX Slice: a subtle, gold win pulse — reuses the
-     exact box-shadow-pulse technique Session's own .exp-celebrate/
-     expWinnerPulse already established, but in gold rather than
-     --exp-purple, matching this file's own documented reasoning above
-     (gold is Poker/brand-level, purple is Session Activity — reusing
-     purple here would borrow the wrong meaning, not just the wrong
-     color). Applied only when the viewer's own payout is positive —
-     never on a loss, tie-with-zero-payout, or fold-ended hand. */
-  @keyframes pokerWinPulse {
-    0% { box-shadow: 0 0 0 0 var(--gold-bg); }
-    100% { box-shadow: 0 0 0 20px rgba(212, 175, 55, 0); }
+  .pk-root .pk-turn.is-mine { background: rgba(124, 58, 237, 0.55); border-left-color: var(--pk-lilac); }
+
+  /* pot and community cards */
+  .pk-root .pk-potrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; }
+  .pk-root .pk-pot-label { font-size: 14px; line-height: 20px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pk-felt-ink); }
+  .pk-root .pk-pot-value { font-size: 28px; line-height: 34px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .pk-root .pk-pot-unit { font-size: 14px; line-height: 20px; color: var(--pk-felt-ink); }
+  .pk-root .pk-pot-note { margin: 4px 0 0; font-size: 13px; line-height: 18px; color: var(--pk-felt-ink); }
+  /* "Out of date": sits in the table's own top band (the extra top padding above), out of the flow, so it can never take a line of its
+     own or move anything, whatever the width or the size of the pot. It covers nothing and takes no taps. */
+  .pk-root .pk-stale-tag {
+    position: absolute; top: 3px; right: 14px; padding: 0 8px; white-space: nowrap; pointer-events: none;
+    font-size: 12px; line-height: 14px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--pk-warn); background: var(--pk-felt-shade); border: 1px solid var(--pk-warn); border-radius: 999px;
   }
-  .poker-result-win { animation: pokerWinPulse 1.2s ease-out 2; }
+  .pk-root .pk-board-label {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; margin: 0 0 8px;
+    font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pk-felt-ink);
+  }
+  .pk-root .pk-board-label .pk-count { letter-spacing: 0; text-transform: none; font-weight: 600; }
+  .pk-root .board-cards { --pk-cw: clamp(40px, 14vw, 72px); display: flex; justify-content: center; gap: 6px; }
+
+  /* connection notice (a failed poll): the LAST thing inside the table, below the controls, so it never moves them */
+  .pk-root .pk-table .pk-notice { margin: 12px 0 0; padding: 10px 12px; background: var(--pk-felt-shade); border-left: 4px solid var(--pk-warn); border-radius: 10px; }
+  .pk-root .pk-notice-title { font-size: 16px; line-height: 22px; font-weight: 800; color: var(--pk-warn); }
+  .pk-root .pk-notice-line { margin: 4px 0 0; font-size: 14px; line-height: 20px; color: var(--pk-ivory); overflow-wrap: anywhere; }
+
+  /* INFORMATION PANEL: outside the table, on the page background */
+  .pk-root .pk-info { margin: 0 0 14px; }
+  /* the page's own "Join a different room" button is the next sibling of the Poker container: give it the same 44px touch target */
+  .pk-root ~ .btn-ghost { min-height: 44px; }
+  .pk-root .pk-room { margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--pk-line); }
+  .pk-root .pk-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; }
+  .pk-root .status-pill {
+    display: inline-flex; align-items: center; padding: 2px 10px; white-space: nowrap;
+    font-size: 13px; line-height: 20px; font-weight: 700; color: var(--pk-ivory);
+    background: var(--pk-surface-2); border: 1px solid var(--pk-line); border-radius: 999px;
+  }
+  .pk-root .status-pill.pk-street { background: var(--pk-purple); border-color: #a78bfa; color: #ffffff; }
+  .pk-root .status-pill.pk-street.idle { background: var(--pk-surface-2); border-color: var(--pk-muted); color: var(--pk-ivory); }
+  .pk-root .pk-street-note { font-size: 13px; line-height: 18px; color: var(--pk-muted); }
+
+  /* playing cards: rank plus a suit SYMBOL, so suit never depends on colour */
+  .pk-root .playing-card {
+    width: var(--pk-cw, 48px); aspect-ratio: 5 / 7; flex: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: calc(var(--pk-cw, 48px) * 0.13); background: var(--pk-ivory); color: var(--pk-card-ink);
+    font-weight: 800; line-height: 1; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  }
+  .pk-root .playing-card .pk-rank { font-size: calc(var(--pk-cw, 48px) * 0.44); }
+  .pk-root .playing-card .pk-suit { font-size: calc(var(--pk-cw, 48px) * 0.46); }
+  .pk-root .playing-card.red { color: var(--pk-card-red); }
+  .pk-root .playing-card.face-down {
+    background: repeating-linear-gradient(45deg, #2b1a5c 0 6px, #36206f 6px 12px);
+    border: 2px solid var(--pk-lilac); box-shadow: none;
+  }
+  .pk-root .playing-card.slot { background: transparent; border: 2px dashed rgba(255, 255, 255, 0.5); box-shadow: none; }
+  .pk-root .playing-card.pk-mini { --pk-cw: 34px; border-radius: 5px; }
+
+  /* the viewer's own cards (a section of the table) */
+  .pk-root .pk-hand .hole-cards { --pk-cw: clamp(52px, 17vw, 72px); display: flex; justify-content: center; gap: 10px; }
+  .pk-root .pk-hand.is-folded .hole-cards { filter: grayscale(1); }
+
+  /* players */
+  .pk-root .seat-list { display: grid; gap: 8px; }
+  .pk-root .seat-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start;
+    padding: 10px 12px; background: var(--pk-surface-2); border: 2px solid var(--pk-line); border-radius: 10px;
+  }
+  .pk-root .seat-row.is-me { background: #25232a; border-color: #8c877f; }
+  .pk-root .seat-row.is-turn { background: var(--pk-purple-soft); border-color: var(--pk-lilac); }
+  .pk-root .seat-row.is-folded { color: var(--pk-muted); }
+  .pk-root .seat-name { min-width: 0; font-size: 16px; line-height: 22px; font-weight: 700; overflow-wrap: anywhere; }
+  .pk-root .pk-seat-chips { display: grid; justify-items: end; min-width: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .pk-root .seat-stack { font-size: 14px; line-height: 20px; color: var(--pk-muted); }
+  .pk-root .pk-seat-left { font-size: 16px; font-weight: 800; color: var(--pk-ivory); }
+  .pk-root .seat-row.is-folded .pk-seat-left { color: var(--pk-muted); }
+  .pk-root .pk-seat-pot { font-size: 13px; line-height: 18px; color: var(--pk-muted); }
+  .pk-root .pk-seat-tags { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+  .pk-root .seat-badge {
+    display: inline-flex; align-items: center; margin: 0; padding: 1px 8px;
+    font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
+    color: var(--pk-ivory); background: transparent; border: 1px solid var(--pk-muted); border-radius: 999px;
+  }
+  .pk-root .seat-badge.turn { background: var(--pk-purple); border-color: #a78bfa; color: #ffffff; }
+  .pk-root .seat-badge.allin { border-color: var(--pk-lilac); color: var(--pk-lilac); }
+  .pk-root .seat-badge.out, .pk-root .seat-badge.wait { color: var(--pk-muted); }
+  .pk-root .seat-badge.wait { border-style: dashed; }
+  @media (max-width: 419px) {
+    .pk-root .seat-row { grid-template-columns: minmax(0, 1fr); }
+    .pk-root .pk-seat-chips { justify-items: start; text-align: left; }
+  }
+
+  /* hand result */
+  .pk-root .poker-result-card { border: 2px solid var(--pk-ivory); border-radius: 16px; }
+  .pk-root .poker-result-card.poker-result-win { border-color: var(--pk-gold); }
+  .pk-root .pk-result-sub { font-size: 13px; line-height: 18px; color: var(--pk-muted); }
+  .pk-root .pk-result-headline { font-size: 22px; line-height: 28px; font-weight: 800; overflow-wrap: anywhere; }
+  .pk-root .pk-result-detail { margin-top: 2px; font-size: 15px; line-height: 22px; font-weight: 700; }
+  .pk-root .poker-result-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px;
+    margin-top: 8px; padding: 8px 10px; background: var(--pk-surface-2); border: 2px solid var(--pk-line); border-radius: 10px;
+  }
+  .pk-root .poker-result-row.pk-winner { border-color: var(--pk-gold); }
+  .pk-root .pk-reveal-line { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+  .pk-root .pk-mini-cards { display: flex; gap: 4px; }
+  .pk-root .pk-payout { grid-column: 1 / -1; font-size: 14px; line-height: 20px; color: var(--pk-muted); }
+  .pk-root .pk-payee { grid-column: 1 / -1; font-weight: 700; overflow-wrap: anywhere; }
+
+  /* actions: a section of the table, in normal document flow (nothing is pinned or overlaid at any screen height, so the board and the
+     player's own cards can always be seen in full); the section scrolls like the rest of the page, and a focused amount field is
+     scrolled into view by the browser. Controls stay readable on the felt: ivory, purple, outlined and dark fields. */
+  .pk-root .pk-actionbar { display: grid; gap: 10px; margin: 0; padding: 0; }
+  .pk-root .pk-turnline { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; }
+  .pk-root .pk-turnline .street-label { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pk-felt-ink); }
+  .pk-root .pk-owed { font-size: 14px; line-height: 20px; color: var(--pk-felt-ink); font-variant-numeric: tabular-nums; }
+  .pk-root .action-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .pk-root .action-bar .pk-wide { grid-column: 1 / -1; }
+  .pk-root .action-btn {
+    min-height: 48px; margin: 0; padding: 10px 8px; overflow-wrap: anywhere; font-family: inherit;
+    font-size: 16px; line-height: 22px; font-weight: 800; text-align: center; cursor: pointer;
+    color: var(--pk-ivory); background: var(--pk-felt-shade); border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 10px;
+  }
+  .pk-root .action-btn.fold { color: var(--pk-danger); border-color: var(--pk-danger-line); }
+  .pk-root .action-btn.primary { color: var(--pk-card-ink); background: var(--pk-ivory); border-color: var(--pk-ivory); }
+  .pk-root .action-btn.aggressive { color: #ffffff; background: var(--pk-purple); border-color: #a78bfa; }
+  .pk-root .action-btn.allin { color: var(--pk-lilac); border-color: var(--pk-lilac); }
+  .pk-root .action-btn:disabled { opacity: 1; cursor: not-allowed; color: var(--pk-felt-ink); background: var(--pk-felt-shade); border-color: rgba(255, 255, 255, 0.18); }
+  .pk-root .pk-btn-note { font-size: 13px; font-weight: 600; }
+  /* the amount field sits in the button grid directly above the Bet/Raise it feeds */
+  .pk-root .pk-amount { grid-column: 1 / -1; display: grid; gap: 6px; margin: 4px 0; padding: 0; }
+  .pk-root .amount-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 12px; margin: 0; }
+  .pk-root .amount-label { margin: 0; font-size: 14px; line-height: 20px; font-weight: 700; color: var(--pk-ivory); }
+  .pk-root #amount-input {
+    width: 100%; min-height: 50px; margin: 0; padding: 8px 12px; color-scheme: dark; font-family: inherit;
+    /* when the field is focused, leave room below it so the help line and the Bet/Raise button it feeds scroll into view with it */
+    scroll-margin: 16px 0 150px;
+    font-size: 20px; line-height: 26px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
+    color: var(--pk-ivory); background: var(--pk-charcoal); border: 2px solid var(--pk-muted); border-radius: 10px;
+  }
+  .pk-root #amount-input[aria-invalid="true"] { border-color: var(--pk-danger); }
+  .pk-root .amount-help { margin: 0; font-size: 13px; line-height: 18px; color: var(--pk-felt-ink); }
+  /* POKER-PLAYER-TABLE-UI:END */
 </style>
 </head>
 <body>
