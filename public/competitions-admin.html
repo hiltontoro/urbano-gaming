@@ -225,6 +225,25 @@
     .schedule-card button, .schedule-card select { min-height: 44px; }
     .schedule-card select { max-width: 100%; }
   }
+  /* UG-CR-GATE-SSS-031: the permanent draw (built only after the server has answered the draw read exactly). */
+  .draw-card h3 { margin-top: 0; }
+  .draw-card h4 { margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .draw-card .msg, .draw-card li, .draw-card dd, .draw-card dt, .draw-card p { overflow-wrap: break-word; }
+  .draw-card ul { margin: 6px 0; padding-left: 20px; font-size: 14px; }
+  .draw-card ol { list-style: none; margin: 6px 0; padding: 0; font-size: 14px; }
+  .draw-card li { margin: 4px 0; }
+  .draw-card .row { margin-top: 12px; }
+  .draw-slot { color: var(--muted); font-weight: 700; }
+  .draw-team { font-weight: 600; }
+  .draw-facts { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0; }
+  .draw-facts dt { color: var(--muted); }
+  .draw-facts dd { margin: 0; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  #draw-heading:focus, #draw-read-note:focus, .draw-card h3:focus { outline: 2px solid var(--exp-purple); outline-offset: 3px; border-radius: 4px; }
+  @media (pointer: coarse) { .draw-card button { min-height: 44px; } }
+  @media (max-width: 720px) {
+    .draw-facts { grid-template-columns: 1fr; }
+    .draw-card button { min-height: 44px; }
+  }
 </style>
 </head>
 <body>
@@ -457,10 +476,18 @@ async function refreshAuthState() {
   // it returns only when the server confirms everything again (see reestablishAmendment); unsent edits wait in memory for that, and no longer than that.
   removeAmendmentSection(true);
   // UG-CR-GATE-SSS-028: the same event removes the schedule section in this very turn and aborts what it was waiting for; it returns only when the server's read is
-  // exact again (see reestablishSchedule). A publication that was in flight is not known to have happened, and the page says so.
+  // exact again (see reestablishDraw: the schedule is asked for only after the draw has been read). A publication that was in flight is not known to have happened, and the page says so.
   const publicationInterrupted = !!(scheduleState && scheduleState.publishing);
   removeScheduleSection();
   if (publicationInterrupted) setMsg("msg-schedule", SCHED_COPY.pubInterrupted, "error");
+  // UG-CR-GATE-SSS-031: so does the draw section, in the same turn, and with it everything the schedule held. A draw request that was in flight is not known to have happened:
+  // the page says so now, and again - truthfully - once the server has been asked what it holds.
+  const drawInterruptedFor = drawState && drawState.busy ? drawState.competitionId : "";
+  removeDrawSection();
+  if (drawInterruptedFor) {
+    drawCarry = { competitionId: drawInterruptedFor, message: DRAW_COPY.interrupted };
+    drawShowNote(DRAW_COPY.interrupted + DRAW_COPY.checking, "error");
+  }
   const state = await UrbanoAuth.getState();
   const statusEl = document.getElementById("auth-status");
   const sections = document.getElementById("admin-sections");
@@ -471,13 +498,16 @@ async function refreshAuthState() {
     // which lists only the competitions the caller actively organizes.
     const code = scorekeeperCodeFromUrl();
     if (code) await loadScorekeeperContext(code);
-    else { await loadCompetitions(); reestablishAmendment(); reestablishSchedule(); }
+    else { await loadCompetitions(); reestablishAmendment(); reestablishDraw(); }
   } else {
     statusEl.textContent = "Not signed in.";
     sections.style.display = "none";
     amendDraft = null;
     scheduleAttempt = null;
     schedClearNotes();
+    drawAttempt = null;
+    drawCarry = null;
+    drawClearNote();
   }
 }
 
@@ -497,6 +527,9 @@ function closeAdministration(message, offerOtherEntries, operations) {
   removeScheduleSection();
   scheduleAttempt = null;
   schedClearNotes();
+  removeDrawSection();
+  drawAttempt = null;
+  drawCarry = null;
   document.getElementById("select-section").hidden = true;
   document.getElementById("competition-detail").style.display = "none";
   document.getElementById("comp-select").innerHTML = "";
@@ -555,7 +588,7 @@ async function loadCompetitions() {
   }
   applyOperations(res.json.operations);
   cachedCompetitions = entries;
-  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) { removeAmendmentSection(false); removeScheduleSection(); }
+  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) { removeAmendmentSection(false); removeScheduleSection(); removeDrawSection(); }
   select.innerHTML = "";
   document.getElementById("admin-gate").hidden = true;
   document.getElementById("admin-gate").textContent = "";
@@ -642,11 +675,16 @@ document.getElementById("comp-select").addEventListener("change", () => {
   removeScheduleSection();
   schedClearNotes();
   if (scheduleAttempt && scheduleAttempt.competitionId !== document.getElementById("comp-select").value) scheduleAttempt = null;
+  // UG-CR-GATE-SSS-031: and so does the draw section (with the schedule that depends on it); another competition's unfinished request is not carried over.
+  removeDrawSection();
+  if (drawAttempt && drawAttempt.competitionId !== document.getElementById("comp-select").value) drawAttempt = null;
+  if (drawCarry && drawCarry.competitionId !== document.getElementById("comp-select").value) drawCarry = null;
 });
 
 document.getElementById("btn-load-competition").addEventListener("click", async () => {
   removeAmendmentSection(false);
   removeScheduleSection();
+  removeDrawSection();
   const competitionId = document.getElementById("comp-select").value;
   if (!competitionId) { setMsg("msg-load", "Select a competition.", "error"); return; }
   // Switching to a (possibly different) competition must never carry over
@@ -661,6 +699,8 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
   document.getElementById("freeze-confirm").hidden = true;
   schedClearNotes();
   if (scheduleAttempt && scheduleAttempt.competitionId !== competitionId) scheduleAttempt = null;
+  if (drawAttempt && drawAttempt.competitionId !== competitionId) drawAttempt = null;
+  if (drawCarry && drawCarry.competitionId !== competitionId) drawCarry = null;
   setMsg("cancel-status", "", "");
   document.getElementById("cancel-panel").hidden = true;
   document.getElementById("cancel-reason").value = "";
@@ -672,6 +712,8 @@ async function loadCompetitionDetail(competitionId) {
   // UG-CR-GATE-SSS-028: reloading the detail removes the schedule section in this very turn (its requests aborted, its proposal and digest forgotten); it is built
   // again, from fresh answers, only if the reloaded detail still calls for it.
   removeScheduleSection();
+  // UG-CR-GATE-SSS-031: so does the draw section, whose own fresh read comes first.
+  removeDrawSection();
   // Only a competition the scoped source returned can be opened here, so a tampered selector value is simply ignored.
   const entry = cachedCompetitions.find((c) => c.competitionId === competitionId);
   if (!entry) { setMsg("msg-load", "Select a competition.", "error"); return; }
@@ -970,8 +1012,9 @@ function renderCompetitionDetail() {
   // organizer signal; the section itself appears only after the server has answered both required reads.
   ensureAmendment(competition, currentView);
 
-  // UG-CR-GATE-SSS-028: the schedule-and-publish section is asked for on the same terms; it exists only after the server has answered its read exactly.
-  ensureSchedule(competition, currentView);
+  // UG-CR-GATE-SSS-031: the permanent draw is asked for on the same terms; it exists only after the server has answered its read exactly. The schedule-and-publish section
+  // (UG-CR-GATE-SSS-028) is asked for from the draw section and from nowhere else: only once a fresh read has confirmed that a valid permanent draw exists.
+  ensureDraw(competition, currentView);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -2776,6 +2819,499 @@ async function withdrawAmendment(state) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-SSS-031 — "Make the draw": the organizer's server-backed way from a frozen four-team competition to its one permanent draw.
+//
+// The browser does not draw. It does not choose, name, influence or work out a team, an order, a pairing, a bracket, a seed, any randomness, a freeze record, a digest, a format
+// or an actor, and it cannot ask for a second draw: the one request it ever sends carries one identifier of its own (a fresh UUID that the server uses only to recognise a repeat
+// of that very request) and nothing else. Everything that matters is decided by the server, and decided again at the moment it matters: who the organizer is, the state, the
+// frozen teams, the randomness, the permanent order, the replay and the conflict. This code SHOWS those answers and sends the organizer's one request.
+//
+// The section exists only for an organizer view of a READY_TO_PUBLISH competition whose view carries the server's own organizer signal (the same signal the plan-change section
+// relies on), and only after the server has answered the draw read exactly: either an answer that says nothing has been drawn (the section explains the draw and offers its one
+// action) or a draw that passes every check below (the section shows it, read-only, with no action at all). Until then - while the authorization source, the detail or the read is
+// pending, and after any failed, refused, silent or malformed read - there is nothing of it on the page, only one plain sentence when a read has failed. A malformed answer is
+// never taken for "no draw yet".
+//
+// The schedule section is asked for from here and from nowhere else: once a fresh read has confirmed that a valid permanent draw exists. Whenever the selection, the session, the
+// authorization or the loaded detail changes, this section AND the schedule section are removed in the same turn, their outstanding requests are aborted, and no late answer can
+// render, enable or confirm anything.
+//
+// A request whose outcome is unknown (silence, a lost connection, an answer that cannot be read) keeps its identifier, and the server is asked what it holds BEFORE the action is
+// offered again, so a retry can never make a second draw; a definite answer ends the attempt. Every server string is placed with textContent, never as markup; a team is never
+// shown by an identifier; the seed and the permutation stay out of the page, and so do the identifiers of members and of teams.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// A draw request that neither answers nor fails within this time is treated as FAILED (and aborted).
+let DRAW_TIMEOUT_MS = 20000;
+// The one live section (or the one being loaded); null when there is none. Everything it knows lives here and nowhere else.
+let drawState = null;
+// The last draw request whose outcome is not known: { competitionId, intentId }. It outlives a rebuild of the section, never a change of competition or a sign-out.
+let drawAttempt = null;
+// What an authorization event interrupted: { competitionId, message }. The read that re-establishes the section says it, once.
+let drawCarry = null;
+// The control that had the keyboard focus when a request began: disabling it would drop the focus to the page, so it is given back when the section is usable again.
+let drawFocusId = "";
+
+// The name the accepted route uses: the draw path under a competition.
+const DRAW_PATH = "/draw";
+// The one method the server records a draw under; a draw made another way is not one this page can vouch for.
+const DRAW_ALGORITHM = "URBANO-DRAW-PERMUTATION-V1";
+const DRAW_TEAMS = 4;
+const DRAW_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DRAW_HEX64 = /^[0-9a-f]{64}$/;
+const DRAW_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{6}Z$/;
+
+/** What this section says in its own words. The server's words are never shown. */
+const DRAW_COPY = {
+  readFailed: "The draw could not be loaded, so nothing can be drawn or scheduled from here right now. Choose Load to try again.",
+  readSignedOut: "Your session could not be confirmed, so the draw cannot be shown. Sign in again, then choose Load.",
+  readUnavailable: "A draw is not available to you for this competition.",
+  headingAbsent: "Make the draw",
+  headingPresent: "The permanent draw",
+  intro: "The draw is permanent. When you make it, the server randomly assigns the four frozen teams to positions 1 to 4. You cannot choose, change, repeat or undo it.",
+  rule1: "Positions 1 and 2 play Semifinal 1.",
+  rule2: "Positions 3 and 4 play Semifinal 2.",
+  rule3: "A position is a place in the bracket, not a ranking.",
+  make: "Make Permanent Draw",
+  making: "Making the draw…",
+  confirming: "Confirming the draw with the server…",
+  made: "The draw was made. It is shown below.",
+  replay: "This draw had already been made from the same request. It is shown below.",
+  alreadyDrawn: "The draw had already been made, so nothing new was made. It is shown below.",
+  foundAfterUncertain: "The server's answer did not arrive, but the draw was made. It is shown below.",
+  timeout: "The server did not answer in time, so it is not known whether the draw was made.",
+  network: "The server could not be reached, so it is not known whether the draw was made.",
+  unreadable: "The server's answer could not be understood, so it is not known whether the draw was made.",
+  unknown: "The server could not complete the request, so it is not known whether the draw was made.",
+  noneYet: " The server shows no draw yet. Making the draw again sends the same request, so a draw can never be made twice.",
+  unconfirmed: " Choose Load to check again.",
+  madeUnconfirmed: "The draw was made, but it could not be confirmed with the server just now. Choose Load to see it.",
+  interrupted: "The draw request was interrupted before the server answered, so it is not known whether the draw was made.",
+  checking: " The server is being asked what it holds.",
+  refused400: "The server did not accept the draw request. No draw was made.",
+  refused401: "Your session could not be confirmed, so no draw was made. Sign in again, then choose Load.",
+  refusedUnavailable: "A draw is not available to you for this competition. No draw was made.",
+  refused409: "The server refused to make the draw. No draw was made.",
+  slotNote: "A position is a place in the bracket, not a ranking, a seeding or a priority.",
+  evidenceNote: "These references identify this exact draw and the registration it used. The server keeps the full record.",
+};
+
+/** The page's own sentence for each refusal the server states by code when a draw is asked for. */
+const DRAW_REFUSALS = {
+  WRONG_STATE: "The draw can be made only while the competition is ready to publish and nothing has been scheduled. No draw was made.",
+  FREEZE_REQUIRED: "Registration must be closed and frozen before the draw can be made. No draw was made.",
+  FREEZE_INCONSISTENT: "The frozen registration no longer matches this competition, so the draw cannot be made. No draw was made.",
+  AMENDMENT_PENDING: "A plan change is still waiting for the captains' answers. Wait until it is decided, withdrawn or expired, then make the draw. No draw was made.",
+  ALREADY_DRAWN: DRAW_COPY.alreadyDrawn,
+};
+
+const drawIsObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const drawIsName = (v) => typeof v === "string" && v.trim() !== "";
+/** The object has exactly these keys: every one present and no other. */
+const drawHasKeys = (v, keys) => { const have = Object.keys(v); return have.length === keys.length && keys.every((k) => Object.prototype.hasOwnProperty.call(v, k)); };
+
+// ---- What the page accepts as the server's answer: the exact shape of the accepted route, and nothing looser ---------------------------------------
+
+function drawRealInstant(value) {
+  const m = typeof value === "string" ? DRAW_INSTANT.exec(value) : null;
+  if (!m) return false;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]), h = Number(m[4]), mi = Number(m[5]), s = Number(m[6]);
+  if (h > 23 || mi > 59 || s > 59) return false;
+  const probe = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  return probe.getUTCFullYear() === y && probe.getUTCMonth() === mo - 1 && probe.getUTCDate() === d;
+}
+
+/**
+ * The draw exactly as the server's public mapper presents it, or false: every key present and no other, every value of its exact shape, four distinct teams in four distinct
+ * positions that agree with the teams the draw started from, and two semifinals that follow the positions (1 and 2, then 3 and 4). Nothing here recomputes or second-guesses the
+ * server's randomness: the page only refuses an answer that does not hang together.
+ */
+function drawValidDraw(d) {
+  if (!drawIsObject(d) || !drawHasKeys(d, ["algorithm", "drawnAt", "seed", "permutationIndex", "freezeDigest", "drawDigest", "inputOrder", "teams", "semifinals"])) return false;
+  if (d.algorithm !== DRAW_ALGORITHM || !drawRealInstant(d.drawnAt)) return false;
+  for (const digest of [d.seed, d.freezeDigest, d.drawDigest]) if (typeof digest !== "string" || !DRAW_HEX64.test(digest)) return false;
+  if (!Number.isInteger(d.permutationIndex) || d.permutationIndex < 0 || d.permutationIndex > 23) return false;
+  if (!Array.isArray(d.inputOrder) || d.inputOrder.length !== DRAW_TEAMS || !Array.isArray(d.teams) || d.teams.length !== DRAW_TEAMS || !Array.isArray(d.semifinals) || d.semifinals.length !== 2) return false;
+  for (let i = 0; i < DRAW_TEAMS; i++) {
+    const t = d.inputOrder[i];
+    if (!drawIsObject(t) || !drawHasKeys(t, ["inputPosition", "teamId", "teamName"]) || t.inputPosition !== i + 1 || typeof t.teamId !== "string" || !DRAW_UUID.test(t.teamId) || !drawIsName(t.teamName)) return false;
+    // the draw starts from the frozen teams in the byte order of their identifiers, so no team can appear twice
+    if (i > 0 && !(d.inputOrder[i - 1].teamId.toLowerCase() < t.teamId.toLowerCase())) return false;
+  }
+  const taken = new Set();
+  for (let i = 0; i < DRAW_TEAMS; i++) {
+    const t = d.teams[i];
+    if (!drawIsObject(t) || !drawHasKeys(t, ["drawPosition", "inputPosition", "teamId", "teamName"]) || t.drawPosition !== i + 1 || !Number.isInteger(t.inputPosition) || t.inputPosition < 1 || t.inputPosition > DRAW_TEAMS) return false;
+    const source = d.inputOrder[t.inputPosition - 1];
+    if (t.teamId !== source.teamId || t.teamName !== source.teamName) return false;
+    taken.add(t.inputPosition);
+  }
+  if (taken.size !== DRAW_TEAMS) return false;
+  const slot = (s, team) => drawIsObject(s) && drawHasKeys(s, ["drawPosition", "teamId", "teamName"]) && s.drawPosition === team.drawPosition && s.teamId === team.teamId && s.teamName === team.teamName;
+  for (let i = 0; i < 2; i++) {
+    const f = d.semifinals[i];
+    if (!drawIsObject(f) || !drawHasKeys(f, ["fixtureRole", "teamA", "teamB"]) || f.fixtureRole !== (i === 0 ? "SEMIFINAL_1" : "SEMIFINAL_2")) return false;
+    if (!slot(f.teamA, d.teams[i * 2]) || !slot(f.teamB, d.teams[i * 2 + 1])) return false;
+  }
+  return true;
+}
+
+/** The read exactly as GET answers it, or null: the one key, holding either null (nothing drawn yet) or a valid draw. Anything else - a missing key, an extra one - is not an answer. */
+function drawValidRead(json) {
+  if (!drawIsObject(json) || !drawHasKeys(json, ["draw"])) return null;
+  if (json.draw === null) return { draw: null };
+  return drawValidDraw(json.draw) ? { draw: json.draw } : null;
+}
+
+/** A write is believed only when it is exactly the documented answer: 201 with alreadyDrawn false for a new draw, 200 with alreadyDrawn true for an exact replay, and a valid draw. */
+function drawValidCreated(status, json) {
+  if ((status !== 201 && status !== 200) || !drawIsObject(json) || !drawHasKeys(json, ["draw", "alreadyDrawn"])) return null;
+  if (json.alreadyDrawn !== (status === 200) || !drawValidDraw(json.draw)) return null;
+  return { draw: json.draw, alreadyDrawn: json.alreadyDrawn };
+}
+
+// ---- Lifecycle: the section exists only for as long as the server's answers and the page's context agree ------------------------------------------
+
+function drawNode(tag, text, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function drawButton(text, className, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "secondary";
+  if (id) button.id = id;
+  button.textContent = text;
+  return button;
+}
+
+function drawClearNote() {
+  const existing = document.getElementById("draw-read-note");
+  if (existing) existing.remove();
+}
+
+/** One plain sentence of the page's own, beside the place the section would be, about a draw that is not shown. It is a note, not a surface: it holds no control. */
+function drawShowNote(text, kind) {
+  drawClearNote();
+  const node = drawNode("p", text, "msg" + (kind ? " " + kind : ""));
+  node.id = "draw-read-note";
+  node.tabIndex = -1;
+  node.setAttribute("role", "status");
+  const anchor = document.getElementById("schedule-read-note");
+  anchor.parentNode.insertBefore(node, anchor);
+  return node;
+}
+
+/** Removes the section in this very turn: its requests are aborted, what it held is dropped, nothing it was waiting for can arrive - and the schedule section, which depends on it, goes too. */
+function removeDrawSection() {
+  const state = drawState;
+  drawState = null;
+  drawFocusId = "";
+  if (state) {
+    for (const controller of state.controllers) { try { controller.abort(); } catch (err) { /* already finished */ } }
+    state.draw = null;
+    state.phase = "closed";
+    state.busy = false;
+  }
+  const existing = document.getElementById("draw-section");
+  if (existing) existing.remove();
+  drawClearNote();
+  removeScheduleSection();
+}
+
+/** Everything the page's context must say for this section to act: it is the live section, for the competition on screen, in the organizer's READY_TO_PUBLISH view with the server's signal. */
+function drawContextHolds(state) {
+  const view = currentView;
+  return !!state && drawState === state && !!view && !!view.competition && view.competition.competitionId === state.competitionId
+    && !!currentAccess && currentAccess.competitionId === state.competitionId && amendmentEligible(view.competition, view);
+}
+
+/** The section may be considered only for the organizer view of a READY_TO_PUBLISH competition whose view carries the server's organizer signal. */
+function ensureDraw(competition, view) {
+  if (!amendmentEligible(competition, view)) { removeDrawSection(); return; }
+  if (drawState && drawState.competitionId === competition.competitionId) return;
+  if (drawState) removeDrawSection();
+  loadDraw(competition.competitionId);
+}
+
+/** After an authorization event the section is asked for again from the server's own answers; nothing returns unless the read is exact again. */
+function reestablishDraw() {
+  if (currentView && isOrganizerView() && cachedCompetitions.some((c) => c.competitionId === currentAccess.competitionId)) ensureDraw(currentView.competition, currentView);
+}
+
+/** One uncached, abortable request through the existing authenticated fetch, bounded by DRAW_TIMEOUT_MS. */
+function drawFetch(state, method, body) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  if (controller) state.controllers.add(controller);
+  const path = "/api/gaming/competitions/" + encodeURIComponent(state.competitionId) + DRAW_PATH;
+  const options = { method, cache: "no-store" };
+  if (controller) options.signal = controller.signal;
+  if (body !== undefined) options.body = JSON.stringify(body);
+  let timer;
+  const timeout = new Promise((_resolve, reject) => { timer = setTimeout(() => { if (controller) { try { controller.abort(); } catch (err) { /* already finished */ } } reject(new Error("timeout")); }, DRAW_TIMEOUT_MS); });
+  return Promise.race([authedFetch(path, options), timeout]).finally(() => { clearTimeout(timer); if (controller) state.controllers.delete(controller); });
+}
+
+/** The read: { ok: true, draw } for an exact answer, { ok: false, status } for anything else (status 0: the request itself failed or timed out). */
+async function readDraw(state) {
+  let res;
+  try {
+    res = await drawFetch(state, "GET");
+  } catch (err) { return { ok: false, status: 0 }; }
+  const read = res.status === 200 ? drawValidRead(res.json) : null;
+  return read ? { ok: true, draw: read.draw } : { ok: false, status: res.status };
+}
+
+async function loadDraw(competitionId) {
+  const state = { competitionId, controllers: new Set(), draw: null, phase: "loading", busy: false };
+  drawState = state;
+  await refreshDraw(state, "", "", false, null);
+}
+
+/** The sentence for a read that failed, by what the server said. Never the server's own words. */
+function drawReadMessage(status) {
+  return status === 401 ? DRAW_COPY.readSignedOut : (status === 403 || status === 404) ? DRAW_COPY.readUnavailable : DRAW_COPY.readFailed;
+}
+
+function drawTakeCarry(competitionId) {
+  const carry = drawCarry;
+  drawCarry = null;
+  return carry && carry.competitionId === competitionId ? carry.message : "";
+}
+
+/** A failed read closes the section and says so in one sentence of the page's own; it never offers anything in its place. */
+function failDraw(state, message) {
+  const old = document.getElementById("draw-section");
+  const hadFocus = !!old && old.contains(document.activeElement);
+  const carried = drawTakeCarry(state.competitionId);
+  removeDrawSection();
+  const noteNode = drawShowNote(carried ? carried + DRAW_COPY.unconfirmed : message, "error");
+  if (hadFocus) noteNode.focus();
+}
+
+/**
+ * Reads the server's state again and rebuilds the section from it. Anything but an exact answer closes the section. A draw that was shown never changes: if the server now says there
+ * is none, or another one, nothing is shown. `expectation` (or null) is what the caller has been told to expect: { digest, failure } - a draw must be there, with that digest when
+ * one is given - and `failure` is the sentence to say when the read cannot show it.
+ */
+async function refreshDraw(state, message, kind, focusHeading, expectation) {
+  const read = await readDraw(state);
+  if (drawState !== state) return;
+  if (!read.ok) { failDraw(state, expectation ? expectation.failure : drawReadMessage(read.status)); return; }
+  const unexpected = !!expectation && (!read.draw || (expectation.digest !== null && read.draw.drawDigest !== expectation.digest));
+  const changed = !!state.draw && (!read.draw || read.draw.drawDigest !== state.draw.drawDigest);
+  if (unexpected || changed) { failDraw(state, expectation ? expectation.failure : DRAW_COPY.readFailed); return; }
+  applyDrawRead(state, read.draw, message, kind, focusHeading);
+}
+
+function drawPlace(section) {
+  const anchor = document.getElementById("schedule-read-note");
+  anchor.parentNode.insertBefore(section, anchor);
+}
+
+function applyDrawRead(state, draw, message, kind, focusHeading) {
+  state.draw = draw;
+  state.phase = draw ? "present" : "absent";
+  state.busy = false;
+  // Once a draw is shown, no attempt is unfinished: there is no action left to repeat.
+  if (draw && drawAttempt && drawAttempt.competitionId === state.competitionId) drawAttempt = null;
+  const carried = drawTakeCarry(state.competitionId);
+  if (carried && message === "") {
+    message = draw ? DRAW_COPY.foundAfterUncertain : carried + DRAW_COPY.noneYet;
+    kind = draw ? "success" : "error";
+  }
+  const existing = document.getElementById("draw-section");
+  const activeId = (existing && existing.contains(document.activeElement) ? document.activeElement.id : "") || drawFocusId;
+  drawFocusId = "";
+  const built = buildDrawSection(state);
+  if (existing) existing.replaceWith(built);
+  else drawPlace(built);
+  drawClearNote();
+  setDrawStatus(message, kind);
+  if (focusHeading) document.getElementById("draw-heading").focus();
+  else if (activeId) {
+    const again = document.getElementById(activeId);
+    if (again && !again.disabled) again.focus();
+  }
+  if (draw) drawOfferSchedule(state);
+}
+
+/** The schedule is asked for here, and only here: a fresh read has just confirmed a valid permanent draw for the competition this page is showing. */
+function drawOfferSchedule(state) {
+  const view = currentView;
+  if (drawState !== state || state.phase !== "present" || !state.draw || !view || !view.competition || view.competition.competitionId !== state.competitionId) return;
+  ensureSchedule(view.competition, view);
+}
+
+/** After an outcome that is not known the server is asked what it holds BEFORE anything can be sent again: the draw if there is one, otherwise the action again, with the same identifier. */
+async function reconcileDraw(state, message) {
+  const read = await readDraw(state);
+  if (drawState !== state) return;
+  if (!read.ok) { failDraw(state, message + DRAW_COPY.unconfirmed); return; }
+  if (read.draw) { applyDrawRead(state, read.draw, DRAW_COPY.foundAfterUncertain, "success", true); return; }
+  applyDrawRead(state, null, message + DRAW_COPY.noneYet, "error", false);
+}
+
+/** A draw the server just answered exactly is not believed on that answer alone: it is read again, and what is shown is what that read says. */
+async function confirmDraw(state, created) {
+  setDrawStatus(DRAW_COPY.confirming, "");
+  await refreshDraw(state, created.alreadyDrawn ? DRAW_COPY.replay : DRAW_COPY.made, "success", true, { digest: created.draw.drawDigest, failure: DRAW_COPY.madeUnconfirmed });
+}
+
+// ---- What is shown --------------------------------------------------------------------------------------------------------------------------
+
+function setDrawStatus(text, kind) {
+  const status = document.getElementById("draw-status");
+  if (!status) return;
+  status.className = "msg" + (kind ? " " + kind : "");
+  status.textContent = text;
+}
+
+/** While a request is out nothing in the section can start another. */
+function setDrawBusy(busy) {
+  const section = document.getElementById("draw-section");
+  if (!section) return;
+  if (busy && section.contains(document.activeElement) && document.activeElement.id) drawFocusId = document.activeElement.id;
+  for (const control of section.querySelectorAll("button")) control.disabled = busy;
+  if (busy) section.setAttribute("aria-busy", "true");
+  else { section.removeAttribute("aria-busy"); drawRestoreFocus(); }
+}
+
+function drawRestoreFocus() {
+  const id = drawFocusId;
+  drawFocusId = "";
+  const section = document.getElementById("draw-section");
+  const control = id && section ? document.getElementById(id) : null;
+  if (control && !control.disabled && section.contains(control)) control.focus();
+}
+
+/** Before a draw: what the draw is, what decides the semifinals, and the one action. Nothing to choose. */
+function buildDrawOffer(section, state) {
+  const intro = drawNode("p", DRAW_COPY.intro, "msg");
+  intro.id = "draw-intro";
+  section.appendChild(intro);
+  const rules = document.createElement("ul");
+  rules.id = "draw-rules";
+  for (const rule of [DRAW_COPY.rule1, DRAW_COPY.rule2, DRAW_COPY.rule3]) rules.appendChild(drawNode("li", rule));
+  section.appendChild(rules);
+  const actions = drawNode("div", undefined, "row");
+  const make = drawButton(DRAW_COPY.make, "dominant", "draw-make");
+  make.setAttribute("aria-describedby", "draw-intro draw-rules");
+  make.addEventListener("click", () => { submitDraw(state); });
+  actions.appendChild(make);
+  section.appendChild(actions);
+}
+
+/** After the draw: the permanent result, read-only. Positions are bracket slots, never rankings; the audit record is three bounded references. No control of any kind. */
+function buildDrawResult(section, draw) {
+  const made = drawNode("p", "Made on " + amendFormatUtc(draw.drawnAt) + ". This draw is permanent: it cannot be repeated, changed or undone.", "msg");
+  made.id = "draw-made";
+  section.appendChild(made);
+  section.appendChild(drawNode("h4", "Positions"));
+  const positions = document.createElement("ol");
+  positions.id = "draw-positions";
+  for (const t of draw.teams) {
+    const item = document.createElement("li");
+    item.appendChild(drawNode("span", "Position " + t.drawPosition + ": ", "draw-slot"));
+    item.appendChild(drawNode("span", t.teamName, "draw-team"));
+    positions.appendChild(item);
+  }
+  section.appendChild(positions);
+  section.appendChild(drawNode("h4", "Semifinals"));
+  const semifinals = document.createElement("ul");
+  semifinals.id = "draw-semifinals";
+  for (const f of draw.semifinals) {
+    const item = document.createElement("li");
+    item.appendChild(drawNode("strong", fixtureLabel(f.fixtureRole)));
+    item.appendChild(document.createTextNode(" (positions " + f.teamA.drawPosition + " and " + f.teamB.drawPosition + "): "));
+    item.appendChild(drawNode("span", f.teamA.teamName, "draw-team"));
+    item.appendChild(document.createTextNode(" vs "));
+    item.appendChild(drawNode("span", f.teamB.teamName, "draw-team"));
+    semifinals.appendChild(item);
+  }
+  section.appendChild(semifinals);
+  const slotNote = drawNode("p", DRAW_COPY.slotNote, "msg");
+  slotNote.id = "draw-slot-note";
+  section.appendChild(slotNote);
+  section.appendChild(drawNode("h4", "Audit record"));
+  const evidence = document.createElement("dl");
+  evidence.id = "draw-evidence";
+  evidence.className = "draw-facts";
+  const add = (term, value) => { evidence.appendChild(drawNode("dt", term)); evidence.appendChild(drawNode("dd", value)); };
+  add("Method", draw.algorithm);
+  add("Draw record", draw.drawDigest);
+  add("Registration record", draw.freezeDigest);
+  section.appendChild(evidence);
+  section.appendChild(drawNode("p", DRAW_COPY.evidenceNote, "msg"));
+}
+
+function buildDrawSection(state) {
+  const present = state.phase === "present" && !!state.draw;
+  const section = document.createElement("div");
+  section.id = "draw-section";
+  section.className = "card draw-card";
+  section.setAttribute("role", "region");
+  section.setAttribute("aria-labelledby", "draw-heading");
+  section.setAttribute("data-state", present ? "present" : "absent");
+  const heading = drawNode("h3", present ? DRAW_COPY.headingPresent : DRAW_COPY.headingAbsent);
+  heading.id = "draw-heading";
+  heading.tabIndex = -1;
+  section.appendChild(heading);
+  const status = drawNode("p", "", "msg");
+  status.id = "draw-status";
+  status.setAttribute("aria-live", "polite");
+  // After a draw the outcome is said first (it says "shown below"); before one, it stands beside the action it concerns.
+  if (present) { section.appendChild(status); buildDrawResult(section, state.draw); }
+  else { buildDrawOffer(section, state); section.appendChild(status); }
+  return section;
+}
+
+// ---- Making the draw ------------------------------------------------------------------------------------------------------------------------
+
+function drawFinish(state, text, kind) {
+  if (drawState !== state) return;
+  state.busy = false;
+  setDrawBusy(false);
+  setDrawStatus(text, kind);
+}
+
+async function submitDraw(state) {
+  if (drawState !== state || state.busy || state.phase !== "absent" || !drawContextHolds(state)) return;
+  // A retry of a request whose outcome is not known keeps its identifier, so a lost answer can never make a second draw; a definite answer ends the attempt.
+  const intentId = drawAttempt && drawAttempt.competitionId === state.competitionId ? drawAttempt.intentId : newPlanningIntentId();
+  drawAttempt = { competitionId: state.competitionId, intentId };
+  state.busy = true;
+  setDrawBusy(true);
+  setDrawStatus(DRAW_COPY.making, "");
+
+  let res;
+  try {
+    res = await drawFetch(state, "POST", { intentId });
+  } catch (err) {
+    if (drawState !== state) return;
+    await reconcileDraw(state, err && err.message === "timeout" ? DRAW_COPY.timeout : DRAW_COPY.network);
+    return;
+  }
+  if (drawState !== state) return;
+  const created = drawValidCreated(res.status, res.json);
+  if (created) { drawAttempt = null; await confirmDraw(state, created); return; }
+  if (res.status === 201 || res.status === 200) { await reconcileDraw(state, DRAW_COPY.unreadable); return; }
+  if (res.status === 400) { drawAttempt = null; drawFinish(state, DRAW_COPY.refused400, "error"); return; }
+  if (res.status === 401) { drawAttempt = null; failDraw(state, DRAW_COPY.refused401); return; }
+  if (res.status === 403 || res.status === 404) { drawAttempt = null; failDraw(state, DRAW_COPY.refusedUnavailable); return; }
+  if (res.status === 409) {
+    drawAttempt = null;
+    const code = drawIsObject(res.json) && typeof res.json.code === "string" ? res.json.code : "";
+    if (code === "ALREADY_DRAWN") await refreshDraw(state, DRAW_REFUSALS.ALREADY_DRAWN, "", true, { digest: null, failure: DRAW_COPY.readFailed });
+    else await refreshDraw(state, Object.prototype.hasOwnProperty.call(DRAW_REFUSALS, code) ? DRAW_REFUSALS[code] : DRAW_COPY.refused409, "error", false, null);
+    return;
+  }
+  await reconcileDraw(state, DRAW_COPY.unknown);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
 // UG-CR-GATE-SSS-028 — "Schedule and publish": the organizer's server-backed way from a frozen, drawn four-team competition to its published fixtures.
 //
 // The manual form that used to stand here (four team selectors, three free date-and-time inputs, a button) is gone for good: the browser no longer chooses a
@@ -2787,7 +3323,8 @@ async function withdrawAmendment(state) {
 // code SHOWS those answers and sends the organizer's requests; every check it makes before sending is a convenience for the person using it, never authority.
 //
 // The section exists only after the server has answered the schedule read exactly, and only for an organizer view of a READY_TO_PUBLISH competition whose view carries
-// the server's own organizer signal (the same signal the plan-change section relies on). Until then — while the authorization source, the detail or the read is
+// the server's own organizer signal (the same signal the plan-change section relies on), and since UG-CR-GATE-SSS-031 only after a fresh read has confirmed that a valid
+// permanent draw exists: the draw section asks for it, and nothing else does. Until then — while the authorization source, the detail or the read is
 // pending, and after any failed, refused, silent or malformed read — there is nothing of it on the page, and the manual form does not come back: one plain
 // sentence says the schedule could not be loaded. Whenever the selection, the session, the authorization or the loaded detail changes, the section is removed in the
 // same turn, its outstanding requests are aborted, the proposal it held (and so its digest) is forgotten, and no late answer can render, enable or confirm anything.
@@ -3085,11 +3622,6 @@ function ensureSchedule(competition, view) {
   if (scheduleState && scheduleState.competitionId === competition.competitionId) return;
   removeScheduleSection();
   loadSchedule(competition.competitionId);
-}
-
-/** After an authorization event the section is asked for again from the server's own answers; nothing returns unless the read is exact again. */
-function reestablishSchedule() {
-  if (currentView && isOrganizerView() && cachedCompetitions.some((c) => c.competitionId === currentAccess.competitionId)) ensureSchedule(currentView.competition, currentView);
 }
 
 /** One uncached, abortable request through the existing authenticated fetch, bounded by SCHEDULE_TIMEOUT_MS. */

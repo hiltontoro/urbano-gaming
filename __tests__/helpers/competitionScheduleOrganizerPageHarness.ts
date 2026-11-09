@@ -13,6 +13,7 @@ import { computeSchedulePublicationDigest, parsePublishRequest, publicScheduledP
 import type {
   PublishScheduledCompetitionResult, ScheduleContextRecord, ScheduleFixtureRole, SchedulePublicationRecord, ScheduleProposalRecord, ScheduleProposalStatus, ScheduleRequestPlacement,
 } from "../../lib/gaming/competitions/types";
+import { DRAW_URL, defaultDrawWire } from "./competitionDrawOrganizerPageHarness";
 
 /**
  * UG-CR-GATE-SSS-028 — test support for the organizer's schedule-and-publish surface on the SHIPPED /competitions-admin.html, run whole in jsdom.
@@ -32,6 +33,8 @@ export type ScheduleReply = AmendReply;
 
 export const SCHEDULE_URL = `/api/gaming/competitions/${CID}/schedule-proposal`;
 export const PUBLISH_URL = `/api/gaming/competitions/${CID}/publish`;
+// UG-CR-GATE-SSS-031: the schedule surface is offered only after the organizer page has read an existing, verified draw (see competitionDrawOrganizerPageHarness.ts).
+export { DRAW_URL };
 export const ORGANIZER_SIGNAL = { organizer: true, captain: false };
 export const ABSENT = Symbol("absent");
 
@@ -305,7 +308,13 @@ export interface ScheduleScenario {
   view?: (request: ScheduleRequest, competitionId: string) => ScheduleReply | Promise<ScheduleReply>;
   planning?: (request: ScheduleRequest) => ScheduleReply | Promise<ScheduleReply>;
   amendment?: (request: ScheduleRequest) => ScheduleReply | Promise<ScheduleReply>;
+  /** UG-CR-GATE-SSS-031: answers GET /draw. By default the competition HAS a draw (verified by the server's own verifier), so every schedule scenario reaches its schedule read. */
+  draw?: (request: ScheduleRequest, competitionId: string) => ScheduleReply | Promise<ScheduleReply>;
+  /** UG-CR-GATE-SSS-031: answers POST /draw. By default an unexpected write (500): a scenario that makes a draw says how. */
+  drawPost?: (request: ScheduleRequest) => ScheduleReply | Promise<ScheduleReply>;
   timeoutMs?: number;
+  /** UG-CR-GATE-SSS-031: the page's own bound on a draw request. */
+  drawTimeoutMs?: number;
 }
 
 const ID_PATTERN = /^\/api\/gaming\/competitions\/([0-9a-f-]{36})(\/[a-z-]+)?$/;
@@ -319,6 +328,8 @@ export function scheduleTransport(s: ScheduleScenario) {
     if (m) {
       const [, id, suffix] = m;
       if (!suffix && r.method === "GET") return (s.view ?? defaultView)(r, id);
+      if (suffix === "/draw" && r.method === "GET") return (s.draw ?? (() => ({ status: 200, json: { draw: defaultDrawWire() } })))(r, id);
+      if (suffix === "/draw" && r.method === "POST") return (s.drawPost ?? (() => ({ status: 500, json: { error: "unexpected draw write" } })))(r);
       if (suffix === "/schedule-proposal" && r.method === "GET") return (s.schedule ?? (() => ({ status: 200, json: readWire() })))(r, id);
       if (suffix === "/schedule-proposal" && r.method === "POST") return (s.propose ?? (() => ({ status: 500, json: { error: "unexpected proposal write" } })))(r);
       if (suffix === "/publish" && r.method === "POST") return (s.publish ?? (() => ({ status: 500, json: { error: "unexpected publication write" } })))(r);
@@ -336,6 +347,7 @@ export function scheduleTransport(s: ScheduleScenario) {
 export async function openScheduleAdmin(s: ScheduleScenario = {}): Promise<SchedulePage> {
   const page = openAmendAdminPage({ auth: s.auth ?? SIGNED_IN, search: s.search, transport: scheduleTransport(s) });
   if (s.timeoutMs !== undefined) page.run(`SCHEDULE_TIMEOUT_MS = ${s.timeoutMs}`);
+  if (s.drawTimeoutMs !== undefined) page.run(`DRAW_TIMEOUT_MS = ${s.drawTimeoutMs}`);
   await page.settle(() => page.$$("#comp-select option").length > 0 || (page.$("#admin-gate") && page.$("#admin-gate").textContent !== ""), "the competition list");
   return page;
 }
@@ -364,5 +376,6 @@ export function chooseAll(page: SchedulePage, placements: ScheduleRequestPlaceme
 export const optionValues = (page: SchedulePage, selector: string): string[] => page.$$(`${selector} option`).map((o: HTMLOptionElement) => o.value);
 export const optionTexts = (page: SchedulePage, selector: string): string[] => page.$$(`${selector} option`).map((o: HTMLOptionElement) => o.textContent ?? "");
 export const scheduleRequests = (page: SchedulePage) => page.requests.filter((r) => r.url.includes("/schedule-proposal"));
+export const drawRequests = (page: SchedulePage) => page.requests.filter((r) => r.url.endsWith("/draw"));
 export const publishRequests = (page: SchedulePage) => page.requests.filter((r) => r.url.endsWith("/publish"));
 export const writes = (page: SchedulePage) => page.requests.filter((r) => r.method === "POST");

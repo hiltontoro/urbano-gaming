@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { publicScheduleProposal } from "../lib/gaming/competitions/scheduleProposal";
 import { PITCH_A, PITCH_B, makeFacts, makeRecord } from "./helpers/competitionScheduleOrganizerPageHarness";
+import { drawWire, makeDrawRecord } from "./helpers/competitionDrawOrganizerPageHarness";
 
 /**
  * UG-CR-GATE-083 Correction B (per UG-CR-REV-054 finding 2) — proves,
@@ -593,6 +594,85 @@ describe("UG-CR-GATE-SSS-028 — the schedule-and-publish section: no server tex
     expect(code).not.toMatch(/innerHTML/);
     expect(code).not.toMatch(/\bel\(|elRow\(|insertAdjacentHTML|outerHTML\s*=|document\.write|new Function|\beval\(|srcdoc|createContextualFragment/);
     // every piece of server text reaches the page through textContent, a form value, or an attribute that is set as data — never an `on*` attribute or a URL
+    expect(code).not.toMatch(/setAttribute\(\s*["']on/i);
+    expect(code).not.toMatch(/\.href\s*=|\.src\s*=|location\.(assign|replace|href)|window\.open/);
+  });
+});
+
+
+describe("UG-CR-GATE-SSS-031 — the draw section: no server text is ever parsed as markup (the real shipped functions, executed)", () => {
+  /** The whole page script in a jsdom window with only the auth bridge stubbed (the same way the schedule tests above load it). */
+  function loadDrawRealm() {
+    const dom = new JSDOM(adminHtml.replace(/<script[^>]*src=[^>]*><\/script>/g, ""), { runScripts: "outside-only", url: "https://urbano.example.test/competitions-admin.html" });
+    const w = dom.window as unknown as Window & Record<string, any>;
+    w.eval(readFileSync(path.join(process.cwd(), "public/competitionsLifecycle.js"), "utf8"));
+    w.eval("window.UrbanoAuth = { attachSignInButton() {}, onAuthStateChange() {}, async getState() { return { status: 'unauthenticated' }; }, async getAccessToken() { return null; } };");
+    const inline = /<script>([\s\S]*?)<\/script>/.exec(adminHtml);
+    if (!inline) throw new Error("the page's inline script was not found");
+    w.eval(inline[1]);
+    return w;
+  }
+  const hostileDraw = (value: string) => drawWire(makeDrawRecord({ index: 5, teamNames: [value, `${value} 2`, `${value} 3`, `${value} 4`] }));
+
+  for (const { label, value } of HOSTILE_PAYLOADS) {
+    it(`a hostile team name (${label}) is shown as literal text in the positions and the pairings, never as a live element`, () => {
+      const w = loadDrawRealm();
+      const host = w.document.createElement("div");
+      w.document.body.appendChild(host);
+      const draw = hostileDraw(value);
+      expect(w.drawValidDraw(draw), "the hostile draw is still a well-formed draw: it is only text").toBe(true);
+      const built = w.buildDrawSection({ phase: "present", draw, busy: false });
+      host.appendChild(built);
+      assertNoLiveInjection(built);
+      expect(built.querySelectorAll("img, svg, b, script, iframe")).toHaveLength(0);
+      const names = Array.from(built.querySelectorAll("#draw-positions .draw-team")) as Element[];
+      expect(names.map((n) => n.textContent)).toEqual(draw.teams.map((t: { teamName: string }) => t.teamName));
+      for (const n of names) expect(n.children).toHaveLength(0);
+      expect((built.querySelector("#draw-semifinals") as Element).textContent).toContain(value);
+      expect(built.innerHTML).not.toContain("<img");
+      expect(built.innerHTML).not.toContain("<svg");
+      expect(built.innerHTML).not.toContain("<script");
+      expect((w as any).__xss).toBeUndefined();
+    });
+  }
+
+  it("the page's own words and the server's evidence fields are placed with textContent only: the audit record shows exactly the three bounded values, as text", () => {
+    const w = loadDrawRealm();
+    const record = makeDrawRecord({ index: 3 });
+    const built = w.buildDrawSection({ phase: "present", draw: drawWire(record), busy: false });
+    const pairs = (Array.from(built.querySelectorAll("#draw-evidence dt")) as Element[]).map((dt) => [dt.textContent, (dt.nextElementSibling as Element).textContent]);
+    expect(pairs).toEqual([["Method", record.algorithm], ["Draw record", record.drawDigest], ["Registration record", record.freezeDigest]]);
+    assertNoLiveInjection(built);
+  });
+
+  it("the validators refuse anything that is not exactly the documented shape, and never throw on garbage", () => {
+    const w = loadDrawRealm();
+    const good = drawWire(makeDrawRecord());
+    expect(w.drawValidDraw(good)).toBe(true);
+    for (const garbage of [null, undefined, 7, "x", [], {}, { ...good, extra: 1 }, { ...good, teams: null }, { ...good, drawnAt: { toString: () => "<img src=x>" } }]) {
+      expect(() => w.drawValidDraw(garbage)).not.toThrow();
+      expect(w.drawValidDraw(garbage)).toBe(false);
+    }
+    expect(w.drawValidRead({ draw: null })).toEqual({ draw: null });
+    expect(w.drawValidRead({ draw: good }).draw).toEqual(good);
+    for (const garbage of [null, undefined, {}, { draw: undefined }, { draw: null, x: 1 }, { draw: {} }, [], "draw"]) expect(w.drawValidRead(garbage)).toBeNull();
+    expect(w.drawValidCreated(201, { draw: good, alreadyDrawn: false })).not.toBeNull();
+    expect(w.drawValidCreated(200, { draw: good, alreadyDrawn: true })).not.toBeNull();
+    for (const [code, body] of [[201, { draw: good, alreadyDrawn: true }], [200, { draw: good, alreadyDrawn: false }], [201, { draw: good }], [202, { draw: good, alreadyDrawn: false }], [201, null]] as Array<[number, unknown]>) {
+      expect(w.drawValidCreated(code, body), `${code} ${JSON.stringify(body)?.slice(0, 40)}`).toBeNull();
+    }
+  });
+
+  it("no sink in the draw code parses server text as markup: it never assigns innerHTML at all, and el(), insertAdjacentHTML, outerHTML, document.write, new Function and eval are not used there", () => {
+    // the block begins at its own header and ends where the schedule's begins
+    const start = adminHtml.indexOf('UG-CR-GATE-SSS-031 — "Make the draw"');
+    expect(start, "the draw code block was found").toBeGreaterThan(-1);
+    const end = adminHtml.indexOf('UG-CR-GATE-SSS-028 — "Schedule and publish"', start);
+    expect(end).toBeGreaterThan(start);
+    const code = adminHtml.slice(start, end);
+    expect(code.length).toBeGreaterThan(3000);
+    expect(code).not.toMatch(/innerHTML/);
+    expect(code).not.toMatch(/\bel\(|elRow\(|insertAdjacentHTML|outerHTML\s*=|document\.write|new Function|\beval\(|srcdoc|createContextualFragment/);
     expect(code).not.toMatch(/setAttribute\(\s*["']on/i);
     expect(code).not.toMatch(/\.href\s*=|\.src\s*=|location\.(assign|replace|href)|window\.open/);
   });

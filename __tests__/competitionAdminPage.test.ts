@@ -277,6 +277,11 @@ describe("the scorekeeper experience: contextual to ONE addressed competition, n
     for (const gone of ["btn-publish", "publish-form", "p-sf1a", "p-sf1b", "p-sf2a", "p-sf2b", "p-sf1-time", "p-sf2-time", "p-final-time", "schedule-section", "schedule-publish", "schedule-propose"]) {
       expect(page.doc.getElementById(gone), `${gone} does not exist for a scorekeeper (or for anyone: the manual form is retired)`).toBeNull();
     }
+    // UG-CR-GATE-SSS-031: the organizer's draw surface is built only for an organizer view; a scorekeeper's page has no draw section, no draw note and no draw control.
+    for (const gone of ["draw-section", "draw-make", "draw-heading", "draw-status", "draw-read-note"]) {
+      expect(page.doc.getElementById(gone), `${gone} does not exist for a scorekeeper`).toBeNull();
+    }
+    expect(page.doc.querySelectorAll('[id^="draw-"]')).toHaveLength(0);
     const blocks = [...page.doc.querySelectorAll("#fixtures-list .fixture-block")];
     expect(blocks).toHaveLength(1);
     expect(blocks[0].querySelector("[data-fixture]")!.getAttribute("data-fixture")).toBe("fx-2");
@@ -306,6 +311,9 @@ describe("the scorekeeper experience: contextual to ONE addressed competition, n
     await new Promise((r) => setTimeout(r, 40));
     expect(page.calls.filter((c) => c.method !== "GET")).toEqual([]);
     expect(page.calls.filter((c) => c.url.includes("schedule-proposal") || c.url.endsWith("/publish"))).toEqual([]);
+    // UG-CR-GATE-SSS-031: nor is there any draw read or draw write in this view, hidden or not
+    expect(page.calls.filter((c) => c.url.endsWith("/draw"))).toEqual([]);
+    expect(page.doc.querySelector('[id^="draw-"]')).toBeNull();
     page.close();
   });
 

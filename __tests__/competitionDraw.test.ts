@@ -986,16 +986,56 @@ describe("[8] no randomness and no clock in the application: the entropy is the 
   });
 });
 
-describe("[28][29] no page offers a draw, and no format other than five-a-side is made available", () => {
+describe("[28][29] no page offers a draw — except the organizer page (UG-CR-GATE-SSS-031) — and no format other than five-a-side is made available", () => {
   const PUBLIC = () => walk(path.join(REPO_ROOT, "public"), (f) => /\.(html|js)$/.test(f));
 
-  it("[29] no public page or script calls a draw endpoint or carries a draw control", () => {
+  // UG-CR-GATE-SSS-031. SSS-031 authorizes ONE public file to consume the draw route: the organizer page, which builds the draw section from script and sends exactly { intentId }.
+  // The exception is that exact path, and what it may carry is bounded below: the route named once, as one bounded path constant, read by one request wrapper. Nothing is skipped:
+  // every public file, the organizer page included, still gets the three original assertions, unchanged; every OTHER file also gets the organizer's draw contract (the path
+  // constant, the route as a string, the section and control names, the action's words), none of which may appear there.
+  const ORGANIZER_PAGE = path.join("public", "competitions-admin.html");
+  const SANCTIONED_PATH = 'const DRAW_PATH = "/draw";';
+  const ROUTE_AS_STRING = /["'`]\/draw["'`]/;
+  const NAMES_THE_DRAW_CONTRACT = /DRAW_PATH|["'`]\/draw["'`]|draw-section|draw-make|draw-heading|draw-status|draw-read-note|Make Permanent Draw/;
+  /** The top-level functions (declared at column 0 in the page's one inline script) in which a constant is read. Its own declaration is not a reading. */
+  const functionsReading = (source: string, constant: string) => {
+    let current = "";
+    const reading = new Set<string>();
+    for (const line of source.split("\n")) {
+      current = /^(?:async\s+)?function\s+(\w+)\(/.exec(line)?.[1] ?? current;
+      if (new RegExp(`\\b${constant}\\b`).test(line) && !line.startsWith(`const ${constant} =`)) reading.add(current);
+    }
+    return Array.from(reading).sort();
+  };
+
+  it("[29] no public page or script calls a draw endpoint or carries a draw control — the organizer page is scanned too, and every other file is free of its draw contract as well", () => {
     for (const file of PUBLIC()) {
       const source = readFileSync(file, "utf8");
       const where = path.relative(REPO_ROOT, file);
       expect(source, `${where}: a /draw path`).not.toMatch(/competitions\/[^\s"'`<>]*\/draw(?![A-Za-z])/);
       expect(source, `${where}: a control named draw`).not.toMatch(/\b(?:id|name|class|for|data-[a-z-]+)=["'][^"']*(?<![A-Za-z])draw(?![A-Za-z])[^"']*["']/i);
       expect(source, `${where}: a draw button`).not.toMatch(/<(?:button|a|summary)\b[^>]*>\s*(?:(?:make|run|do|start|request|perform)\s+(?:the\s+)?)?draw\s*</i);
+      if (where !== ORGANIZER_PAGE) expect(source, `${where}: the organizer's draw contract`).not.toMatch(NAMES_THE_DRAW_CONTRACT);
+    }
+  });
+
+  it("the organizer page is the one exception: the only public file that names the draw route, once, as its bounded path constant, read only by the one request wrapper", () => {
+    const named = PUBLIC().filter((file) => NAMES_THE_DRAW_CONTRACT.test(readFileSync(file, "utf8"))).map((file) => path.relative(REPO_ROOT, file));
+    expect(named).toEqual([ORGANIZER_PAGE]);
+    const page = readFileSync(path.join(REPO_ROOT, ORGANIZER_PAGE), "utf8");
+    // Every line of the page that holds the route as a string is the one sanctioned line, exactly once (a filter would hide a duplicate).
+    expect(page.split("\n").filter((line) => ROUTE_AS_STRING.test(line)).map((line) => line.trim())).toEqual([SANCTIONED_PATH]);
+    // The constant is read by exactly one function: the wrapper every draw request goes through.
+    expect(functionsReading(page, "DRAW_PATH")).toEqual(["drawFetch"]);
+  });
+
+  it("no Home, member-discovery, captain or scorekeeper surface gains the draw: those files are among the ones scanned, and none names the route or carries the section or the action", () => {
+    // The scorekeeper-only mode is part of the organizer page itself; that it gets no draw read and no draw control is proved at runtime (competitionDrawOrganizerPage.test.ts, test 3,
+    // and competitionAdminPage.test.ts).
+    const scanned = PUBLIC().map((file) => path.relative(REPO_ROOT, file));
+    for (const surface of ["competitions.html", "competitionsIntent.js", "index.html", "become-a-host.html", "urbanoAuth.js", "host.html", "participant.html"].map((name) => path.join("public", name))) {
+      expect(scanned, `${surface} is scanned`).toContain(surface);
+      expect(NAMES_THE_DRAW_CONTRACT.test(read(surface)), `${surface} names the draw route or carries the organizer's section or action`).toBe(false);
     }
   });
 
