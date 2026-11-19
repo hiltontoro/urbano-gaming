@@ -1152,6 +1152,25 @@ function restoreStoredSession(discriminatorAlreadySet) {
   }
 }
 
+// Trivia rendering-safety correction. Participant display names, question
+// text, option text and answer text are chosen by whoever joins or typed /
+// imported by the host, so they must reach the page as text nodes and never
+// be parsed as HTML. These two helpers are the only way the renderers below
+// put such a value on screen: domEl() sets textContent (never innerHTML), and
+// replaceChildrenWith() swaps a container's children for freshly built nodes
+// each poll without ever re-reading what was displayed. Mirrors host.html.
+function domEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+
+function replaceChildrenWith(container, nodes) {
+  container.textContent = "";
+  nodes.forEach((n) => container.appendChild(n));
+}
+
 function show(label, data) {
   document.getElementById("output").textContent = label + ":\n" + JSON.stringify(data, null, 2);
 }
@@ -1382,8 +1401,12 @@ function renderStateCard(state) {
     el.style.display = "none";
     return;
   }
+  // Trivia rendering-safety correction: every message is plain text. LOBBY_OPEN
+  // is the only one that includes a value the participant chose (their own
+  // display name), so it is assembled below from text nodes plus a <strong>
+  // element whose content is set as text — it is not a markup string.
   const messages = {
-    LOBBY_OPEN: ["🕒", `You're in as <strong>${participantState.displayName}</strong>. Waiting for the host to lock the lobby…`],
+    LOBBY_OPEN: ["🕒", null],
     LOBBY_LOCKED: ["🔒", "Lobby locked. Waiting for the host to start the game…"],
     PROMPT_ACTIVE: null,
     SUBMISSIONS_CLOSED: ["✋", "Submissions closed. Waiting for the host to reveal results…"],
@@ -1396,7 +1419,16 @@ function renderStateCard(state) {
     return;
   }
   el.style.display = "block";
-  el.innerHTML = `<div class="waiting"><span class="big">${msg[0]}</span>${msg[1]}</div>`;
+  const waiting = domEl("div", "waiting");
+  waiting.appendChild(domEl("span", "big", msg[0]));
+  if (state === "LOBBY_OPEN") {
+    waiting.appendChild(document.createTextNode("You're in as "));
+    waiting.appendChild(domEl("strong", "", participantState.displayName));
+    waiting.appendChild(document.createTextNode(". Waiting for the host to lock the lobby…"));
+  } else {
+    waiting.appendChild(document.createTextNode(msg[1]));
+  }
+  replaceChildrenWith(el, [waiting]);
 }
 
 // Slice 003 (Second Interaction Engine). currentPrompt.options is
@@ -1586,8 +1618,12 @@ function renderOptionButtons(currentPrompt, revealedCorrectIndex, clickable) {
   document.getElementById("optionsSubmittedNote").style.display =
     clickable && hasSubmittedThisPageLoad ? "block" : "none";
 
-  list.innerHTML = currentPrompt.options
-    .map((option, i) => {
+  // Trivia rendering-safety correction: an option's text is chosen by the
+  // host (typed or imported), so it is set as a text node, and the tap is
+  // wired with addEventListener rather than an inline onclick string.
+  replaceChildrenWith(
+    list,
+    currentPrompt.options.map((option, i) => {
       let cls = "option-btn";
       if (selectedOptionIndex === i) cls += " selected";
       if (revealedCorrectIndex !== null && revealedCorrectIndex === i) cls += " is-correct";
@@ -1598,11 +1634,14 @@ function renderOptionButtons(currentPrompt, revealedCorrectIndex, clickable) {
       ) {
         cls += " is-wrong-selected";
       }
-      return `<button class="${cls}" ${clickable ? "" : "disabled"} onclick="selectOption(${i})">
-        <span class="option-index-badge">${i + 1}</span><span>${option}</span>
-      </button>`;
+      const button = domEl("button", cls);
+      if (!clickable) button.disabled = true;
+      button.addEventListener("click", () => selectOption(i));
+      button.appendChild(domEl("span", "option-index-badge", i + 1));
+      button.appendChild(domEl("span", "", option));
+      return button;
     })
-    .join("");
+  );
 }
 
 async function selectOption(index) {
@@ -1973,19 +2012,30 @@ function renderResults(submissions, sessionState) {
     return;
   }
   card.style.display = "block";
-  document.getElementById("resultsList").innerHTML = effective
-    .map((s) => {
+  const resultsList = document.getElementById("resultsList");
+  if (effective.length === 0) {
+    replaceChildrenWith(resultsList, [domEl("div", "waiting", "No responses were submitted.")]);
+    return;
+  }
+  replaceChildrenWith(
+    resultsList,
+    effective.map((s) => {
       const isOwn = s.participantId === participantState.participantId;
       // Slice 003: isCorrect is null for Open Response, a boolean for
       // Multiple Choice — resolved by GET_SESSION's automatic evaluation.
       const correctnessClass = s.isCorrect === true ? "is-correct" : s.isCorrect === false ? "is-wrong" : "";
       const badge = s.isCorrect === true ? " ✓" : s.isCorrect === false ? " ✗" : "";
-      return `<div class="result-card ${isOwn ? "own" : ""} ${correctnessClass}">
-        <div class="result-name">${s.displayName}${isOwn ? ' <span class="you">(you)</span>' : ""}${badge}</div>
-        <div class="result-text">${s.text}</div>
-      </div>`;
+      const resultCard = domEl("div", ["result-card", isOwn ? "own" : "", correctnessClass].filter(Boolean).join(" "));
+      // s.displayName and s.text (an option's label, or an Open Response answer) are participant-controlled: text nodes only.
+      const name = domEl("div", "result-name");
+      name.appendChild(document.createTextNode(isOwn ? `${s.displayName} ` : String(s.displayName)));
+      if (isOwn) name.appendChild(domEl("span", "you", "(you)"));
+      if (badge) name.appendChild(document.createTextNode(badge));
+      resultCard.appendChild(name);
+      resultCard.appendChild(domEl("div", "result-text", s.text));
+      return resultCard;
     })
-    .join("") || `<div class="waiting">No responses were submitted.</div>`;
+  );
 }
 
 // Slice 002 (Scored Multi-Round Experience). Read-only for
@@ -2004,15 +2054,20 @@ function renderStandings(standings) {
 
   const sorted = [...standings].sort((a, b) => b.score - a.score);
 
-  document.getElementById("standingsList").innerHTML = sorted
-    .map((s) => {
+  replaceChildrenWith(
+    document.getElementById("standingsList"),
+    sorted.map((s) => {
       const isOwn = s.participantId === participantState.participantId;
-      return `<div class="standing-row ${isOwn ? "own" : ""}">
-        <div class="standing-name">${s.displayName}${isOwn ? ' <span class="you">(you)</span>' : ""}</div>
-        <div class="standing-score">${s.score}</div>
-      </div>`;
+      const row = domEl("div", "standing-row" + (isOwn ? " own" : ""));
+      const name = domEl("div", "standing-name");
+      // s.displayName is chosen by whoever joined: a text node, never markup.
+      name.appendChild(document.createTextNode(isOwn ? `${s.displayName} ` : String(s.displayName)));
+      if (isOwn) name.appendChild(domEl("span", "you", "(you)"));
+      row.appendChild(name);
+      row.appendChild(domEl("div", "standing-score", s.score));
+      return row;
     })
-    .join("");
+  );
 
   renderWinnerBanner(sorted);
 }

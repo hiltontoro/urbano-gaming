@@ -1307,6 +1307,25 @@ function restoreStoredSession(discriminatorAlreadySet) {
   }
 }
 
+// Trivia rendering-safety correction. Participant display names, question
+// text, option text and answer text are chosen by whoever joins or typed /
+// imported by the host, so they must reach the page as text nodes and never
+// be parsed as HTML. These two helpers are the only way the renderers below
+// put such a value on screen: domEl() sets textContent (never innerHTML), and
+// replaceChildrenWith() swaps a container's children for freshly built nodes
+// each poll without ever re-reading what was displayed.
+function domEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+
+function replaceChildrenWith(container, nodes) {
+  container.textContent = "";
+  nodes.forEach((n) => container.appendChild(n));
+}
+
 function show(label, data) {
   document.getElementById("output").textContent = label + ":\n" + JSON.stringify(data, null, 2);
 }
@@ -2014,18 +2033,25 @@ function renderPreparedQueue(questions) {
     return;
   }
   const sorted = [...questions].sort((a, b) => a.ordinal - b.ordinal);
-  list.innerHTML =
-    `<h2 style="margin-top:14px;">Question Queue</h2>` +
-    sorted
-      .map((q) => {
-        const status = q.consumedAt ? "Asked" : "Waiting";
-        return `<div class="prepared-question-row ${q.consumedAt ? "consumed" : ""}">
-          <span class="ordinal-badge">${q.ordinal}</span>
-          <div style="flex:1;">${q.promptText} <span style="color:var(--muted);">(correct: “${q.options[q.correctOptionIndex]}”, ${q.pointsForCorrect} pts)</span></div>
-          <span style="font-size:12px; color:var(--muted);">${status}</span>
-        </div>`;
-      })
-      .join("");
+  const heading = domEl("h2", "", "Question Queue");
+  heading.setAttribute("style", "margin-top:14px;");
+  const rows = sorted.map((q) => {
+    const row = domEl("div", "prepared-question-row" + (q.consumedAt ? " consumed" : ""));
+    const body = domEl("div");
+    body.setAttribute("style", "flex:1;");
+    // One text node for the prompt (and the single space that follows it), then the correct-answer note.
+    body.appendChild(document.createTextNode(`${q.promptText} `));
+    const note = domEl("span", "", `(correct: “${q.options[q.correctOptionIndex]}”, ${q.pointsForCorrect} pts)`);
+    note.setAttribute("style", "color:var(--muted);");
+    body.appendChild(note);
+    const status = domEl("span", "", q.consumedAt ? "Asked" : "Waiting");
+    status.setAttribute("style", "font-size:12px; color:var(--muted);");
+    row.appendChild(domEl("span", "ordinal-badge", q.ordinal));
+    row.appendChild(body);
+    row.appendChild(status);
+    return row;
+  });
+  replaceChildrenWith(list, [heading, ...rows]);
 }
 
 // Slice 003. The host presses one button; this resolves which
@@ -2545,9 +2571,10 @@ function selectVotingSource(source) {
 function renderParticipants(participants) {
   lastKnownParticipants = participants || [];
   document.getElementById("participantCount").textContent = participants.length;
-  document.getElementById("participantList").innerHTML = participants
-    .map((p) => `<li>${p.displayName}</li>`)
-    .join("");
+  replaceChildrenWith(
+    document.getElementById("participantList"),
+    participants.map((p) => domEl("li", "", p.displayName))
+  );
 }
 
 // Slice 003 (Second Interaction Engine). currentPrompt.options is
@@ -2589,16 +2616,17 @@ function renderPrompt(currentPrompt, engineType, votingCandidates) {
       )
       .join("");
   } else if (currentPrompt.options) {
-    optionsList.innerHTML = currentPrompt.options
-      .map((option, i) => {
+    replaceChildrenWith(
+      optionsList,
+      currentPrompt.options.map((option, i) => {
         const isCorrect = currentPrompt.correctOptionIndex === i;
-        return `<li class="option-row ${isCorrect ? "is-correct" : ""}">
-          <span class="option-index-badge">${i + 1}</span>
-          <span>${option}</span>
-          ${isCorrect ? '<span class="correct-tag">✓ Correct</span>' : ""}
-        </li>`;
+        const row = domEl("li", "option-row" + (isCorrect ? " is-correct" : ""));
+        row.appendChild(domEl("span", "option-index-badge", i + 1));
+        row.appendChild(domEl("span", "", option));
+        if (isCorrect) row.appendChild(domEl("span", "correct-tag", "✓ Correct"));
+        return row;
       })
-      .join("");
+    );
   } else {
     optionsList.innerHTML = "";
   }
@@ -2684,16 +2712,29 @@ function renderResults(submissions) {
     return;
   }
   card.style.display = "block";
-  document.getElementById("resultsList").innerHTML = effective
-    .map((s) => {
+  const resultsList = document.getElementById("resultsList");
+  if (effective.length === 0) {
+    replaceChildrenWith(resultsList, [domEl("div", "waiting", "No responses were submitted.")]);
+    return;
+  }
+  replaceChildrenWith(
+    resultsList,
+    effective.map((s) => {
       // Slice 003: isCorrect is null for Open Response (no correctness
       // concept at all) and a boolean for Multiple Choice, resolved by
       // GET_SESSION's automatic evaluation.
-      const cls = s.isCorrect === true ? "is-correct" : s.isCorrect === false ? "is-wrong" : "";
-      const badge = s.isCorrect === true ? '<span class="correctness-badge">✓</span>' : s.isCorrect === false ? '<span class="correctness-badge">✗</span>' : "";
-      return `<div class="result-card ${cls}"><div class="result-name">${s.displayName}${badge}</div><div class="result-text">${s.text}</div></div>`;
+      const cls = s.isCorrect === true ? " is-correct" : s.isCorrect === false ? " is-wrong" : "";
+      const resultCard = domEl("div", "result-card" + cls);
+      // s.displayName and s.text (an option's label, or an Open Response answer) are participant-controlled: text nodes only.
+      const name = domEl("div", "result-name");
+      name.appendChild(document.createTextNode(String(s.displayName)));
+      if (s.isCorrect === true) name.appendChild(domEl("span", "correctness-badge", "✓"));
+      else if (s.isCorrect === false) name.appendChild(domEl("span", "correctness-badge", "✗"));
+      resultCard.appendChild(name);
+      resultCard.appendChild(domEl("div", "result-text", s.text));
+      return resultCard;
     })
-    .join("") || `<div class="waiting">No responses were submitted.</div>`;
+  );
 }
 
 // Slice 002 (Scored Multi-Round Experience). Standings are always
@@ -2727,9 +2768,13 @@ function renderStandings(standings) {
 
   const sorted = [...lastKnownStandings].sort((a, b) => b.score - a.score);
 
-  document.getElementById("standingsList").innerHTML = sorted
-    .map((s) => {
+  replaceChildrenWith(
+    document.getElementById("standingsList"),
+    sorted.map((s) => {
       const pending = Boolean(awardInFlight[s.participantId]);
+      const row = domEl("div", "standing-row");
+      row.appendChild(domEl("div", "standing-name", s.displayName));
+      row.appendChild(domEl("div", "standing-score", s.score));
       // Founder iPhone playtest correction: a single fixed quick-tap
       // action (+10) replaces the numeric-spinner-plus-Award-button
       // pair. No second preset value is included — no other amount has
@@ -2739,16 +2784,23 @@ function renderStandings(standings) {
       // the existing awardInFlight in-flight guard (unchanged, see
       // awardPoints()) is what actually prevents a double-tap from
       // creating two awards, not a confirmation dialog.
-      const controls = canAward
-        ? `<button class="btn-secondary award-btn" ${pending ? "disabled" : ""} onclick="awardPoints('${s.participantId}', ${AWARD_POINTS_QUICK_ACTION_POINTS})">${pending ? "Awarding…" : `+${AWARD_POINTS_QUICK_ACTION_POINTS}`}</button>`
-        : "";
-      return `<div class="standing-row">
-        <div class="standing-name">${s.displayName}</div>
-        <div class="standing-score">${s.score}</div>
-        ${controls}
-      </div>`;
+      //
+      // Trivia rendering-safety correction: the control is built with
+      // addEventListener, not an inline onclick="awardPoints('<id>', …)"
+      // string, so no data value is ever turned into JavaScript source.
+      if (canAward) {
+        const awardBtn = domEl(
+          "button",
+          "btn-secondary award-btn",
+          pending ? "Awarding…" : `+${AWARD_POINTS_QUICK_ACTION_POINTS}`
+        );
+        if (pending) awardBtn.disabled = true;
+        awardBtn.addEventListener("click", () => awardPoints(s.participantId, AWARD_POINTS_QUICK_ACTION_POINTS));
+        row.appendChild(awardBtn);
+      }
+      return row;
     })
-    .join("");
+  );
 
   renderWinnerBanner(sorted);
 }
