@@ -789,7 +789,7 @@ describe("the migration (static contract): exactly one new, append-only migratio
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^\d{14}_[a-z0-9_]*schedule_publication[a-z0-9_]*\.sql$/);
     expect(files[0] > PROPOSAL_MIGRATION).toBe(true);
-    expect(readdirSync(DIR).filter((f) => f > PROPOSAL_MIGRATION)).toEqual(files);
+    expect(readdirSync(DIR).filter((f) => f > PROPOSAL_MIGRATION && f <= files[0])).toEqual(files); // a later migration (the lifetime-team foundation's) is that gate's own
   });
 
   it("creates exactly one table, server-only: row-level security on, no policy, no privilege for anyone — not even the server role", () => {

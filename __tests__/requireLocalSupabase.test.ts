@@ -118,9 +118,10 @@ describe("contract-test registry and guard placement (static inventory)", () => 
 
   const registered = extractEntryFiles(packageJson.scripts["test:contract"]);
 
-  it("package.json registers exactly thirty-two unique contract entry files", () => {
-    expect(registered.length).toBe(32);
-    expect(new Set(registered).size).toBe(32);
+  it("package.json registers exactly thirty-eight unique contract entry files", () => {
+    // UG-CR-GATE-CFM-001 adds six (lifetimeTeams, lifetimeEntries, lifetimeConcurrency, lifetimeCompatibility, lifetimeReviewHardening, lifetimeReviewRound2): 32 + 6.
+    expect(registered.length).toBe(38);
+    expect(new Set(registered).size).toBe(38);
   });
 
   it("the new behavioral/meta test is registered in the ordinary npm test script, not test:contract", () => {

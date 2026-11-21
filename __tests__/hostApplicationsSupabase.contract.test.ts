@@ -62,6 +62,8 @@ import { PlanAmendmentError } from "../lib/gaming/competitions/planAmendment";
 import { CompetitionDrawError } from "../lib/gaming/competitions/draw";
 import { ScheduleProposalError } from "../lib/gaming/competitions/scheduleProposal";
 import { SchedulePublicationError } from "../lib/gaming/competitions/schedulePublication";
+import { LifetimeTeamError } from "../lib/gaming/competitions/lifetimeTeams";
+import { SupabaseLifetimeTeamsRepository } from "../lib/gaming/competitions/db/supabaseLifetimeTeamsRepository";
 import { statusForCompetitionsError } from "../lib/gaming/competitions/httpAuth";
 import { isActiveOrganizer, isListedFor } from "../lib/gaming/competitions/organizerAccess";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
@@ -111,6 +113,7 @@ if (!/^postgresql:\/\/[^@]+@(127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(supabas
 
 const hostRepo = new SupabaseHostRepository(supabaseUrl, supabaseServiceRoleKey);
 const compRepo = new SupabaseCompetitionsRepository(supabaseUrl, supabaseServiceRoleKey);
+const lifetimeRepo = new SupabaseLifetimeTeamsRepository(supabaseUrl, supabaseServiceRoleKey);
 const gamingRepo = new SupabaseGamingRepository(supabaseUrl, supabaseServiceRoleKey);
 const serviceClient = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
 const anonClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -1366,6 +1369,12 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // refusal for a digest that names no proposal (SchedulePublicationError, PROPOSAL_NOT_FOUND) — after, never instead of, the ownership check and the host-revocation guard the
   // rest of this matrix proves for it.
   { rpc: "publish_competition_schedule_atomically", label: "publish the scheduled four-team bracket", call: (c, a) => compRepo.publishScheduledCompetition(c.competitionId, a, "0".repeat(64)) },
+  // UG-CR-GATE-CFM-001: the lifetime entry-flow switch. A published matrix competition is long past registration and already has legacy teams, so for its OWN active organizer this
+  // reports the switch's refusal (LifetimeTeamError, FLOW_CONFLICT) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
+  { rpc: "enable_lifetime_entry_flow_atomically", label: "enable the lifetime entry flow", call: (c, a) => lifetimeRepo.enableEntryFlow(c.competitionId, a) },
+  // UG-CR-GATE-CFM-001: the lifetime entry freeze. A matrix competition never enabled the lifetime flow, so for its OWN active organizer this reports the freeze's refusal
+  // (LifetimeTeamError, FLOW_NOT_ENABLED) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
+  { rpc: "freeze_lifetime_competition_entries_atomically", label: "freeze the lifetime entries", call: (c, a) => lifetimeRepo.freezeEntries(c.competitionId, a) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
@@ -1551,8 +1560,8 @@ describe("[T14, T15, T16, T17] ownership and revocation hold on every organizer 
       if (outcome !== null) {
         expect(outcome, `${entry.label}: an active host must not be refused as a stranger or as revoked`).not.toBeInstanceOf(CompetitionAccessDeniedError);
         expect(outcome, `${entry.label}`).not.toBeInstanceOf(HostAccessRevokedError);
-        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change, draw, proposal or publication operations' own typed refusals (their routes answer for them).
-        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError || outcome instanceof ScheduleProposalError || outcome instanceof SchedulePublicationError;
+        // A state refusal is a known domain refusal: one the shared status table maps, or one of the plan-change, draw, proposal, publication or lifetime-entry operations' own typed refusals (their routes answer for them).
+        const known = statusForCompetitionsError(outcome) !== null || outcome instanceof PlanAmendmentError || outcome instanceof CompetitionDrawError || outcome instanceof ScheduleProposalError || outcome instanceof SchedulePublicationError || outcome instanceof LifetimeTeamError;
         expect(known, `${entry.label}: expected a known domain refusal (state), got ${(outcome as Error)?.name}`).toBe(true);
       }
     }
