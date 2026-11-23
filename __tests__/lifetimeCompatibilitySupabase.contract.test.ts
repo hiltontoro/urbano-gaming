@@ -271,6 +271,8 @@ describe("[2] the legacy backfill: accepted V1 teams become legacy lifetime team
 const TABLES = [
   "lifetime_teams", "lifetime_team_memberships", "lifetime_team_leaderships", "lifetime_team_events", "lifetime_team_legacy_sources",
   "competition_lifetime_flows", "competition_lifetime_roster_claims", "competition_lifetime_freezes",
+  // UG-CR-GATE-CFM-004: the two append-only audit tables (every decision about an entry; every enable and disable of the flow)
+  "competition_lifetime_entry_decisions", "competition_lifetime_flow_events",
 ] as const;
 
 const U = "00000000-0000-4000-8000-000000000001";
@@ -292,14 +294,17 @@ const RPC_ARGS: Record<string, Record<string, unknown>> = {
   release_lifetime_entry_roster_claim_atomically: { p_competition_lifetime_roster_claim_id: U, p_actor_gaming_member_id: U },
   freeze_lifetime_competition_entries_atomically: { p_competition_id: U, p_organizer_gaming_member_id: U },
   backfill_legacy_competition_teams_atomically: { p_competition_ids: [U] },
+  // UG-CR-GATE-CFM-004 (the reason and the note have defaults: a well-formed call omits them)
+  decide_lifetime_competition_entry_atomically: { p_competition_id: U, p_competition_team_id: U, p_organizer_gaming_member_id: U, p_decision: "APPROVE" },
+  disable_lifetime_entry_flow_atomically: { p_competition_id: U, p_organizer_gaming_member_id: U },
 };
 const RPCS = Object.keys(RPC_ARGS);
 const INTERNAL = ["lifetime_clock", "lifetime_lock_people"];
 
 describe("[3] every new table and function is server-only", () => {
-  it("lists exactly the expected tables and functions, so nothing is added by accident (8 tables, 17 operations)", async () => {
-    expect(TABLES).toHaveLength(8);
-    expect(RPCS).toHaveLength(17);
+  it("lists exactly the expected tables and functions, so nothing is added by accident (10 tables, 19 operations)", async () => {
+    expect(TABLES).toHaveLength(10);
+    expect(RPCS).toHaveLength(19);
     const tables = await rawQuery("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r' and (relname like 'lifetime\\_%' or relname like 'competition\\_lifetime\\_%') order by relname");
     expect(tables.map((t) => t.relname)).toEqual([...TABLES].sort());
     const functions = await rawQuery(
@@ -314,7 +319,7 @@ describe("[3] every new table and function is server-only", () => {
               has_table_privilege('service_role', c.oid, 'SELECT') as service_select, has_table_privilege('service_role', c.oid, 'INSERT') as service_insert,
               has_table_privilege('service_role', c.oid, 'UPDATE') as service_update, has_table_privilege('service_role', c.oid, 'DELETE') as service_delete, has_table_privilege('service_role', c.oid, 'TRUNCATE') as service_truncate
          from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname = any($1) order by c.relname`, [[...TABLES]]);
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(TABLES.length);
     for (const r of rows) {
       expect(r.rls, `${r.relname} rls`).toBe(true);
       expect(r.policies, `${r.relname} policies`).toBe(0);
@@ -463,7 +468,7 @@ describe("[5] the TypeScript repository turns every database refusal into a type
     expect(noCompetition).toBeInstanceOf(CompetitionNotFoundError);
   });
 
-  it("runs the whole entry journey through the repository: enter, propose, affirm, freeze, and reads the entry with its claims", async () => {
+  it("runs the whole entry journey through the repository: enter, approve, propose, affirm, freeze, and reads the entry with its claims", async () => {
     const { LifetimeTeamError, repo } = await load();
     const competition = await h.setUpCompetition("RepoJourney");
     const teamA = await h.buildTeam("RepoA", 6);
@@ -471,6 +476,11 @@ describe("[5] the TypeScript repository turns every database refusal into a type
     await h.register(competition, teamA.captain, teamB.captain);
     const entryA = await repo.enterTeam(competition.competitionId, teamA.teamId, teamA.captain.gamingMemberId);
     const entryB = await repo.enterTeam(competition.competitionId, teamB.teamId, teamB.captain.gamingMemberId);
+    // UG-CR-GATE-CFM-004: the organizer approves each entry (through the repository, as a server caller would); the freeze counts only ACCEPTED entries.
+    for (const entry of [entryA, entryB]) {
+      const approved = await repo.decideEntry(competition.competitionId, entry.competitionTeamId, competition.organizer.gamingMemberId, "APPROVE", null, null);
+      expect(approved).toMatchObject({ competitionTeamId: entry.competitionTeamId, status: "ACCEPTED", decision: "APPROVE", releasedClaims: 0 });
+    }
     const proposedOrder: Record<string, string[]> = {};
     for (const [entry, team] of [[entryA, teamA], [entryB, teamB]] as const) {
       const proposed = await repo.proposeRosterClaims(entry.competitionTeamId, team.captain.gamingMemberId, team.everyone.map((p) => p.gamingMemberId));

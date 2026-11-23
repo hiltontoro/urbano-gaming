@@ -407,7 +407,9 @@ describe("[F8] no role can read or move an identity sequence", () => {
               has_sequence_privilege('service_role', c.oid, 'USAGE') or has_sequence_privilege('service_role', c.oid, 'SELECT') or has_sequence_privilege('service_role', c.oid, 'UPDATE') as service_role
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = 'public' and c.relkind = 'S' and (c.relname like 'lifetime\\_%' or c.relname like 'competition\\_lifetime\\_%') order by c.relname`);
+    // The foundation's four, and — UG-CR-GATE-CFM-004 — the two of its audit tables (every decision, every enable/disable of the flow): equally closed to every role.
     expect(rows.map((r) => r.relname)).toEqual([
+      "competition_lifetime_entry_decisions_decision_seq_seq", "competition_lifetime_flow_events_flow_event_seq_seq",
       "competition_lifetime_roster_claims_seq_seq", "lifetime_team_events_event_seq_seq", "lifetime_team_leaderships_seq_seq", "lifetime_team_memberships_seq_seq"]);
     for (const row of rows) expect(row, row.relname).toMatchObject({ anon: false, authenticated: false, service_role: false });
   });
@@ -534,6 +536,7 @@ describe("[F22] a disband settles the claims of a team whose competition was can
     const competition = await h.setUpCompetition("F22Frozen");
     const [teamA, teamB] = [await h.buildTeam("F22FA", 5), await h.buildTeam("F22FB", 5)];
     const [entryA, entryB] = [await h.enterTeam(competition, teamA), await h.enterTeam(competition, teamB)];
+    await h.approveEntries(competition, entryA.entryId, entryB.entryId); // UG-CR-GATE-CFM-004: the freeze counts only ACCEPTED entries
     await h.rosterUp(entryA.entryId, teamA.captain, competition, teamA.everyone);
     await h.rosterUp(entryB.entryId, teamB.captain, competition, teamB.everyone);
     await h.passDeadline(competition.competitionId);
@@ -565,6 +568,7 @@ describe("[F26] the freeze settles every proposal that is still open", () => {
     const competition = await h.setUpCompetition("F26");
     const [teamA, teamB] = [await h.buildTeam("F26A", 7), await h.buildTeam("F26B", 6)];
     const [entryA, entryB] = [await h.enterTeam(competition, teamA), await h.enterTeam(competition, teamB)];
+    await h.approveEntries(competition, entryA.entryId, entryB.entryId); // UG-CR-GATE-CFM-004: the freeze counts only ACCEPTED entries
     await h.rosterUp(entryA.entryId, teamA.captain, competition, teamA.everyone.slice(0, 6));
     await h.rosterUp(entryB.entryId, teamB.captain, competition, teamB.everyone);
     const late = teamA.everyone[6];

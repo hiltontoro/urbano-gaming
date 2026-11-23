@@ -40,12 +40,16 @@ const decideArgs = (claimId: string, actor: { gamingMemberId: string }, decision
 const releaseArgs = (claimId: string, actor: { gamingMemberId: string }) => ({ p_competition_lifetime_roster_claim_id: claimId, p_actor_gaming_member_id: actor.gamingMemberId });
 const freezeArgs = (c: LifetimeTestCompetition, organizer: { gamingMemberId: string } | null = c.organizer) => ({ p_competition_id: c.competitionId, p_organizer_gaming_member_id: organizer?.gamingMemberId ?? null });
 
-/** A competition and two teams entered in it, each with `size` people on the roster (everyone has proposed, registered and affirmed). */
+/**
+ * A competition and two teams entered in it, each with `size` people on the roster (everyone has proposed, registered and affirmed). UG-CR-GATE-CFM-004: the organizer has
+ * APPROVED both entries (before the deadline, as the rule requires) — the freeze counts only ACCEPTED entries, so an unapproved pair is no longer something it can freeze.
+ */
 async function twoRosteredEntries(label: string, size = 6) {
   const competition = await h.setUpCompetition(label);
   const [teamA, teamB] = [await h.buildTeam(`${label}A`, size), await h.buildTeam(`${label}B`, size)];
   const entryA = await h.enterTeam(competition, teamA);
   const entryB = await h.enterTeam(competition, teamB);
+  await h.approveEntries(competition, entryA.entryId, entryB.entryId);
   const claimsA = await h.rosterUp(entryA.entryId, teamA.captain, competition, teamA.everyone);
   const claimsB = await h.rosterUp(entryB.entryId, teamB.captain, competition, teamB.everyone);
   return { competition, teamA, teamB, entryA, entryB, claimsA, claimsB };

@@ -38,6 +38,9 @@ const personKey = (id: string) => `lifetime_person:${id}`;
 
 /** How many sessions the holder is blocking right now (directly, or through the queue behind a lock it holds). Nothing else in the database can change this count. */
 async function blockedBy(db: Client, holderPid: number): Promise<number> {
+  // The holder polls INSIDE its open transaction, where pg_stat_activity is a snapshot taken at the first read: a backend created later (a new PostgREST pool connection for a racer)
+  // would stay invisible and the racer would "never queue". Clearing the snapshot first makes every count current (UG-CR-GATE-CFM-004: found by a four-racer race whose pool was short).
+  await db.query("select pg_stat_clear_snapshot()");
   return (await db.query("select count(*)::int n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))", [holderPid])).rows[0].n as number;
 }
 
@@ -308,6 +311,7 @@ describe("[2] claims, withdrawals and the freeze", () => {
     const competition = await h.setUpCompetition(label);
     const entryA = await h.enterTeam(competition, teamA);
     const entryB = await h.enterTeam(competition, teamB);
+    await h.approveEntries(competition, entryA.entryId, entryB.entryId); // UG-CR-GATE-CFM-004: the freeze counts only ACCEPTED entries
     const claimsA = await h.rosterUp(entryA.entryId, teamA.captain, competition, teamA.everyone);
     const claimsB = await h.rosterUp(entryB.entryId, teamB.captain, competition, teamB.everyone);
     return { competition, entryA, entryB, claimsA, claimsB };

@@ -38,6 +38,9 @@ const migrationFiles = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sq
 const MIGRATION_NAME = migrationFiles.find((f) => /_competition_lifetime_teams_and_entry_foundation\.sql$/.test(f));
 const MIGRATION = MIGRATION_NAME ? readFileSync(path.join(MIGRATIONS_DIR, MIGRATION_NAME), "utf8") : "";
 const CODE = MIGRATION.replace(/--.*$/gm, ""); // comments removed (the scans below must not be fooled by prose)
+// UG-CR-GATE-CFM-004: the organizer-decision migration continues this one. The scans about the refusals the database RAISES read both; the rest of the CFM-001 scans are about the file they were written for.
+const DECISIONS_MIGRATION_NAME = migrationFiles.find((f) => /_competition_lifetime_entry_decisions_and_flow_recovery\.sql$/.test(f));
+const DECISIONS_CODE = (DECISIONS_MIGRATION_NAME ? readFileSync(path.join(MIGRATIONS_DIR, DECISIONS_MIGRATION_NAME), "utf8") : "").replace(/--.*$/gm, "");
 
 // =============================================================================================================================================
 describe("team names", () => {
@@ -109,9 +112,10 @@ describe("the database code table", () => {
     }
   });
 
-  it("maps EVERY coded refusal the migration raises (a code added to the SQL but not to the table would reach a caller as UNAVAILABLE)", () => {
-    const raised = [...new Set([...CODE.matchAll(/raise\s+exception\s+'(LIFETIME_[A-Z_]+):/g)].map((m) => m[1]))];
-    expect(raised.length).toBeGreaterThan(45);
+  it("maps EVERY coded refusal the lifetime migrations raise (a code added to the SQL but not to the table would reach a caller as UNAVAILABLE)", () => {
+    expect(DECISIONS_MIGRATION_NAME, "the CFM-004 migration must exist").toBeTruthy();
+    const raised = [...new Set([...(CODE + "\n" + DECISIONS_CODE).matchAll(/raise\s+exception\s+'(LIFETIME_[A-Z_]+):/g)].map((m) => m[1]))];
+    expect(raised.length).toBeGreaterThan(50);
     const mapped = new Set(LIFETIME_DATABASE_CODES.map(([code]) => code));
     expect(raised.filter((code) => !mapped.has(code))).toEqual([]);
     expect([...mapped].filter((code) => !raised.includes(code)), "a mapped code the migration never raises is dead weight").toEqual([]);

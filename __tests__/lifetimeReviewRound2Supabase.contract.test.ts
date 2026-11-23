@@ -184,7 +184,11 @@ describe("[R2-F1] the backfill converges without meeting a membership the lifeti
 // =============================================================================================================================================
 describe("[R2-F12] the backfill's mirror takes the team lock", () => {
   /** Sessions that the holder is blocking right now (directly or through the queue behind it). */
-  const blockedBy = async (db: Client, pid: number) => (await db.query("select count(*)::int n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))", [pid])).rows[0].n as number;
+  // (The snapshot is cleared first: inside the holder's open transaction pg_stat_activity is cached at its first read, so a backend created later would never be counted — see the CFM-001 concurrency suite.)
+  const blockedBy = async (db: Client, pid: number) => {
+    await db.query("select pg_stat_clear_snapshot()");
+    return (await db.query("select count(*)::int n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))", [pid])).rows[0].n as number;
+  };
 
   it("a disband that commits while the backfill waits for the team leaves no ACTIVE member in a DISBANDED team", async () => {
     const w = await legacyWorld("R2F12");
@@ -492,6 +496,7 @@ describe("[R2-F21] what the first round's tests claimed more than they checked",
     const teamB = await h.buildTeam("R2F21ClockB", 6);
     const entryA = await h.enterTeam(competition, teamA);
     const entryB = await h.enterTeam(competition, teamB);
+    await h.approveEntries(competition, entryA.entryId, entryB.entryId); // UG-CR-GATE-CFM-004: the freeze counts only ACCEPTED entries
     const claimsA = await h.rosterUp(entryA.entryId, teamA.captain, competition, teamA.everyone);
     await h.rosterUp(entryB.entryId, teamB.captain, competition, teamB.everyone);
     await h.passDeadline(competition.competitionId);

@@ -1,8 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  LifetimeTeamError, lifetimeErrorFromDatabase, normalizeLifetimeTeamName, parseBackfillScope, parseClaimBatch, parseClaimDecision, parseOfferDecision, parseOfferKind, requireUuid,
-  type ClaimDecision, type EntriesFrozen, type EntryCreated, type EntryFlowEnabled, type EntryWithdrawn, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
+  LifetimeTeamError, lifetimeErrorFromDatabase, normalizeLifetimeTeamName, parseBackfillScope, parseClaimBatch, parseClaimDecision, parseEntryDecisionRequest, parseOfferDecision, parseOfferKind,
+  requireUuid,
+  type ClaimDecision, type EntriesFrozen, type EntryCreated, type EntryDecided, type EntryDecision, type EntryDecisionReason, type EntryFlowDisabled, type EntryFlowEnabled,
+  type EntryWithdrawn, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
   type LeadershipOffer, type LifetimeEntryView, type LifetimeTeamCreated, type LifetimeTeamDisbanded, type LifetimeTeamsStore, type LifetimeTeamView, type MemberTeamSummary,
   type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type RosterClaimDecision, type RosterClaimProposed,
   type RosterClaimReleased,
@@ -129,6 +131,26 @@ export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
   async enableEntryFlow(competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowEnabled> {
     const r = await this.row("enable_lifetime_entry_flow_atomically", { p_competition_id: requireUuid(competitionId), p_organizer_gaming_member_id: requireUuid(organizerGamingMemberId) });
     return { competitionId: str(r.competition_id), enabledAt: str(r.enabled_at), alreadyEnabled: r.already_enabled === true };
+  }
+
+  async disableEntryFlow(competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowDisabled> {
+    const r = await this.row("disable_lifetime_entry_flow_atomically", { p_competition_id: requireUuid(competitionId), p_organizer_gaming_member_id: requireUuid(organizerGamingMemberId) });
+    return { competitionId: str(r.competition_id), disabledAt: strOrNull(r.disabled_at), alreadyDisabled: r.already_disabled === true };
+  }
+
+  async decideEntry(
+    competitionId: string, competitionTeamId: string, organizerGamingMemberId: string, decision: EntryDecision, reasonCode: EntryDecisionReason | null, note: string | null,
+  ): Promise<EntryDecided> {
+    // Validated here too (a caller of the store directly gets the same refusal before any call): the decision, the reason from the bounded list, the normalized note.
+    const request = parseEntryDecisionRequest(decision, reasonCode, note);
+    const r = await this.row("decide_lifetime_competition_entry_atomically", {
+      p_competition_id: requireUuid(competitionId), p_competition_team_id: requireUuid(competitionTeamId), p_organizer_gaming_member_id: requireUuid(organizerGamingMemberId),
+      p_decision: request.decision, p_reason_code: request.reasonCode, p_note: request.note,
+    });
+    return {
+      competitionTeamId: str(r.competition_team_id), status: r.status === "ACCEPTED" ? "ACCEPTED" : "REJECTED", decision: request.decision, decidedAt: str(r.decided_at),
+      releasedClaims: Number(r.released_claims), decisionId: str(r.decision_id),
+    };
   }
 
   async enterTeam(competitionId: string, lifetimeTeamId: string, actorGamingMemberId: string): Promise<EntryCreated> {

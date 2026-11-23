@@ -301,6 +301,21 @@ export function createHarness(tag: string) {
     return one("enable_lifetime_entry_flow_atomically", { p_competition_id: competition.competitionId, p_organizer_gaming_member_id: competition.organizer.gamingMemberId });
   }
 
+  /**
+   * The competition's organizer (or `actor`) decides an entry through the real operation: APPROVE, REJECT (with a reason code) or REMOVE (an accepted entry, with a
+   * reason code). UG-CR-GATE-CFM-004.
+   */
+  async function decideEntry(competition: { competitionId: string; organizer: Person }, entryId: string, decision: "APPROVE" | "REJECT" | "REMOVE", opts: { reason?: string | null; note?: string | null; actor?: Person } = {}) {
+    return one("decide_lifetime_competition_entry_atomically", {
+      p_competition_id: competition.competitionId, p_competition_team_id: entryId, p_organizer_gaming_member_id: (opts.actor ?? competition.organizer).gamingMemberId,
+      p_decision: decision, p_reason_code: opts.reason ?? null, p_note: opts.note ?? null });
+  }
+
+  /** The organizer approves each of these entries (it must happen while registration is open, so before the deadline passes). */
+  async function approveEntries(competition: { competitionId: string; organizer: Person }, ...entryIds: string[]) {
+    for (const entryId of entryIds) await decideEntry(competition, entryId, "APPROVE");
+  }
+
   /** The person registers for the competition with the adult self-attestation (the real, existing operation). */
   async function register(competition: LifetimeTestCompetition, ...people: Person[]) {
     for (const person of people) await registerForCompetition(compRepo, competition.competitionId, person.gamingMemberId, true);
@@ -392,6 +407,10 @@ export function createHarness(tag: string) {
         }
       };
       const revs = "(select planning_revision_id from competition_planning_revisions where competition_id = any($1))";
+      // The audit tables of the organizer-decision gate (UG-CR-GATE-CFM-004) reference entries and competitions: they go first, and only when the schema has them.
+      const decisionTables = (await db.query("select to_regclass('public.competition_lifetime_entry_decisions') is not null as decisions, to_regclass('public.competition_lifetime_flow_events') is not null as flow_events")).rows[0];
+      if (decisionTables.decisions) await run("delete from competition_lifetime_entry_decisions where competition_id = any($1)", [competitionIds]);
+      if (decisionTables.flow_events) await run("delete from competition_lifetime_flow_events where competition_id = any($1)", [competitionIds]);
       // $1 = the competitions of this run
       for (const sql of [
         "delete from competition_lifetime_roster_claims where competition_id = any($1)",
@@ -446,7 +465,7 @@ export function createHarness(tag: string) {
     RUN, env, supabaseUrl, serviceKey, anonKey, dbUrl, service, anon, compRepo, gamingRepo,
     rawQuery, rawTransaction, violation, atInstant, withClock, rpc, one, refused, settle,
     newPerson, newPeople, makeOperator, tokenFor, authenticatedClient, uniqueName, createTeam, addMember, makeSubCaptain, buildTeam,
-    setUpCompetition, enableFlow, register, enterTeam, rosterUp, passDeadline, supersedePlan,
+    setUpCompetition, enableFlow, register, enterTeam, rosterUp, passDeadline, supersedePlan, decideEntry, approveEntries,
     trackTeam: (id: string) => { teamIds.push(id); },
     trackCompetition: (id: string) => { competitionIds.push(id); },
     cleanup,

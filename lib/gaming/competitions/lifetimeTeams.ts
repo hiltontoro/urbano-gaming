@@ -13,6 +13,12 @@
 export const LIFETIME_TEAM_NAME_MIN = 2;
 export const LIFETIME_TEAM_NAME_MAX = 60;
 export const ROSTER_CLAIM_BATCH_MAX = 32;
+export const ENTRY_DECISION_NOTE_MAX = 280;
+/** The bounded reasons an organizer gives for rejecting or removing an entry (the database holds the same list in a CHECK). An approval carries none. */
+export const ENTRY_DECISION_REASON_CODES = [
+  "INELIGIBLE_TEAM", "INCOMPLETE_ENTRY", "DUPLICATE_OR_MISTAKEN_ENTRY", "COMPETITION_CAPACITY", "RULE_VIOLATION", "OTHER_ORGANIZER_DECISION",
+] as const;
+export type EntryDecisionReason = (typeof ENTRY_DECISION_REASON_CODES)[number];
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 // Typed refusals
@@ -31,6 +37,9 @@ export type LifetimeProblem =
   | "PERSON_ALREADY_CLAIMED" | "PERSON_REPRESENTS_ANOTHER_TEAM" | "ROSTER_FULL"
   | "FREEZE_PLAN_INVALID" | "FREEZE_DEADLINE_NOT_REACHED" | "FREEZE_NOT_ENOUGH_ENTRIES" | "FREEZE_ROSTER_BELOW_MINIMUM" | "FREEZE_ROSTER_ABOVE_MAXIMUM"
   | "BACKFILL_SCOPE_INVALID"
+  // UG-CR-GATE-CFM-004: the organizer's decision about an entry, the corrected freeze, and the recovery of an accidentally enabled flow
+  | "ENTRY_NOT_PENDING" | "ENTRY_NOT_ACCEPTED" | "ENTRY_CAPTAIN_CHANGED" | "REASON_INVALID" | "NOTE_INVALID" | "FREEZE_PENDING_ENTRIES"
+  | "FLOW_RECOVERY_BLOCKED" | "FLOW_RECOVERY_UNSAFE_LEGACY_STATE"
   // never from the database: a malformed request caught here, and anything unexpected
   | "INPUT_INVALID" | "UNAVAILABLE";
 
@@ -56,6 +65,9 @@ export const LIFETIME_DATABASE_CODES: ReadonlyArray<readonly [string, LifetimePr
   ["LIFETIME_FREEZE_PLAN_INVALID", "FREEZE_PLAN_INVALID"], ["LIFETIME_FREEZE_DEADLINE_NOT_REACHED", "FREEZE_DEADLINE_NOT_REACHED"],
   ["LIFETIME_FREEZE_NOT_ENOUGH_ENTRIES", "FREEZE_NOT_ENOUGH_ENTRIES"], ["LIFETIME_FREEZE_ROSTER_BELOW_MINIMUM", "FREEZE_ROSTER_BELOW_MINIMUM"],
   ["LIFETIME_FREEZE_ROSTER_ABOVE_MAXIMUM", "FREEZE_ROSTER_ABOVE_MAXIMUM"], ["LIFETIME_BACKFILL_SCOPE_INVALID", "BACKFILL_SCOPE_INVALID"],
+  ["LIFETIME_ENTRY_NOT_PENDING", "ENTRY_NOT_PENDING"], ["LIFETIME_ENTRY_NOT_ACCEPTED", "ENTRY_NOT_ACCEPTED"], ["LIFETIME_ENTRY_CAPTAIN_CHANGED", "ENTRY_CAPTAIN_CHANGED"],
+  ["LIFETIME_REASON_INVALID", "REASON_INVALID"], ["LIFETIME_NOTE_INVALID", "NOTE_INVALID"], ["LIFETIME_FREEZE_PENDING_ENTRIES", "FREEZE_PENDING_ENTRIES"],
+  ["LIFETIME_FLOW_RECOVERY_BLOCKED", "FLOW_RECOVERY_BLOCKED"], ["LIFETIME_FLOW_RECOVERY_UNSAFE_LEGACY_STATE", "FLOW_RECOVERY_UNSAFE_LEGACY_STATE"],
 ];
 
 interface RefusalDetail { count?: number; limit?: number }
@@ -111,10 +123,18 @@ function messageFor(code: LifetimeProblem, detail: RefusalDetail = {}): string {
     case "ROSTER_FULL": return "This entry already has the maximum number of players.";
     case "FREEZE_PLAN_INVALID": return "This competition has no usable registration plan.";
     case "FREEZE_DEADLINE_NOT_REACHED": return "The registration deadline has not been reached yet.";
-    case "FREEZE_NOT_ENOUGH_ENTRIES": return n === undefined ? "At least two live entries are needed." : `At least two live entries are needed (found ${n}).`;
+    case "FREEZE_NOT_ENOUGH_ENTRIES": return n === undefined ? "At least two accepted entries are needed." : `At least two accepted entries are needed (found ${n}).`;
     case "FREEZE_ROSTER_BELOW_MINIMUM": return n === undefined || detail.limit === undefined ? "An entry has fewer players than the roster minimum." : `An entry has ${n} accepted player${n === 1 ? "" : "s"}, below the roster minimum of ${detail.limit}.`;
     case "FREEZE_ROSTER_ABOVE_MAXIMUM": return n === undefined || detail.limit === undefined ? "An entry has more players than the roster maximum." : `An entry has ${n} accepted player${n === 1 ? "" : "s"}, above the roster maximum of ${detail.limit}.`;
     case "BACKFILL_SCOPE_INVALID": return "Name at least one competition to backfill.";
+    case "ENTRY_NOT_PENDING": return "This entry has already been decided or withdrawn.";
+    case "ENTRY_NOT_ACCEPTED": return "Only an accepted entry can be removed.";
+    case "ENTRY_CAPTAIN_CHANGED": return "The captain this entry names no longer leads the team. Reject it and let the team enter again.";
+    case "REASON_INVALID": return "Choose one of the listed reasons for a rejection or removal; an approval carries none.";
+    case "NOTE_INVALID": return `A note has 1 to ${ENTRY_DECISION_NOTE_MAX} characters and no control characters; an approval carries none.`;
+    case "FREEZE_PENDING_ENTRIES": return "Decide every pending entry before freezing the entries.";
+    case "FLOW_RECOVERY_BLOCKED": return "Team entries can only be switched off before publication and before anything has been entered, decided or frozen.";
+    case "FLOW_RECOVERY_UNSAFE_LEGACY_STATE": return "Legacy team data exists for this competition, so team entries cannot be switched off from here.";
     case "INPUT_INVALID": return "That request is not well formed.";
     case "UNAVAILABLE": return "This could not be completed right now. Try again.";
   }
@@ -202,6 +222,41 @@ export function parseClaimBatch(raw: unknown): string[] {
   return ids;
 }
 
+export type EntryDecision = "APPROVE" | "REJECT" | "REMOVE";
+
+/** An organizer's decision about an entry is APPROVE, REJECT or REMOVE. */
+export function parseEntryDecision(raw: unknown): EntryDecision {
+  if (raw === "APPROVE" || raw === "REJECT" || raw === "REMOVE") return raw;
+  throw new LifetimeTeamError("DECISION_INVALID");
+}
+
+/** The note the database will store: whitespace collapsed and trimmed, 1 to 280 CHARACTERS (code points, as char_length counts), no control characters. */
+export function normalizeEntryDecisionNote(raw: string): string {
+  const note = raw.replace(/\s+/g, " ").trim();
+  const length = Array.from(note).length;
+  if (length < 1 || length > ENTRY_DECISION_NOTE_MAX || /[\u0000-\u001f\u007f-\u009f]/.test(note)) throw new LifetimeTeamError("NOTE_INVALID");
+  return note;
+}
+
+/**
+ * What an organizer sends with a decision, checked BEFORE a call is made. An approval carries no reason and no note; a rejection or removal carries one reason from the
+ * bounded list and, optionally, a short note (an absent note is null — an empty or blank one is refused, never silently dropped).
+ */
+export function parseEntryDecisionRequest(decision: unknown, reasonCode: unknown, note: unknown): { decision: EntryDecision; reasonCode: EntryDecisionReason | null; note: string | null } {
+  const parsed = parseEntryDecision(decision);
+  const reasonAbsent = reasonCode === undefined || reasonCode === null;
+  const noteAbsent = note === undefined || note === null;
+  if (parsed === "APPROVE") {
+    if (!reasonAbsent) throw new LifetimeTeamError("REASON_INVALID");
+    if (!noteAbsent) throw new LifetimeTeamError("NOTE_INVALID");
+    return { decision: parsed, reasonCode: null, note: null };
+  }
+  if (typeof reasonCode !== "string" || !(ENTRY_DECISION_REASON_CODES as readonly string[]).includes(reasonCode)) throw new LifetimeTeamError("REASON_INVALID");
+  if (noteAbsent) return { decision: parsed, reasonCode: reasonCode as EntryDecisionReason, note: null };
+  if (typeof note !== "string") throw new LifetimeTeamError("NOTE_INVALID");
+  return { decision: parsed, reasonCode: reasonCode as EntryDecisionReason, note: normalizeEntryDecisionNote(note) };
+}
+
 /** The scope of a legacy backfill: a non-empty list of competitions. There is no "everything": a missing, null or empty scope is refused. */
 export function parseBackfillScope(raw: unknown): string[] {
   if (!Array.isArray(raw) || raw.length === 0) throw new LifetimeTeamError("BACKFILL_SCOPE_INVALID");
@@ -224,6 +279,9 @@ export interface LeadershipEnded { lifetimeTeamLeadershipId: string; endedAt: st
 export interface EntryFlowEnabled { competitionId: string; enabledAt: string; alreadyEnabled: boolean }
 export interface EntryCreated { competitionTeamId: string; publicCode: string; createdAt: string }
 export interface EntryWithdrawn { competitionTeamId: string; status: "REJECTED"; releasedClaims: number }
+export interface EntryDecided { competitionTeamId: string; status: "ACCEPTED" | "REJECTED"; decision: EntryDecision; decidedAt: string; releasedClaims: number; decisionId: string }
+/** `disabledAt` is null when nothing was enabled (an exact retry): nothing was written. */
+export interface EntryFlowDisabled { competitionId: string; disabledAt: string | null; alreadyDisabled: boolean }
 export interface RosterClaimProposed { claimId: string; gamingMemberId: string; status: "PROPOSED"; expiresAt: string }
 export interface RosterClaimDecision { claimId: string; status: "ACCEPTED" | "REJECTED"; acceptedAt: string | null }
 export interface RosterClaimReleased { claimId: string; status: "WITHDRAWN" | "REMOVED"; releaseReason: string }
@@ -259,6 +317,8 @@ export interface LifetimeTeamsStore {
   decideLeadership(leadershipId: string, actorGamingMemberId: string, decision: OfferDecision): Promise<LeadershipDecision>;
   endLeadership(lifetimeTeamId: string, actorGamingMemberId: string): Promise<LeadershipEnded>;
   enableEntryFlow(competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowEnabled>;
+  disableEntryFlow(competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowDisabled>;
+  decideEntry(competitionId: string, competitionTeamId: string, organizerGamingMemberId: string, decision: EntryDecision, reasonCode: EntryDecisionReason | null, note: string | null): Promise<EntryDecided>;
   enterTeam(competitionId: string, lifetimeTeamId: string, actorGamingMemberId: string): Promise<EntryCreated>;
   withdrawEntry(competitionTeamId: string, actorGamingMemberId: string): Promise<EntryWithdrawn>;
   proposeRosterClaims(competitionTeamId: string, actorGamingMemberId: string, gamingMemberIds: string[]): Promise<RosterClaimProposed[]>;
@@ -323,6 +383,25 @@ export async function endLifetimeLeadership(store: LifetimeTeamsStore, lifetimeT
 
 export async function enableLifetimeEntryFlow(store: LifetimeTeamsStore, competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowEnabled> {
   return store.enableEntryFlow(requireUuid(competitionId), requireUuid(organizerGamingMemberId));
+}
+
+/**
+ * Switches an accidentally enabled lifetime flow off. The database allows it only when the flow produced nothing (no entry, claim, decision or freeze, nothing legacy, the
+ * competition not yet published) and leaves a dated audit event; otherwise it refuses and deletes nothing.
+ */
+export async function disableLifetimeEntryFlow(store: LifetimeTeamsStore, competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowDisabled> {
+  return store.disableEntryFlow(requireUuid(competitionId), requireUuid(organizerGamingMemberId));
+}
+
+/** The organizer approves, rejects or removes an entry. Approval never accepts a roster claim; a rejection or removal needs a reason from the bounded list. */
+export async function decideLifetimeEntry(
+  store: LifetimeTeamsStore, competitionId: string, competitionTeamId: string, organizerGamingMemberId: string, decision: unknown, reasonCode?: unknown, note?: unknown,
+): Promise<EntryDecided> {
+  const competition = requireUuid(competitionId);
+  const entry = requireUuid(competitionTeamId);
+  const organizer = requireUuid(organizerGamingMemberId);
+  const request = parseEntryDecisionRequest(decision, reasonCode, note);
+  return store.decideEntry(competition, entry, organizer, request.decision, request.reasonCode, request.note);
 }
 
 export async function enterLifetimeTeam(store: LifetimeTeamsStore, competitionId: string, lifetimeTeamId: string, actorGamingMemberId: string): Promise<EntryCreated> {

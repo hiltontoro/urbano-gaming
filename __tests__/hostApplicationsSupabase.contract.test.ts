@@ -1375,6 +1375,12 @@ const ORGANIZER_CALLS: OrganizerCall[] = [
   // UG-CR-GATE-CFM-001: the lifetime entry freeze. A matrix competition never enabled the lifetime flow, so for its OWN active organizer this reports the freeze's refusal
   // (LifetimeTeamError, FLOW_NOT_ENABLED) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
   { rpc: "freeze_lifetime_competition_entries_atomically", label: "freeze the lifetime entries", call: (c, a) => lifetimeRepo.freezeEntries(c.competitionId, a) },
+  // UG-CR-GATE-CFM-004: the organizer's decision about an entry. A matrix competition never enabled the lifetime flow, so for its OWN active organizer this reports the
+  // decision's refusal (LifetimeTeamError, FLOW_NOT_ENABLED) — after, never instead of, the ownership check and the host-revocation guard the rest of this matrix proves for it.
+  { rpc: "decide_lifetime_competition_entry_atomically", label: "decide a lifetime entry", call: (c, a) => lifetimeRepo.decideEntry(c.competitionId, c.teams[0].competitionTeamId, a, "APPROVE", null, null) },
+  // UG-CR-GATE-CFM-004: switching the lifetime flow off. A matrix competition has no flow, so for its OWN active organizer this answers "already disabled" and writes nothing —
+  // still only after the ownership check and the host-revocation guard, which a stranger and a revoked host meet first.
+  { rpc: "disable_lifetime_entry_flow_atomically", label: "disable the lifetime entry flow", call: (c, a) => lifetimeRepo.disableEntryFlow(c.competitionId, a) },
 ];
 
 /** Organizer-gated functions the catalog must find: exactly the names of the list above (the planning save included), plus the scorekeeper evidence path. */
