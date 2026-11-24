@@ -218,6 +218,27 @@ export function createHarness(tag: string) {
     return { teamId: row.lifetime_team_id, publicCode: row.public_code, name };
   }
 
+  /**
+   * Fixture (UG-CR-GATE-CFM-010): lets ONE pending offer lapse without waiting seven days. The row's own guard forbids any change to `expires_at`, so — like cleanup — this
+   * runs as the database owner with row triggers off, for exactly one pending row, and proves that it touched exactly one. Nothing else about the offer changes: the lapse
+   * itself is then judged by the real operations against the real clock.
+   */
+  async function lapseOffer(kind: "MEMBERSHIP" | "LEADERSHIP", offerId: string): Promise<void> {
+    const [table, idColumn] = kind === "MEMBERSHIP" ? ["lifetime_team_memberships", "lifetime_team_membership_id"] : ["lifetime_team_leaderships", "lifetime_team_leadership_id"];
+    const db = new Client({ connectionString: dbUrl, statement_timeout: 60000 });
+    await db.connect();
+    try {
+      await db.query("begin");
+      await db.query("set local session_replication_role = replica");
+      const done = await db.query(`update ${table} set expires_at = now() - interval '1 minute' where ${idColumn} = $1 and status = 'PENDING'`, [offerId]);
+      if (done.rowCount !== 1) throw new Error(`lapseOffer: expected exactly one pending ${kind} offer, found ${done.rowCount}`);
+      await db.query("commit");
+    } finally {
+      await db.query("rollback").catch(() => {});
+      await db.end().catch(() => {});
+    }
+  }
+
   /** The captain invites `person`; the person accepts. Returns the membership id. */
   async function addMember(teamId: string, leader: Person, person: Person): Promise<string> {
     const offer = await one("propose_lifetime_team_membership_atomically", { p_lifetime_team_id: teamId, p_actor_gaming_member_id: leader.gamingMemberId, p_subject_gaming_member_id: person.gamingMemberId });
@@ -464,7 +485,7 @@ export function createHarness(tag: string) {
   return {
     RUN, env, supabaseUrl, serviceKey, anonKey, dbUrl, service, anon, compRepo, gamingRepo,
     rawQuery, rawTransaction, violation, atInstant, withClock, rpc, one, refused, settle,
-    newPerson, newPeople, makeOperator, tokenFor, authenticatedClient, uniqueName, createTeam, addMember, makeSubCaptain, buildTeam,
+    newPerson, newPeople, makeOperator, tokenFor, authenticatedClient, uniqueName, createTeam, addMember, makeSubCaptain, buildTeam, lapseOffer,
     setUpCompetition, enableFlow, register, enterTeam, rosterUp, passDeadline, supersedePlan, decideEntry, approveEntries,
     trackTeam: (id: string) => { teamIds.push(id); },
     trackCompetition: (id: string) => { competitionIds.push(id); },

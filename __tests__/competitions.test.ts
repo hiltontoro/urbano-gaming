@@ -1628,11 +1628,11 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
       else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
     });
 
-    it("discovered exactly the 37 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw; UG-CR-GATE-SSS-022 added [competitionId]/schedule-proposal; UG-CR-GATE-CFM-007 added lifetime-teams and lifetime-teams/[lifetimeTeamId]/disband)", () => {
-      expect(routeFiles).toHaveLength(37);
+    it("discovered exactly the 44 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw; UG-CR-GATE-SSS-022 added [competitionId]/schedule-proposal; UG-CR-GATE-CFM-007 added lifetime-teams and lifetime-teams/[lifetimeTeamId]/disband; UG-CR-GATE-CFM-010 added lifetime-teams/[lifetimeTeamId]/memberships, memberships/end, leadership-offers and leadership/end, lifetime-memberships/[membershipId]/decision, lifetime-offers/[offerId]/withdraw and lifetime-leaderships/[leadershipId]/decision)", () => {
+      expect(routeFiles).toHaveLength(44);
     });
 
-    it("with readiness disabled, every one of the 43 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment, on [competitionId]/draw, on [competitionId]/schedule-proposal and on lifetime-teams; the lifetime-teams/[lifetimeTeamId]/disband route is POST only) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
+    it("with readiness disabled, every one of the 50 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment, on [competitionId]/draw, on [competitionId]/schedule-proposal and on lifetime-teams; the lifetime-teams/[lifetimeTeamId]/disband route and the seven UG-CR-GATE-CFM-010 membership and leadership routes are POST only) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
       delete process.env.COMPETITIONS_SCHEMA_READY;
       let handlersTested = 0;
 
@@ -1669,7 +1669,7 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
         }
       }
 
-      expect(handlersTested).toBe(43);
+      expect(handlersTested).toBe(50);
     });
   });
 });

@@ -612,6 +612,14 @@ describe("no public surface", () => {
   // UG-CR-GATE-CFM-007: the ONE server module allowed to stand between the foundation and a route. It is exempt from the two scans below by its exact path (never by
   // directory or pattern), and it is held to a guard of its own — derived from the foundation — in the last block of this section.
   const HTTP_ADAPTER = "lib/gaming/competitions/lifetimeHttp.ts";
+  // UG-CR-GATE-CFM-010: the SECOND server module allowed to stand between the foundation and a route, for membership and leadership. It is exempt by its exact path too —
+  // never by directory or pattern — and it is held to a guard of its own, in the last block but one of this section.
+  const MEMBERSHIP_HTTP_ADAPTER = "lib/gaming/competitions/lifetimeMembershipHttp.ts";
+  const HTTP_ADAPTERS = [HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER];
+  // The routes of the Competitions API that import a module by its exact specifier (what a route may reach is decided by what it imports, not by where it lives).
+  const competitionRoutes = () => walk(path.join(ROOT, "app", "api", "gaming", "competitions")).filter((f) => /[\\/]route\.ts$/.test(f)).map((f) => path.relative(ROOT, f).split(path.sep).join("/")).sort();
+  const importsOf = (file: string) => [...read(file).matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+  const routesImporting = (specifier: string) => competitionRoutes().filter((f) => importsOf(f).includes(specifier));
 
   it("derives its tokens from every function and table the migration creates", () => {
     expect(OBJECTS.length).toBeGreaterThan(35);
@@ -627,17 +635,17 @@ describe("no public surface", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("is called by no other server code either: outside its own two files and the one bounded HTTP adapter, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
-    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)) && path.relative(ROOT, f) !== HTTP_ADAPTER);
+  it("is called by no other server code either: outside its own two files and the two bounded HTTP adapters, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
+    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)) && !HTTP_ADAPTERS.includes(path.relative(ROOT, f)));
     expect(libFiles.length).toBeGreaterThan(100);
     const offenders = libFiles.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
   });
 
-  it("is imported by nothing outside its own module, the one bounded HTTP adapter and the tests", () => {
+  it("is imported by nothing outside its own module, the two bounded HTTP adapters and the tests", () => {
     const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f));
     const importers = libFiles.filter((file) => /from\s+["'][^"']*(lifetimeTeams|supabaseLifetimeTeamsRepository)["']/.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f)).sort();
-    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts", HTTP_ADAPTER]);
+    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts", HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER]);
   });
 
   // UG-CR-GATE-CFM-007: the exception above is exactly ONE file, and that file is held to the same standard from the other side. What it may name is DERIVED from the
@@ -718,7 +726,7 @@ describe("no public surface", () => {
     });
 
     it("is reached only by its two routes, which import nothing but the adapter and name no foundation symbol", () => {
-      const routes = walk(path.join(ROOT, "app", "api", "gaming", "competitions", "lifetime-teams")).map(unix).sort();
+      const routes = routesImporting("@/lib/gaming/competitions/lifetimeHttp");
       expect(routes).toEqual(["app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/disband/route.ts", "app/api/gaming/competitions/lifetime-teams/route.ts"]);
       for (const route of routes) {
         const code = stripComments(read(route));
@@ -729,6 +737,127 @@ describe("no public surface", () => {
       const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
       const mentioning = surfaces.map(unix).filter((f) => f !== HTTP_ADAPTER && /lifetimeHttp/.test(read(f))).sort();
       expect(mentioning, "nothing but the two routes reaches the adapter").toEqual(routes);
+    });
+  });
+
+  // UG-CR-GATE-CFM-010: the second exception is exactly ONE more file, held to the same standard. What it may name is DERIVED from the foundation (never hand-listed): the
+  // seven operations it exists for, the two decision parsers, the identifier parser and the typed refusal. Everything else the foundation offers is forbidden to it.
+  describe("the bounded membership and leadership HTTP adapter exposes seven operations — and nothing else", () => {
+    const stripComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const adapterCode = () => stripComments(read(MEMBERSHIP_HTTP_ADAPTER));
+    const namesIn = (pattern: RegExp, text: string) => [...text.matchAll(pattern)].map((m) => m[1]);
+    const unix = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
+
+    const FOUNDATION = read("lib/gaming/competitions/lifetimeTeams.ts");
+    const storeStart = FOUNDATION.indexOf("export interface LifetimeTeamsStore");
+    const STORE_METHODS = namesIn(/^ {2}(\w+)\(/gm, FOUNDATION.slice(storeStart, FOUNDATION.indexOf("// ---", storeStart)));
+    const FOUNDATION_NAMES = [
+      ...STORE_METHODS,
+      ...namesIn(/^export async function (\w+)\(/gm, FOUNDATION),
+      ...namesIn(/^export function (\w+)\(/gm, FOUNDATION),
+      ...namesIn(/^export const (\w+)/gm, FOUNDATION),
+      ...namesIn(/^export (?:interface|type) (\w+)/gm, FOUNDATION).filter((n) => n !== "LifetimeTeamsStore"),
+    ];
+    const OPERATIONS = ["proposeLifetimeMembership", "decideLifetimeMembership", "withdrawLifetimeOffer", "endLifetimeMembership", "offerLifetimeLeadership", "decideLifetimeLeadership", "endLifetimeLeadership"];
+    const ALLOWED = [...OPERATIONS, "parseOfferDecision", "parseOfferKind", "requireUuid", "LifetimeProblem"];
+    const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
+    const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
+
+    it("derives what it forbids from the foundation: every other operation, record, parser and lookup is found, and every allowance names something that exists", () => {
+      expect(STORE_METHODS).toContain("proposeMembership");
+      expect(STORE_METHODS.length).toBeGreaterThan(20);
+      expect(FORBIDDEN.length).toBeGreaterThan(50);
+      for (const name of ["createLifetimeTeam", "disbandLifetimeTeam", "listActiveTeamsOfMember", "normalizeLifetimeTeamName", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims",
+        "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided", "proposeMembership", "MembershipOffer"]) {
+        expect(FORBIDDEN, name).toContain(name);
+      }
+      for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
+    });
+
+    it("names none of the foundation's other operations, records, parsers or lookups — and never the store directly (its code, comments removed)", () => {
+      expect(named(adapterCode(), FORBIDDEN)).toEqual([]);
+    });
+
+    const CAPABILITIES: Array<[string, RegExp]> = [
+      ["team creation, disbanding or listing", /^(?:createLifetimeTeam|disbandLifetimeTeam|listActiveTeamsOfMember|LifetimeTeamCreated|LifetimeTeamDisbanded|MemberTeamSummary|normalizeLifetimeTeamName|LIFETIME_TEAM_NAME_MIN|LIFETIME_TEAM_NAME_MAX)$/],
+      ["competition entry", /Entry|Entries|enterTeam|enterLifetimeTeam/], ["roster claims", /Roster|Claim/],
+      ["organizer decisions", /decideEntry|decideLifetimeEntry|EntryDecision|EntryDecided/], ["freeze", /[Ff]reez|Frozen/], ["backfill", /[Bb]ackfill/],
+      ["unrestricted team lookup", /^get(?:LifetimeTeam|Entry)$|LifetimeTeamView|LifetimeEntryView/],
+    ];
+    it.each(CAPABILITIES)("references no %s: the foundation's own names for it are found, and none appears in the adapter", (_capability, pattern) => {
+      const theirs = FORBIDDEN.filter((n) => pattern.test(n));
+      expect(theirs.length, "the scan must find the foundation's names for this capability, or it proves nothing").toBeGreaterThan(0);
+      expect(named(adapterCode(), theirs)).toEqual([]);
+    });
+
+    it("names no database object and makes no database call of its own (it goes through the domain operations and nothing else)", () => {
+      const databaseNames = [...new Set([CODE, DECISIONS_CODE].flatMap((sql) => namesIn(/create\s+(?:or\s+replace\s+)?(?:function|table)\s+(\w+)/gi, sql)))];
+      expect(databaseNames.length).toBeGreaterThan(35);
+      expect(named(adapterCode(), databaseNames)).toEqual([]);
+      expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
+    });
+
+    it("calls each of the seven operations, and no other", () => {
+      const code = adapterCode();
+      for (const operation of OPERATIONS) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
+    });
+
+    it("exports exactly its seven handlers and no helper", () => {
+      const code = adapterCode();
+      expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual([
+        "handleDecideLeadership", "handleDecideMembership", "handleEndLeadership", "handleEndMembership", "handleOfferLeadership", "handleProposeMembership", "handleWithdrawOffer",
+      ]);
+      expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
+    });
+
+    it("imports only what its seven operations need, one statement per module", () => {
+      const code = adapterCode();
+      const imports: Record<string, string[]> = {};
+      for (const m of code.matchAll(/^import\s+\{([^}]*)\}\s+from\s+["']([^"']+)["'];?$/gm)) {
+        imports[m[2]] = m[1].split(",").map((s) => s.replace(/^\s*type\s+/, "").trim()).filter(Boolean).sort();
+      }
+      expect(imports).toEqual({
+        "next/server": ["NextResponse"],
+        "./httpAuth": ["getSupabaseCredentials", "requireCompetitionsSchemaReady", "requireGamingMember"],
+        "./db/supabaseLifetimeTeamsRepository": ["SupabaseLifetimeTeamsRepository"],
+        "./lifetimeTeams": [...ALLOWED.filter((n) => n !== "requireUuid"), "LifetimeTeamError", "requireUuid"].sort(),
+      });
+      expect([...code.matchAll(/^import\b/gm)], "no other form of import (default, namespace, side-effect, type-only statement)").toHaveLength(4);
+      expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+    });
+
+    it("is reached only by its seven routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the two adapters", () => {
+      const SPECIFIER = "@/lib/gaming/competitions/lifetimeMembershipHttp";
+      const routes = routesImporting(SPECIFIER);
+      expect(routes).toEqual([
+        "app/api/gaming/competitions/lifetime-leaderships/[leadershipId]/decision/route.ts",
+        "app/api/gaming/competitions/lifetime-memberships/[membershipId]/decision/route.ts",
+        "app/api/gaming/competitions/lifetime-offers/[offerId]/withdraw/route.ts",
+        "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership-offers/route.ts",
+        "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership/end/route.ts",
+        "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/end/route.ts",
+        "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/route.ts",
+      ]);
+      for (const route of routes) {
+        const code = stripComments(read(route));
+        expect(importsOf(route), route).toEqual([SPECIFIER]);
+        expect(code, route).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+        expect(TOKENS.test(read(route)), `${route} must not name a foundation symbol`).toBe(false);
+      }
+      const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
+      const mentioning = surfaces.map(unix).filter((f) => f !== MEMBERSHIP_HTTP_ADAPTER && /lifetimeMembershipHttp/.test(read(f))).sort();
+      expect(mentioning, "nothing but the seven routes reaches the adapter").toEqual(routes);
+      // No broad exemption and no unbounded sibling: every route of the lifetime family imports exactly one of the two adapters and nothing else.
+      const family = competitionRoutes().filter((f) => /\/lifetime-[a-z]+\//.test(f));
+      expect(family).toHaveLength(9);
+      for (const route of family) expect([["@/lib/gaming/competitions/lifetimeHttp"], [SPECIFIER]], route).toContainEqual(importsOf(route));
+    });
+
+    it("is registered in the explicit test lists: the route test in npm test, the contract file in the contract script only", () => {
+      const scripts = (JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts;
+      expect(scripts.test).toContain("__tests__/lifetimeMembershipHttp.test.ts");
+      expect(scripts["test:contract"]).toContain("__tests__/lifetimeMembershipHttpSupabase.contract.test.ts");
+      expect(scripts.test, "the contract file must stay out of the in-memory suite").not.toContain("lifetimeMembershipHttpSupabase");
     });
   });
 
