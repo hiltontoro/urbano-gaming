@@ -609,6 +609,9 @@ describe("no public surface", () => {
     return statSync(full).isDirectory() ? walk(full) : [full];
   });
   const MODULE_FILES = new Set(["lib/gaming/competitions/lifetimeTeams.ts", "lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts"]);
+  // UG-CR-GATE-CFM-007: the ONE server module allowed to stand between the foundation and a route. It is exempt from the two scans below by its exact path (never by
+  // directory or pattern), and it is held to a guard of its own — derived from the foundation — in the last block of this section.
+  const HTTP_ADAPTER = "lib/gaming/competitions/lifetimeHttp.ts";
 
   it("derives its tokens from every function and table the migration creates", () => {
     expect(OBJECTS.length).toBeGreaterThan(35);
@@ -624,17 +627,109 @@ describe("no public surface", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("is called by no other server code either: outside its own two files, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
-    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)));
+  it("is called by no other server code either: outside its own two files and the one bounded HTTP adapter, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
+    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)) && path.relative(ROOT, f) !== HTTP_ADAPTER);
     expect(libFiles.length).toBeGreaterThan(100);
     const offenders = libFiles.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
   });
 
-  it("is imported by nothing outside its own module and the tests", () => {
+  it("is imported by nothing outside its own module, the one bounded HTTP adapter and the tests", () => {
     const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f));
-    const importers = libFiles.filter((file) => /from\s+["'][^"']*(lifetimeTeams|supabaseLifetimeTeamsRepository)["']/.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
-    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts"]);
+    const importers = libFiles.filter((file) => /from\s+["'][^"']*(lifetimeTeams|supabaseLifetimeTeamsRepository)["']/.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f)).sort();
+    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts", HTTP_ADAPTER]);
+  });
+
+  // UG-CR-GATE-CFM-007: the exception above is exactly ONE file, and that file is held to the same standard from the other side. What it may name is DERIVED from the
+  // foundation itself (never hand-listed), so an operation added to the foundation later is forbidden to the adapter from the day it exists.
+  describe("the one bounded HTTP adapter exposes create, the member's own active list and disband — and nothing else", () => {
+    const stripComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const adapterCode = () => stripComments(read(HTTP_ADAPTER));
+    const namesIn = (pattern: RegExp, text: string) => [...text.matchAll(pattern)].map((m) => m[1]);
+    const unix = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
+
+    const FOUNDATION = read("lib/gaming/competitions/lifetimeTeams.ts");
+    const storeStart = FOUNDATION.indexOf("export interface LifetimeTeamsStore");
+    const STORE_METHODS = namesIn(/^ {2}(\w+)\(/gm, FOUNDATION.slice(storeStart, FOUNDATION.indexOf("// ---", storeStart)));
+    const FOUNDATION_NAMES = [
+      ...STORE_METHODS,
+      ...namesIn(/^export async function (\w+)\(/gm, FOUNDATION), // the thin operations
+      ...namesIn(/^export function (\w+)\(/gm, FOUNDATION), // the parsers and the database-text translator
+      ...namesIn(/^export const (\w+)/gm, FOUNDATION),
+      ...namesIn(/^export (?:interface|type) (\w+)/gm, FOUNDATION).filter((n) => n !== "LifetimeTeamsStore"),
+    ];
+    // What the adapter may use: the two operations it calls, the member's own list (a store method), the two parsers, the typed refusal and the records those return.
+    const ALLOWED = ["createLifetimeTeam", "disbandLifetimeTeam", "listActiveTeamsOfMember", "normalizeLifetimeTeamName", "requireUuid", "LifetimeProblem", "LifetimeTeamCreated", "LifetimeTeamDisbanded", "MemberTeamSummary", "LIFETIME_TEAM_NAME_MIN", "LIFETIME_TEAM_NAME_MAX"];
+    const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
+    const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
+
+    it("derives what it forbids from the foundation: every operation, record, parser and lookup is found, and every allowance names something that exists", () => {
+      expect(STORE_METHODS).toContain("listActiveTeamsOfMember");
+      expect(STORE_METHODS.length).toBeGreaterThan(20);
+      expect(FORBIDDEN.length).toBeGreaterThan(50);
+      for (const name of ["proposeMembership", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims", "offerLeadership", "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided"]) {
+        expect(FORBIDDEN, name).toContain(name);
+      }
+      for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
+    });
+
+    it("names none of the foundation's other operations, records, parsers or lookups (its code, comments removed)", () => {
+      expect(named(adapterCode(), FORBIDDEN)).toEqual([]);
+    });
+
+    const CAPABILITIES: Array<[string, RegExp]> = [
+      ["membership offers", /Membership|Offer/], ["leadership", /Leadership/], ["competition entry", /Entry|Entries|enterTeam|enterLifetimeTeam/], ["roster claims", /Roster|Claim/],
+      ["organizer decisions", /decideEntry|decideLifetimeEntry|EntryDecision|EntryDecided/], ["freeze", /[Ff]reez|Frozen/], ["backfill", /[Bb]ackfill/],
+      ["unrestricted team lookup", /^get(?:LifetimeTeam|Entry)$|LifetimeTeamView|LifetimeEntryView/],
+    ];
+    it.each(CAPABILITIES)("references no %s: the foundation's own names for it are found, and none appears in the adapter", (_capability, pattern) => {
+      const theirs = FORBIDDEN.filter((n) => pattern.test(n));
+      expect(theirs.length, "the scan must find the foundation's names for this capability, or it proves nothing").toBeGreaterThan(0);
+      expect(named(adapterCode(), theirs)).toEqual([]);
+    });
+
+    it("names no database object and makes no database call of its own (it goes through the domain operations and nothing else)", () => {
+      const databaseNames = [...new Set([CODE, DECISIONS_CODE].flatMap((sql) => namesIn(/create\s+(?:or\s+replace\s+)?(?:function|table)\s+(\w+)/gi, sql)))];
+      expect(databaseNames.length).toBeGreaterThan(35);
+      expect(named(adapterCode(), databaseNames)).toEqual([]);
+      expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
+    });
+
+    it("exports exactly its three handlers and no helper", () => {
+      const code = adapterCode();
+      expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual(["handleCreateTeam", "handleDisbandTeam", "handleListMyTeams"]);
+      expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
+    });
+
+    it("imports only what its three operations need, one statement per module", () => {
+      const code = adapterCode();
+      const imports: Record<string, string[]> = {};
+      for (const m of code.matchAll(/^import\s+\{([^}]*)\}\s+from\s+["']([^"']+)["'];?$/gm)) {
+        imports[m[2]] = m[1].split(",").map((s) => s.replace(/^\s*type\s+/, "").trim()).filter(Boolean).sort();
+      }
+      expect(imports).toEqual({
+        "next/server": ["NextResponse"],
+        "./httpAuth": ["getSupabaseCredentials", "requireCompetitionsSchemaReady", "requireGamingMember"],
+        "./db/supabaseLifetimeTeamsRepository": ["SupabaseLifetimeTeamsRepository"],
+        "./lifetimeTeams": ["LifetimeProblem", "LifetimeTeamError", "createLifetimeTeam", "disbandLifetimeTeam", "normalizeLifetimeTeamName", "requireUuid"],
+      });
+      expect([...code.matchAll(/^import\b/gm)], "no other form of import (default, namespace, side-effect, type-only statement)").toHaveLength(4);
+      expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+    });
+
+    it("is reached only by its two routes, which import nothing but the adapter and name no foundation symbol", () => {
+      const routes = walk(path.join(ROOT, "app", "api", "gaming", "competitions", "lifetime-teams")).map(unix).sort();
+      expect(routes).toEqual(["app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/disband/route.ts", "app/api/gaming/competitions/lifetime-teams/route.ts"]);
+      for (const route of routes) {
+        const code = stripComments(read(route));
+        expect([...code.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]), route).toEqual(["@/lib/gaming/competitions/lifetimeHttp"]);
+        expect(code, route).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+        expect(TOKENS.test(read(route)), `${route} must not name a foundation symbol`).toBe(false);
+      }
+      const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
+      const mentioning = surfaces.map(unix).filter((f) => f !== HTTP_ADAPTER && /lifetimeHttp/.test(read(f))).sort();
+      expect(mentioning, "nothing but the two routes reaches the adapter").toEqual(routes);
+    });
   });
 
   it("is registered in the explicit test lists: the unit test in npm test, the five contract files in the contract script", () => {
