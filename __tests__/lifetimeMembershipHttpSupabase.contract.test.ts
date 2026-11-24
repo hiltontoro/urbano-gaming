@@ -5,6 +5,7 @@ import { loadEnv } from "vite";
 import { requireLocalSupabase } from "./helpers/requireLocalSupabase";
 
 import { GET as listRoute } from "../app/api/gaming/competitions/lifetime-teams/route";
+import { GET as inboxRoute } from "../app/api/gaming/competitions/lifetime-offers/route";
 import { POST as proposeRoute } from "../app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/route";
 import { POST as endMembershipRoute } from "../app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/end/route";
 import { POST as offerLeadershipRoute } from "../app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership-offers/route";
@@ -110,6 +111,8 @@ const offerL = route("offer leadership", offerLeadershipRoute, paths.offerLeader
 const decideL = route("decide leadership", decideLeadershipRoute, paths.decideLeadership, "leadershipId");
 const endL = route("end leadership", endLeadershipRoute, paths.endLeadership, "lifetimeTeamId");
 const list = (token: string | undefined) => call("list", listRoute, "GET", `${BASE}/lifetime-teams`, { token });
+/** The member's own pending offers (CFM-012). */
+const inbox = (token: string | undefined, extra: Extra = {}) => call("inbox", inboxRoute, "GET", extra.url ?? `${BASE}/lifetime-offers`, { token, authorization: extra.authorization, headers: extra.headers });
 
 type Member = Person & { token: string };
 /** A person with a genuine session. */
@@ -148,7 +151,7 @@ const sorted = (...people: Person[]) => people.map((p) => p.gamingMemberId).sort
 
 // =============================================================================================================================================
 describe("signed-out calls", () => {
-  it("are rejected on all seven routes — whatever the credential — before anything is parsed or changed", async () => {
+  it("are rejected on all seven routes and on the offer inbox — whatever the credential — before anything is parsed, read or changed", async () => {
     const alice = await member("Alice");
     const bob = await h.newPerson("Bob");
     const team = await h.createTeam(alice);
@@ -166,6 +169,7 @@ describe("signed-out calls", () => {
         await decideL(undefined, randomUUID(), { decision: "ACCEPT" }, { authorization }),
         await endL(undefined, team.teamId, undefined, { authorization }),
         await decideM(undefined, "test-id", "not json {{{", { authorization }),
+        await inbox(undefined, { authorization }),
       ];
       for (const answer of answers) {
         expect(answer.status, `${label}: ${answer.text}`).toBe(401);
@@ -621,6 +625,218 @@ describe("departure: a captain cannot leave without a successor, and the success
 });
 
 // =============================================================================================================================================
+describe("CFM-012 — the member's own pending offers (GET /lifetime-offers)", () => {
+  const teamView = async (teamId: string) => {
+    const [t] = await rawQuery("select public_code, name from lifetime_teams where lifetime_team_id = $1", [teamId]);
+    return { lifetimeTeamId: teamId, publicCode: t.public_code as string, name: t.name as string };
+  };
+  const who = (p: Person) => ({ gamingMemberId: p.gamingMemberId, displayName: p.displayName });
+  type Team = Awaited<ReturnType<typeof teamView>>;
+  const entry = (kind: "MEMBERSHIP" | "LEADERSHIP", offerId: string, direction: "INCOMING" | "OUTGOING", team: Team, counterparty: ReturnType<typeof who> | null, expiresAt: string) =>
+    ({ kind, offerId, direction, team, counterparty, expiresAt });
+  const KEYS = ["kind", "offerId", "direction", "team", "counterparty", "expiresAt"];
+  const offersOf = async (token: string, extra: Extra = {}) => {
+    const answer = await inbox(token, extra);
+    expect(answer.status, answer.text).toBe(200);
+    expect(answer.cache).toBe(NO_STORE);
+    expect(Object.keys(answer.json)).toEqual(["offers"]);
+    for (const o of answer.json.offers) {
+      expect(Object.keys(o)).toEqual(KEYS);
+      expect(Object.keys(o.team)).toEqual(["lifetimeTeamId", "publicCode", "name"]);
+      if (o.counterparty !== null) expect(Object.keys(o.counterparty)).toEqual(["gamingMemberId", "displayName"]);
+    }
+    return { offers: answer.json.offers as any[], text: answer.text };
+  };
+  const created = (answer: Answer) => { expect(answer.status, answer.text).toBe(201); return answer.json.membership ?? answer.json.leadership; };
+
+  it("an invitation is OUTGOING for the leader who made it and INCOMING for the invited member — with exactly the other person as the counterparty, no PII, and nothing for anyone else, the other leader included", async () => {
+    const team = await h.buildTeam("Inbox", 4);
+    const captain = await withToken(team.captain);
+    const sub = await withToken(team.subCaptain!);
+    const [m1] = team.members;
+    const t1 = await withToken(m1);
+    const eve = await member("Eve");
+    const ivan = await member("Ivan");
+    const view = await teamView(team.teamId);
+
+    expect((await offersOf(ivan.token)).text, "before any offer").toBe('{"offers":[]}');
+    const invited = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const expected = (direction: "INCOMING" | "OUTGOING", counterparty: Person) => [entry("MEMBERSHIP", invited.lifetimeTeamMembershipId, direction, view, who(counterparty), invited.expiresAt)];
+
+    const theirs = await offersOf(ivan.token);
+    expect(theirs.offers, "the invited member").toEqual(expected("INCOMING", captain));
+    const mine = await offersOf(captain.token);
+    expect(mine.offers, "the leader who invited").toEqual(expected("OUTGOING", ivan));
+    expect((await offersOf(sub.token)).offers, "the other leader never sees an invitation somebody else made").toEqual([]);
+    expect((await offersOf(t1.token)).offers, "an ordinary member of the team").toEqual([]);
+    expect((await offersOf(eve.token)).offers, "an unrelated member").toEqual([]);
+
+    // Nothing but the contract's fields: no email, no auth id, no phone — in either answer, for anyone involved.
+    for (const text of [theirs.text, mine.text]) {
+      for (const person of [captain, ivan, sub, eve]) {
+        expect(text).not.toContain(person.email);
+        expect(text).not.toContain(person.authUserId);
+      }
+      expect(text).not.toMatch(/@example\.com|auth_user|email|phone|created|status|initiated/i);
+    }
+    // Once answered it is no longer pending: nobody sees it.
+    expect((await decideM(ivan.token, invited.lifetimeTeamMembershipId, { decision: "ACCEPT" })).status).toBe(200);
+    for (const person of [ivan, captain]) expect((await offersOf(person.token)).offers, "an accepted offer").toEqual([]);
+  });
+
+  it("a person's own join request is OUTGOING for that person (no counterparty) and INCOMING for the team's CURRENT captain and sub-captain — never for an ordinary member, a stranger, or a leader whose seat has ended", async () => {
+    const team = await h.buildTeam("Request", 4);
+    const captain = await withToken(team.captain);
+    const sub = await withToken(team.subCaptain!);
+    const t1 = await withToken(team.members[0]);
+    const eve = await member("Eve");
+    const dave = await member("Dave");
+    const view = await teamView(team.teamId);
+    const request = created(await proposeM(dave.token, team.teamId, { gamingMemberId: dave.gamingMemberId }));
+    const id = request.lifetimeTeamMembershipId as string;
+
+    expect((await offersOf(dave.token)).offers, "the requester").toEqual([entry("MEMBERSHIP", id, "OUTGOING", view, null, request.expiresAt)]);
+    for (const leader of [captain, sub]) expect((await offersOf(leader.token)).offers, "a current leader").toEqual([entry("MEMBERSHIP", id, "INCOMING", view, who(dave), request.expiresAt)]);
+    for (const outsider of [t1, eve]) expect((await offersOf(outsider.token)).offers, "an ordinary member or a stranger").toEqual([]);
+
+    // The sub-captain steps down: the request is no longer theirs to see; the captain's inbox is unchanged.
+    expect((await endL(sub.token, team.teamId)).status).toBe(200);
+    expect((await offersOf(sub.token)).offers, "a former sub-captain").toEqual([]);
+    expect((await offersOf(captain.token)).offers.map((o: any) => o.offerId)).toEqual([id]);
+    // The captain answers it: it is gone for everybody.
+    expect((await decideM(captain.token, id, { decision: "ACCEPT" })).status).toBe(200);
+    for (const person of [dave, captain, sub]) expect((await offersOf(person.token)).offers).toEqual([]);
+  });
+
+  it("a seat offer is OUTGOING for the captain who made it and INCOMING for the member offered; every other member sees nothing — and the offer leaves the inbox when it is accepted, declined or withdrawn", async () => {
+    const team = await h.buildTeam("Seat", 5, { subCaptain: false });
+    const [m1, m2, m3] = team.members;
+    const captain = await withToken(team.captain);
+    const [t1, t2, t3] = await Promise.all([m1, m2, m3].map(withToken));
+    const eve = await member("Eve");
+    const view = await teamView(team.teamId);
+
+    const offer = created(await offerL(captain.token, team.teamId, { gamingMemberId: m1.gamingMemberId }));
+    const id = offer.lifetimeTeamLeadershipId as string;
+    expect((await offersOf(captain.token)).offers).toEqual([entry("LEADERSHIP", id, "OUTGOING", view, who(m1), offer.expiresAt)]);
+    expect((await offersOf(t1.token)).offers).toEqual([entry("LEADERSHIP", id, "INCOMING", view, who(captain), offer.expiresAt)]);
+    for (const other of [t2, t3, eve]) expect((await offersOf(other.token)).offers, "another member of the team, or a stranger").toEqual([]);
+
+    expect((await decideL(t1.token, id, { decision: "ACCEPT" })).status).toBe(200);
+    for (const person of [captain, t1]) expect((await offersOf(person.token)).offers, "an accepted seat").toEqual([]);
+    expect((await endL(t1.token, team.teamId)).status).toBe(200);
+
+    const toWithdraw = created(await offerL(captain.token, team.teamId, { gamingMemberId: m2.gamingMemberId }));
+    expect((await offersOf(t2.token)).offers.map((o: any) => o.offerId)).toEqual([toWithdraw.lifetimeTeamLeadershipId]);
+    expect((await withdraw(captain.token, toWithdraw.lifetimeTeamLeadershipId, { kind: "LEADERSHIP" })).status).toBe(200);
+    for (const person of [captain, t2]) expect((await offersOf(person.token)).offers, "a withdrawn seat offer").toEqual([]);
+
+    const toDecline = created(await offerL(captain.token, team.teamId, { gamingMemberId: m3.gamingMemberId }));
+    expect((await decideL(t3.token, toDecline.lifetimeTeamLeadershipId, { decision: "DECLINE" })).status).toBe(200);
+    for (const person of [captain, t3]) expect((await offersOf(person.token)).offers, "a declined seat offer").toEqual([]);
+  });
+
+  it("an invitation that is declined or withdrawn, and one that lapsed and was replaced, are never shown", async () => {
+    const team = await h.buildTeam("Ended", 3);
+    const captain = await withToken(team.captain);
+    const ivan = await member("Ivan");
+    const view = await teamView(team.teamId);
+    const gone = async (note: string) => { for (const person of [captain, ivan]) expect((await offersOf(person.token)).offers, note).toEqual([]); };
+
+    const first = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    expect((await decideM(ivan.token, first.lifetimeTeamMembershipId, { decision: "DECLINE" })).status).toBe(200);
+    await gone("declined");
+    const second = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    expect((await offersOf(ivan.token)).offers.map((o: any) => o.offerId)).toEqual([second.lifetimeTeamMembershipId]);
+    expect((await withdraw(captain.token, second.lifetimeTeamMembershipId, { kind: "MEMBERSHIP" })).status).toBe(200);
+    await gone("withdrawn");
+    // A lapsed offer is still PENDING until something dates its end; a new offer for the same person ends it, and only the new one is shown.
+    const third = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    await h.lapseOffer("MEMBERSHIP", third.lifetimeTeamMembershipId);
+    const fourth = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    expect((await offersOf(ivan.token)).offers).toEqual([entry("MEMBERSHIP", fourth.lifetimeTeamMembershipId, "INCOMING", view, who(captain), fourth.expiresAt)]);
+    expect((await membershipRow(third.lifetimeTeamMembershipId)).end_reason).toBe("EXPIRED");
+  });
+
+  it("a pending offer whose expiry has PASSED is still listed — exactly as stored, with no 'actionable' or 'expired' invented — and the decision operation remains the authority on it", async () => {
+    const team = await h.buildTeam("Lapsed", 3);
+    const captain = await withToken(team.captain);
+    const ivan = await member("Ivan");
+    const view = await teamView(team.teamId);
+    const invited = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    await h.lapseOffer("MEMBERSHIP", invited.lifetimeTeamMembershipId);
+    const [row] = await rawQuery("select expires_at from lifetime_team_memberships where lifetime_team_membership_id = $1", [invited.lifetimeTeamMembershipId]);
+    const shown = await offersOf(ivan.token);
+    expect(shown.offers).toHaveLength(1);
+    expect(shown.offers[0]).toMatchObject({ kind: "MEMBERSHIP", offerId: invited.lifetimeTeamMembershipId, direction: "INCOMING", team: view });
+    expect(Date.parse(shown.offers[0].expiresAt), "the stored instant, in the past").toBeLessThan(Date.now());
+    expect(Math.abs(Date.parse(shown.offers[0].expiresAt) - row.expires_at.getTime())).toBeLessThanOrEqual(1);
+    expect(shown.text, "no flag of any kind is added to the entry (judged by key: the synthetic team's own name contains words)").not.toMatch(/"(actionable|expired|status|lapsed|isExpired|canAccept)"\s*:/i);
+    const decided = await decideM(ivan.token, invited.lifetimeTeamMembershipId, { decision: "ACCEPT" });
+    expect(decided.status, "the decision operation, not the read, judges the expiry").toBe(409);
+    expect(decided.json).toEqual({ error: messageOf("OFFER_EXPIRED") });
+  });
+
+  it("offers of another team are invisible: each member sees only the offers they are party to, or lead the team of — and an unrelated member gets the empty inbox", async () => {
+    const one = await h.buildTeam("One", 3);
+    const two = await h.buildTeam("Two", 3);
+    const c1 = await withToken(one.captain);
+    const c2 = await withToken(two.captain);
+    const ivan = await member("Ivan");
+    const eve = await member("Eve");
+    const nobody = await member("Nobody");
+    const asked = created(await proposeM(ivan.token, one.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const invited = created(await proposeM(c2.token, two.teamId, { gamingMemberId: eve.gamingMemberId }));
+    expect((await offersOf(c1.token)).offers.map((o: any) => o.offerId), "the first team's captain: its own request only").toEqual([asked.lifetimeTeamMembershipId]);
+    expect((await offersOf(c2.token)).offers.map((o: any) => o.offerId), "the second team's captain: its own invitation only").toEqual([invited.lifetimeTeamMembershipId]);
+    expect((await offersOf(ivan.token)).offers.map((o: any) => o.offerId)).toEqual([asked.lifetimeTeamMembershipId]);
+    expect((await offersOf(eve.token)).offers.map((o: any) => o.offerId)).toEqual([invited.lifetimeTeamMembershipId]);
+    for (const ordinary of [...one.members, ...two.members]) expect((await offersOf(await h.tokenFor(ordinary))).offers, "ordinary members of either team").toEqual([]);
+    expect((await offersOf(nobody.token)).text).toBe('{"offers":[]}');
+  });
+
+  it("no query, header or body can redirect the inbox: it is always the verified member's own", async () => {
+    const team = await h.buildTeam("Redirect", 3);
+    const captain = await withToken(team.captain);
+    const ivan = await member("Ivan");
+    const eve = await member("Eve");
+    const invited = created(await proposeM(captain.token, team.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const aim = (target: Person) => ({
+      url: `${BASE}/lifetime-offers?gamingMemberId=${target.gamingMemberId}&memberId=${target.gamingMemberId}&member=${target.gamingMemberId}&captain=${target.gamingMemberId}&teamId=${team.teamId}&offerId=${invited.lifetimeTeamMembershipId}&direction=OUTGOING&kind=MEMBERSHIP`,
+      headers: { "x-gaming-member-id": target.gamingMemberId, "x-actor": target.gamingMemberId },
+    });
+    expect((await offersOf(eve.token, aim(captain))).offers, "a stranger aiming at the captain, or at the invitee").toEqual([]);
+    expect((await offersOf(eve.token, aim(ivan))).offers).toEqual([]);
+    expect((await offersOf(ivan.token, aim(eve))).offers.map((o: any) => [o.offerId, o.direction])).toEqual([[invited.lifetimeTeamMembershipId, "INCOMING"]]);
+    expect((await offersOf(captain.token, aim(ivan))).offers.map((o: any) => [o.offerId, o.direction])).toEqual([[invited.lifetimeTeamMembershipId, "OUTGOING"]]);
+    // knowing an offer's identifier shows nothing either: there is no lookup, and the withdrawal route gives a stranger the uniform 404
+    expect((await withdraw(eve.token, invited.lifetimeTeamMembershipId, { kind: "MEMBERSHIP" })).status).toBe(404);
+  });
+
+  it("the order is the order of creation — across both kinds of offer — and it is the same every time", async () => {
+    const [c1, c2, c3, c4] = await Promise.all(["Cap1", "Cap2", "Cap3", "Cap4"].map(member));
+    const ivan = await member("Ivan");
+    const t1 = await h.createTeam(c1);
+    const t2 = await h.createTeam(c2);
+    const t3 = await h.createTeam(c3);
+    const t4 = await h.createTeam(c4);
+    await h.addMember(t4.teamId, c4, ivan);                        // Ivan is an ordinary member of the fourth team
+    const first = created(await proposeM(c1.token, t1.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const second = created(await proposeM(c2.token, t2.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const seat = created(await offerL(c4.token, t4.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const third = created(await proposeM(c3.token, t3.teamId, { gamingMemberId: ivan.gamingMemberId }));
+    const expected = [first.lifetimeTeamMembershipId, second.lifetimeTeamMembershipId, seat.lifetimeTeamLeadershipId, third.lifetimeTeamMembershipId];
+    for (let round = 0; round < 3; round++) {
+      const shown = await offersOf(ivan.token);
+      expect(shown.offers.map((o: any) => o.offerId), `round ${round}`).toEqual(expected);
+      expect(shown.offers.map((o: any) => [o.kind, o.direction])).toEqual([["MEMBERSHIP", "INCOMING"], ["MEMBERSHIP", "INCOMING"], ["LEADERSHIP", "INCOMING"], ["MEMBERSHIP", "INCOMING"]]);
+    }
+    const [early] = await rawQuery<{ n: number }>("select count(*)::int as n from lifetime_team_memberships where gaming_member_id = $1 and status = 'PENDING'", [ivan.gamingMemberId]);
+    expect(early.n, "three invitations are pending (the seat offer is the fourth thing in the inbox)").toBe(3);
+  });
+});
+
+// =============================================================================================================================================
 describe("actor-forging fields do nothing, on any of the seven routes", () => {
   it("a stranger who names the authority as the actor — in the body, the query and the headers — is refused or is still the stranger, and nothing changes", async () => {
     const team = await h.buildTeam("Forge", 4);
@@ -724,7 +940,7 @@ describe("privileges and availability", () => {
     expect(await teamState(team.teamId), "nothing a browser role tried changed the team").toEqual(before);
   });
 
-  it("with the capability off, every route answers the bounded 503 before anything happens — even for a valid session", async () => {
+  it("with the capability off, every route and the inbox answer the bounded 503 before anything happens — even for a valid session", async () => {
     const alice = await member("Alice");
     const bob = await h.newPerson("Bob");
     const team = await h.createTeam(alice);
@@ -741,6 +957,7 @@ describe("privileges and availability", () => {
         await decideL(alice.token, randomUUID(), { decision: "ACCEPT" }),
         await endL(alice.token, team.teamId),
         await proposeM(alice.token, "test-id", "not json {{{"),
+        await inbox(alice.token),
       ];
       for (const answer of answers) {
         expect(answer.status, answer.text).toBe(503);

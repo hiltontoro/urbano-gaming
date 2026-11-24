@@ -15,7 +15,8 @@ import { NextResponse } from "next/server";
  *
  * B1…B12 name the behaviours of the gate: B1 availability first · B2 order · B3 signed out · B4 the actor is the session · B5 the exact body · B6 the addressed id ·
  * B7 the response is copied field by field · B8 the refusal table · B9 the privacy collapse · B10 raw failures never escape · B11 every response is uncached ·
- * B12 the surface is exactly seven POST handlers.
+ * B12 the surface is exactly seven POST handlers and one GET.
+ * UG-CR-GATE-CFM-012 adds B13: the member's own offer inbox (GET), derived from the verified member alone and projected field by field.
  */
 
 vi.mock("@/lib/gaming/competitions/httpAuth", async () => {
@@ -42,6 +43,7 @@ const lifetime = vi.hoisted(() => ({
     offerLeadership: vi.fn(),
     decideLeadership: vi.fn(),
     endLeadership: vi.fn(),
+    listPendingOffersOfMember: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
 }));
 
@@ -812,13 +814,195 @@ describe("B11 — every response is uncached (the whole file also enforces this 
 });
 
 // =============================================================================================================================================
-describe("B12 — the existing routes are unchanged, and the new surface is exactly seven POST handlers that reach nothing but the bounded adapter", () => {
+describe("B13 (CFM-012) — GET /lifetime-offers: the member's own pending offers, derived from the verified member alone and projected field by field", () => {
+  const INBOX_ROUTE = "../app/api/gaming/competitions/lifetime-offers/route";
+  const INBOX_URL = `${BASE}/lifetime-offers`;
+  const READ = lifetime.store.listPendingOffersOfMember;
+  const loadInbox = async () => (await import(INBOX_ROUTE)) as RouteModule;
+  const inboxRequest = (init: { query?: string; headers?: Record<string, string> } = {}) => new Request(INBOX_URL + (init.query ?? ""), { method: "GET", headers: { authorization: "Bearer session-token", ...init.headers } });
+  const sendInbox = async (request: Request) => { const { GET } = await loadInbox(); return send("inbox", GET!, request); };
+  const TEAM_VIEW = { lifetimeTeamId: TEAM, publicCode: "LT-AB12CD", name: "Los Lobos" };
+  const offer = (over: Record<string, unknown> = {}) => ({
+    kind: "MEMBERSHIP", offerId: MEMBERSHIP, direction: "INCOMING", team: TEAM_VIEW, counterparty: { gamingMemberId: OTHER, displayName: "Capi" }, expiresAt: LATER, ...over,
+  });
+  const KEYS = ["kind", "offerId", "direction", "team", "counterparty", "expiresAt"];
+  const readers = ["json", "text", "formData", "arrayBuffer", "blob"] as const;
+
+  const VALUES: Array<string | undefined> = [undefined, "", "false", "TRUE", "True", "1", "yes", " true", "true ", "null"];
+  it.each(VALUES)("B1: with COMPETITIONS_SCHEMA_READY=%j the inbox answers the bounded 503 and touches nothing — no credential, no authentication, no repository, no read", async (value) => {
+    if (value === undefined) delete process.env.COMPETITIONS_SCHEMA_READY;
+    else process.env.COMPETITIONS_SCHEMA_READY = value;
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: UNAVAILABLE_503 });
+    expect(httpAuth.getSupabaseCredentials).not.toHaveBeenCalled();
+    expect(httpAuth.requireGamingMember).not.toHaveBeenCalled();
+    expect(lifetime.constructed).toHaveLength(0);
+    expect(anyStoreCalled()).toBe(false);
+  });
+
+  it("B2: with the capability on the order is credentials, authentication, the repository, then the one read — nothing is read before the caller is known", async () => {
+    READ.mockResolvedValue([]);
+    vi.mocked(httpAuth.getSupabaseCredentials).mockImplementation(() => { lifetime.order.push("credentials"); return CREDENTIALS; });
+    vi.mocked(httpAuth.requireGamingMember).mockImplementation(async () => { lifetime.order.push("auth"); return { gamingMemberId: SESSION }; });
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(200);
+    expect(lifetime.order).toEqual(["credentials", "auth", "construct", "store"]);
+  });
+
+  it("B3: a signed-out caller is a bounded, uncached 401 — nothing constructed, nothing read", async () => {
+    signedOut();
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: UNAUTHENTICATED_401 });
+    expect(lifetime.constructed).toHaveLength(0);
+    expect(anyStoreCalled()).toBe(false);
+  });
+
+  it("a missing server credential is the bounded 500 that names no provider and authenticates nobody", async () => {
+    vi.mocked(httpAuth.getSupabaseCredentials).mockReturnValue(null);
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({ error: GENERIC_500 });
+    expectBounded(body);
+    expect(httpAuth.requireGamingMember).not.toHaveBeenCalled();
+    expect(lifetime.constructed).toHaveLength(0);
+  });
+
+  it("B4: the read is for the verified member and nobody else — no query, header or body can name another member, a team, an offer, a direction or a kind", async () => {
+    READ.mockResolvedValue([]);
+    const request = inboxRequest({
+      query: `?gamingMemberId=${OTHER}&memberId=${OTHER}&member=${OTHER}&captain=${OTHER}&teamId=${TEAM}&lifetimeTeamId=${TEAM}&offerId=${MEMBERSHIP}&direction=OUTGOING&kind=LEADERSHIP&limit=1&all=true`,
+      headers: { "x-gaming-member-id": OTHER, "x-actor": OTHER, "x-team-id": TEAM },
+    });
+    for (const reader of readers) vi.spyOn(request, reader);
+    const res = await sendInbox(request);
+    expect(res.status).toBe(200);
+    expect(READ).toHaveBeenCalledTimes(1);
+    expect(READ.mock.calls, "exactly the session member: no second argument of any kind").toEqual([[SESSION]]);
+    expect(Object.values(lifetime.store).filter((fn) => fn.mock.calls.length > 0)).toHaveLength(1);
+    expect(httpAuth.requireGamingMember).toHaveBeenCalledTimes(1);
+    expect(lifetime.constructed).toEqual([{ url: CREDENTIALS.url, key: CREDENTIALS.serviceKey }]);
+    expect(request.bodyUsed).toBe(false);
+    for (const reader of readers) expect(request[reader], `${reader} must never be called`).not.toHaveBeenCalled();
+  });
+
+  it("B7: exposes exactly the contract's fields, copied one by one — nothing else the repository holds (email, phone, auth id, status, sequence, flags, leaders) reaches the response", async () => {
+    const planted = { email: "someone@example.com", phone: "+5062222333", authUserId: "auth-user-1", createdAt: AT, seq: 4, status: "PENDING", initiatedBySide: "TEAM", actionable: true, expired: false, leaders: [OTHER] };
+    READ.mockResolvedValue([
+      { ...offer(), ...planted, team: { ...TEAM_VIEW, ...planted }, counterparty: { gamingMemberId: OTHER, displayName: "Capi", ...planted } },
+      offer({ kind: "LEADERSHIP", offerId: LEADERSHIP, direction: "OUTGOING", counterparty: { gamingMemberId: SUBJECT, displayName: "Memo" } }),
+      offer({ offerId: OFFER, direction: "OUTGOING", counterparty: null }),
+    ]);
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toBe(JSON.stringify({ offers: [
+      offer(),
+      offer({ kind: "LEADERSHIP", offerId: LEADERSHIP, direction: "OUTGOING", counterparty: { gamingMemberId: SUBJECT, displayName: "Memo" } }),
+      offer({ offerId: OFFER, direction: "OUTGOING", counterparty: null }),
+    ] }));
+    const body = JSON.parse(text) as { offers: Array<Record<string, any>> };
+    expect(Object.keys(body)).toEqual(["offers"]);
+    for (const o of body.offers) {
+      expect(Object.keys(o)).toEqual(KEYS);
+      expect(Object.keys(o.team)).toEqual(["lifetimeTeamId", "publicCode", "name"]);
+      if (o.counterparty !== null) expect(Object.keys(o.counterparty)).toEqual(["gamingMemberId", "displayName"]);
+    }
+    for (const word of ["someone@example.com", "+5062222333", "auth-user-1", "actionable", "expired", "initiatedBySide", "createdAt", "leaders", "seq", "PENDING"]) expect(text, word).not.toContain(word);
+    expect(text).not.toContain(CREDENTIALS.serviceKey);
+  });
+
+  it("B7: an empty inbox is a successful {offers: []}; the repository's order is kept (nothing is re-sorted here); an outgoing request has a null counterparty, not a made-up one", async () => {
+    READ.mockResolvedValue([]);
+    expect(await (await sendInbox(inboxRequest())).text()).toBe('{"offers":[]}');
+    READ.mockResolvedValue([offer({ offerId: LEADERSHIP, kind: "LEADERSHIP" }), offer({ offerId: MEMBERSHIP }), offer({ offerId: OFFER, direction: "OUTGOING", counterparty: null })]);
+    const body = (await (await sendInbox(inboxRequest())).json()) as { offers: Array<{ offerId: string; counterparty: unknown }> };
+    expect(body.offers.map((o) => o.offerId)).toEqual([LEADERSHIP, MEMBERSHIP, OFFER]);
+    expect(body.offers[2].counterparty).toBeNull();
+  });
+
+  it("B7: a past expiry is copied as it is and nothing is derived from it — no 'actionable', 'expired' or 'status' appears: the decision operations stay the authority", async () => {
+    READ.mockResolvedValue([offer({ expiresAt: "2020-01-01T00:00:00.000Z" })]);
+    const text = await (await sendInbox(inboxRequest())).text();
+    expect(JSON.parse(text).offers[0].expiresAt).toBe("2020-01-01T00:00:00.000Z");
+    expect(text).not.toMatch(/actionable|expired|status|lapsed/i);
+  });
+
+  it("B7: an entry that is malformed in any field is dropped — never shown, never repaired — and the well-formed entries beside it stay", async () => {
+    const BAD: unknown[] = [
+      offer({ kind: "TEAM" }), offer({ kind: undefined }), offer({ kind: "membership" }), offer({ offerId: "not-a-uuid" }), offer({ offerId: 7 }), offer({ offerId: undefined }),
+      offer({ direction: "SIDEWAYS" }), offer({ direction: undefined }), offer({ direction: "incoming" }),
+      offer({ expiresAt: "soon" }), offer({ expiresAt: null }), offer({ expiresAt: undefined }), offer({ expiresAt: 1700000000000 }),
+      offer({ team: null }), offer({ team: undefined }), offer({ team: "Los Lobos" }), offer({ team: [TEAM_VIEW] }), offer({ team: { ...TEAM_VIEW, lifetimeTeamId: "x" } }),
+      offer({ team: { ...TEAM_VIEW, publicCode: "" } }), offer({ team: { ...TEAM_VIEW, publicCode: undefined } }), offer({ team: { ...TEAM_VIEW, name: "   " } }), offer({ team: { ...TEAM_VIEW, name: 7 } }),
+      offer({ counterparty: undefined }), offer({ counterparty: "Capi" }), offer({ counterparty: [] }), offer({ counterparty: 7 }),
+      offer({ counterparty: { gamingMemberId: "bad", displayName: "Capi" } }), offer({ counterparty: { gamingMemberId: OTHER, displayName: "" } }), offer({ counterparty: { gamingMemberId: OTHER, displayName: "  " } }),
+      offer({ counterparty: { gamingMemberId: OTHER, displayName: 7 } }), offer({ counterparty: { gamingMemberId: OTHER } }),
+      null, undefined, "offer", 7, [], [offer()],
+    ];
+    READ.mockResolvedValue([...BAD, offer(), offer({ offerId: OFFER, kind: "LEADERSHIP", direction: "OUTGOING", counterparty: null })]);
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ offers: [offer(), offer({ offerId: OFFER, kind: "LEADERSHIP", direction: "OUTGOING", counterparty: null })] });
+  });
+
+  it("B7: an answer that is not a list is a bounded 500, never a guess", async () => {
+    for (const answer of [null, undefined, {}, "offers", 3]) {
+      READ.mockResolvedValue(answer);
+      const res = await sendInbox(inboxRequest());
+      expect(res.status, JSON.stringify(answer)).toBe(500);
+      expect(await res.json()).toEqual({ error: GENERIC_500 });
+    }
+  });
+
+  const ALL_PROBLEMS = [...new Set([...LIFETIME_DATABASE_CODES.map(([, problem]) => problem), "INPUT_INVALID", "UNAVAILABLE"])] as LifetimeProblem[];
+  it.each(ALL_PROBLEMS)("B8: a read has no refusal of its own — %s is the generic bounded 500", async (code) => {
+    READ.mockRejectedValue(new LifetimeTeamError(code));
+    const res = await sendInbox(inboxRequest());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({ error: GENERIC_500 });
+    expectBounded(body, code);
+  });
+
+  const RAW: Array<[string, unknown]> = [
+    ["a raw Error with SQL text", new Error('relation "lifetime_team_memberships" does not exist')],
+    ["a PostgREST-shaped object", { code: "23505", message: 'duplicate key value violates unique constraint "lifetime_team_memberships_one_pending"', details: "Key (gaming_member_id)=(x) already exists." }],
+    ["a string", "LIFETIME_OFFER_NOT_FOUND: no such offer exists"], ["null", null], ["undefined", undefined],
+    ["a TypeError", new TypeError("Cannot read properties of undefined (reading 'from')")],
+    ["a shared Competitions refusal", new CompetitionAccessDeniedError()],
+    ["an error with a hostile code property", Object.assign(new Error("boom"), { code: "SELECT * FROM auth.users" })],
+  ];
+  it.each(RAW)("B10: %s becomes the generic bounded 500, and the log carries no raw text", async (_label, failure) => {
+    for (const mode of ["rejects", "throws"] as const) {
+      READ.mockImplementation(mode === "rejects" ? () => Promise.reject(failure) : () => { throw failure; });
+      const res = await sendInbox(inboxRequest());
+      expect(res.status, mode).toBe(500);
+      expect(await res.json(), mode).toEqual({ error: GENERIC_500 });
+    }
+    const logged = JSON.stringify(consoleError.mock.calls);
+    for (const fragment of ["lifetime_team", "duplicate key", "Key (gaming", "'from'", "auth.users", "boom", "LIFETIME_OFFER", "relation", "Access denied", "SELECT"]) expect(logged, `the log must not carry ${fragment}`).not.toContain(fragment);
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("B12: the route exports exactly GET (and the framework's force-dynamic flag, so it is never cached) — no write verb, no lookup by identifier", async () => {
+    const route = await loadInbox();
+    expect(Object.keys(route).sort()).toEqual(["GET", "dynamic"]);
+    expect(route.dynamic).toBe("force-dynamic");
+  });
+});
+
+// =============================================================================================================================================
+describe("B12 — the existing routes are unchanged, and the surface is exactly seven POST handlers and one GET that reach nothing but the bounded adapter", () => {
   const findRouteFiles = (dir: string): string[] => readdirSync(dir).flatMap((entry) => {
     const full = path.join(dir, entry);
     return statSync(full).isDirectory() ? findRouteFiles(full) : entry === "route.ts" ? [full] : [];
   });
   const unix = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
   const OWN = OPS.map((op) => unix(path.join(ROOT, "__tests__", op.route + ".ts")));
+  const INBOX_FILE = "app/api/gaming/competitions/lifetime-offers/route.ts";
 
   it("the seven routes are exactly the seven named in the gate", () => {
     expect([...OWN].sort()).toEqual([
@@ -839,14 +1023,14 @@ describe("B12 — the existing routes are unchanged, and the new surface is exac
   });
 
   it("no pre-existing route file mentions the membership adapter, the foundation or the new surface", () => {
-    const own = new Set(OWN);
+    const own = new Set([...OWN, INBOX_FILE]);
     const others = findRouteFiles(path.join(ROOT, "app", "api")).map(unix).filter((f) => !own.has(f));
     expect(others.length).toBeGreaterThan(100);
     expect(others.filter((f) => /lifetimeMembershipHttp|lifetime-memberships|lifetime-offers|lifetime-leaderships|SupabaseLifetime/.test(readFileSync(path.join(ROOT, f), "utf8")))).toEqual([]);
   });
 
-  it("the seven routes import nothing but the adapter and call exactly one of its handlers each", () => {
-    for (const file of OWN) {
+  it("the eight routes (seven POST and the inbox GET) import nothing but the adapter and call exactly one of its handlers each", () => {
+    for (const file of [...OWN, INBOX_FILE]) {
       const code = readFileSync(path.join(ROOT, file), "utf8");
       expect([...code.matchAll(/^\s*import\b[^;]*from\s+["']([^"']+)["']/gm)].map((m) => m[1]), file).toEqual(["@/lib/gaming/competitions/lifetimeMembershipHttp"]);
       expect(code.match(/\bhandle[A-Z]\w*\(/g) ?? [], file).toHaveLength(1);

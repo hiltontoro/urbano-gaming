@@ -114,8 +114,8 @@ function expectBounded(body: unknown, label = "") {
   expect((text as string).length, label).toBeLessThan(200);
 }
 
-const summary = (over: Record<string, unknown> = {}) => ({ lifetimeTeamId: TEAM, publicCode: "LT-AB12CD", name: "Los Lobos", status: "ACTIVE", joinedAt: "2026-11-20T10:00:00.000Z", isLegacy: false, ...over });
-const SUMMARY_KEYS = ["lifetimeTeamId", "publicCode", "name", "status", "joinedAt", "isLegacy"];
+const summary = (over: Record<string, unknown> = {}) => ({ lifetimeTeamId: TEAM, publicCode: "LT-AB12CD", name: "Los Lobos", status: "ACTIVE", joinedAt: "2026-11-20T10:00:00.000Z", isLegacy: false, role: "CAPTAIN", ...over });
+const SUMMARY_KEYS = ["lifetimeTeamId", "publicCode", "name", "status", "joinedAt", "isLegacy", "role"];
 const signedOut = () => vi.mocked(httpAuth.requireGamingMember).mockResolvedValue({ errorResponse: NextResponse.json({ error: UNAUTHENTICATED_401 }, { status: 401 }) });
 
 const ORIGINAL_READY = process.env.COMPETITIONS_SCHEMA_READY;
@@ -264,9 +264,9 @@ describe("F4–F6 — GET list: only the session member's own active teams, exac
     for (const reader of ["json", "text", "formData", "arrayBuffer", "blob"] as const) expect(request[reader], reader).not.toHaveBeenCalled();
   });
 
-  it("F5: exposes exactly the six summary fields, copied one by one — nothing else the repository holds reaches the response", async () => {
+  it("F5: exposes exactly the seven summary fields (the six of CFM-007 and the caller's role), copied one by one — nothing else the repository holds reaches the response", async () => {
     lifetime.list.mockResolvedValue([
-      { ...summary(), gamingMemberId: OTHER, email: "someone@example.com", leaders: [{ gamingMemberId: OTHER }], members: [{ gamingMemberId: OTHER }], origin: "LEGACY_BACKFILL", createdAt: CREATED_AT, disbandedAt: null, pendingOffers: [1] },
+      { ...summary(), gamingMemberId: OTHER, email: "someone@example.com", leaders: [{ gamingMemberId: OTHER, role: "CAPTAIN" }], members: [{ gamingMemberId: OTHER }], origin: "LEGACY_BACKFILL", createdAt: CREATED_AT, disbandedAt: null, pendingOffers: [1], seats: [{ role: "SUB_CAPTAIN" }], captainGamingMemberId: OTHER },
     ]);
     const { GET } = await load(LIST_ROUTE);
     const res = await send("list", GET!, req("GET", LIST_URL));
@@ -274,7 +274,28 @@ describe("F4–F6 — GET list: only the session member's own active teams, exac
     const text = await res.text();
     expect(text).toBe(JSON.stringify({ teams: [summary()] }));
     expect(Object.keys(JSON.parse(text).teams[0])).toEqual(SUMMARY_KEYS);
-    for (const planted of [OTHER, "someone@example.com", "LEGACY_BACKFILL", "pendingOffers", "leaders", "members"]) expect(text).not.toContain(planted);
+    for (const planted of [OTHER, "someone@example.com", "LEGACY_BACKFILL", "pendingOffers", "leaders", "members", "seats", "SUB_CAPTAIN", "captainGamingMemberId"]) expect(text).not.toContain(planted);
+  });
+
+  it("CFM-012: each team carries the role the repository derived — CAPTAIN, SUB_CAPTAIN or MEMBER — in the repository's order, field last", async () => {
+    lifetime.list.mockResolvedValue([summary({ lifetimeTeamId: TEAM_3, name: "C", role: "MEMBER" }), summary({ lifetimeTeamId: TEAM, name: "A", role: "CAPTAIN" }), summary({ lifetimeTeamId: TEAM_2, name: "B", role: "SUB_CAPTAIN" })]);
+    const { GET } = await load(LIST_ROUTE);
+    const body = (await (await send("list", GET!, req("GET", LIST_URL))).json()) as { teams: Array<Record<string, unknown>> };
+    expect(body.teams.map((t) => [t.name, t.role])).toEqual([["C", "MEMBER"], ["A", "CAPTAIN"], ["B", "SUB_CAPTAIN"]]);
+    for (const team of body.teams) expect(Object.keys(team)).toEqual(SUMMARY_KEYS);
+    expect(SUMMARY_KEYS[SUMMARY_KEYS.length - 1], "the six existing fields keep their names and order; the role is appended").toBe("role");
+  });
+
+  it("CFM-012: a query, a header or a body can neither choose nor raise the role — the response carries only what the repository derived for the verified member", async () => {
+    lifetime.list.mockResolvedValue([summary({ role: "MEMBER" })]);
+    const { GET } = await load(LIST_ROUTE);
+    const request = req("GET", `${LIST_URL}?role=CAPTAIN&leadership=true&captain=${SESSION}&asRole=CAPTAIN`, { headers: { "x-role": "CAPTAIN", "x-gaming-member-id": OTHER } });
+    for (const reader of ["json", "text", "formData", "arrayBuffer", "blob"] as const) vi.spyOn(request, reader);
+    const res = await send("list", GET!, request);
+    expect(res.status).toBe(200);
+    expect(lifetime.list.mock.calls).toEqual([[SESSION]]);
+    expect(((await res.json()) as { teams: Array<{ role: string }> }).teams.map((t) => t.role)).toEqual(["MEMBER"]);
+    for (const reader of ["json", "text", "formData", "arrayBuffer", "blob"] as const) expect(request[reader], reader).not.toHaveBeenCalled();
   });
 
   it("F6: an empty membership is a successful {teams: []}", async () => {
@@ -292,11 +313,13 @@ describe("F4–F6 — GET list: only the session member's own active teams, exac
     expect(body.teams.map((t) => t.name)).toEqual(["C", "A", "B"]);
   });
 
-  it("007A: only a row whose projected status is exactly ACTIVE and whose fields are well formed appears — a disbanded, malformed or unexpected row never does", async () => {
+  it("007A, CFM-012: only a row whose projected status is exactly ACTIVE and whose fields — the role among them: exactly CAPTAIN, SUB_CAPTAIN or MEMBER — are well formed appears; a disbanded, malformed or unexpected row never does", async () => {
     lifetime.list.mockResolvedValue([
       summary(),
       summary({ lifetimeTeamId: TEAM_2, status: "DISBANDED" }),
-      summary({ lifetimeTeamId: TEAM_3, name: "Los Gatos", isLegacy: true, joinedAt: "2026-11-21T10:00:00.123456+00:00" }),
+      summary({ lifetimeTeamId: TEAM_3, name: "Los Gatos", isLegacy: true, joinedAt: "2026-11-21T10:00:00.123456+00:00", role: "SUB_CAPTAIN" }),
+      summary({ lifetimeTeamId: "66666666-6666-4666-8666-666666666666", name: "Los Tigres", role: "MEMBER" }),
+      summary({ role: "OWNER" }), summary({ role: "captain" }), summary({ role: "CAPTAIN " }), summary({ role: undefined }), summary({ role: null }), summary({ role: 1 }), summary({ role: true }), summary({ role: ["CAPTAIN"] }),
       summary({ status: "active" }), summary({ status: "ACTIVE " }), summary({ status: undefined }), summary({ status: "PENDING" }), summary({ status: true }),
       summary({ lifetimeTeamId: "not-a-uuid" }), summary({ lifetimeTeamId: undefined }), summary({ lifetimeTeamId: 7 }),
       summary({ name: "" }), summary({ name: "   " }), summary({ name: 7 }), summary({ name: undefined }),
@@ -308,7 +331,10 @@ describe("F4–F6 — GET list: only the session member's own active teams, exac
     const { GET } = await load(LIST_ROUTE);
     const res = await send("list", GET!, req("GET", LIST_URL));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ teams: [summary(), summary({ lifetimeTeamId: TEAM_3, name: "Los Gatos", isLegacy: true, joinedAt: "2026-11-21T10:00:00.123456+00:00" })] });
+    expect(await res.json()).toEqual({ teams: [
+      summary(), summary({ lifetimeTeamId: TEAM_3, name: "Los Gatos", isLegacy: true, joinedAt: "2026-11-21T10:00:00.123456+00:00", role: "SUB_CAPTAIN" }),
+      summary({ lifetimeTeamId: "66666666-6666-4666-8666-666666666666", name: "Los Tigres", role: "MEMBER" }),
+    ] });
   });
 
   it("007A: an answer that is not a list is a bounded 500, never a guess", async () => {

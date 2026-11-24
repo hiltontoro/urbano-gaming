@@ -3,17 +3,17 @@ import { NextResponse } from "next/server";
 import { getSupabaseCredentials, requireCompetitionsSchemaReady, requireGamingMember } from "./httpAuth";
 import { SupabaseLifetimeTeamsRepository } from "./db/supabaseLifetimeTeamsRepository";
 import {
-  LifetimeTeamError, decideLifetimeLeadership, decideLifetimeMembership, endLifetimeLeadership, endLifetimeMembership, offerLifetimeLeadership, parseOfferDecision, parseOfferKind,
-  proposeLifetimeMembership, requireUuid, withdrawLifetimeOffer, type LifetimeProblem,
+  LifetimeTeamError, decideLifetimeLeadership, decideLifetimeMembership, endLifetimeLeadership, endLifetimeMembership, listPendingLifetimeOffers, offerLifetimeLeadership,
+  parseOfferDecision, parseOfferKind, proposeLifetimeMembership, requireUuid, withdrawLifetimeOffer, type LifetimeProblem,
 } from "./lifetimeTeams";
 
 /**
  * UG-CR-GATE-CFM-010 — the ONE bounded HTTP adapter between the lifetime-team membership and leadership operations and a route.
  *
- * Seven operations and nothing else: propose a membership (an invitation, or a person's own request), decide one, withdraw an offer, end a membership, offer the
- * sub-captain seat, decide that offer, end the seat. (The team's own lifecycle — create, list, disband — has an adapter of its own; competition entry, roster claims, the
- * organizer's decisions, the freeze and the backfill have none, and no lookup of a team, an offer or a person exists here.) Each handler runs the same sequence, in this
- * order and no other:
+ * Seven operations and one read, and nothing else: propose a membership (an invitation, or a person's own request), decide one, withdraw an offer, end a membership, offer
+ * the sub-captain seat, decide that offer, end the seat — and read the member's OWN pending offers (UG-CR-GATE-CFM-012). (The team's own lifecycle — create, list, disband —
+ * has an adapter of its own; competition entry, roster claims, the organizer's decisions, the freeze and the backfill have none, and no lookup of a team, an offer or a
+ * person by identifier exists here.) Each handler runs the same sequence, in this order and no other:
  *
  *   1. the Competitions availability guard (before credentials, authentication, parsing or any repository);
  *   2. the server credentials;
@@ -259,4 +259,58 @@ export async function handleEndLeadership(request: Request, lifetimeTeamId: unkn
     const ended = await endLifetimeLeadership(repositoryFor(credentials), team, actor);
     return respond({ leadership: { lifetimeTeamLeadershipId: ended.lifetimeTeamLeadershipId, endedAt: ended.endedAt, endReason: ended.endReason } }, 200);
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// The member's own pending offers (UG-CR-GATE-CFM-012)
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+const isUuid = (value: unknown): value is string => {
+  try { requireUuid(value); return true; } catch { return false; }
+};
+const isText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+const isTimestamp = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value));
+
+/**
+ * The inbox the caller may see, copied field by field from what the repository returned — in the repository's order, which is the order the offers were made. An entry that
+ * is malformed in any field is dropped: it is never shown and never repaired. The counterparty is the other person in that one offer, or null when there is none (a person's
+ * own join request names nobody); a counterparty that is present but malformed drops the whole entry, so a person is never shown half-described. Nothing here says whether
+ * an offer can still be answered — `expiresAt` is what was stored, and the decision operations remain the authority on it.
+ */
+function pendingOffers(rows: unknown) {
+  if (!Array.isArray(rows)) throw new LifetimeTeamError("UNAVAILABLE");
+  const offers: Array<{
+    kind: "MEMBERSHIP" | "LEADERSHIP"; offerId: string; direction: "INCOMING" | "OUTGOING";
+    team: { lifetimeTeamId: string; publicCode: string; name: string }; counterparty: { gamingMemberId: string; displayName: string } | null; expiresAt: string;
+  }> = [];
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
+    const { kind, offerId, direction, team, counterparty, expiresAt } = row as Record<string, unknown>;
+    if ((kind !== "MEMBERSHIP" && kind !== "LEADERSHIP") || !isUuid(offerId) || (direction !== "INCOMING" && direction !== "OUTGOING") || !isTimestamp(expiresAt)) continue;
+    if (typeof team !== "object" || team === null || Array.isArray(team)) continue;
+    const { lifetimeTeamId, publicCode, name } = team as Record<string, unknown>;
+    if (!isUuid(lifetimeTeamId) || !isText(publicCode) || !isText(name)) continue;
+    let person: { gamingMemberId: string; displayName: string } | null = null;
+    if (counterparty !== null) {
+      if (typeof counterparty !== "object" || Array.isArray(counterparty)) continue;
+      const { gamingMemberId, displayName } = counterparty as Record<string, unknown>;
+      if (!isUuid(gamingMemberId) || !isText(displayName)) continue;
+      person = { gamingMemberId, displayName };
+    }
+    offers.push({ kind, offerId, direction, team: { lifetimeTeamId, publicCode, name }, counterparty: person, expiresAt });
+  }
+  return offers;
+}
+
+/** GET — the signed-in member's own pending offers, and nothing about anyone else's. No query, header or body can choose the member: there is none to read. */
+export async function handleListMyOffers(request: Request): Promise<Response> {
+  try {
+    const opened = await open(request);
+    if ("response" in opened) return opened.response;
+    const rows = await listPendingLifetimeOffers(repositoryFor(opened.credentials), opened.gamingMemberId);
+    return respond({ offers: pendingOffers(rows) }, 200);
+  } catch (err) {
+    // A read has no refusal of its own: whatever went wrong, the inbox is unavailable.
+    return unavailable("list-offers", err);
+  }
 }

@@ -55,7 +55,7 @@ const LIST_URL = "http://localhost/api/gaming/competitions/lifetime-teams";
 const disbandUrl = (id: string) => `${LIST_URL}/${id}/disband`;
 const NO_STORE = "no-store, max-age=0";
 const UNAVAILABLE_503 = "URBANO Gaming Competitions is temporarily unavailable while its database is being prepared.";
-const SUMMARY_KEYS = ["lifetimeTeamId", "publicCode", "name", "status", "joinedAt", "isLegacy"];
+const SUMMARY_KEYS = ["lifetimeTeamId", "publicCode", "name", "status", "joinedAt", "isLegacy", "role"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const messageOf = (code: ConstructorParameters<typeof LifetimeTeamError>[0]) => new LifetimeTeamError(code).message;
 const NOT_FOUND_MESSAGE = "That team could not be found.";
@@ -196,7 +196,7 @@ describe("create, list and the database contract", () => {
     expect([...allKeys(mine.json)].sort(), "no member id, leader, roster, offer or entry detail at any depth").toEqual(["teams", ...SUMMARY_KEYS].sort());
     const [membership] = await rawQuery("select joined_at, is_legacy from lifetime_team_memberships where lifetime_team_id = $1 and gaming_member_id = $2", [alices.teamId, alice.gamingMemberId]);
     expect(mine.json.teams[0]).toEqual({
-      lifetimeTeamId: alices.teamId, publicCode: alices.publicCode, name: alices.name, status: "ACTIVE", joinedAt: mine.json.teams[0].joinedAt, isLegacy: false,
+      lifetimeTeamId: alices.teamId, publicCode: alices.publicCode, name: alices.name, status: "ACTIVE", joinedAt: mine.json.teams[0].joinedAt, isLegacy: false, role: "CAPTAIN",
     });
     expect(Math.abs(Date.parse(mine.json.teams[0].joinedAt) - membership.joined_at.getTime())).toBeLessThanOrEqual(1);
     expect(membership.is_legacy).toBe(false);
@@ -215,6 +215,75 @@ describe("create, list and the database contract", () => {
     expect(redirected.json.teams.map((t: any) => t.lifetimeTeamId)).toEqual([alices.teamId]);
     const redirectedBack = await list(bob.token, `${LIST_URL}?gamingMemberId=${alice.gamingMemberId}`);
     expect(redirectedBack.json.teams.map((t: any) => t.lifetimeTeamId)).toEqual([bobs.teamId]);
+  });
+
+  it("CFM-012: each listed team carries the caller's own role — CAPTAIN, SUB_CAPTAIN or MEMBER — derived from the ACTIVE seat alone: an offered, withdrawn, declined or ended seat grants nothing, and no query can claim one", async () => {
+    const team = await h.buildTeam("Roles", 5, { subCaptain: false });
+    const [m1, m2, m3, m4] = team.members;
+    const [captain, t1, t2, t3, t4] = await Promise.all([team.captain, m1, m2, m3, m4].map(async (p) => ({ ...p, token: await h.tokenFor(p) })));
+    const roleOf = async (who: { token: string }, url = LIST_URL) => {
+      const answer = await list(who.token, url);
+      expect(answer.status, answer.text).toBe(200);
+      return answer.json.teams.map((t: any) => [t.lifetimeTeamId, t.role]);
+    };
+    const mine = (role: string) => [[team.teamId, role]];
+
+    // The captain who created the team, and four ordinary members.
+    expect(await roleOf(captain)).toEqual(mine("CAPTAIN"));
+    for (const who of [t1, t2, t3, t4]) expect(await roleOf(who)).toEqual(mine("MEMBER"));
+
+    // A seat that is only OFFERED grants nothing: the offered member is still a member, the captain still the captain.
+    const offer = await h.one("offer_lifetime_team_leadership_atomically", { p_lifetime_team_id: team.teamId, p_actor_gaming_member_id: captain.gamingMemberId, p_subject_gaming_member_id: m1.gamingMemberId });
+    expect(await roleOf(t1), "a pending seat offer").toEqual(mine("MEMBER"));
+    expect(await roleOf(captain)).toEqual(mine("CAPTAIN"));
+    // …and a role cannot be claimed by asking for it.
+    expect(await roleOf(t1, `${LIST_URL}?role=SUB_CAPTAIN&leadership=true&asRole=CAPTAIN`), "a claimed role").toEqual(mine("MEMBER"));
+
+    // Accepted: now the seat is ACTIVE.
+    await h.one("decide_lifetime_team_leadership_atomically", { p_lifetime_team_leadership_id: offer.lifetime_team_leadership_id, p_actor_gaming_member_id: m1.gamingMemberId, p_decision: "ACCEPT" });
+    expect(await roleOf(t1), "an accepted seat").toEqual(mine("SUB_CAPTAIN"));
+    expect(await roleOf(captain)).toEqual(mine("CAPTAIN"));
+    for (const who of [t2, t3, t4]) expect(await roleOf(who), "nobody else's role moved").toEqual(mine("MEMBER"));
+
+    // The sub-captain steps down: the seat is ENDED and grants nothing (the person is still a member).
+    await h.one("end_lifetime_team_leadership_atomically", { p_lifetime_team_id: team.teamId, p_actor_gaming_member_id: m1.gamingMemberId });
+    expect(await roleOf(t1), "an ended seat").toEqual(mine("MEMBER"));
+
+    // An offer that is withdrawn, and one that is declined, grant nothing either.
+    const withdrawn = await h.one("offer_lifetime_team_leadership_atomically", { p_lifetime_team_id: team.teamId, p_actor_gaming_member_id: captain.gamingMemberId, p_subject_gaming_member_id: m2.gamingMemberId });
+    await h.one("withdraw_lifetime_team_offer_atomically", { p_offer_kind: "LEADERSHIP", p_offer_id: withdrawn.lifetime_team_leadership_id, p_actor_gaming_member_id: captain.gamingMemberId });
+    expect(await roleOf(t2), "a withdrawn seat offer").toEqual(mine("MEMBER"));
+    const declined = await h.one("offer_lifetime_team_leadership_atomically", { p_lifetime_team_id: team.teamId, p_actor_gaming_member_id: captain.gamingMemberId, p_subject_gaming_member_id: m3.gamingMemberId });
+    await h.one("decide_lifetime_team_leadership_atomically", { p_lifetime_team_leadership_id: declined.lifetime_team_leadership_id, p_actor_gaming_member_id: m3.gamingMemberId, p_decision: "DECLINE" });
+    expect(await roleOf(t3), "a declined seat offer").toEqual(mine("MEMBER"));
+
+    // The captaincy changes hands: the former captain leaves (no team left to list), the sub-captain is the captain.
+    await h.makeSubCaptain(team.teamId, team.captain, m4);
+    expect(await roleOf(t4)).toEqual(mine("SUB_CAPTAIN"));
+    await h.one("end_lifetime_team_membership_atomically", { p_lifetime_team_id: team.teamId, p_actor_gaming_member_id: captain.gamingMemberId, p_subject_gaming_member_id: captain.gamingMemberId });
+    expect(await roleOf(t4), "the successor").toEqual(mine("CAPTAIN"));
+    expect(await roleOf(captain), "the former captain belongs to nothing now").toEqual([]);
+    for (const who of [t2, t3]) expect(await roleOf(who)).toEqual(mine("MEMBER"));
+  });
+
+  it("CFM-012: a member of two teams is judged team by team and listed in the order they joined; a leader belongs to one team only, so a seat can never appear on the other", async () => {
+    const alice = await member("Alice");
+    const bob = await member("Bob");
+    const carol = await member("Carol");
+    const lobos = await teamOf(alice, "Lobos");
+    const gatos = await teamOf(bob, "Gatos");
+    await h.addMember(lobos.teamId, alice, carol);
+    await h.addMember(gatos.teamId, bob, carol);
+    const both = await list(carol.token);
+    expect(both.json.teams.map((t: any) => [t.lifetimeTeamId, t.role]), "joined first, listed first; ordinary in both").toEqual([[lobos.teamId, "MEMBER"], [gatos.teamId, "MEMBER"]]);
+    // A seat needs a membership of THAT team and no other: she may be offered it, but accepting is refused while she belongs to two teams — and neither step grants a role.
+    const offer = await h.one("offer_lifetime_team_leadership_atomically", { p_lifetime_team_id: lobos.teamId, p_actor_gaming_member_id: alice.gamingMemberId, p_subject_gaming_member_id: carol.gamingMemberId });
+    await h.refused("decide_lifetime_team_leadership_atomically", { p_lifetime_team_leadership_id: offer.lifetime_team_leadership_id, p_actor_gaming_member_id: carol.gamingMemberId, p_decision: "ACCEPT" }, "LIFETIME_LEADER_MUST_BELONG_TO_ONE_TEAM");
+    expect((await list(carol.token)).json.teams.map((t: any) => t.role), "an offered seat and a refused acceptance").toEqual(["MEMBER", "MEMBER"]);
+    // She leaves one team and accepts the same, still pending, offer: only the team whose seat she holds lists her as a sub-captain.
+    await h.one("end_lifetime_team_membership_atomically", { p_lifetime_team_id: gatos.teamId, p_actor_gaming_member_id: carol.gamingMemberId, p_subject_gaming_member_id: carol.gamingMemberId });
+    await h.one("decide_lifetime_team_leadership_atomically", { p_lifetime_team_leadership_id: offer.lifetime_team_leadership_id, p_actor_gaming_member_id: carol.gamingMemberId, p_decision: "ACCEPT" });
+    expect((await list(carol.token)).json.teams.map((t: any) => [t.lifetimeTeamId, t.role])).toEqual([[lobos.teamId, "SUB_CAPTAIN"]]);
   });
 
   it("keeps name uniqueness and malformed input bounded: 409 for a taken name and for a captain who already has a team, 400 for the rest — never database text", async () => {

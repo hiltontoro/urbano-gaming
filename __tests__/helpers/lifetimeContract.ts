@@ -27,7 +27,7 @@ const CR_OFFSET_MS = -6 * 3600_000; // America/Costa_Rica has no daylight saving
 const localMinute = (utcMs: number) => new Date(utcMs + CR_OFFSET_MS).toISOString().slice(0, 16);
 const localDate = (utcMs: number) => new Date(utcMs + CR_OFFSET_MS).toISOString().slice(0, 10);
 
-export interface Person { authUserId: string; gamingMemberId: string; email: string; label: string }
+export interface Person { authUserId: string; gamingMemberId: string; email: string; label: string; displayName: string }
 
 /** A refusal raised by one of the database operations: `refusal` is the stable `CODE` the database wrote before the colon (null for anything that is not a coded refusal). */
 export class RpcError extends Error {
@@ -189,7 +189,7 @@ export function createHarness(tag: string) {
     authUsers.push(data.user.id);
     const member = await gamingRepo.createGamingMember(data.user.id, `${label.slice(0, 24)} ${RUN}-${counter}`);
     personIds.push(member.gamingMemberId);
-    return { authUserId: data.user.id, gamingMemberId: member.gamingMemberId, email, label };
+    return { authUserId: data.user.id, gamingMemberId: member.gamingMemberId, email, label, displayName: member.displayName };
   }
 
   async function newPeople(count: number, label: string): Promise<Person[]> {

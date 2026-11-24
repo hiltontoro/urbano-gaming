@@ -119,7 +119,7 @@ async function open(request: Request): Promise<Opened> {
 const repositoryFor = (credentials: { url: string; serviceKey: string }) => new SupabaseLifetimeTeamsRepository(credentials.url, credentials.serviceKey);
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
-// GET — the signed-in member's own active teams
+// GET — the signed-in member's own active teams, each with the member's own role on it
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 
 const isUuid = (value: unknown): value is string => {
@@ -127,19 +127,22 @@ const isUuid = (value: unknown): value is string => {
 };
 const isText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 const isTimestamp = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value));
+/** The caller's own role on a team (UG-CR-GATE-CFM-012): exactly one of three words, derived by the repository from the caller's ACTIVE seat — never from the request. */
+const isRole = (value: unknown): value is "CAPTAIN" | "SUB_CAPTAIN" | "MEMBER" => value === "CAPTAIN" || value === "SUB_CAPTAIN" || value === "MEMBER";
 
 /**
- * The summary the caller may see, copied field by field from rows the repository returned. A row that is not exactly ACTIVE (a disbanded team, anything unexpected) or
- * that is malformed in any field is dropped — it never appears as an active team. The repository's order is kept.
+ * The summary the caller may see, copied field by field from rows the repository returned — the caller's OWN role on the team last. A row that is not exactly ACTIVE
+ * (a disbanded team, anything unexpected) or that is malformed in any field, the role included, is dropped — it never appears as an active team, and a role that is
+ * not one of the three is never defaulted into anything. The repository's order is kept.
  */
 function activeSummaries(rows: unknown) {
   if (!Array.isArray(rows)) throw new LifetimeTeamError("UNAVAILABLE");
-  const teams: Array<{ lifetimeTeamId: string; publicCode: string; name: string; status: "ACTIVE"; joinedAt: string; isLegacy: boolean }> = [];
+  const teams: Array<{ lifetimeTeamId: string; publicCode: string; name: string; status: "ACTIVE"; joinedAt: string; isLegacy: boolean; role: "CAPTAIN" | "SUB_CAPTAIN" | "MEMBER" }> = [];
   for (const row of rows) {
     if (typeof row !== "object" || row === null || Array.isArray(row)) continue;
-    const { lifetimeTeamId, publicCode, name, status, joinedAt, isLegacy } = row as Record<string, unknown>;
-    if (status !== "ACTIVE" || !isUuid(lifetimeTeamId) || !isText(publicCode) || !isText(name) || !isTimestamp(joinedAt) || typeof isLegacy !== "boolean") continue;
-    teams.push({ lifetimeTeamId, publicCode, name, status: "ACTIVE", joinedAt, isLegacy });
+    const { lifetimeTeamId, publicCode, name, status, joinedAt, isLegacy, role } = row as Record<string, unknown>;
+    if (status !== "ACTIVE" || !isUuid(lifetimeTeamId) || !isText(publicCode) || !isText(name) || !isTimestamp(joinedAt) || typeof isLegacy !== "boolean" || !isRole(role)) continue;
+    teams.push({ lifetimeTeamId, publicCode, name, status: "ACTIVE", joinedAt, isLegacy, role });
   }
   return teams;
 }

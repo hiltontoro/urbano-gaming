@@ -6,8 +6,8 @@ import {
   type ClaimDecision, type EntriesFrozen, type EntryCreated, type EntryDecided, type EntryDecision, type EntryDecisionReason, type EntryFlowDisabled, type EntryFlowEnabled,
   type EntryWithdrawn, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
   type LeadershipOffer, type LifetimeEntryView, type LifetimeTeamCreated, type LifetimeTeamDisbanded, type LifetimeTeamsStore, type LifetimeTeamView, type MemberTeamSummary,
-  type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type RosterClaimDecision, type RosterClaimProposed,
-  type RosterClaimReleased,
+  type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type PendingOfferView, type RosterClaimDecision,
+  type RosterClaimProposed, type RosterClaimReleased, type TeamRole,
 } from "../lifetimeTeams";
 import { CompetitionAccessDeniedError, TeamRegistrationNotOpenError } from "../types";
 import { translateError } from "./supabaseCompetitionsRepository";
@@ -44,6 +44,151 @@ export function translateLifetimeError(error: { code?: string; message?: string 
 type Row = Record<string, unknown>;
 const str = (value: unknown): string => String(value);
 const strOrNull = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-CFM-012 — the read side: the member's role on each team, and the member's own pending offers.
+//
+// Everything below is derived from the verified member alone. The statements are filtered by that member, but the filter is only a convenience: the code that follows
+// decides what the member may see from the rows themselves (their status, their parties, the team's own current seats), and a row that is malformed or contradicts
+// itself is dropped — it is never shown, never repaired and never grants anything. Every result is built field by field; no database row leaves this file.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuidText = (value: unknown): value is string => typeof value === "string" && UUID_SHAPE.test(value);
+const isText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+const sameMember = (a: unknown, b: unknown): boolean => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+const asRows = (value: unknown): Row[] => (Array.isArray(value) ? value.filter((row): row is Row => typeof row === "object" && row !== null && !Array.isArray(row)) : []);
+
+/** A team's seats, embedded in the same statement as whatever asks about them: its whole seat history, so that a pending or ended seat can be told from an active one. */
+const SEATS_OF_TEAM = "leaders:lifetime_team_leaderships(gaming_member_id, role, status, started_at, ended_at)";
+const TEAM_OF_OFFER = `team:lifetime_teams(lifetime_team_id, public_code, name, status, ${SEATS_OF_TEAM})`;
+const SEAT_ROWS = "lifetime_team_id, gaming_member_id, role, status, started_at, ended_at";
+const MEMBERSHIP_OFFER_ROWS = `lifetime_team_membership_id, seq, created_at, expires_at, status, lifetime_team_id, gaming_member_id, initiated_by_side, initiated_by_gaming_member_id, ${TEAM_OF_OFFER}`;
+const SEAT_OFFER_ROWS = `lifetime_team_leadership_id, seq, created_at, expires_at, status, role, lifetime_team_id, gaming_member_id, offered_by_gaming_member_id, ${TEAM_OF_OFFER}`;
+/** The only columns of a member's profile this file ever asks for: never the authentication identity, never contact details. */
+const COUNTERPARTY_ROWS = "gaming_member_id, display_name";
+
+/** A seat exactly as a current one is recorded — ACTIVE, started, not ended, a known role, a known holder — or null (pending, ended, malformed or contradictory). */
+function activeSeat(value: unknown): { member: string; role: "CAPTAIN" | "SUB_CAPTAIN" } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const seat = value as Row;
+  if (seat.status !== "ACTIVE" || !isUuidText(seat.gaming_member_id)) return null;
+  if (seat.role !== "CAPTAIN" && seat.role !== "SUB_CAPTAIN") return null;
+  if (!isText(seat.started_at) || seat.ended_at !== null) return null; // ACTIVE and ended, or ACTIVE and never started, contradict themselves
+  return { member: seat.gaming_member_id, role: seat.role };
+}
+
+/**
+ * The member's role on ONE team, from that team's own seats. Only an ACTIVE, well-formed seat counts, and only a role that is unambiguous — held by exactly one active seat
+ * of the team — is granted: two seats for the same role contradict the one-holder rule and grant it to nobody. The captain's seat beats the sub-captain's, and either beats
+ * being a member. Anything else, whatever the data, is MEMBER: a doubt is never resolved in favour of leadership.
+ */
+function deriveTeamRole(memberId: string, seats: unknown): TeamRole {
+  const active = (Array.isArray(seats) ? seats : []).flatMap((seat) => { const found = activeSeat(seat); return found ? [found] : []; });
+  const captains = active.filter((seat) => seat.role === "CAPTAIN");
+  const subCaptains = active.filter((seat) => seat.role === "SUB_CAPTAIN");
+  if (captains.length === 1 && sameMember(captains[0].member, memberId)) return "CAPTAIN";
+  if (subCaptains.length === 1 && sameMember(subCaptains[0].member, memberId)) return "SUB_CAPTAIN";
+  return "MEMBER";
+}
+
+/** An instant as a whole number of microseconds, so that two offers made within the same millisecond keep the order they were made in (null when it is not an instant). */
+function microsecondsOf(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return null;
+  const seconds = Date.parse(`${match[1]}${match[3]}`);
+  return Number.isNaN(seconds) ? null : seconds * 1000 + Number((match[2] ?? "").padEnd(6, "0"));
+}
+
+interface OfferCandidate {
+  key: string;
+  kind: "MEMBERSHIP" | "LEADERSHIP";
+  offerId: string;
+  direction: "INCOMING" | "OUTGOING";
+  team: { lifetimeTeamId: string; publicCode: string; name: string };
+  counterpartyId: string | null;
+  expiresAt: string;
+  created: number;
+  seq: number;
+}
+
+/** What every pending offer row must state: a well-formed identifier, PENDING, an expiry that is an instant (it may be in the past: that is not this read's to judge), and a creation order. */
+function offerFacts(row: Row, idColumn: string): { offerId: string; expiresAt: string; created: number; seq: number } | null {
+  const id = row[idColumn];
+  if (!isUuidText(id) || row.status !== "PENDING" || !isText(row.expires_at) || Number.isNaN(Date.parse(row.expires_at))) return null;
+  const created = microsecondsOf(row.created_at);
+  if (created === null || typeof row.seq !== "number" || !Number.isSafeInteger(row.seq)) return null;
+  return { offerId: id, expiresAt: row.expires_at, created, seq: row.seq };
+}
+
+/** The offer's own team — the embedded record must be THAT team, active, and named — with its seats as they stood in the same statement. */
+function offerTeam(row: Row): { team: { lifetimeTeamId: string; publicCode: string; name: string }; seats: unknown } | null {
+  const embedded = Array.isArray(row.team) ? row.team[0] : row.team;
+  if (typeof embedded !== "object" || embedded === null) return null;
+  const team = embedded as Row;
+  if (!isUuidText(row.lifetime_team_id) || !sameMember(team.lifetime_team_id, row.lifetime_team_id)) return null;
+  if (team.status !== "ACTIVE" || !isText(team.public_code) || !isText(team.name)) return null;
+  return { team: { lifetimeTeamId: row.lifetime_team_id, publicCode: team.public_code, name: team.name }, seats: team.leaders };
+}
+
+/**
+ * Who sees a membership offer. A team INVITATION stands only while the leader who made it still leads (the database ends it otherwise): it is INCOMING for the person invited
+ * and OUTGOING for that leader — not for the team's other leader. A person's own join REQUEST is OUTGOING for that person (it names nobody: it is addressed to the team) and
+ * INCOMING for the team's current captain and sub-captain. Anybody else sees nothing.
+ */
+function membershipCandidates(me: string, rows: Row[]): OfferCandidate[] {
+  const out: OfferCandidate[] = [];
+  for (const row of rows) {
+    const facts = offerFacts(row, "lifetime_team_membership_id");
+    const where = offerTeam(row);
+    if (!facts || !where || !isUuidText(row.gaming_member_id) || !isUuidText(row.initiated_by_gaming_member_id)) continue;
+    const subject = row.gaming_member_id;
+    const initiator = row.initiated_by_gaming_member_id;
+    let direction: "INCOMING" | "OUTGOING";
+    let counterpartyId: string | null;
+    if (row.initiated_by_side === "TEAM") {
+      if (sameMember(subject, initiator) || deriveTeamRole(initiator, where.seats) === "MEMBER") continue;
+      if (sameMember(subject, me)) { direction = "INCOMING"; counterpartyId = initiator; }
+      else if (sameMember(initiator, me)) { direction = "OUTGOING"; counterpartyId = subject; }
+      else continue;
+    } else if (row.initiated_by_side === "PERSON") {
+      if (!sameMember(subject, initiator)) continue; // a request is the person's own act
+      if (sameMember(subject, me)) { direction = "OUTGOING"; counterpartyId = null; }
+      else if (deriveTeamRole(me, where.seats) !== "MEMBER") { direction = "INCOMING"; counterpartyId = subject; }
+      else continue;
+    } else continue;
+    out.push({ key: `MEMBERSHIP:${facts.offerId.toLowerCase()}`, kind: "MEMBERSHIP", offerId: facts.offerId, direction, team: where.team, counterpartyId, expiresAt: facts.expiresAt, created: facts.created, seq: facts.seq });
+  }
+  return out;
+}
+
+/** Who sees an offer of the sub-captain seat: INCOMING for the person offered it; OUTGOING for the team's active captain who made it; nobody else. */
+function seatOfferCandidates(me: string, rows: Row[]): OfferCandidate[] {
+  const out: OfferCandidate[] = [];
+  for (const row of rows) {
+    const facts = offerFacts(row, "lifetime_team_leadership_id");
+    const where = offerTeam(row);
+    if (!facts || !where || row.role !== "SUB_CAPTAIN" || !isUuidText(row.gaming_member_id) || !isUuidText(row.offered_by_gaming_member_id)) continue;
+    const subject = row.gaming_member_id;
+    const offeredBy = row.offered_by_gaming_member_id;
+    if (sameMember(subject, offeredBy)) continue;
+    let direction: "INCOMING" | "OUTGOING";
+    let counterpartyId: string;
+    if (sameMember(subject, me)) { direction = "INCOMING"; counterpartyId = offeredBy; }
+    else if (sameMember(offeredBy, me) && deriveTeamRole(me, where.seats) === "CAPTAIN") { direction = "OUTGOING"; counterpartyId = subject; }
+    else continue;
+    out.push({ key: `LEADERSHIP:${facts.offerId.toLowerCase()}`, kind: "LEADERSHIP", offerId: facts.offerId, direction, team: where.team, counterpartyId, expiresAt: facts.expiresAt, created: facts.created, seq: facts.seq });
+  }
+  return out;
+}
+
+/** Creation time across both kinds (their tables keep separate sequences), then each table's own creation sequence, then the kind, then the identifier: a total order. */
+const byCreation = (a: OfferCandidate, b: OfferCandidate): number => {
+  const rank = (c: OfferCandidate) => (c.kind === "MEMBERSHIP" ? 0 : 1);
+  const [x, y] = [a.offerId.toLowerCase(), b.offerId.toLowerCase()];
+  return a.created - b.created || rank(a) - rank(b) || a.seq - b.seq || (x < y ? -1 : x > y ? 1 : 0);
+};
 
 export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
   private readonly client: SupabaseClient;
@@ -220,15 +365,55 @@ export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
 
   async listActiveTeamsOfMember(gamingMemberId: string): Promise<MemberTeamSummary[]> {
     const id = requireUuid(gamingMemberId);
+    // ONE statement: the membership and the team's seats — which decide the member's role — come from the same snapshot.
     const { data, error } = await this.client
       .from("lifetime_team_memberships")
-      .select("lifetime_team_id, joined_at, is_legacy, team:lifetime_teams(public_code, name, status)")
+      .select(`lifetime_team_id, joined_at, is_legacy, team:lifetime_teams(public_code, name, status, ${SEATS_OF_TEAM})`)
       .eq("gaming_member_id", id).eq("status", "ACTIVE").order("seq");
     if (error) throw translateLifetimeError(error);
     return ((data ?? []) as unknown as Array<Row & { team: Row | Row[] | null }>).flatMap((m) => {
       const team = Array.isArray(m.team) ? m.team[0] : m.team;
       if (!team) return [];
-      return [{ lifetimeTeamId: str(m.lifetime_team_id), publicCode: str(team.public_code), name: str(team.name), status: team.status === "DISBANDED" ? "DISBANDED" as const : "ACTIVE" as const, joinedAt: str(m.joined_at), isLegacy: m.is_legacy === true }];
+      return [{
+        lifetimeTeamId: str(m.lifetime_team_id), publicCode: str(team.public_code), name: str(team.name), status: team.status === "DISBANDED" ? "DISBANDED" as const : "ACTIVE" as const,
+        joinedAt: str(m.joined_at), isLegacy: m.is_legacy === true, role: deriveTeamRole(id, team.leaders),
+      }];
+    });
+  }
+
+  async listPendingOffersOfMember(gamingMemberId: string): Promise<PendingOfferView[]> {
+    const me = requireUuid(gamingMemberId);
+    // The member's seats (whose join requests they may see), the membership offers they are party to, and the seat offers they are party to — each filtered by the member alone.
+    const [seats, party, seatOffers] = await Promise.all([
+      this.client.from("lifetime_team_leaderships").select(SEAT_ROWS).eq("gaming_member_id", me).eq("status", "ACTIVE"),
+      this.client.from("lifetime_team_memberships").select(MEMBERSHIP_OFFER_ROWS).eq("status", "PENDING").or(`gaming_member_id.eq.${me},initiated_by_gaming_member_id.eq.${me}`).order("seq"),
+      this.client.from("lifetime_team_leaderships").select(SEAT_OFFER_ROWS).eq("status", "PENDING").or(`gaming_member_id.eq.${me},offered_by_gaming_member_id.eq.${me}`).order("seq"),
+    ]);
+    for (const answer of [seats, party, seatOffers]) if (answer.error) throw translateLifetimeError(answer.error);
+    // A join request is for the team's CURRENT leaders: ask for those of the teams this member currently leads (and only then).
+    const led = [...new Set(asRows(seats.data).flatMap((seat) => (activeSeat(seat) !== null && sameMember(seat.gaming_member_id, me) && isUuidText(seat.lifetime_team_id) ? [seat.lifetime_team_id.toLowerCase()] : [])))];
+    const requests = led.length === 0 ? null : await this.client.from("lifetime_team_memberships").select(MEMBERSHIP_OFFER_ROWS).eq("status", "PENDING").eq("initiated_by_side", "PERSON").in("lifetime_team_id", led).order("seq");
+    if (requests?.error) throw translateLifetimeError(requests.error);
+
+    const candidates = new Map<string, OfferCandidate>();
+    for (const candidate of [...membershipCandidates(me, asRows(party.data)), ...membershipCandidates(me, asRows(requests?.data)), ...seatOfferCandidates(me, asRows(seatOffers.data))]) {
+      if (!candidates.has(candidate.key)) candidates.set(candidate.key, candidate);
+    }
+
+    // The display names of the people these offers involve — only theirs, and only that column.
+    const ids = [...new Set([...candidates.values()].flatMap((c) => (c.counterpartyId === null ? [] : [c.counterpartyId.toLowerCase()])))];
+    const names = new Map<string, string>();
+    if (ids.length > 0) {
+      const found = await this.client.from("gaming_members").select(COUNTERPARTY_ROWS).in("gaming_member_id", ids);
+      if (found.error) throw translateLifetimeError(found.error);
+      for (const row of asRows(found.data)) if (isUuidText(row.gaming_member_id) && isText(row.display_name)) names.set(row.gaming_member_id.toLowerCase(), row.display_name);
+    }
+
+    return [...candidates.values()].sort(byCreation).flatMap((c): PendingOfferView[] => {
+      const base = { kind: c.kind, offerId: c.offerId, direction: c.direction, team: { lifetimeTeamId: c.team.lifetimeTeamId, publicCode: c.team.publicCode, name: c.team.name } };
+      if (c.counterpartyId === null) return [{ ...base, counterparty: null, expiresAt: c.expiresAt }];
+      const displayName = names.get(c.counterpartyId.toLowerCase());
+      return displayName === undefined ? [] : [{ ...base, counterparty: { gamingMemberId: c.counterpartyId, displayName }, expiresAt: c.expiresAt }];
     });
   }
 

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   LIFETIME_DATABASE_CODES, LIFETIME_TEAM_NAME_MAX, LIFETIME_TEAM_NAME_MIN, LifetimeTeamError, lifetimeErrorFromDatabase, normalizeLifetimeTeamName,
   parseClaimDecision, parseOfferDecision, parseOfferKind, requireUuid,
-  createLifetimeTeam, decideLifetimeMembership, endLifetimeMembership, enterLifetimeTeam, proposeRosterClaims, backfillLegacyTeams,
+  createLifetimeTeam, decideLifetimeMembership, endLifetimeMembership, enterLifetimeTeam, listPendingLifetimeOffers, proposeRosterClaims, backfillLegacyTeams,
   type LifetimeTeamsStore,
 } from "../lib/gaming/competitions/lifetimeTeams";
 import { SupabaseLifetimeTeamsRepository } from "../lib/gaming/competitions/db/supabaseLifetimeTeamsRepository";
@@ -163,6 +163,18 @@ describe("the domain functions", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it("CFM-012: the inbox read takes the verified member alone — a malformed identifier never reaches the store, and nothing else can be named", async () => {
+    const { fn, store: s } = store();
+    fn.mockResolvedValue([] as never);
+    await expect(listPendingLifetimeOffers(s, "nope")).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    await expect(listPendingLifetimeOffers(s, undefined as never)).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    expect(fn).not.toHaveBeenCalled();
+    expect(await listPendingLifetimeOffers(s, U1)).toEqual([]);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith(U1);
+    expect(listPendingLifetimeOffers.length, "exactly (store, member): no selector, filter or second identity").toBe(2);
+  });
+
   it("passes a successor only when one is named, a claim batch as given, and the backfill scope only as a named list (there is no \"all\")", async () => {
     const { fn, store: s } = store();
     await endLifetimeMembership(s, U1, U2, U2);
@@ -306,24 +318,362 @@ describe("the Supabase repository adapter", () => {
     expect(await call(repo)).toEqual(expected);
   });
 
-  it("reads the teams a member belongs to (the embedded team may arrive as an object or a one-element list; a missing team is skipped)", async () => {
-    const answer = (rows: unknown[]) => {
-      const chain: Record<string, unknown> = {};
-      for (const method of ["select", "eq"]) chain[method] = () => chain;
-      chain.order = async () => ({ data: rows, error: null });
-      return new SupabaseLifetimeTeamsRepository("http://127.0.0.1:1", "service-key", { from: () => chain, rpc: vi.fn() } as never);
-    };
-    const team = { public_code: "e".repeat(22), name: "Los Halcones", status: "ACTIVE" };
-    const result = await answer([
+  // -------------------------------------------------------------------------------------------------------------------------------------------
+  // UG-CR-GATE-CFM-012 — the read side: the member's role on each team, and the member's own pending offers. Everything is derived from the verified member alone.
+  // -------------------------------------------------------------------------------------------------------------------------------------------
+
+  /** The membership read: ONE statement. The embedded team may arrive as an object or a one-element list, and carries the team's seats — history included. */
+  function teamsClient(rows: unknown[]) {
+    const calls: string[] = [];
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq"]) chain[method] = (...args: unknown[]) => { calls.push(`${method}:${args.join(",")}`); return chain; };
+    chain.order = async (...args: unknown[]) => { calls.push(`order:${args.join(",")}`); return { data: rows, error: null }; };
+    const from = vi.fn(() => chain);
+    return { calls, from, repo: new SupabaseLifetimeTeamsRepository("http://127.0.0.1:1", "service-key", { from, rpc: vi.fn() } as never) };
+  }
+
+  it("reads the teams a member belongs to — with the member's own role — in ONE statement (the embedded team may arrive as an object or a one-element list; a missing team is skipped)", async () => {
+    const team = { public_code: "e".repeat(22), name: "Los Halcones", status: "ACTIVE", leaders: [] as unknown[] };
+    const { repo, calls, from } = teamsClient([
       { lifetime_team_id: U1, joined_at: "T1", is_legacy: false, team },
       { lifetime_team_id: U2, joined_at: "T2", is_legacy: true, team: [{ ...team, name: "Old FC", status: "DISBANDED" }] },
       { lifetime_team_id: U3, joined_at: "T3", is_legacy: false, team: null },
-    ]).listActiveTeamsOfMember(U4);
-    expect(result).toEqual([
-      { lifetimeTeamId: U1, publicCode: team.public_code, name: "Los Halcones", status: "ACTIVE", joinedAt: "T1", isLegacy: false },
-      { lifetimeTeamId: U2, publicCode: team.public_code, name: "Old FC", status: "DISBANDED", joinedAt: "T2", isLegacy: true },
     ]);
-    await expect(answer([]).listActiveTeamsOfMember("nope")).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    const result = await repo.listActiveTeamsOfMember(U4);
+    expect(result).toEqual([
+      { lifetimeTeamId: U1, publicCode: team.public_code, name: "Los Halcones", status: "ACTIVE", joinedAt: "T1", isLegacy: false, role: "MEMBER" },
+      { lifetimeTeamId: U2, publicCode: team.public_code, name: "Old FC", status: "DISBANDED", joinedAt: "T2", isLegacy: true, role: "MEMBER" },
+    ]);
+    expect(from, "one statement: the membership and the seat that decides the role come from the same snapshot").toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith("lifetime_team_memberships");
+    expect(calls.find((c) => c.startsWith("select:"))).toMatch(/team:lifetime_teams\(public_code, name, status, leaders:lifetime_team_leaderships\(gaming_member_id, role, status, started_at, ended_at\)\)/);
+    expect(calls).toEqual(expect.arrayContaining([`eq:gaming_member_id,${U4}`, "eq:status,ACTIVE", "order:seq"]));
+    await expect(teamsClient([]).repo.listActiveTeamsOfMember("nope")).rejects.toMatchObject({ code: "INPUT_INVALID" });
+  });
+
+  describe("CFM-012: the member's role on a team comes from the member's ACTIVE seat on that team — and from nothing else", () => {
+    const ME = U4, OTHER = U2;
+    const BEGAN = "2026-11-20T10:00:00+00:00";
+    const seat = (over: Record<string, unknown> = {}) => ({ gaming_member_id: ME, role: "CAPTAIN", status: "ACTIVE", started_at: BEGAN, ended_at: null, ...over });
+    const rolesFor = async (seats: unknown) => {
+      const { repo } = teamsClient([{ lifetime_team_id: U1, joined_at: "T1", is_legacy: false, team: { public_code: "e".repeat(22), name: "Los Halcones", status: "ACTIVE", leaders: seats } }]);
+      return (await repo.listActiveTeamsOfMember(ME)).map((t) => t.role);
+    };
+    const CASES: Array<[string, unknown, string]> = [
+      ["an active captain seat", [seat()], "CAPTAIN"],
+      ["an active sub-captain seat", [seat({ role: "SUB_CAPTAIN" })], "SUB_CAPTAIN"],
+      ["no seat at all (an ordinary member)", [], "MEMBER"],
+      ["somebody else's captain seat", [seat({ gaming_member_id: OTHER })], "MEMBER"],
+      ["somebody else's captain seat beside the member's own sub-captain seat", [seat({ gaming_member_id: OTHER }), seat({ role: "SUB_CAPTAIN" })], "SUB_CAPTAIN"],
+      ["a PENDING seat offer (it grants nothing until it is accepted)", [seat({ role: "SUB_CAPTAIN", status: "PENDING", started_at: null })], "MEMBER"],
+      ["an ENDED seat", [seat({ role: "SUB_CAPTAIN", status: "ENDED", ended_at: BEGAN })], "MEMBER"],
+      ["an ENDED captain seat beside an ACTIVE sub-captain seat", [seat({ status: "ENDED", ended_at: BEGAN }), seat({ role: "SUB_CAPTAIN" })], "SUB_CAPTAIN"],
+      ["a PENDING offer beside the member's ACTIVE captain seat", [seat({ role: "SUB_CAPTAIN", status: "PENDING", started_at: null }), seat()], "CAPTAIN"],
+      ["both seats active for the same member: the captain's wins", [seat({ role: "SUB_CAPTAIN" }), seat()], "CAPTAIN"],
+      ["a seat that is ACTIVE and also ended (contradictory)", [seat({ ended_at: BEGAN })], "MEMBER"],
+      ["a seat that is ACTIVE and never started (contradictory)", [seat({ started_at: null })], "MEMBER"],
+      ["an ACTIVE seat with no start or end fields at all (malformed)", [{ gaming_member_id: ME, role: "CAPTAIN", status: "ACTIVE" }], "MEMBER"],
+      ["an unknown role", [seat({ role: "OWNER" })], "MEMBER"],
+      ["a missing role", [seat({ role: undefined })], "MEMBER"],
+      ["a lower-case status", [seat({ status: "active" })], "MEMBER"],
+      ["a seat whose holder is missing", [seat({ gaming_member_id: undefined })], "MEMBER"],
+      ["two different people holding the captaincy (contradictory): nobody is granted it", [seat(), seat({ gaming_member_id: OTHER })], "MEMBER"],
+      ["two seat rows for the same captaincy (contradictory)", [seat(), seat()], "MEMBER"],
+      ["two different people holding the sub-captain seat (contradictory)", [seat({ role: "SUB_CAPTAIN" }), seat({ role: "SUB_CAPTAIN", gaming_member_id: OTHER })], "MEMBER"],
+      ["junk among the seats is ignored, the one valid seat counts", [null, 7, "CAPTAIN", [], seat({ role: "SUB_CAPTAIN" })], "SUB_CAPTAIN"],
+      ["leaders that are not a list", { role: "CAPTAIN" }, "MEMBER"],
+      ["leaders missing", undefined, "MEMBER"],
+      ["leaders null", null, "MEMBER"],
+    ];
+    it.each(CASES)("%s → %s", async (_label, seats, expected) => {
+      expect(await rolesFor(seats)).toEqual([expected]);
+    });
+
+    it("the same person's identifier in a different letter case is still the same person", async () => {
+      expect(await rolesFor([seat({ gaming_member_id: ME.toUpperCase() })])).toEqual(["CAPTAIN"]);
+    });
+
+    it("a seat on ANOTHER team grants nothing here: each team is judged by its own seats, and the order of the member's teams is the membership order", async () => {
+      const mk = (teamId: string, leaders: unknown[]) => ({ lifetime_team_id: teamId, joined_at: "T", is_legacy: false, team: { public_code: "e".repeat(22), name: teamId, status: "ACTIVE", leaders } });
+      const { repo } = teamsClient([mk(U1, []), mk(U2, [seat()]), mk(U3, [seat({ role: "SUB_CAPTAIN" })]), mk("00000000-0000-4000-8000-0000000000aa", [seat({ gaming_member_id: OTHER })])]);
+      const teams = await repo.listActiveTeamsOfMember(ME);
+      expect(teams.map((t) => [t.lifetimeTeamId, t.role])).toEqual([[U1, "MEMBER"], [U2, "CAPTAIN"], [U3, "SUB_CAPTAIN"], ["00000000-0000-4000-8000-0000000000aa", "MEMBER"]]);
+    });
+
+    it("nothing but a membership lists a team: a leadership with no membership row lists nothing", async () => {
+      const { repo } = teamsClient([]);
+      expect(await repo.listActiveTeamsOfMember(ME)).toEqual([]);
+    });
+
+    it("exposes exactly the seven summary fields — no seat, leader or member detail from the embedded rows ever reaches the result", async () => {
+      const { repo } = teamsClient([{ lifetime_team_id: U1, joined_at: "T1", is_legacy: false, auth_user_id: "secret", team: { public_code: "e".repeat(22), name: "Los Halcones", status: "ACTIVE", email: "x@example.com", leaders: [seat(), seat({ gaming_member_id: OTHER, role: "SUB_CAPTAIN" })] } }]);
+      const [summary] = await repo.listActiveTeamsOfMember(ME);
+      expect(Object.keys(summary)).toEqual(["lifetimeTeamId", "publicCode", "name", "status", "joinedAt", "isLegacy", "role"]);
+      expect(JSON.stringify(summary)).not.toMatch(/secret|example\.com|SUB_CAPTAIN|started_at/);
+    });
+  });
+
+  // -------------------------------------------------------------------------------------------------------------------------------------------
+  describe("CFM-012: the member's pending offers — derived from the verified member, projected field by field, deterministic", () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const ME = id(1), CAPTAIN = id(2), SUBCAP = id(3), PERSON = id(4), STRANGER = id(5), MEMBER = id(6), ORDINARY = id(7), OTHER_CAPTAIN = id(8), INVITEE = id(9), NOBODY = id(10);
+    const TEAM = id(100), TEAM_2 = id(101);
+    const BEGAN = "2026-11-20T10:00:00+00:00";
+    const EXPIRES = "2026-12-01T10:00:00+00:00";
+    const NAMES: Record<string, string> = { [ME]: "Marta", [CAPTAIN]: "Capi", [SUBCAP]: "Subi", [PERSON]: "Pedro", [STRANGER]: "Sara", [MEMBER]: "Memo", [ORDINARY]: "Ordi", [OTHER_CAPTAIN]: "Otto", [INVITEE]: "Ivan", [NOBODY]: "Nadie" };
+    const seatOf = (member: string, role = "CAPTAIN", over: Record<string, unknown> = {}) => ({ gaming_member_id: member, role, status: "ACTIVE", started_at: BEGAN, ended_at: null, ...over });
+    const teamNamed = (teamId: string) => (teamId === TEAM ? "Los Halcones" : "Los Gatos");
+    const codeOf = (teamId: string) => `code${teamId.slice(-3)}`.padEnd(22, "x");
+    const team = (teamId = TEAM, seats: unknown[] = teamId === TEAM ? [seatOf(CAPTAIN), seatOf(SUBCAP, "SUB_CAPTAIN")] : [seatOf(OTHER_CAPTAIN)], over: Record<string, unknown> = {}) =>
+      ({ lifetime_team_id: teamId, public_code: codeOf(teamId), name: teamNamed(teamId), status: "ACTIVE", leaders: seats, ...over });
+    const at = (n: number) => `2026-11-24T10:00:00.${String(n).padStart(6, "0")}+00:00`;
+    const membership = (offer: number, over: Record<string, unknown> = {}) => ({
+      lifetime_team_membership_id: id(offer), seq: offer, created_at: at(offer), expires_at: EXPIRES, status: "PENDING", lifetime_team_id: TEAM,
+      gaming_member_id: ME, initiated_by_side: "TEAM", initiated_by_gaming_member_id: CAPTAIN, team: team(), ...over,
+    });
+    const seatOffer = (offer: number, over: Record<string, unknown> = {}) => ({
+      lifetime_team_leadership_id: id(offer), seq: offer, created_at: at(offer), expires_at: EXPIRES, status: "PENDING", role: "SUB_CAPTAIN", lifetime_team_id: TEAM,
+      gaming_member_id: MEMBER, offered_by_gaming_member_id: CAPTAIN, team: team(), ...over,
+    });
+    const view = (kind: "MEMBERSHIP" | "LEADERSHIP", offer: number, direction: "INCOMING" | "OUTGOING", counterparty: string | null, teamId = TEAM) => ({
+      kind, offerId: id(offer), direction,
+      team: { lifetimeTeamId: teamId, publicCode: codeOf(teamId), name: teamNamed(teamId) },
+      counterparty: counterparty === null ? null : { gamingMemberId: counterparty, displayName: NAMES[counterparty] },
+      expiresAt: EXPIRES,
+    });
+    const memberRows = () => Object.entries(NAMES).map(([gaming_member_id, display_name]) => ({ gaming_member_id, display_name }));
+
+    interface Data { seats?: unknown[]; memberships?: unknown[]; offers?: unknown[]; members?: unknown[]; fail?: "seats" | "memberships" | "requests" | "offers" | "members" }
+    /** A client that answers EVERY statement with the whole dataset — whatever it was asked: the repository, not the filter, must decide what a member may see. */
+    function inboxRepo(data: Data) {
+      const statements: Array<{ table: string; steps: string[] }> = [];
+      const from = (table: string) => {
+        const statement = { table, steps: [] as string[] };
+        statements.push(statement);
+        const chain: Record<string, unknown> = {};
+        for (const method of ["select", "eq", "or", "in", "order"]) chain[method] = (...args: unknown[]) => { statement.steps.push(`${method}:${args.map(String).join(",")}`); return chain; };
+        chain.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => {
+          const has = (prefix: string) => statement.steps.some((step) => step.startsWith(prefix));
+          const which = table === "gaming_members" ? "members" : table === "lifetime_team_leaderships" ? (has("eq:status,ACTIVE") ? "seats" : "offers") : has("in:lifetime_team_id") ? "requests" : "memberships";
+          const rows = { members: data.members ?? memberRows(), seats: data.seats ?? [], memberships: data.memberships ?? [], requests: data.memberships ?? [], offers: data.offers ?? [] }[which];
+          const answer = which === data.fail ? { data: null, error: { code: "XX000", message: 'relation "lifetime_team_memberships" violates secret detail' } } : { data: rows, error: null };
+          return Promise.resolve(answer).then(resolve, reject);
+        };
+        return chain;
+      };
+      return { statements, repo: new SupabaseLifetimeTeamsRepository("http://127.0.0.1:1", "service-key", { from, rpc: vi.fn() } as never) };
+    }
+    const everyone = () => ({
+      seats: [{ lifetime_team_id: TEAM, ...seatOf(CAPTAIN) }, { lifetime_team_id: TEAM, ...seatOf(SUBCAP, "SUB_CAPTAIN") }, { lifetime_team_id: TEAM_2, ...seatOf(OTHER_CAPTAIN) }],
+      memberships: [
+        membership(201),                                                                                                        // the captain invites ME
+        membership(202, { gaming_member_id: PERSON, initiated_by_side: "PERSON", initiated_by_gaming_member_id: PERSON }),      // PERSON asks to join
+        membership(203, { gaming_member_id: INVITEE }),                                                                         // the captain invites INVITEE
+        membership(204, { gaming_member_id: ORDINARY, initiated_by_gaming_member_id: OTHER_CAPTAIN, lifetime_team_id: TEAM_2, team: team(TEAM_2) }), // ANOTHER team invites ORDINARY
+      ],
+      offers: [seatOffer(301)],                                                                                                // the captain offers MEMBER the sub-captain seat
+    });
+    const inboxOf = async (caller: string, data: Data = everyone()) => inboxRepo(data).repo.listPendingOffersOfMember(caller);
+
+    it("who sees what: the invitee, the inviter, the other leader, the requester, the offered member — and nobody else", async () => {
+      expect(await inboxOf(ME), "the invited member").toEqual([view("MEMBERSHIP", 201, "INCOMING", CAPTAIN)]);
+      expect(await inboxOf(CAPTAIN), "the captain: their own invitations and the seat offer they made, and the join request to their team").toEqual([
+        view("MEMBERSHIP", 201, "OUTGOING", ME), view("MEMBERSHIP", 202, "INCOMING", PERSON), view("MEMBERSHIP", 203, "OUTGOING", INVITEE), view("LEADERSHIP", 301, "OUTGOING", MEMBER),
+      ]);
+      expect(await inboxOf(SUBCAP), "the sub-captain: the join request only — never an invitation another leader made").toEqual([view("MEMBERSHIP", 202, "INCOMING", PERSON)]);
+      expect(await inboxOf(PERSON), "the requester: an OUTGOING request with no counterparty person").toEqual([view("MEMBERSHIP", 202, "OUTGOING", null)]);
+      expect(await inboxOf(INVITEE), "the other invitee").toEqual([view("MEMBERSHIP", 203, "INCOMING", CAPTAIN)]);
+      expect(await inboxOf(MEMBER), "the member offered the seat").toEqual([view("LEADERSHIP", 301, "INCOMING", CAPTAIN)]);
+      expect(await inboxOf(ORDINARY), "an ordinary member sees their own invitation from ANOTHER team, and nothing of this team").toEqual([view("MEMBERSHIP", 204, "INCOMING", OTHER_CAPTAIN, TEAM_2)]);
+      expect(await inboxOf(OTHER_CAPTAIN), "another team's captain sees only their own team's").toEqual([view("MEMBERSHIP", 204, "OUTGOING", ORDINARY, TEAM_2)]);
+      for (const nobody of [STRANGER, NOBODY, id(77)]) expect(await inboxOf(nobody), "an unrelated member sees nothing").toEqual([]);
+    });
+
+    it("a join request is shown only to a CURRENT captain or sub-captain: a pending or ended seat, an ordinary member and a seat on another team see nothing", async () => {
+      const request = membership(202, { gaming_member_id: PERSON, initiated_by_side: "PERSON", initiated_by_gaming_member_id: PERSON });
+      const withSeats = (seats: unknown[]) => ({ memberships: [{ ...request, team: team(TEAM, seats) }], seats: [] as unknown[] });
+      const caller = SUBCAP;
+      const mine = (over: Record<string, unknown> = {}) => ({ lifetime_team_id: TEAM, ...seatOf(caller, "SUB_CAPTAIN", over) });
+      const cases: Array<[string, unknown[], boolean]> = [
+        ["an active sub-captain seat", [seatOf(CAPTAIN), seatOf(caller, "SUB_CAPTAIN")], true],
+        ["a seat that ended", [seatOf(CAPTAIN), seatOf(caller, "SUB_CAPTAIN", { status: "ENDED", ended_at: BEGAN })], false],
+        ["a seat that is only offered", [seatOf(CAPTAIN), seatOf(caller, "SUB_CAPTAIN", { status: "PENDING", started_at: null })], false],
+        ["no seat on this team", [seatOf(CAPTAIN)], false],
+        ["a seat that is ACTIVE and ended (contradictory)", [seatOf(CAPTAIN), seatOf(caller, "SUB_CAPTAIN", { ended_at: BEGAN })], false],
+      ];
+      for (const [label, seats, sees] of cases) {
+        const data = { ...withSeats(seats), seats: sees ? [mine()] : [mine({ status: "ENDED", ended_at: BEGAN })] };
+        expect(await inboxOf(caller, data), label).toEqual(sees ? [view("MEMBERSHIP", 202, "INCOMING", PERSON)] : []);
+      }
+    });
+
+    it("an invitation stands only while the leader who made it still leads: otherwise neither side sees it", async () => {
+      const gone = membership(201, { team: team(TEAM, [seatOf(SUBCAP, "SUB_CAPTAIN")]) });            // the captain who invited ME holds no ACTIVE seat any more
+      const ended = membership(201, { team: team(TEAM, [seatOf(CAPTAIN, "CAPTAIN", { status: "ENDED", ended_at: BEGAN })]) });
+      for (const row of [gone, ended]) {
+        expect(await inboxOf(ME, { memberships: [row] }), "the invitee").toEqual([]);
+        expect(await inboxOf(CAPTAIN, { memberships: [row], seats: [] }), "the former leader").toEqual([]);
+      }
+    });
+
+    it("a seat offer is OUTGOING only for the team's active captain who made it — a sub-captain or a former captain sees nothing", async () => {
+      const notCaptain = seatOffer(301, { team: team(TEAM, [seatOf(CAPTAIN, "SUB_CAPTAIN")]) });
+      expect(await inboxOf(CAPTAIN, { offers: [notCaptain] })).toEqual([]);
+      expect(await inboxOf(MEMBER, { offers: [notCaptain] }), "the offered member still sees what was offered to them").toEqual([view("LEADERSHIP", 301, "INCOMING", CAPTAIN)]);
+      expect(await inboxOf(SUBCAP, { offers: [seatOffer(301)] }), "another leader").toEqual([]);
+    });
+
+    it("only a PENDING offer on an ACTIVE team is ever shown — an accepted, declined, withdrawn, ended or lapsed-and-ended record never is, whatever the server returned", async () => {
+      const rows = {
+        memberships: [membership(201, { status: "ACTIVE" }), membership(202, { status: "ENDED" }), membership(203, { status: "pending" }), membership(204, { status: undefined }), membership(205, { team: team(TEAM, undefined, { status: "DISBANDED" }) }), membership(206)],
+        offers: [seatOffer(301, { status: "ACTIVE", gaming_member_id: ME }), seatOffer(302, { status: "ENDED", gaming_member_id: ME }), seatOffer(303, { role: "CAPTAIN", gaming_member_id: ME }), seatOffer(304, { gaming_member_id: ME })],
+      };
+      expect((await inboxOf(ME, rows)).map((o) => [o.kind, o.offerId])).toEqual([["MEMBERSHIP", id(206)], ["LEADERSHIP", id(304)]]);
+    });
+
+    it("a PAST expiry is still shown, and nothing is invented from it: there is no 'actionable' flag — the decision operations remain the authority", async () => {
+      const lapsed = membership(201, { expires_at: "2020-01-01T00:00:00+00:00" });
+      const [offer] = await inboxOf(ME, { memberships: [lapsed] });
+      expect(offer.expiresAt).toBe("2020-01-01T00:00:00+00:00");
+      expect(Object.keys(offer).sort()).toEqual(["counterparty", "direction", "expiresAt", "kind", "offerId", "team"]);
+    });
+
+    it("exposes exactly the contract's fields: no email, phone, auth id or any other profile or database field, from the offers, their teams or their counterparties", async () => {
+      const pii = { email: "someone@example.com", phone: "+5062222333", auth_user_id: id(900), initiated_by_side_extra: "x", ended_at: "T", decided_by_gaming_member_id: id(901) };
+      const data: Data = everyone();
+      data.memberships = (data.memberships ?? []).map((m) => ({ ...(m as object), ...pii, team: { ...(m as { team: object }).team, ...pii } }));
+      data.offers = (data.offers ?? []).map((o) => ({ ...(o as object), ...pii, team: { ...(o as { team: object }).team, ...pii } }));
+      const members = memberRows().map((r) => ({ ...r, ...pii, created_at: "T" }));
+      const all = [...(await inboxOf(CAPTAIN, { ...data, members })), ...(await inboxOf(ME, { ...data, members }))];
+      expect(all.length).toBeGreaterThan(4);
+      for (const offer of all) {
+        expect(Object.keys(offer)).toEqual(["kind", "offerId", "direction", "team", "counterparty", "expiresAt"]);
+        expect(Object.keys(offer.team)).toEqual(["lifetimeTeamId", "publicCode", "name"]);
+        if (offer.counterparty) expect(Object.keys(offer.counterparty)).toEqual(["gamingMemberId", "displayName"]);
+      }
+      expect(JSON.stringify(all)).not.toMatch(/someone@example\.com|\+5062222333|auth_user_id|decided_by|created_at|initiated_by/);
+      expect(JSON.stringify(all)).not.toContain(id(900));
+      expect(JSON.stringify(all)).not.toContain(id(901));
+    });
+
+    it("every statement is derived from the verified member alone: the member's own identifier in each filter, the member's led teams for the requests, and only the counterparties the offers name — never another selector", async () => {
+      const { repo, statements } = inboxRepo(everyone());
+      await repo.listPendingOffersOfMember(CAPTAIN);
+      const by = (table: string, prefix: string) => statements.filter((s) => s.table === table && s.steps.some((step) => step.startsWith(prefix)));
+      expect(statements.map((s) => s.table).sort()).toEqual(["gaming_members", "lifetime_team_leaderships", "lifetime_team_leaderships", "lifetime_team_memberships", "lifetime_team_memberships"]);
+      const [seats] = by("lifetime_team_leaderships", "eq:status,ACTIVE");
+      expect(seats.steps).toEqual(expect.arrayContaining([`eq:gaming_member_id,${CAPTAIN}`, "eq:status,ACTIVE"]));
+      const [party] = by("lifetime_team_memberships", "or:");
+      expect(party.steps).toEqual(expect.arrayContaining(["eq:status,PENDING", `or:gaming_member_id.eq.${CAPTAIN},initiated_by_gaming_member_id.eq.${CAPTAIN}`, "order:seq"]));
+      const [requests] = by("lifetime_team_memberships", "in:lifetime_team_id");
+      expect(requests.steps, "the join requests of the teams the member currently leads").toEqual(expect.arrayContaining(["eq:status,PENDING", "eq:initiated_by_side,PERSON", `in:lifetime_team_id,${TEAM}`]));
+      const [offers] = by("lifetime_team_leaderships", "eq:status,PENDING");
+      expect(offers.steps).toEqual(expect.arrayContaining(["eq:status,PENDING", `or:gaming_member_id.eq.${CAPTAIN},offered_by_gaming_member_id.eq.${CAPTAIN}`, "order:seq"]));
+      const [names] = by("gaming_members", "in:gaming_member_id");
+      const named = names.steps.find((step) => step.startsWith("in:gaming_member_id,"))!.slice("in:gaming_member_id,".length).split(",").sort();
+      expect(named, "only the people the visible offers involve").toEqual([ME, PERSON, INVITEE, MEMBER].sort());
+      expect(names.steps.find((step) => step.startsWith("select:"))).toBe("select:gaming_member_id, display_name");
+      // no statement names a member the caller did not already stand in a relation to, and none selects a column the contract does not return
+      for (const statement of statements) for (const step of statement.steps.filter((s) => s.startsWith("select:"))) expect(step, statement.table).not.toMatch(/\*|auth_user_id|email|phone/);
+      for (const statement of statements.filter((s) => s.table !== "gaming_members")) {
+        for (const step of statement.steps.filter((s) => /^(eq:gaming_member_id|or:)/.test(s))) expect([...step.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)].every((m) => m[0] === CAPTAIN), step).toBe(true);
+      }
+    });
+
+    it("a member who leads nothing runs no join-request statement; a member who leads runs exactly one", async () => {
+      const none = inboxRepo(everyone());
+      await none.repo.listPendingOffersOfMember(ME);
+      expect(none.statements.filter((s) => s.steps.some((step) => step.startsWith("in:lifetime_team_id")))).toHaveLength(0);
+      const led = inboxRepo(everyone());
+      await led.repo.listPendingOffersOfMember(SUBCAP);
+      expect(led.statements.filter((s) => s.steps.some((step) => step.startsWith("in:lifetime_team_id")))).toHaveLength(1);
+    });
+
+    it("a record that is malformed or contradictory is dropped — never shown, never guessed — while a good record beside it still is", async () => {
+      const bad = [
+        membership(210, { lifetime_team_membership_id: "not-a-uuid" }), membership(211, { initiated_by_side: "CLUB" }), membership(212, { initiated_by_side: undefined }),
+        membership(213, { gaming_member_id: undefined }), membership(214, { initiated_by_gaming_member_id: null }),
+        membership(215, { initiated_by_gaming_member_id: ME }),                                                              // an invitation the invitee made to themselves
+        membership(216, { initiated_by_side: "PERSON", gaming_member_id: ME, initiated_by_gaming_member_id: CAPTAIN }),     // a request the person did not make
+        membership(217, { team: null }), membership(218, { team: team(id(555)) }),                                          // the team of another row
+        membership(219, { team: team(TEAM, undefined, { name: "" }) }), membership(220, { team: team(TEAM, undefined, { name: 7 }) }), membership(221, { team: team(TEAM, undefined, { public_code: "" }) }),
+        membership(222, { team: team(TEAM, undefined, { public_code: undefined }) }),
+        membership(223, { expires_at: null }), membership(224, { expires_at: "soon" }), membership(225, { created_at: "yesterday" }), membership(226, { created_at: null }),
+        membership(227, { seq: "first" }), membership(228, { seq: null }), membership(229, { seq: 1.5 }),
+        null, 7, "offer", [], { lifetime_team_membership_id: id(230) },
+      ];
+      const badOffers = [seatOffer(310, { lifetime_team_leadership_id: undefined }), seatOffer(311, { gaming_member_id: ME, offered_by_gaming_member_id: ME }), seatOffer(312, { gaming_member_id: ME, role: "OWNER" }),
+        seatOffer(313, { gaming_member_id: ME, team: null }), seatOffer(314, { gaming_member_id: ME, expires_at: "later" }), seatOffer(315, { gaming_member_id: ME, seq: "x" })];
+      const good = membership(299);
+      expect((await inboxOf(ME, { memberships: [...bad, good], offers: badOffers })).map((o) => o.offerId)).toEqual([id(299)]);
+    });
+
+    it("a counterparty whose display name is missing, blank or not text drops that offer — the rest stay; an offer with no counterparty person needs none", async () => {
+      const members = (name: unknown) => memberRows().map((r) => (r.gaming_member_id === CAPTAIN ? { ...r, display_name: name } : r));
+      for (const name of [undefined, null, "", "   ", 7]) expect(await inboxOf(ME, { memberships: [membership(201), membership(202, { gaming_member_id: ME, initiated_by_side: "PERSON", initiated_by_gaming_member_id: ME })], members: members(name) }), String(name))
+        .toEqual([view("MEMBERSHIP", 202, "OUTGOING", null)]);
+      expect(await inboxOf(ME, { memberships: [membership(201)], members: memberRows().filter((r) => r.gaming_member_id !== CAPTAIN) }), "a counterparty the lookup did not return").toEqual([]);
+    });
+
+    describe("the order is deterministic: creation time across both kinds, then each table's creation sequence, then the kind, then the identifier", () => {
+      const mine = (rows: unknown[], offers: unknown[]) => ({ memberships: rows, offers });
+      it("creation time decides first — even against a larger sequence — across membership and leadership offers", async () => {
+        const rows = mine([
+          membership(205, { seq: 90, created_at: "2026-11-24T10:00:00.000400+00:00" }),
+          membership(206, { seq: 100, created_at: "2026-11-24T09:59:59+00:00" }),                    // earliest, though its sequence is the largest; no fractional seconds at all
+        ], [seatOffer(301, { gaming_member_id: ME, seq: 7, created_at: "2026-11-24T10:00:00.000500+00:00" })]);
+        expect((await inboxOf(ME, rows)).map((o) => o.offerId)).toEqual([id(206), id(205), id(301)]);
+      });
+
+      it("the same instant written with a different offset or fractional width is the same instant: then the kind, then the sequence, then the identifier break the tie", async () => {
+        const rows = mine([
+          membership(210, { seq: 5, created_at: "2026-11-24T05:00:00.5-05:00" }),                   // 10:00:00.500000Z
+          membership(211, { seq: 4, created_at: "2026-11-24T10:00:00.500000+00:00" }),              // the same instant, a smaller sequence
+          membership(212, { seq: 4, created_at: "2026-11-24T10:00:00.5Z" }),                        // the same instant and sequence: the identifier decides
+        ], [seatOffer(300, { gaming_member_id: ME, seq: 1, created_at: "2026-11-24T10:00:00.500000+00:00" })]);
+        expect((await inboxOf(ME, rows)).map((o) => o.offerId)).toEqual([id(211), id(212), id(210), id(300)]);
+      });
+
+      it("a microsecond decides, where a millisecond clock could not", async () => {
+        const rows = mine([membership(220, { seq: 2, created_at: "2026-11-24T10:00:00.123457+00:00" }), membership(221, { seq: 1, created_at: "2026-11-24T10:00:00.123456+00:00" })], []);
+        expect((await inboxOf(ME, rows)).map((o) => o.offerId)).toEqual([id(221), id(220)]);
+      });
+
+      it("whatever order the server returns the rows in, the answer is the same", async () => {
+        const rows = [membership(231), membership(232), membership(233), membership(234)];
+        const offers = [seatOffer(331, { gaming_member_id: ME }), seatOffer(332, { gaming_member_id: ME })];
+        const expected = (await inboxOf(ME, mine(rows, offers))).map((o) => o.offerId);
+        expect(expected).toEqual([id(231), id(232), id(233), id(234), id(331), id(332)]);
+        for (const [a, b] of [[[...rows].reverse(), [...offers].reverse()], [[rows[2], rows[0], rows[3], rows[1]], [offers[1], offers[0]]]] as const) {
+          expect((await inboxOf(ME, mine([...a], [...b]))).map((o) => o.offerId)).toEqual(expected);
+        }
+      });
+
+      it("a request listed by both statements (as a party and as a leader) appears once", async () => {
+        const request = membership(240, { gaming_member_id: PERSON, initiated_by_side: "PERSON", initiated_by_gaming_member_id: PERSON });
+        const out = await inboxOf(CAPTAIN, { memberships: [request, request, request], seats: [{ lifetime_team_id: TEAM, ...seatOf(CAPTAIN) }] });
+        expect(out.map((o) => o.offerId)).toEqual([id(240)]);
+      });
+    });
+
+    it("a failure of ANY statement is a bounded error that carries none of the database's words — and a malformed identifier fails before any statement is made", async () => {
+      for (const fail of ["seats", "memberships", "requests", "offers", "members"] as const) {
+        const { repo } = inboxRepo({ ...everyone(), fail });
+        const thrown = await repo.listPendingOffersOfMember(SUBCAP).catch((e) => e);
+        expect(thrown, fail).toBeInstanceOf(LifetimeTeamError);
+        expect(thrown.code, fail).toBe("UNAVAILABLE");
+        expect(thrown.message, fail).not.toMatch(/relation|violates|secret|lifetime_/);
+      }
+      const { repo, statements } = inboxRepo(everyone());
+      await expect(repo.listPendingOffersOfMember("nope")).rejects.toMatchObject({ code: "INPUT_INVALID" });
+      await expect(repo.listPendingOffersOfMember(undefined as never)).rejects.toMatchObject({ code: "INPUT_INVALID" });
+      expect(statements).toHaveLength(0);
+    });
+
+    it("an answer that is not a list of rows is dropped, not guessed at (a null table answer is an empty inbox, not a crash)", async () => {
+      const { repo } = inboxRepo({ ...everyone(), memberships: null as never, offers: {} as never, seats: "x" as never });
+      expect(await repo.listPendingOffersOfMember(ME)).toEqual([]);
+    });
   });
 
   it("reads a team with its leaders and members in ONE request (one snapshot), ordered by their sequence", async () => {
@@ -675,7 +1025,8 @@ describe("no public surface", () => {
       expect(STORE_METHODS).toContain("listActiveTeamsOfMember");
       expect(STORE_METHODS.length).toBeGreaterThan(20);
       expect(FORBIDDEN.length).toBeGreaterThan(50);
-      for (const name of ["proposeMembership", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims", "offerLeadership", "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided"]) {
+      for (const name of ["proposeMembership", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims", "offerLeadership", "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided",
+        "listPendingOffersOfMember", "listPendingLifetimeOffers", "PendingOfferView", "TeamRole"]) {
         expect(FORBIDDEN, name).toContain(name);
       }
       for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
@@ -759,7 +1110,9 @@ describe("no public surface", () => {
       ...namesIn(/^export (?:interface|type) (\w+)/gm, FOUNDATION).filter((n) => n !== "LifetimeTeamsStore"),
     ];
     const OPERATIONS = ["proposeLifetimeMembership", "decideLifetimeMembership", "withdrawLifetimeOffer", "endLifetimeMembership", "offerLifetimeLeadership", "decideLifetimeLeadership", "endLifetimeLeadership"];
-    const ALLOWED = [...OPERATIONS, "parseOfferDecision", "parseOfferKind", "requireUuid", "LifetimeProblem"];
+    // CFM-012: the one read the adapter owns — the member's own pending offers — is called through its domain function, never through the store.
+    const READS = ["listPendingLifetimeOffers"];
+    const ALLOWED = [...OPERATIONS, ...READS, "parseOfferDecision", "parseOfferKind", "requireUuid", "LifetimeProblem"];
     const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
     const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
 
@@ -768,7 +1121,7 @@ describe("no public surface", () => {
       expect(STORE_METHODS.length).toBeGreaterThan(20);
       expect(FORBIDDEN.length).toBeGreaterThan(50);
       for (const name of ["createLifetimeTeam", "disbandLifetimeTeam", "listActiveTeamsOfMember", "normalizeLifetimeTeamName", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims",
-        "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided", "proposeMembership", "MembershipOffer"]) {
+        "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided", "proposeMembership", "MembershipOffer", "listPendingOffersOfMember", "PendingOfferView", "OfferDirection", "TeamRole"]) {
         expect(FORBIDDEN, name).toContain(name);
       }
       for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
@@ -797,20 +1150,20 @@ describe("no public surface", () => {
       expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
     });
 
-    it("calls each of the seven operations, and no other", () => {
+    it("calls each of the seven operations and its one read, and no other", () => {
       const code = adapterCode();
-      for (const operation of OPERATIONS) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
+      for (const operation of [...OPERATIONS, ...READS]) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
     });
 
-    it("exports exactly its seven handlers and no helper", () => {
+    it("exports exactly its eight handlers (seven operations and the member's own offer inbox) and no helper", () => {
       const code = adapterCode();
       expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual([
-        "handleDecideLeadership", "handleDecideMembership", "handleEndLeadership", "handleEndMembership", "handleOfferLeadership", "handleProposeMembership", "handleWithdrawOffer",
+        "handleDecideLeadership", "handleDecideMembership", "handleEndLeadership", "handleEndMembership", "handleListMyOffers", "handleOfferLeadership", "handleProposeMembership", "handleWithdrawOffer",
       ]);
       expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
     });
 
-    it("imports only what its seven operations need, one statement per module", () => {
+    it("imports only what its operations and its one read need, one statement per module", () => {
       const code = adapterCode();
       const imports: Record<string, string[]> = {};
       for (const m of code.matchAll(/^import\s+\{([^}]*)\}\s+from\s+["']([^"']+)["'];?$/gm)) {
@@ -826,13 +1179,14 @@ describe("no public surface", () => {
       expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
     });
 
-    it("is reached only by its seven routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the two adapters", () => {
+    it("is reached only by its eight routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the two adapters", () => {
       const SPECIFIER = "@/lib/gaming/competitions/lifetimeMembershipHttp";
       const routes = routesImporting(SPECIFIER);
       expect(routes).toEqual([
         "app/api/gaming/competitions/lifetime-leaderships/[leadershipId]/decision/route.ts",
         "app/api/gaming/competitions/lifetime-memberships/[membershipId]/decision/route.ts",
         "app/api/gaming/competitions/lifetime-offers/[offerId]/withdraw/route.ts",
+        "app/api/gaming/competitions/lifetime-offers/route.ts",
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership-offers/route.ts",
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership/end/route.ts",
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/end/route.ts",
@@ -846,10 +1200,10 @@ describe("no public surface", () => {
       }
       const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
       const mentioning = surfaces.map(unix).filter((f) => f !== MEMBERSHIP_HTTP_ADAPTER && /lifetimeMembershipHttp/.test(read(f))).sort();
-      expect(mentioning, "nothing but the seven routes reaches the adapter").toEqual(routes);
+      expect(mentioning, "nothing but the eight routes reaches the adapter").toEqual(routes);
       // No broad exemption and no unbounded sibling: every route of the lifetime family imports exactly one of the two adapters and nothing else.
       const family = competitionRoutes().filter((f) => /\/lifetime-[a-z]+\//.test(f));
-      expect(family).toHaveLength(9);
+      expect(family).toHaveLength(10);
       for (const route of family) expect([["@/lib/gaming/competitions/lifetimeHttp"], [SPECIFIER]], route).toContainEqual(importsOf(route));
     });
 

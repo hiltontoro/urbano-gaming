@@ -4,8 +4,9 @@
  * The decisions are the database's: a lifetime team, its dated memberships and leadership, an entry into a competition and a person's own acceptance of a roster
  * place are judged inside atomic operations under fixed lock order, and the tables hold the same rules themselves (see the migration of this gate). This module holds
  * only what the application adds: the typed refusals with their stable codes, the parsing of what a caller sends BEFORE a call is made, the records an operation
- * returns, the store interface, and thin operations that validate and call the store. It reads no clock, decides no rule and is referenced by no route or page:
- * the foundation is reachable only from server code and tests.
+ * returns, the store interface, and thin operations that validate and call the store. It reads no clock and decides no rule. It is reachable from server code and
+ * tests only: no route or page names it — the two bounded HTTP adapters (the team lifecycle one and the membership and leadership one) are the only modules that stand
+ * between it and a route.
  *
  * The database's own words are never passed on: every refusal has a bounded message here.
  */
@@ -294,7 +295,26 @@ export interface LifetimeTeamView {
   members: Array<{ gamingMemberId: string; joinedAt: string; isLegacy: boolean }>;
 }
 
-export interface MemberTeamSummary { lifetimeTeamId: string; publicCode: string; name: string; status: "ACTIVE" | "DISBANDED"; joinedAt: string; isLegacy: boolean }
+/** The member's OWN role on a team (UG-CR-GATE-CFM-012): derived on the server from the member's ACTIVE seat on that team alone — never chosen or claimed by a caller. */
+export type TeamRole = "CAPTAIN" | "SUB_CAPTAIN" | "MEMBER";
+
+export interface MemberTeamSummary { lifetimeTeamId: string; publicCode: string; name: string; status: "ACTIVE" | "DISBANDED"; joinedAt: string; isLegacy: boolean; role: TeamRole }
+
+export type OfferDirection = "INCOMING" | "OUTGOING";
+
+/**
+ * One pending offer as the member it concerns may see it (UG-CR-GATE-CFM-012): a membership invitation or request, or an offer of the sub-captain seat. The counterparty is
+ * only the other person already involved in THAT offer — null when there is none (a person's own join request is addressed to the team, not to anybody in it). Nothing
+ * here says whether the offer can still be answered: the decision operations remain the authority on expiry, and `expiresAt` is simply what was stored.
+ */
+export interface PendingOfferView {
+  kind: OfferKind;
+  offerId: string;
+  direction: OfferDirection;
+  team: { lifetimeTeamId: string; publicCode: string; name: string };
+  counterparty: { gamingMemberId: string; displayName: string } | null;
+  expiresAt: string;
+}
 
 export interface LifetimeEntryView {
   competitionTeamId: string; competitionId: string; lifetimeTeamId: string; publicCode: string; name: string; captainGamingMemberId: string; subCaptainGamingMemberId: string | null;
@@ -328,6 +348,7 @@ export interface LifetimeTeamsStore {
   backfillLegacyTeams(competitionIds: string[]): Promise<LegacyBackfillResult>;
   getLifetimeTeam(lifetimeTeamId: string): Promise<LifetimeTeamView | null>;
   listActiveTeamsOfMember(gamingMemberId: string): Promise<MemberTeamSummary[]>;
+  listPendingOffersOfMember(gamingMemberId: string): Promise<PendingOfferView[]>;
   getEntry(competitionTeamId: string): Promise<LifetimeEntryView | null>;
 }
 
@@ -379,6 +400,14 @@ export async function decideLifetimeLeadership(store: LifetimeTeamsStore, leader
 
 export async function endLifetimeLeadership(store: LifetimeTeamsStore, lifetimeTeamId: string, actorGamingMemberId: string): Promise<LeadershipEnded> {
   return store.endLeadership(requireUuid(lifetimeTeamId), requireUuid(actorGamingMemberId));
+}
+
+/**
+ * The pending offers that concern the verified member — and nobody else's (UG-CR-GATE-CFM-012). The member is the ONLY input: there is no selector, filter or second
+ * identity to give, so nothing a caller sends can name another member, a team or an offer.
+ */
+export async function listPendingLifetimeOffers(store: LifetimeTeamsStore, gamingMemberId: string): Promise<PendingOfferView[]> {
+  return store.listPendingOffersOfMember(requireUuid(gamingMemberId));
 }
 
 export async function enableLifetimeEntryFlow(store: LifetimeTeamsStore, competitionId: string, organizerGamingMemberId: string): Promise<EntryFlowEnabled> {
