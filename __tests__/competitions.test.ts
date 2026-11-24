@@ -1628,11 +1628,11 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
       else process.env.COMPETITIONS_SCHEMA_READY = ORIGINAL;
     });
 
-    it("discovered exactly the 45 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw; UG-CR-GATE-SSS-022 added [competitionId]/schedule-proposal; UG-CR-GATE-CFM-007 added lifetime-teams and lifetime-teams/[lifetimeTeamId]/disband; UG-CR-GATE-CFM-010 added lifetime-teams/[lifetimeTeamId]/memberships, memberships/end, leadership-offers and leadership/end, lifetime-memberships/[membershipId]/decision, lifetime-offers/[offerId]/withdraw and lifetime-leaderships/[leadershipId]/decision; UG-CR-GATE-CFM-012 added lifetime-offers, the member's own offer inbox, GET only)", () => {
-      expect(routeFiles).toHaveLength(45);
+    it("discovered exactly the 56 known route files (canary — bump this alongside the review if a route is genuinely added or removed; UG-CR-RPT-041/042 added open-team-registration, close-team-registration, teams/propose, teams/[teamId]/decide, and teams/[teamId]/invitation-preview; UG-CR-GATE-081 added resolve and [competitionId]/cancel; UG-CR-GATE-SSS-004 added [competitionId]/planning; UG-CR-GATE-SSS-011 added [competitionId]/plan-amendment, plan-amendment/decision and plan-amendment/withdraw; UG-CR-GATE-SSS-019 added [competitionId]/draw; UG-CR-GATE-SSS-022 added [competitionId]/schedule-proposal; UG-CR-GATE-CFM-007 added lifetime-teams and lifetime-teams/[lifetimeTeamId]/disband; UG-CR-GATE-CFM-010 added lifetime-teams/[lifetimeTeamId]/memberships, memberships/end, leadership-offers and leadership/end, lifetime-memberships/[membershipId]/decision, lifetime-offers/[offerId]/withdraw and lifetime-leaderships/[leadershipId]/decision; UG-CR-GATE-CFM-012 added lifetime-offers, the member's own offer inbox, GET only; UG-CR-GATE-CFM-014 added [competitionId]/lifetime-entry-flow/enable and disable, [competitionId]/lifetime-entries (GET and POST), lifetime-entries/freeze, lifetime-entries/[competitionTeamId]/decision, withdraw and roster-claims, [competitionId]/lifetime-roster-claims/[claimId]/decision and release, and the two member reads lifetime-entries and lifetime-roster-claims, GET only)", () => {
+      expect(routeFiles).toHaveLength(56);
     });
 
-    it("with readiness disabled, every one of the 51 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment, on [competitionId]/draw, on [competitionId]/schedule-proposal and on lifetime-teams; the lifetime-teams/[lifetimeTeamId]/disband route and the seven UG-CR-GATE-CFM-010 membership and leadership routes are POST only; the UG-CR-GATE-CFM-012 lifetime-offers inbox route is GET only) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
+    it("with readiness disabled, every one of the 63 discovered handlers (GET+POST both counted on the base route, on [competitionId]/planning, on [competitionId]/plan-amendment, on [competitionId]/draw, on [competitionId]/schedule-proposal, on lifetime-teams and on [competitionId]/lifetime-entries; the lifetime-teams/[lifetimeTeamId]/disband route and the seven UG-CR-GATE-CFM-010 membership and leadership routes are POST only; the UG-CR-GATE-CFM-012 lifetime-offers inbox route is GET only; of the UG-CR-GATE-CFM-014 routes, the two member reads are GET only and every other one is POST only) returns 503 immediately, WITHOUT authenticating (including the deliberately-unauthenticated invitation-preview and resolve routes — the schema-readiness guard fires before either route's own intentional auth omission is reached), parsing the request body, or constructing a repository", async () => {
       delete process.env.COMPETITIONS_SCHEMA_READY;
       let handlersTested = 0;
 
@@ -1669,7 +1669,7 @@ describe("Competitions production-availability guard (UG-CR-GATE-036)", () => {
         }
       }
 
-      expect(handlersTested).toBe(51);
+      expect(handlersTested).toBe(63);
     });
   });
 });

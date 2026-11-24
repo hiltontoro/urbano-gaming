@@ -4,12 +4,12 @@ import {
   LifetimeTeamError, lifetimeErrorFromDatabase, normalizeLifetimeTeamName, parseBackfillScope, parseClaimBatch, parseClaimDecision, parseEntryDecisionRequest, parseOfferDecision, parseOfferKind,
   requireUuid,
   type ClaimDecision, type EntriesFrozen, type EntryCreated, type EntryDecided, type EntryDecision, type EntryDecisionReason, type EntryFlowDisabled, type EntryFlowEnabled,
-  type EntryWithdrawn, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
-  type LeadershipOffer, type LifetimeEntryView, type LifetimeTeamCreated, type LifetimeTeamDisbanded, type LifetimeTeamsStore, type LifetimeTeamView, type MemberTeamSummary,
-  type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type PendingOfferView, type RosterClaimDecision,
-  type RosterClaimProposed, type RosterClaimReleased, type TeamRole,
+  type EntryWithdrawn, type LedEntryView, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
+  type LeadershipOffer, type LifetimeEntryView, type LifetimeTeamCreated, type LifetimeTeamDisbanded, type LifetimeTeamsStore, type LifetimeTeamView, type LiveEntryStatus, type MemberTeamSummary,
+  type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type OpenClaimStatus, type OrganizerEntryView, type OwnClaimView,
+  type PendingOfferView, type RosterClaimDecision, type RosterClaimProposed, type RosterClaimReleased, type TeamRole,
 } from "../lifetimeTeams";
-import { CompetitionAccessDeniedError, TeamRegistrationNotOpenError } from "../types";
+import { CompetitionAccessDeniedError, CompetitionNotFoundError, TeamRegistrationNotOpenError } from "../types";
 import { translateError } from "./supabaseCompetitionsRepository";
 
 /**
@@ -189,6 +189,30 @@ const byCreation = (a: OfferCandidate, b: OfferCandidate): number => {
   const [x, y] = [a.offerId.toLowerCase(), b.offerId.toLowerCase()];
   return a.created - b.created || rank(a) - rank(b) || a.seq - b.seq || (x < y ? -1 : x > y ? 1 : 0);
 };
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-CFM-014 — the entry reads: what each participant may find of their own, and the two lookups that bind an entry or a proposal to its competition.
+//
+// The same discipline as the offer inbox above: every statement is filtered by the verified member (the organizer's by the addressed competition as well), but the filter is only
+// a convenience — the code that follows decides what may be shown from the rows themselves, and a row that is malformed or contradicts itself is dropped: never shown, never
+// repaired. Every result is built field by field; no database row leaves this file, and the only columns of a person's profile ever read are the identifier and the display name.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+const ENTRY_OF_COMPETITION = "competition_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims(status)";
+const ENTRY_OF_TEAM = "competition_team_id, competition_id, lifetime_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims(competition_lifetime_roster_claim_id, gaming_member_id, status, expires_at, seq)";
+const CLAIM_OF_MEMBER = "competition_lifetime_roster_claim_id, seq, competition_id, gaming_member_id, status, expires_at, entry:competition_teams(competition_team_id, competition_id, lifetime_team_id, status, entry_flow, team:lifetime_teams(lifetime_team_id, public_code, name, status))";
+
+const isLiveEntryStatus = (value: unknown): value is LiveEntryStatus => value === "PENDING_ORGANIZER_APPROVAL" || value === "ACCEPTED";
+const isOpenClaimStatus = (value: unknown): value is OpenClaimStatus => value === "PROPOSED" || value === "ACCEPTED";
+/** One embedded record, whether the relationship came back as an object or as a list of one. */
+const embeddedRow = (value: unknown): Row | null => {
+  const one = Array.isArray(value) ? value[0] : value;
+  return typeof one === "object" && one !== null && !Array.isArray(one) ? (one as Row) : null;
+};
+/** A statement that asked for ONE row answers a record or nothing: a list is not an answer. */
+const plainRow = (value: unknown): Row | null => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Row) : null);
+/** Creation order: the instant to the microsecond, then the identifier — the same two statements always give the same order. */
+const byCreatedThenId = (a: { created: number; id: string }, b: { created: number; id: string }) => a.created - b.created || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
   private readonly client: SupabaseClient;
@@ -435,5 +459,130 @@ export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
         claimId: str(c.competition_lifetime_roster_claim_id), gamingMemberId: str(c.gaming_member_id), status: str(c.status), acceptedAt: strOrNull(c.accepted_at), departedAt: strOrNull(c.departed_at),
       })),
     };
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------------------------------
+  // UG-CR-GATE-CFM-014 — binding an entry or a proposal to its competition, and the three reads of the participants
+  // -------------------------------------------------------------------------------------------------------------------------------------------
+
+  async getEntryCompetitionId(competitionTeamId: string): Promise<string | null> {
+    const id = requireUuid(competitionTeamId);
+    const { data, error } = await this.client.from("competition_teams").select("competition_id").eq("competition_team_id", id).eq("entry_flow", "LIFETIME").maybeSingle();
+    if (error) throw translateLifetimeError(error);
+    const row = plainRow(data);
+    return row !== null && isUuidText(row.competition_id) ? row.competition_id : null;
+  }
+
+  async getRosterClaimCompetitionId(claimId: string): Promise<string | null> {
+    const id = requireUuid(claimId);
+    const { data, error } = await this.client.from("competition_lifetime_roster_claims").select("competition_id").eq("competition_lifetime_roster_claim_id", id).maybeSingle();
+    if (error) throw translateLifetimeError(error);
+    const row = plainRow(data);
+    return row !== null && isUuidText(row.competition_id) ? row.competition_id : null;
+  }
+
+  async listLiveEntriesForOrganizer(competitionId: string, organizerGamingMemberId: string): Promise<OrganizerEntryView[]> {
+    const id = requireUuid(competitionId);
+    const organizer = requireUuid(organizerGamingMemberId);
+    // ONE statement: the organizer, any revocation of their hosting access and the entries with their places come from the same snapshot.
+    const { data, error } = await this.client.from("competitions")
+      .select(`competition_id, organizer_gaming_member_id, hosts:competition_host_capabilities(state), entries:competition_teams(${ENTRY_OF_COMPETITION})`)
+      .eq("competition_id", id).eq("organizer_gaming_member_id", organizer).maybeSingle();
+    if (error) throw translateLifetimeError(error);
+    const competition = plainRow(data);
+    // Not the organizer — no such competition, a competition somebody else runs, one whose hosting access has been revoked — is ONE refusal: an unknown competition.
+    if (competition === null || !sameMember(competition.competition_id, id) || !sameMember(competition.organizer_gaming_member_id, organizer)) throw new CompetitionNotFoundError();
+    // The hosting capability is one record or a list of them, whichever way the relationship is read; anything else is not understood, and a revocation that cannot be ruled out is not ignored.
+    const hosts = competition.hosts;
+    const capabilities = hosts === null ? [] : Array.isArray(hosts) ? hosts : [hosts];
+    if (capabilities.some((capability) => typeof capability !== "object" || capability === null || Array.isArray(capability) || typeof (capability as Row).state !== "string")) throw new LifetimeTeamError("UNAVAILABLE");
+    if (capabilities.some((capability) => (capability as Row).state === "REVOKED")) throw new CompetitionNotFoundError();
+
+    const entries = asRows(competition.entries).flatMap((entry) => {
+      const created = microsecondsOf(entry.created_at);
+      if (entry.entry_flow !== "LIFETIME" || !isLiveEntryStatus(entry.status) || !isUuidText(entry.competition_team_id) || !isText(entry.public_code) || !isText(entry.name)) return [];
+      if (created === null || typeof entry.created_at !== "string" || !Array.isArray(entry.claims)) return [];
+      const claims = asRows(entry.claims);
+      return [{
+        created, id: entry.competition_team_id.toLowerCase(),
+        view: {
+          competitionTeamId: entry.competition_team_id, publicCode: entry.public_code, name: entry.name, status: entry.status, createdAt: entry.created_at,
+          acceptedPlayers: claims.filter((claim) => claim.status === "ACCEPTED").length, proposedPlayers: claims.filter((claim) => claim.status === "PROPOSED").length,
+        } satisfies OrganizerEntryView,
+      }];
+    });
+    return entries.sort(byCreatedThenId).map((entry) => entry.view);
+  }
+
+  async listLiveEntriesOfLedTeams(gamingMemberId: string): Promise<LedEntryView[]> {
+    const me = requireUuid(gamingMemberId);
+    // ONE statement, and it is its own authority. Its rows are the member's CURRENT seats — ACTIVE, captain or sub-captain: the database's own definition of leading a team — and each seat
+    // carries, inside it, the live lifetime entries of ITS team with their proposals. Nothing about an entry or a proposal can come back without the seat that authorizes it, read in the same
+    // snapshot: a leadership that ended a moment ago answers with no rows at all. There is no earlier lookup whose answer could go stale between asking who leads and reading what they lead.
+    const found = await this.client.from("lifetime_team_leaderships")
+      .select(`${SEAT_ROWS}, lifetime_teams(lifetime_team_id, competition_teams(${ENTRY_OF_TEAM}))`)
+      .eq("gaming_member_id", me).eq("status", "ACTIVE").in("role", ["CAPTAIN", "SUB_CAPTAIN"])
+      .eq("lifetime_teams.competition_teams.entry_flow", "LIFETIME").in("lifetime_teams.competition_teams.status", ["PENDING_ORGANIZER_APPROVAL", "ACCEPTED"]);
+    if (found.error) throw translateLifetimeError(found.error);
+
+    // The filters are not taken on trust either: an entry is shown only through a seat that is exactly a current one, the member's own, whose embedded team is that very seat's team.
+    const shown = new Set<string>();
+    const entries = asRows(found.data).flatMap((seat) => {
+      const teamId = seat.lifetime_team_id;
+      const team = embeddedRow(seat.lifetime_teams);
+      if (activeSeat(seat) === null || !sameMember(seat.gaming_member_id, me) || !isUuidText(teamId) || team === null || !sameMember(team.lifetime_team_id, teamId)) return [];
+      return asRows(team.competition_teams).flatMap((entry) => {
+        const created = microsecondsOf(entry.created_at);
+        if (entry.entry_flow !== "LIFETIME" || !isLiveEntryStatus(entry.status) || !isUuidText(entry.competition_team_id) || !isUuidText(entry.competition_id) || !isUuidText(entry.lifetime_team_id)) return [];
+        if (!sameMember(entry.lifetime_team_id, teamId) || !isText(entry.public_code) || !isText(entry.name) || created === null || typeof entry.created_at !== "string" || !Array.isArray(entry.claims)) return [];
+        if (shown.has(entry.competition_team_id.toLowerCase())) return [];
+        shown.add(entry.competition_team_id.toLowerCase());
+        const claims = asRows(entry.claims).flatMap((claim) => {
+          if (!isUuidText(claim.competition_lifetime_roster_claim_id) || !isUuidText(claim.gaming_member_id) || !isOpenClaimStatus(claim.status)) return [];
+          if (!isText(claim.expires_at) || Number.isNaN(Date.parse(claim.expires_at)) || typeof claim.seq !== "number" || !Number.isSafeInteger(claim.seq)) return [];
+          return [{ seq: claim.seq, claimId: claim.competition_lifetime_roster_claim_id, gamingMemberId: claim.gaming_member_id, status: claim.status, expiresAt: claim.expires_at }];
+        });
+        return [{ created, id: entry.competition_team_id.toLowerCase(), entry, claims }];
+      });
+    }).sort(byCreatedThenId);
+
+    // The display names of the people those proposals name — only theirs, and only that column.
+    const ids = [...new Set(entries.flatMap((candidate) => candidate.claims.map((claim) => claim.gamingMemberId.toLowerCase())))];
+    const names = new Map<string, string>();
+    if (ids.length > 0) {
+      const people = await this.client.from("gaming_members").select(COUNTERPARTY_ROWS).in("gaming_member_id", ids);
+      if (people.error) throw translateLifetimeError(people.error);
+      for (const row of asRows(people.data)) if (isUuidText(row.gaming_member_id) && isText(row.display_name)) names.set(row.gaming_member_id.toLowerCase(), row.display_name);
+    }
+
+    return entries.map(({ entry, claims }): LedEntryView => ({
+      competitionTeamId: entry.competition_team_id as string, competitionId: entry.competition_id as string, lifetimeTeamId: entry.lifetime_team_id as string, publicCode: entry.public_code as string,
+      name: entry.name as string, status: entry.status as LiveEntryStatus, createdAt: entry.created_at as string,
+      // A person without a display name is not shown half-described: the proposal is left out rather than shown nameless.
+      claims: claims.sort((a, b) => a.seq - b.seq || (a.claimId < b.claimId ? -1 : a.claimId > b.claimId ? 1 : 0)).flatMap((claim) => {
+        const displayName = names.get(claim.gamingMemberId.toLowerCase());
+        return displayName === undefined ? [] : [{ claimId: claim.claimId, gamingMemberId: claim.gamingMemberId, displayName, status: claim.status, expiresAt: claim.expiresAt }];
+      }),
+    }));
+  }
+
+  async listOpenClaimsOfMember(gamingMemberId: string): Promise<OwnClaimView[]> {
+    const me = requireUuid(gamingMemberId);
+    // ONE statement: each proposal with its entry and team, from the same snapshot.
+    const { data, error } = await this.client.from("competition_lifetime_roster_claims").select(CLAIM_OF_MEMBER).eq("gaming_member_id", me).in("status", ["PROPOSED", "ACCEPTED"]).order("seq");
+    if (error) throw translateLifetimeError(error);
+    return asRows(data).flatMap((claim) => {
+      if (!isUuidText(claim.competition_lifetime_roster_claim_id) || !sameMember(claim.gaming_member_id, me) || !isOpenClaimStatus(claim.status) || !isUuidText(claim.competition_id)) return [];
+      if (!isText(claim.expires_at) || Number.isNaN(Date.parse(claim.expires_at)) || typeof claim.seq !== "number" || !Number.isSafeInteger(claim.seq)) return [];
+      // The proposal's own entry — live, a lifetime entry, in the proposal's own competition — and that entry's own team, active and named.
+      const entry = embeddedRow(claim.entry);
+      if (entry === null || entry.entry_flow !== "LIFETIME" || !isLiveEntryStatus(entry.status) || !sameMember(entry.competition_id, claim.competition_id)) return [];
+      const team = embeddedRow(entry.team);
+      if (team === null || !isUuidText(team.lifetime_team_id) || !sameMember(team.lifetime_team_id, entry.lifetime_team_id) || team.status !== "ACTIVE" || !isText(team.public_code) || !isText(team.name)) return [];
+      return [{
+        seq: claim.seq, id: claim.competition_lifetime_roster_claim_id,
+        view: { claimId: claim.competition_lifetime_roster_claim_id, competitionId: claim.competition_id, status: claim.status, expiresAt: claim.expires_at, team: { lifetimeTeamId: team.lifetime_team_id, publicCode: team.public_code, name: team.name } } satisfies OwnClaimView,
+      }];
+    }).sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((candidate) => candidate.view);
   }
 }

@@ -5,8 +5,8 @@
  * place are judged inside atomic operations under fixed lock order, and the tables hold the same rules themselves (see the migration of this gate). This module holds
  * only what the application adds: the typed refusals with their stable codes, the parsing of what a caller sends BEFORE a call is made, the records an operation
  * returns, the store interface, and thin operations that validate and call the store. It reads no clock and decides no rule. It is reachable from server code and
- * tests only: no route or page names it — the two bounded HTTP adapters (the team lifecycle one and the membership and leadership one) are the only modules that stand
- * between it and a route.
+ * tests only: no route or page names it — the three bounded HTTP adapters (the team lifecycle one, the membership and leadership one and the competition entry one) are
+ * the only modules that stand between it and a route.
  *
  * The database's own words are never passed on: every refusal has a bounded message here.
  */
@@ -323,6 +323,33 @@ export interface LifetimeEntryView {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-CFM-014 — what each person who takes part in an entry may find for themselves. Three reads, each derived from the verified member alone (the organizer's from the
+// addressed competition as well): the organizer's live entries of a competition they run, a leader's live entries of the team they lead, and a person's own open proposals.
+// A record says what was stored; none says whether an answer can still be given — the operations remain the authority on expiry, on the deadline and on the freeze.
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+/** An entry is live while it awaits the organizer's decision or after it was approved; a rejected or withdrawn entry is over. */
+export type LiveEntryStatus = "PENDING_ORGANIZER_APPROVAL" | "ACCEPTED";
+/** A roster proposal is open while its person has not answered it (PROPOSED), and holds a place once they accepted (ACCEPTED). */
+export type OpenClaimStatus = "PROPOSED" | "ACCEPTED";
+
+/** One live entry of a competition, as the organizer of that competition sees it: who entered, where it stands and how many places are taken — no person is named. */
+export interface OrganizerEntryView {
+  competitionTeamId: string; publicCode: string; name: string; status: LiveEntryStatus; createdAt: string; acceptedPlayers: number; proposedPlayers: number;
+}
+
+/** One live entry of a team the member currently leads, with the open proposals and accepted places on it and the people they name. */
+export interface LedEntryView {
+  competitionTeamId: string; competitionId: string; lifetimeTeamId: string; publicCode: string; name: string; status: LiveEntryStatus; createdAt: string;
+  claims: Array<{ claimId: string; gamingMemberId: string; displayName: string; status: OpenClaimStatus; expiresAt: string }>;
+}
+
+/** One open proposal (or accepted place) of the member themself: where it is, the team that made it and what it stands at. */
+export interface OwnClaimView {
+  claimId: string; competitionId: string; status: OpenClaimStatus; expiresAt: string; team: { lifetimeTeamId: string; publicCode: string; name: string };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
 // The store: every operation the database offers, and three bounded reads
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -350,6 +377,16 @@ export interface LifetimeTeamsStore {
   listActiveTeamsOfMember(gamingMemberId: string): Promise<MemberTeamSummary[]>;
   listPendingOffersOfMember(gamingMemberId: string): Promise<PendingOfferView[]>;
   getEntry(competitionTeamId: string): Promise<LifetimeEntryView | null>;
+  /** The competition an entry belongs to (it never changes), or null when there is no such entry. */
+  getEntryCompetitionId(competitionTeamId: string): Promise<string | null>;
+  /** The competition a roster proposal belongs to (it never changes), or null when there is no such proposal. */
+  getRosterClaimCompetitionId(claimId: string): Promise<string | null>;
+  /** The live entries of a competition — only when the member is its organizer with organizer access still in force; otherwise it refuses as an unknown competition. */
+  listLiveEntriesForOrganizer(competitionId: string, organizerGamingMemberId: string): Promise<OrganizerEntryView[]>;
+  /** The live entries of the teams the member currently leads, with their open proposals and accepted places. */
+  listLiveEntriesOfLedTeams(gamingMemberId: string): Promise<LedEntryView[]>;
+  /** The member's own open proposals and accepted places. */
+  listOpenClaimsOfMember(gamingMemberId: string): Promise<OwnClaimView[]>;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -459,6 +496,86 @@ export async function releaseRosterClaim(store: LifetimeTeamsStore, claimId: str
 
 export async function freezeLifetimeEntries(store: LifetimeTeamsStore, competitionId: string, organizerGamingMemberId: string): Promise<EntriesFrozen> {
   return store.freezeEntries(requireUuid(competitionId), requireUuid(organizerGamingMemberId));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-CFM-014 — operations that address an entry or a proposal THROUGH a competition, and the reads each participant may make
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * An entry belongs to exactly one competition, for good. A request that names a competition and an entry is only about that entry when the entry is in that competition:
+ * an entry that does not exist and an entry of another competition are the same refusal, so nothing says which it was. The database's operations take the entry alone and
+ * decide who may act on it; this only makes sure the competition a caller named is the entry's own.
+ */
+async function requireEntryIn(store: LifetimeTeamsStore, competitionId: string, competitionTeamId: string): Promise<void> {
+  const found = await store.getEntryCompetitionId(competitionTeamId);
+  if (typeof found !== "string" || !sameId(found, competitionId)) throw new LifetimeTeamError("ENTRY_NOT_FOUND");
+}
+
+/** The same for a roster proposal: it belongs to one competition, for good. An unknown proposal and one of another competition are the same refusal. */
+async function requireClaimIn(store: LifetimeTeamsStore, competitionId: string, claimId: string): Promise<void> {
+  const found = await store.getRosterClaimCompetitionId(claimId);
+  if (typeof found !== "string" || !sameId(found, competitionId)) throw new LifetimeTeamError("CLAIM_NOT_FOUND");
+}
+
+/** A leader withdraws their team's entry — the entry named in the competition named. */
+export async function withdrawLifetimeEntryIn(store: LifetimeTeamsStore, competitionId: string, competitionTeamId: string, actorGamingMemberId: string): Promise<EntryWithdrawn> {
+  const competition = requireUuid(competitionId);
+  const entry = requireUuid(competitionTeamId);
+  const actor = requireUuid(actorGamingMemberId);
+  await requireEntryIn(store, competition, entry);
+  return store.withdrawEntry(entry, actor);
+}
+
+/** A leader proposes people for their team's entry — the entry named in the competition named. A proposal claims nobody: the person's own acceptance does. */
+export async function proposeRosterClaimsIn(
+  store: LifetimeTeamsStore, competitionId: string, competitionTeamId: string, actorGamingMemberId: string, gamingMemberIds: unknown,
+): Promise<RosterClaimProposed[]> {
+  const competition = requireUuid(competitionId);
+  const entry = requireUuid(competitionTeamId);
+  const actor = requireUuid(actorGamingMemberId);
+  const batch = parseClaimBatch(gamingMemberIds);
+  await requireEntryIn(store, competition, entry);
+  return store.proposeRosterClaims(entry, actor, batch);
+}
+
+/** The person named by a proposal answers it — the proposal named in the competition named. */
+export async function decideRosterClaimIn(store: LifetimeTeamsStore, competitionId: string, claimId: string, actorGamingMemberId: string, decision: unknown): Promise<RosterClaimDecision> {
+  const competition = requireUuid(competitionId);
+  const claim = requireUuid(claimId);
+  const actor = requireUuid(actorGamingMemberId);
+  const parsed = parseClaimDecision(decision);
+  await requireClaimIn(store, competition, claim);
+  return store.decideRosterClaim(claim, actor, parsed);
+}
+
+/** The person withdraws their accepted place, or a leader of the team withdraws a proposal or removes a place — the proposal named in the competition named. */
+export async function releaseRosterClaimIn(store: LifetimeTeamsStore, competitionId: string, claimId: string, actorGamingMemberId: string): Promise<RosterClaimReleased> {
+  const competition = requireUuid(competitionId);
+  const claim = requireUuid(claimId);
+  const actor = requireUuid(actorGamingMemberId);
+  await requireClaimIn(store, competition, claim);
+  return store.releaseRosterClaim(claim, actor);
+}
+
+/**
+ * The live entries of the addressed competition — for its organizer only. The verified member is the organizer or there is nothing to show: a competition that does not
+ * exist, one somebody else runs and one whose organizer access has been revoked refuse alike, as an unknown competition.
+ */
+export async function listLifetimeEntriesForOrganizer(store: LifetimeTeamsStore, competitionId: string, organizerGamingMemberId: string): Promise<OrganizerEntryView[]> {
+  return store.listLiveEntriesForOrganizer(requireUuid(competitionId), requireUuid(organizerGamingMemberId));
+}
+
+/** The live entries of the team the verified member leads. The member is the ONLY input: there is nothing else to give. */
+export async function listLifetimeEntriesOfMyTeams(store: LifetimeTeamsStore, gamingMemberId: string): Promise<LedEntryView[]> {
+  return store.listLiveEntriesOfLedTeams(requireUuid(gamingMemberId));
+}
+
+/** The verified member's own open proposals and accepted places. The member is the ONLY input: there is nothing else to give. */
+export async function listMyOpenRosterClaims(store: LifetimeTeamsStore, gamingMemberId: string): Promise<OwnClaimView[]> {
+  return store.listOpenClaimsOfMember(requireUuid(gamingMemberId));
 }
 
 /** The explicit legacy backfill of the NAMED competitions (there is no "all"). It is never run by a migration or a route. */

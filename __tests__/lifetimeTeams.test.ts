@@ -7,6 +7,7 @@ import {
   LIFETIME_DATABASE_CODES, LIFETIME_TEAM_NAME_MAX, LIFETIME_TEAM_NAME_MIN, LifetimeTeamError, lifetimeErrorFromDatabase, normalizeLifetimeTeamName,
   parseClaimDecision, parseOfferDecision, parseOfferKind, requireUuid,
   createLifetimeTeam, decideLifetimeMembership, endLifetimeMembership, enterLifetimeTeam, listPendingLifetimeOffers, proposeRosterClaims, backfillLegacyTeams,
+  decideRosterClaimIn, listLifetimeEntriesForOrganizer, listLifetimeEntriesOfMyTeams, listMyOpenRosterClaims, proposeRosterClaimsIn, releaseRosterClaimIn, withdrawLifetimeEntryIn,
   type LifetimeTeamsStore,
 } from "../lib/gaming/competitions/lifetimeTeams";
 import { SupabaseLifetimeTeamsRepository } from "../lib/gaming/competitions/db/supabaseLifetimeTeamsRepository";
@@ -754,6 +755,456 @@ describe("the Supabase repository adapter", () => {
 });
 
 // =============================================================================================================================================
+describe("UG-CR-GATE-CFM-014 — the entry reads and the binding of an entry or a proposal to its competition", () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const COMP = id(1), ELSEWHERE = id(2), ORG = id(3), ME = id(4), LEADER = id(5), PERSON_A = id(6), PERSON_B = id(7), STRANGER = id(8);
+  const TEAM = id(100), TEAM_2 = id(101), ENTRY = id(200), ENTRY_2 = id(201), CLAIM = id(300), CLAIM_2 = id(301);
+  const BEGAN = "2026-11-20T10:00:00+00:00";
+  const at = (n: number) => `2026-11-24T10:00:00.${String(n).padStart(6, "0")}+00:00`;
+  const CODE_OF = (n: number) => `entry${n}`.padEnd(22, "x");
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("the domain operations that address an entry or a proposal through a competition", () => {
+    const stores = () => {
+      const s = {
+        getEntryCompetitionId: vi.fn(async (_id: string): Promise<unknown> => COMP), getRosterClaimCompetitionId: vi.fn(async (_id: string): Promise<unknown> => COMP),
+        withdrawEntry: vi.fn(async () => ({ competitionTeamId: ENTRY, status: "REJECTED", releasedClaims: 0 })),
+        proposeRosterClaims: vi.fn(async () => []), decideRosterClaim: vi.fn(async () => ({ claimId: CLAIM, status: "ACCEPTED", acceptedAt: "T" })),
+        releaseRosterClaim: vi.fn(async () => ({ claimId: CLAIM, status: "WITHDRAWN", releaseReason: "PERSON_WITHDREW" })),
+        listLiveEntriesForOrganizer: vi.fn(async () => []), listLiveEntriesOfLedTeams: vi.fn(async () => []), listOpenClaimsOfMember: vi.fn(async () => []),
+      };
+      return { s, store: s as unknown as LifetimeTeamsStore, touched: () => Object.values(s).some((fn) => fn.mock.calls.length > 0) };
+    };
+    type Run = (store: LifetimeTeamsStore, competition: string, second: string) => Promise<unknown>;
+    const OPS: Array<[string, Run, "entry" | "claim", string, (s: ReturnType<typeof stores>["s"]) => unknown[]]> = [
+      ["withdrawLifetimeEntryIn", (st, c, e) => withdrawLifetimeEntryIn(st, c, e, ME), "entry", "ENTRY_NOT_FOUND", (s) => s.withdrawEntry.mock.calls[0]],
+      ["proposeRosterClaimsIn", (st, c, e) => proposeRosterClaimsIn(st, c, e, ME, [PERSON_A, PERSON_B]), "entry", "ENTRY_NOT_FOUND", (s) => s.proposeRosterClaims.mock.calls[0]],
+      ["decideRosterClaimIn", (st, c, k) => decideRosterClaimIn(st, c, k, ME, "ACCEPT"), "claim", "CLAIM_NOT_FOUND", (s) => s.decideRosterClaim.mock.calls[0]],
+      ["releaseRosterClaimIn", (st, c, k) => releaseRosterClaimIn(st, c, k, ME), "claim", "CLAIM_NOT_FOUND", (s) => s.releaseRosterClaim.mock.calls[0]],
+    ];
+    const codeOfAsync = async (promise: Promise<unknown>) => promise.then(() => "NO_THROW", (err) => (err instanceof LifetimeTeamError ? err.code : `OTHER:${(err as Error)?.name}`));
+
+    it.each(OPS)("%s: the entry or proposal is looked up FIRST, and the operation is called only when it belongs to the competition named — with the actor and the addressed id", async (_n, run, kind, _code, call) => {
+      const { s, store } = stores();
+      const second = kind === "entry" ? ENTRY : CLAIM;
+      await run(store, COMP, second);
+      const lookup = kind === "entry" ? s.getEntryCompetitionId : s.getRosterClaimCompetitionId;
+      expect(lookup.mock.calls).toEqual([[second]]);
+      expect(lookup.mock.invocationCallOrder[0]).toBeLessThan(Math.min(...[s.withdrawEntry, s.proposeRosterClaims, s.decideRosterClaim, s.releaseRosterClaim].flatMap((fn) => fn.mock.invocationCallOrder)));
+      const args = call(s);
+      expect(args[0]).toBe(second);
+      expect(args[1]).toBe(ME);
+      expect(JSON.stringify(args)).not.toContain(COMP);
+    });
+
+    it.each(OPS)("%s: an entry or proposal of ANOTHER competition, an unknown one and a malformed answer are one refusal, and nothing is called", async (_n, run, kind, code) => {
+      for (const found of [ELSEWHERE, null, "", "nope", undefined, 7, {}]) {
+        const { s, store } = stores();
+        (kind === "entry" ? s.getEntryCompetitionId : s.getRosterClaimCompetitionId).mockResolvedValue(found);
+        expect(await codeOfAsync(run(store, COMP, kind === "entry" ? ENTRY : CLAIM)), String(found)).toBe(code);
+        for (const fn of [s.withdrawEntry, s.proposeRosterClaims, s.decideRosterClaim, s.releaseRosterClaim]) expect(fn, String(found)).not.toHaveBeenCalled();
+      }
+    });
+
+    it.each(OPS)("%s: the same competition in another letter case is the same competition", async (_n, run, kind) => {
+      const { s, store } = stores();
+      (kind === "entry" ? s.getEntryCompetitionId : s.getRosterClaimCompetitionId).mockResolvedValue(COMP.toUpperCase());
+      expect(await codeOfAsync(run(store, COMP, kind === "entry" ? ENTRY : CLAIM))).toBe("NO_THROW");
+    });
+
+    it.each(OPS)("%s: a malformed id is refused before the store is touched at all", async (_n, run, kind) => {
+      for (const [competition, second] of [["nope", kind === "entry" ? ENTRY : CLAIM], [COMP, "nope"], [COMP, ""]] as const) {
+        const { touched, store } = stores();
+        expect(await codeOfAsync(run(store, competition, second)), `${competition}/${second}`).toBe("INPUT_INVALID");
+        expect(touched()).toBe(false);
+      }
+    });
+
+    it("a malformed batch and a malformed answer are refused before the store is touched, whatever the competition holds", async () => {
+      const a = stores();
+      expect(await codeOfAsync(proposeRosterClaimsIn(a.store, COMP, ENTRY, ME, [PERSON_A, PERSON_A]))).toBe("CLAIM_BATCH_INVALID");
+      expect(await codeOfAsync(proposeRosterClaimsIn(a.store, COMP, ENTRY, ME, []))).toBe("CLAIM_BATCH_INVALID");
+      expect(await codeOfAsync(proposeRosterClaimsIn(a.store, COMP, ENTRY, ME, "x"))).toBe("CLAIM_BATCH_INVALID");
+      expect(a.touched()).toBe(false);
+      const b = stores();
+      for (const decision of ["DECLINE", "accept", null, undefined, 1]) expect(await codeOfAsync(decideRosterClaimIn(b.store, COMP, CLAIM, ME, decision)), String(decision)).toBe("DECISION_INVALID");
+      expect(b.touched()).toBe(false);
+      expect(await codeOfAsync(withdrawLifetimeEntryIn(b.store, COMP, ENTRY, "nope"))).toBe("INPUT_INVALID");
+      expect(b.touched()).toBe(false);
+    });
+
+    it("the three reads take the member (and for the organizer, the competition) and nothing else — a malformed id never reaches the store", async () => {
+      const { s, store } = stores();
+      await listLifetimeEntriesForOrganizer(store, COMP, ORG);
+      await listLifetimeEntriesOfMyTeams(store, ME);
+      await listMyOpenRosterClaims(store, ME);
+      expect(s.listLiveEntriesForOrganizer.mock.calls).toEqual([[COMP, ORG]]);
+      expect(s.listLiveEntriesOfLedTeams.mock.calls).toEqual([[ME]]);
+      expect(s.listOpenClaimsOfMember.mock.calls).toEqual([[ME]]);
+      for (const bad of [[() => listLifetimeEntriesForOrganizer(store, "nope", ORG)], [() => listLifetimeEntriesForOrganizer(store, COMP, "nope")], [() => listLifetimeEntriesOfMyTeams(store, "nope")], [() => listMyOpenRosterClaims(store, "")]]) {
+        expect(await codeOfAsync(bad[0]())).toBe("INPUT_INVALID");
+      }
+      expect(s.listLiveEntriesForOrganizer).toHaveBeenCalledTimes(1);
+      expect(s.listLiveEntriesOfLedTeams).toHaveBeenCalledTimes(1);
+      expect(s.listOpenClaimsOfMember).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  /**
+   * A client that answers EVERY statement on a table with the whole dataset — whatever it was asked: the repository, not the filter, must decide what a member may see.
+   * `answer` is the dataset (or a function of the statement); an `error` makes the statement fail.
+   */
+  interface Statement { table: string; steps: string[] }
+  type Answer = unknown | ((statement: Statement) => unknown) | { error: { code?: string; message: string } };
+  function clientOf(answers: Record<string, Answer>) {
+    const statements: Statement[] = [];
+    const from = (table: string) => {
+      const statement: Statement = { table, steps: [] };
+      statements.push(statement);
+      const outcome = () => {
+        const given = answers[table];
+        const value = typeof given === "function" ? (given as (s: Statement) => unknown)(statement) : given;
+        if (value !== null && typeof value === "object" && "error" in (value as object) && (value as { error: unknown }).error) return { data: null, error: (value as { error: unknown }).error };
+        return { data: value === undefined ? null : value, error: null };
+      };
+      const chain: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "in", "order"]) chain[method] = (...args: unknown[]) => { statement.steps.push(`${method}:${args.map(String).join(",")}`); return chain; };
+      chain.maybeSingle = () => { statement.steps.push("maybeSingle"); return Promise.resolve(outcome()); };
+      chain.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => Promise.resolve(outcome()).then(resolve, reject);
+      return chain;
+    };
+    return { statements, repo: new SupabaseLifetimeTeamsRepository("http://127.0.0.1:1", "service-key", { from, rpc: vi.fn() } as never) };
+  }
+  const refusalOf = async (promise: Promise<unknown>) => promise.then(() => "NO_THROW", (err) => (err instanceof LifetimeTeamError ? `LifetimeTeamError:${err.code}` : err instanceof Error ? err.name : "OTHER"));
+  const RAW_FAILURE = { error: { code: "XX000", message: 'relation "competition_teams" violates secret detail' } };
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("the two lookups that bind an entry or a proposal to its competition", () => {
+    it("an entry's competition is read from the lifetime entries alone — one statement, filtered by the entry — and anything but a well-formed identifier is no answer", async () => {
+      const found = clientOf({ competition_teams: { competition_id: COMP } });
+      expect(await found.repo.getEntryCompetitionId(ENTRY)).toBe(COMP);
+      expect(found.statements).toHaveLength(1);
+      expect(found.statements[0].table).toBe("competition_teams");
+      expect(found.statements[0].steps).toEqual(["select:competition_id", `eq:competition_team_id,${ENTRY}`, "eq:entry_flow,LIFETIME", "maybeSingle"]);
+      for (const row of [null, undefined, {}, { competition_id: null }, { competition_id: "nope" }, { competition_id: 7 }, [], "x"]) {
+        expect(await clientOf({ competition_teams: row }).repo.getEntryCompetitionId(ENTRY), JSON.stringify(row)).toBeNull();
+      }
+      expect(await refusalOf(clientOf({ competition_teams: RAW_FAILURE }).repo.getEntryCompetitionId(ENTRY))).toBe("LifetimeTeamError:UNAVAILABLE");
+      const none = clientOf({});
+      expect(await refusalOf(none.repo.getEntryCompetitionId("nope"))).toBe("LifetimeTeamError:INPUT_INVALID");
+      expect(none.statements).toEqual([]);
+    });
+
+    it("a proposal's competition is read from the proposals alone — one statement, filtered by the proposal — and anything but a well-formed identifier is no answer", async () => {
+      const found = clientOf({ competition_lifetime_roster_claims: { competition_id: COMP } });
+      expect(await found.repo.getRosterClaimCompetitionId(CLAIM)).toBe(COMP);
+      expect(found.statements).toHaveLength(1);
+      expect(found.statements[0].table).toBe("competition_lifetime_roster_claims");
+      expect(found.statements[0].steps).toEqual(["select:competition_id", `eq:competition_lifetime_roster_claim_id,${CLAIM}`, "maybeSingle"]);
+      for (const row of [null, undefined, {}, { competition_id: "nope" }, { competition_id: 7 }, []]) {
+        expect(await clientOf({ competition_lifetime_roster_claims: row }).repo.getRosterClaimCompetitionId(CLAIM), JSON.stringify(row)).toBeNull();
+      }
+      expect(await refusalOf(clientOf({ competition_lifetime_roster_claims: RAW_FAILURE }).repo.getRosterClaimCompetitionId(CLAIM))).toBe("LifetimeTeamError:UNAVAILABLE");
+      expect(await refusalOf(clientOf({}).repo.getRosterClaimCompetitionId("nope"))).toBe("LifetimeTeamError:INPUT_INVALID");
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("the organizer's live entries of a competition", () => {
+    const entry = (n: number, over: Record<string, unknown> = {}) => ({
+      competition_team_id: id(200 + n), public_code: CODE_OF(n), name: `Team ${n}`, status: "PENDING_ORGANIZER_APPROVAL", entry_flow: "LIFETIME", created_at: at(n), claims: [], ...over,
+    });
+    const competition = (over: Record<string, unknown> = {}) => ({ competition_id: COMP, organizer_gaming_member_id: ORG, hosts: [], entries: [entry(1)], ...over });
+    const view = (n: number, over: Record<string, unknown> = {}) => ({ competitionTeamId: id(200 + n), publicCode: CODE_OF(n), name: `Team ${n}`, status: "PENDING_ORGANIZER_APPROVAL", createdAt: at(n), acceptedPlayers: 0, proposedPlayers: 0, ...over });
+    const listed = (row: unknown, as = ORG) => clientOf({ competitions: row }).repo.listLiveEntriesForOrganizer(COMP, as);
+
+    it("is ONE statement — the competition, its hosting capability and its entries with their places — filtered by the competition AND the organizer", async () => {
+      const { repo, statements } = clientOf({ competitions: competition() });
+      expect(await repo.listLiveEntriesForOrganizer(COMP, ORG)).toEqual([view(1)]);
+      expect(statements).toHaveLength(1);
+      expect(statements[0].table).toBe("competitions");
+      expect(statements[0].steps[0]).toMatch(/^select:competition_id, organizer_gaming_member_id, hosts:competition_host_capabilities\(state\), entries:competition_teams\(competition_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims\(status\)\)$/);
+      expect(statements[0].steps).toEqual(expect.arrayContaining([`eq:competition_id,${COMP}`, `eq:organizer_gaming_member_id,${ORG}`, "maybeSingle"]));
+      expect(statements[0].steps.join(" ")).not.toMatch(/auth_user_id|email|display_name|phone/);
+    });
+
+    it("counts the accepted places and the open proposals of each entry — and no person is named", async () => {
+      const claims = [{ status: "ACCEPTED" }, { status: "ACCEPTED" }, { status: "PROPOSED" }, { status: "REJECTED" }, { status: "REMOVED" }, { status: "EXPIRED" }, { status: "WITHDRAWN" }];
+      const [shown] = await listed(competition({ entries: [entry(1, { claims, status: "ACCEPTED" })] }));
+      expect(shown).toEqual(view(1, { status: "ACCEPTED", acceptedPlayers: 2, proposedPlayers: 1 }));
+      expect(Object.keys(shown)).toEqual(["competitionTeamId", "publicCode", "name", "status", "createdAt", "acceptedPlayers", "proposedPlayers"]);
+    });
+
+    it("shows only LIVE lifetime entries: a rejected or withdrawn entry, a legacy one and a malformed one are never shown", async () => {
+      const dropped = [
+        entry(2, { status: "REJECTED" }), entry(3, { entry_flow: "V1" }), entry(4, { entry_flow: undefined }), entry(5, { status: "pending" }), entry(6, { competition_team_id: "nope" }),
+        entry(7, { public_code: "  " }), entry(8, { name: "" }), entry(9, { created_at: "yesterday" }), entry(10, { created_at: null }), entry(11, { claims: null }), entry(12, { claims: {} }), null, 7, "x", [],
+      ];
+      expect(await listed(competition({ entries: [entry(1), ...dropped, entry(13, { status: "ACCEPTED" })] }))).toEqual([view(1), view(13, { status: "ACCEPTED" })]);
+    });
+
+    it("orders the entries by their creation instant to the microsecond, then by identifier — however the database returned them", async () => {
+      const rows = [entry(3), entry(1), entry(2), entry(5, { created_at: at(2) }), entry(4, { created_at: "2026-11-24T10:00:00.000002+00:00" })];
+      const names = (await listed(competition({ entries: rows }))).map((e) => e.name);
+      expect(names).toEqual(["Team 1", "Team 2", "Team 4", "Team 5", "Team 3"]);
+      expect((await listed(competition({ entries: [...rows].reverse() }))).map((e) => e.name)).toEqual(names);
+    });
+
+    it("anybody but the organizer is told the competition is unknown: no such competition, another's, another organizer, a different competition in the row", async () => {
+      for (const [label, row] of [
+        ["no row", null], ["no row at all", undefined], ["not a record", "x"], ["a list", [competition()]], ["another organizer", competition({ organizer_gaming_member_id: STRANGER })],
+        ["no organizer", competition({ organizer_gaming_member_id: undefined })], ["another competition", competition({ competition_id: ELSEWHERE })], ["no competition id", competition({ competition_id: null })],
+      ] as const) {
+        expect(await refusalOf(listed(row)), label).toBe("CompetitionNotFoundError");
+      }
+      expect(await refusalOf(listed(competition(), STRANGER)), "the caller is not the organizer the row names").toBe("CompetitionNotFoundError");
+      expect((await listed(competition({ organizer_gaming_member_id: ORG.toUpperCase() }))).length, "the same person in another letter case").toBe(1);
+    });
+
+    it("an organizer whose hosting access was REVOKED is told the competition is unknown — however the capability is read (a list, a record) — and any other state is not a revocation", async () => {
+      for (const [label, hosts] of [
+        ["a revoked capability", [{ state: "REVOKED" }]], ["a revoked record", { state: "REVOKED" }], ["one revoked among several", [{ state: "CONSUMED" }, { state: "REVOKED" }]],
+      ] as const) {
+        expect(await refusalOf(listed(competition({ hosts }))), label).toBe("CompetitionNotFoundError");
+      }
+      for (const [label, hosts] of [["no capability", []], ["no capability record", null], ["a consumed capability", [{ state: "CONSUMED" }]], ["a consumed record", { state: "CONSUMED" }], ["a lower-case state", [{ state: "revoked" }]]] as const) {
+        expect((await listed(competition({ hosts }))).length, label).toBe(1);
+      }
+    });
+
+    it("a capability that cannot be understood is NOT read as 'not revoked': the read is unavailable", async () => {
+      for (const [label, hosts] of [["a missing field", undefined], ["a string", "REVOKED"], ["a record without a state", {}], ["a state that is not text", [{ state: 1 }]], ["junk in the list", [null]], ["a list inside the list", [[{ state: "REVOKED" }]]]] as const) {
+        expect(await refusalOf(listed(competition({ hosts }))), label).toBe("LifetimeTeamError:UNAVAILABLE");
+      }
+    });
+
+    it("a database failure is the bounded UNAVAILABLE — and a malformed identifier never reaches the database", async () => {
+      expect(await refusalOf(listed(RAW_FAILURE))).toBe("LifetimeTeamError:UNAVAILABLE");
+      const none = clientOf({});
+      expect(await refusalOf(none.repo.listLiveEntriesForOrganizer("nope", ORG))).toBe("LifetimeTeamError:INPUT_INVALID");
+      expect(await refusalOf(none.repo.listLiveEntriesForOrganizer(COMP, "nope"))).toBe("LifetimeTeamError:INPUT_INVALID");
+      expect(none.statements).toEqual([]);
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("a leader's live entries — of the teams the member currently leads, with the proposals on them", () => {
+    const seat = (member: string, team: string, over: Record<string, unknown> = {}) => ({ lifetime_team_id: team, gaming_member_id: member, role: "CAPTAIN", status: "ACTIVE", started_at: BEGAN, ended_at: null, ...over });
+    const claim = (n: number, person: string, over: Record<string, unknown> = {}) => ({
+      competition_lifetime_roster_claim_id: id(300 + n), gaming_member_id: person, status: "PROPOSED", expires_at: "2026-12-01T10:00:00+00:00", seq: n, ...over,
+    });
+    const entry = (n: number, over: Record<string, unknown> = {}) => ({
+      competition_team_id: id(200 + n), competition_id: COMP, lifetime_team_id: TEAM, public_code: CODE_OF(n), name: `Team ${n}`, status: "PENDING_ORGANIZER_APPROVAL", entry_flow: "LIFETIME", created_at: at(n), claims: [], ...over,
+    });
+    const people = [{ gaming_member_id: PERSON_A, display_name: "Ana" }, { gaming_member_id: PERSON_B, display_name: "Beto" }, { gaming_member_id: LEADER, display_name: "Capi" }];
+    const view = (n: number, claims: unknown[] = [], over: Record<string, unknown> = {}) => ({
+      competitionTeamId: id(200 + n), competitionId: COMP, lifetimeTeamId: TEAM, publicCode: CODE_OF(n), name: `Team ${n}`, status: "PENDING_ORGANIZER_APPROVAL", createdAt: at(n), claims, ...over,
+    });
+    const shownClaim = (n: number, person: string, name: string, over: Record<string, unknown> = {}) => ({ claimId: id(300 + n), gamingMemberId: person, displayName: name, status: "PROPOSED", expiresAt: "2026-12-01T10:00:00+00:00", ...over });
+    // The leaders' statement answers with the seats and, inside each seat, its team with the team's entries: this fake nests the WHOLE `competition_teams` dataset in EVERY seat, whatever the
+    // statement's filters said — the repository, not the filter, decides what is shown. (A seat that already carries its own `lifetime_teams` keeps it.) There is no `competition_teams` answer
+    // to give: that table is never a statement of its own any more, and a statement on it would show in `statements`.
+    const inside = (row: unknown, entries: unknown) => (typeof row === "object" && row !== null && !Array.isArray(row) && !("lifetime_teams" in row)
+      ? { ...row, lifetime_teams: { lifetime_team_id: (row as Record<string, unknown>).lifetime_team_id, competition_teams: entries } } : row);
+    const data = (over: Record<string, Answer> = {}) => {
+      const { lifetime_team_leaderships: seats, competition_teams: entries, ...rest } = { lifetime_team_leaderships: [seat(LEADER, TEAM)] as unknown, competition_teams: [entry(1)] as unknown, gaming_members: people as unknown, ...over };
+      return { ...rest, lifetime_team_leaderships: Array.isArray(seats) ? seats.map((row) => inside(row, entries)) : seats };
+    };
+    const listed = (answers: Record<string, Answer>, as = LEADER) => clientOf(answers).repo.listLiveEntriesOfLedTeams(as);
+
+    it("reads the entries and their proposals in ONE statement that states the member's authority itself — their own ACTIVE captain or sub-captain seat — then the names of the people named: nothing else", async () => {
+      const { repo, statements } = clientOf(data({ competition_teams: [entry(1, { claims: [claim(1, PERSON_A)] })] }));
+      expect(await repo.listLiveEntriesOfLedTeams(LEADER)).toEqual([view(1, [shownClaim(1, PERSON_A, "Ana")])]);
+      // no statement of its own on the entries, and no earlier lookup of who leads: the seat is the root of the statement that reads them
+      expect(statements.map((s) => s.table)).toEqual(["lifetime_team_leaderships", "gaming_members"]);
+      expect(statements[0].steps[0]).toBe("select:lifetime_team_id, gaming_member_id, role, status, started_at, ended_at, lifetime_teams(lifetime_team_id, competition_teams(competition_team_id, competition_id, lifetime_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims(competition_lifetime_roster_claim_id, gaming_member_id, status, expires_at, seq)))");
+      expect(statements[0].steps.slice(1)).toEqual([
+        `eq:gaming_member_id,${LEADER}`, "eq:status,ACTIVE", "in:role,CAPTAIN,SUB_CAPTAIN", "eq:lifetime_teams.competition_teams.entry_flow,LIFETIME", "in:lifetime_teams.competition_teams.status,PENDING_ORGANIZER_APPROVAL,ACCEPTED",
+      ]);
+      // only the identifier and the display name of the people the proposals name — never the authentication identity, never contact details
+      expect(statements[1].steps).toEqual(["select:gaming_member_id, display_name", `in:gaming_member_id,${PERSON_A}`]);
+      expect(statements.map((s) => s.steps.join(" ")).join(" ")).not.toMatch(/auth_user_id|email|phone/);
+    });
+
+    it("a member who leads no team has no entries — and no other statement is made", async () => {
+      for (const seats of [[], [seat(LEADER, TEAM, { status: "PENDING", started_at: null })], [seat(LEADER, TEAM, { status: "ENDED", ended_at: BEGAN })], [seat(STRANGER, TEAM)], [seat(LEADER, TEAM, { ended_at: BEGAN })],
+        [seat(LEADER, TEAM, { role: "OWNER" })], [seat(LEADER, "nope")], [null], "x", null,
+        // a seat that does not carry ITS team: none, another team's, or something that is not a team
+        [seat(LEADER, TEAM, { lifetime_teams: null })], [seat(LEADER, TEAM, { lifetime_teams: { lifetime_team_id: TEAM_2, competition_teams: [entry(1)] } })], [seat(LEADER, TEAM, { lifetime_teams: "x" })]]) {
+        const { repo, statements } = clientOf(data({ lifetime_team_leaderships: seats as unknown }));
+        expect(await repo.listLiveEntriesOfLedTeams(LEADER), JSON.stringify(seats)).toEqual([]);
+        expect(statements.map((s) => s.table), JSON.stringify(seats)).toEqual(["lifetime_team_leaderships"]);
+      }
+    });
+
+    it("the statement that reads the entries and their proposals is its own authority: a leadership that ENDS before it is evaluated discloses no entry and no player — a current leader still gets the result", async () => {
+      const FORMER = LEADER, CURRENT = ME;
+      type Rows = Array<Record<string, unknown>>;
+      // A database that evaluates each statement against ITS STATE AT THAT MOMENT, by the statement's own `eq` / `in` filters — unlike `clientOf`, whose answers are fixed in advance — so that what happens
+      // between two statements is seen by the one that follows. (`at` names the level a filter belongs to: "" is the statement's own rows, "lifetime_teams.competition_teams." the entries inside a seat.)
+      const keep = (rows: Rows, steps: string[], at = ""): Rows => rows.filter((row) => steps.every((step) => {
+        const kind = step.slice(0, step.indexOf(":"));
+        const [column, ...values] = step.slice(step.indexOf(":") + 1).split(",");
+        if ((kind !== "eq" && kind !== "in") || !column.startsWith(at) || column.slice(at.length).includes(".")) return true; // not a filter of this level
+        return values.includes(String(row[column.slice(at.length)]));
+      }));
+      const open = () => {
+        const state = {
+          seats: [seat(CURRENT, TEAM), seat(FORMER, TEAM, { role: "SUB_CAPTAIN" })] as Rows,
+          entries: [entry(1, { claims: [claim(1, PERSON_A), claim(2, PERSON_B)] })] as Rows,
+          beforeProtectedRead: null as null | (() => void), answered: [] as unknown[],
+        };
+        const ends = (member: string) => { state.seats = state.seats.map((s) => (s.gaming_member_id === member ? { ...s, status: "ENDED", ended_at: BEGAN } : s)); };
+        // The statement that reads the entries and their proposals — whichever table it is rooted on — is the one the leadership ends in front of.
+        const reading = (s: Statement) => { if (s.steps[0].includes("competition_lifetime_roster_claims")) state.beforeProtectedRead?.(); };
+        const answer = (rows: Rows) => { state.answered.push(rows); return rows; };
+        const client = clientOf({
+          lifetime_team_leaderships: (s: Statement) => {
+            reading(s);
+            return answer(keep(state.seats, s.steps).map((row) => ({
+              ...row, lifetime_teams: { lifetime_team_id: row.lifetime_team_id, competition_teams: keep(state.entries.filter((e) => e.lifetime_team_id === row.lifetime_team_id), s.steps, "lifetime_teams.competition_teams.") },
+            })));
+          },
+          // The entries read by team, with no seat of their own in the statement: such a statement sees every entry of the teams it names, whoever leads them now.
+          competition_teams: (s: Statement) => { reading(s); return answer(keep(state.entries, s.steps)); },
+          gaming_members: (s: Statement) => answer(keep(people as Rows, s.steps)),
+        });
+        return { state, ends, client };
+      };
+      const expected = [view(1, [shownClaim(1, PERSON_A, "Ana"), shownClaim(2, PERSON_B, "Beto")])];
+
+      // Control: the caller, while still leading, gets the entry and the two people its proposals name.
+      expect(await open().client.repo.listLiveEntriesOfLedTeams(FORMER)).toEqual(expected);
+
+      // The caller's leadership ENDS before the statement that reads the entries and their proposals is evaluated — whatever was learned about it earlier: no entry, no proposal, no person.
+      const stale = open();
+      stale.state.beforeProtectedRead = () => stale.ends(FORMER);
+      expect(await stale.client.repo.listLiveEntriesOfLedTeams(FORMER)).toEqual([]);
+      expect(stale.client.statements.map((s) => s.table), "no person is looked up for a read that found nothing").not.toContain("gaming_members");
+      const answered = JSON.stringify(stale.state.answered);
+      for (const secret of [id(201), id(301), id(302), PERSON_A, PERSON_B, "Ana", "Beto", "Team 1"]) expect(answered, `the database never answered with ${secret}`).not.toContain(secret);
+
+      // The very same moment, for a leader who STAYS: the other seat ending changes nothing for them.
+      const current = open();
+      current.state.beforeProtectedRead = () => current.ends(FORMER);
+      expect(await current.client.repo.listLiveEntriesOfLedTeams(CURRENT)).toEqual(expected);
+    });
+
+    it("a sub-captain leads too; an entry of a team the member does NOT lead is never shown, whatever the database answered", async () => {
+      const seats = [seat(LEADER, TEAM, { role: "SUB_CAPTAIN" }), seat(STRANGER, TEAM_2)];
+      const entries = [entry(1), entry(2, { lifetime_team_id: TEAM_2 }), entry(3, { lifetime_team_id: id(999) })];
+      expect((await listed(data({ lifetime_team_leaderships: seats, competition_teams: entries }))).map((e) => e.name)).toEqual(["Team 1"]);
+      expect((await listed(data({ lifetime_team_leaderships: [seat(LEADER, TEAM.toUpperCase())] }))).length, "the team's identifier in another letter case").toBe(1);
+      expect((await listed(data({ lifetime_team_leaderships: [seat(LEADER, TEAM), seat(LEADER, TEAM, { role: "SUB_CAPTAIN" })] }))).map((e) => e.name), "two seats on one team show its entry once").toEqual(["Team 1"]);
+    });
+
+    it("shows only LIVE lifetime entries, well formed: anything else is dropped, never repaired", async () => {
+      const dropped = [
+        entry(2, { status: "REJECTED" }), entry(3, { entry_flow: "V1" }), entry(4, { status: "WITHDRAWN" }), entry(5, { competition_team_id: "nope" }), entry(6, { competition_id: null }),
+        entry(7, { public_code: "" }), entry(8, { name: "  " }), entry(9, { created_at: "soon" }), entry(10, { claims: "none" }), null, 3, [],
+      ];
+      expect((await listed(data({ competition_teams: [entry(1), ...dropped, entry(11, { status: "ACCEPTED" })] }))).map((e) => e.name)).toEqual(["Team 1", "Team 11"]);
+    });
+
+    it("lists the OPEN proposals and the accepted places only, in the order they were made, each with the person's own display name", async () => {
+      const claims = [
+        claim(3, PERSON_B, { seq: 30, status: "ACCEPTED" }), claim(1, PERSON_A, { seq: 10 }), claim(2, PERSON_A, { seq: 20, status: "REJECTED" }), claim(4, PERSON_B, { seq: 40, status: "WITHDRAWN" }),
+        claim(5, PERSON_B, { seq: 50, status: "REMOVED" }), claim(6, PERSON_B, { seq: 60, status: "EXPIRED" }),
+      ];
+      const [shown] = await listed(data({ competition_teams: [entry(1, { claims })] }));
+      expect(shown.claims).toEqual([shownClaim(1, PERSON_A, "Ana"), shownClaim(3, PERSON_B, "Beto", { status: "ACCEPTED" })]);
+      expect(Object.keys(shown.claims[0])).toEqual(["claimId", "gamingMemberId", "displayName", "status", "expiresAt"]);
+    });
+
+    it("a proposal that is malformed, or names a person with no display name, is dropped — the entry stays; a lapsed proposal is shown as stored (the operations judge expiry)", async () => {
+      const claims = [
+        claim(1, PERSON_A), claim(2, PERSON_B, { competition_lifetime_roster_claim_id: "nope" }), claim(3, PERSON_B, { gaming_member_id: 3 }), claim(4, PERSON_B, { expires_at: "never" }),
+        claim(5, PERSON_B, { seq: "5" }), claim(6, PERSON_B, { seq: 6.5 }), claim(7, id(555)), claim(8, PERSON_B, { status: "proposed" }), null, 4, "x", [], claim(9, PERSON_B, { expires_at: "2020-01-01T00:00:00+00:00" }),
+      ];
+      const [shown] = await listed(data({ competition_teams: [entry(1, { claims })] }));
+      expect(shown.claims.map((c) => c.claimId)).toEqual([id(301), id(309)]);
+      expect(shown.claims[1].expiresAt).toBe("2020-01-01T00:00:00+00:00");
+    });
+
+    it("orders entries by creation instant to the microsecond then identifier, and the proposals of one entry by their sequence", async () => {
+      const rows = [entry(3), entry(1), entry(2)];
+      expect((await listed(data({ competition_teams: rows }))).map((e) => e.name)).toEqual(["Team 1", "Team 2", "Team 3"]);
+      expect((await listed(data({ competition_teams: [...rows].reverse() }))).map((e) => e.name)).toEqual(["Team 1", "Team 2", "Team 3"]);
+      const [shown] = await listed(data({ competition_teams: [entry(1, { claims: [claim(2, PERSON_B, { seq: 2 }), claim(1, PERSON_A, { seq: 1 })] })] }));
+      expect(shown.claims.map((c) => c.displayName)).toEqual(["Ana", "Beto"]);
+    });
+
+    it("exposes exactly the documented fields: nothing of the embedded rows, the seats or the profile ever reaches the result", async () => {
+      const rows = [entry(1, { auth_user_id: "secret", captain_gaming_member_id: STRANGER, claims: [claim(1, PERSON_A, { proposed_by_gaming_member_id: STRANGER, release_reason: "X" })] })];
+      const out = await listed(data({ competition_teams: rows, gaming_members: [{ gaming_member_id: PERSON_A, display_name: "Ana", auth_user_id: "secret", email: "a@example.com" }] }));
+      expect(Object.keys(out[0])).toEqual(["competitionTeamId", "competitionId", "lifetimeTeamId", "publicCode", "name", "status", "createdAt", "claims"]);
+      expect(JSON.stringify(out)).not.toMatch(/secret|example\.com|proposed_by|release_reason|captain_gaming/);
+    });
+
+    it("a database failure in ANY statement is the bounded UNAVAILABLE", async () => {
+      for (const table of ["lifetime_team_leaderships", "gaming_members"]) {
+        const answers = data({ competition_teams: [entry(1, { claims: [claim(1, PERSON_A)] })], [table]: RAW_FAILURE });
+        expect(await refusalOf(listed(answers)), table).toBe("LifetimeTeamError:UNAVAILABLE");
+      }
+      expect(await refusalOf(clientOf({}).repo.listLiveEntriesOfLedTeams("nope"))).toBe("LifetimeTeamError:INPUT_INVALID");
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("a person's own open proposals and accepted places", () => {
+    const team = (over: Record<string, unknown> = {}) => ({ lifetime_team_id: TEAM, public_code: CODE_OF(7), name: "Los Halcones", status: "ACTIVE", ...over });
+    const entryOf = (over: Record<string, unknown> = {}) => ({ competition_team_id: ENTRY, competition_id: COMP, lifetime_team_id: TEAM, status: "PENDING_ORGANIZER_APPROVAL", entry_flow: "LIFETIME", team: team(), ...over });
+    const claim = (n: number, over: Record<string, unknown> = {}) => ({
+      competition_lifetime_roster_claim_id: id(300 + n), seq: n, competition_id: COMP, gaming_member_id: ME, status: "PROPOSED", expires_at: "2026-12-01T10:00:00+00:00", entry: entryOf(), ...over,
+    });
+    const view = (n: number, over: Record<string, unknown> = {}) => ({ claimId: id(300 + n), competitionId: COMP, status: "PROPOSED", expiresAt: "2026-12-01T10:00:00+00:00", team: { lifetimeTeamId: TEAM, publicCode: CODE_OF(7), name: "Los Halcones" }, ...over });
+    const listed = (rows: unknown, as = ME) => clientOf({ competition_lifetime_roster_claims: rows as Answer }).repo.listOpenClaimsOfMember(as);
+
+    it("is ONE statement — the proposals with their entry and its team — filtered by the member alone", async () => {
+      const { repo, statements } = clientOf({ competition_lifetime_roster_claims: [claim(1)] });
+      expect(await repo.listOpenClaimsOfMember(ME)).toEqual([view(1)]);
+      expect(statements).toHaveLength(1);
+      expect(statements[0].table).toBe("competition_lifetime_roster_claims");
+      expect(statements[0].steps[0]).toBe("select:competition_lifetime_roster_claim_id, seq, competition_id, gaming_member_id, status, expires_at, entry:competition_teams(competition_team_id, competition_id, lifetime_team_id, status, entry_flow, team:lifetime_teams(lifetime_team_id, public_code, name, status))");
+      expect(statements[0].steps).toEqual(expect.arrayContaining([`eq:gaming_member_id,${ME}`, "in:status,PROPOSED,ACCEPTED", "order:seq"]));
+    });
+
+    it("shows a person only their OWN proposals — whatever the database answered — in the order they were made, and exactly the documented fields", async () => {
+      const rows = [claim(2, { seq: 20 }), claim(1, { seq: 10 }), claim(3, { gaming_member_id: STRANGER }), claim(4, { gaming_member_id: ME.toUpperCase(), seq: 40, status: "ACCEPTED" })];
+      const out = await listed(rows);
+      expect(out).toEqual([view(1), view(2), view(4, { status: "ACCEPTED" })]);
+      expect(Object.keys(out[0])).toEqual(["claimId", "competitionId", "status", "expiresAt", "team"]);
+      expect(Object.keys(out[0].team)).toEqual(["lifetimeTeamId", "publicCode", "name"]);
+    });
+
+    it("the embedded entry and team may arrive as a record or as a list of one", async () => {
+      expect(await listed([claim(1, { entry: [entryOf({ team: [team()] })] })])).toEqual([view(1)]);
+    });
+
+    it("an entry that is not live, not a lifetime entry or in ANOTHER competition, and a team that is gone, disbanded or unnamed, leave nothing to show — never a repaired row", async () => {
+      const bad: Array<[string, Record<string, unknown>]> = [
+        ["a rejected entry", { entry: entryOf({ status: "REJECTED" }) }], ["a legacy entry", { entry: entryOf({ entry_flow: "V1" }) }], ["no entry", { entry: null }], ["a missing entry", { entry: undefined }],
+        ["an entry in another competition", { entry: entryOf({ competition_id: ELSEWHERE }) }], ["an entry that is not a record", { entry: "x" }],
+        ["no team", { entry: entryOf({ team: null }) }], ["a disbanded team", { entry: entryOf({ team: team({ status: "DISBANDED" }) }) }], ["another team's record", { entry: entryOf({ team: team({ lifetime_team_id: TEAM_2 }) }) }],
+        ["a team without a name", { entry: entryOf({ team: team({ name: " " }) }) }], ["a team without a code", { entry: entryOf({ team: team({ public_code: null }) }) }],
+        ["a proposal already answered", { status: "REJECTED" }], ["a released place", { status: "REMOVED" }], ["a lower-case status", { status: "proposed" }], ["a malformed id", { competition_lifetime_roster_claim_id: "nope" }],
+        ["a malformed competition", { competition_id: "nope" }], ["no expiry", { expires_at: "never" }], ["a sequence that is not a number", { seq: "1" }], ["a sequence that is not whole", { seq: 1.5 }],
+      ];
+      for (const [label, over] of bad) expect(await listed([claim(1, over), claim(2)]), label).toEqual([view(2)]);
+      expect(await listed([null, 4, "x", [], claim(2)])).toEqual([view(2)]);
+    });
+
+    it("a database failure is the bounded UNAVAILABLE, and a malformed identifier never reaches the database", async () => {
+      expect(await refusalOf(listed(RAW_FAILURE))).toBe("LifetimeTeamError:UNAVAILABLE");
+      const none = clientOf({});
+      expect(await refusalOf(none.repo.listOpenClaimsOfMember("nope"))).toBe("LifetimeTeamError:INPUT_INVALID");
+      expect(none.statements).toEqual([]);
+    });
+  });
+});
+
+// =============================================================================================================================================
 describe("the migration (read as text)", () => {
   it("exists, follows the newest migration the SSS chain had, and is one coherent append-only file", () => {
     expect(MIGRATION_NAME, "the lifetime migration must exist").toBeTruthy();
@@ -965,7 +1416,10 @@ describe("no public surface", () => {
   // UG-CR-GATE-CFM-010: the SECOND server module allowed to stand between the foundation and a route, for membership and leadership. It is exempt by its exact path too —
   // never by directory or pattern — and it is held to a guard of its own, in the last block but one of this section.
   const MEMBERSHIP_HTTP_ADAPTER = "lib/gaming/competitions/lifetimeMembershipHttp.ts";
-  const HTTP_ADAPTERS = [HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER];
+  // UG-CR-GATE-CFM-014: the THIRD server module allowed to stand between the foundation and a route, for a competition's entries and their roster proposals. Exempt by its exact
+  // path too — never by directory or pattern — and held to a guard of its own, in the last block of this section.
+  const ENTRY_HTTP_ADAPTER = "lib/gaming/competitions/lifetimeEntryHttp.ts";
+  const HTTP_ADAPTERS = [HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER, ENTRY_HTTP_ADAPTER];
   // The routes of the Competitions API that import a module by its exact specifier (what a route may reach is decided by what it imports, not by where it lives).
   const competitionRoutes = () => walk(path.join(ROOT, "app", "api", "gaming", "competitions")).filter((f) => /[\\/]route\.ts$/.test(f)).map((f) => path.relative(ROOT, f).split(path.sep).join("/")).sort();
   const importsOf = (file: string) => [...read(file).matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
@@ -985,17 +1439,17 @@ describe("no public surface", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("is called by no other server code either: outside its own two files and the two bounded HTTP adapters, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
+  it("is called by no other server code either: outside its own two files and the three bounded HTTP adapters, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
     const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)) && !HTTP_ADAPTERS.includes(path.relative(ROOT, f)));
     expect(libFiles.length).toBeGreaterThan(100);
     const offenders = libFiles.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
   });
 
-  it("is imported by nothing outside its own module, the two bounded HTTP adapters and the tests", () => {
+  it("is imported by nothing outside its own module, the three bounded HTTP adapters and the tests", () => {
     const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f));
     const importers = libFiles.filter((file) => /from\s+["'][^"']*(lifetimeTeams|supabaseLifetimeTeamsRepository)["']/.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f)).sort();
-    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts", HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER]);
+    expect(importers).toEqual(["lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts", HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER, ENTRY_HTTP_ADAPTER].sort());
   });
 
   // UG-CR-GATE-CFM-007: the exception above is exactly ONE file, and that file is held to the same standard from the other side. What it may name is DERIVED from the
@@ -1179,7 +1633,7 @@ describe("no public surface", () => {
       expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
     });
 
-    it("is reached only by its eight routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the two adapters", () => {
+    it("is reached only by its eight routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the three adapters", () => {
       const SPECIFIER = "@/lib/gaming/competitions/lifetimeMembershipHttp";
       const routes = routesImporting(SPECIFIER);
       expect(routes).toEqual([
@@ -1201,10 +1655,11 @@ describe("no public surface", () => {
       const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
       const mentioning = surfaces.map(unix).filter((f) => f !== MEMBERSHIP_HTTP_ADAPTER && /lifetimeMembershipHttp/.test(read(f))).sort();
       expect(mentioning, "nothing but the eight routes reaches the adapter").toEqual(routes);
-      // No broad exemption and no unbounded sibling: every route of the lifetime family imports exactly one of the two adapters and nothing else.
-      const family = competitionRoutes().filter((f) => /\/lifetime-[a-z]+\//.test(f));
-      expect(family).toHaveLength(10);
-      for (const route of family) expect([["@/lib/gaming/competitions/lifetimeHttp"], [SPECIFIER]], route).toContainEqual(importsOf(route));
+      // No broad exemption and no unbounded sibling: every route of the lifetime family (a path segment that starts with "lifetime-", hyphenated names included) imports exactly one
+      // of the three adapters and nothing else.
+      const family = competitionRoutes().filter((f) => /\/lifetime-[a-z-]+\//.test(f));
+      expect(family).toHaveLength(21);
+      for (const route of family) expect([["@/lib/gaming/competitions/lifetimeHttp"], [SPECIFIER], ["@/lib/gaming/competitions/lifetimeEntryHttp"]], route).toContainEqual(importsOf(route));
     });
 
     it("is registered in the explicit test lists: the route test in npm test, the contract file in the contract script only", () => {
@@ -1212,6 +1667,149 @@ describe("no public surface", () => {
       expect(scripts.test).toContain("__tests__/lifetimeMembershipHttp.test.ts");
       expect(scripts["test:contract"]).toContain("__tests__/lifetimeMembershipHttpSupabase.contract.test.ts");
       expect(scripts.test, "the contract file must stay out of the in-memory suite").not.toContain("lifetimeMembershipHttpSupabase");
+    });
+  });
+
+  // UG-CR-GATE-CFM-014: the third exception is exactly ONE more file, held to the same standard. What it may name is DERIVED from the foundation (never hand-listed): the nine
+  // operations it exists for — the five that address an entry or a proposal through a competition being the BOUND versions, never the ones that take the entry alone — its three
+  // reads, the four parsers and the typed refusal. Everything else the foundation offers is forbidden to it, the store most of all.
+  describe("the bounded competition entry HTTP adapter exposes nine operations and three reads — and nothing else", () => {
+    const stripComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const adapterCode = () => stripComments(read(ENTRY_HTTP_ADAPTER));
+    const namesIn = (pattern: RegExp, text: string) => [...text.matchAll(pattern)].map((m) => m[1]);
+    const unix = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
+
+    const FOUNDATION = read("lib/gaming/competitions/lifetimeTeams.ts");
+    const storeStart = FOUNDATION.indexOf("export interface LifetimeTeamsStore");
+    const STORE_METHODS = namesIn(/^ {2}(\w+)\(/gm, FOUNDATION.slice(storeStart, FOUNDATION.indexOf("// ---", storeStart)));
+    const FOUNDATION_NAMES = [
+      ...STORE_METHODS,
+      ...namesIn(/^export async function (\w+)\(/gm, FOUNDATION),
+      ...namesIn(/^export function (\w+)\(/gm, FOUNDATION),
+      ...namesIn(/^export const (\w+)/gm, FOUNDATION),
+      ...namesIn(/^export (?:interface|type) (\w+)/gm, FOUNDATION).filter((n) => n !== "LifetimeTeamsStore"),
+    ];
+    const OPERATIONS = ["enableLifetimeEntryFlow", "disableLifetimeEntryFlow", "decideLifetimeEntry", "freezeLifetimeEntries", "enterLifetimeTeam", "withdrawLifetimeEntryIn", "proposeRosterClaimsIn", "decideRosterClaimIn", "releaseRosterClaimIn"];
+    const READS = ["listLifetimeEntriesForOrganizer", "listLifetimeEntriesOfMyTeams", "listMyOpenRosterClaims"];
+    const ALLOWED = [...OPERATIONS, ...READS, "parseClaimBatch", "parseClaimDecision", "parseEntryDecisionRequest", "requireUuid", "LifetimeProblem"];
+    const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
+    const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
+
+    it("derives what it forbids from the foundation: every other operation, record, parser and lookup is found — the unbound versions of the bound operations among them — and every allowance names something that exists", () => {
+      expect(STORE_METHODS).toContain("enterTeam");
+      expect(STORE_METHODS).toContain("getEntryCompetitionId");
+      expect(STORE_METHODS.length).toBeGreaterThan(25);
+      expect(FORBIDDEN.length).toBeGreaterThan(50);
+      for (const name of ["createLifetimeTeam", "disbandLifetimeTeam", "listActiveTeamsOfMember", "proposeLifetimeMembership", "offerLifetimeLeadership", "listPendingLifetimeOffers", "backfillLegacyTeams", "getLifetimeTeam", "getEntry",
+        // the operations that take an entry or a proposal ALONE, without the competition it must belong to: forbidden, so a route can never skip the binding
+        "withdrawLifetimeEntry", "proposeRosterClaims", "decideRosterClaim", "releaseRosterClaim", "parseOfferDecision", "lifetimeErrorFromDatabase",
+        // the store, whose reads and writes are reached through the domain operations alone
+        "enableEntryFlow", "decideEntry", "freezeEntries", "enterTeam", "withdrawEntry", "getEntryCompetitionId", "getRosterClaimCompetitionId", "listLiveEntriesForOrganizer", "listLiveEntriesOfLedTeams", "listOpenClaimsOfMember",
+        "LifetimeTeamView", "LifetimeEntryView", "EntryDecided", "OrganizerEntryView", "LedEntryView", "OwnClaimView"]) {
+        expect(FORBIDDEN, name).toContain(name);
+      }
+      for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
+    });
+
+    it("names none of the foundation's other operations, records, parsers or lookups — and never the store directly (its code, comments removed)", () => {
+      expect(named(adapterCode(), FORBIDDEN)).toEqual([]);
+    });
+
+    const CAPABILITIES: Array<[string, RegExp]> = [
+      ["team creation, disbanding or listing", /^(?:createLifetimeTeam|disbandLifetimeTeam|listActiveTeamsOfMember|LifetimeTeamCreated|LifetimeTeamDisbanded|MemberTeamSummary|normalizeLifetimeTeamName|LIFETIME_TEAM_NAME_MIN|LIFETIME_TEAM_NAME_MAX)$/],
+      ["membership and leadership", /Membership|Leadership|Offer/], ["the legacy backfill", /[Bb]ackfill/],
+      ["unrestricted team or entry lookup", /^get(?:LifetimeTeam|Entry)$|LifetimeTeamView|LifetimeEntryView/],
+      ["an operation that takes an entry or a proposal without its competition", /^(?:withdrawLifetimeEntry|proposeRosterClaims|decideRosterClaim|releaseRosterClaim)$/],
+      ["the store's own lookups and reads", /^(?:getEntryCompetitionId|getRosterClaimCompetitionId|listLiveEntriesForOrganizer|listLiveEntriesOfLedTeams|listOpenClaimsOfMember)$/],
+    ];
+    it.each(CAPABILITIES)("references no %s: the foundation's own names for it are found, and none appears in the adapter", (_capability, pattern) => {
+      const theirs = FORBIDDEN.filter((n) => pattern.test(n));
+      expect(theirs.length, "the scan must find the foundation's names for this capability, or it proves nothing").toBeGreaterThan(0);
+      expect(named(adapterCode(), theirs)).toEqual([]);
+    });
+
+    it("names no database object and makes no database call of its own (it goes through the domain operations and nothing else)", () => {
+      const databaseNames = [...new Set([CODE, DECISIONS_CODE].flatMap((sql) => namesIn(/create\s+(?:or\s+replace\s+)?(?:function|table)\s+(\w+)/gi, sql)))];
+      expect(databaseNames.length).toBeGreaterThan(35);
+      expect(named(adapterCode(), databaseNames)).toEqual([]);
+      expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
+    });
+
+    it("calls each of the nine operations and each of the three reads, and no other", () => {
+      const code = adapterCode();
+      for (const operation of [...OPERATIONS, ...READS]) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
+    });
+
+    it("exports exactly its twelve handlers (nine operations, three reads) and no helper", () => {
+      const code = adapterCode();
+      expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual([
+        "handleDecideEntry", "handleDecideRosterClaim", "handleDisableEntryFlow", "handleEnableEntryFlow", "handleEnterTeam", "handleFreezeEntries", "handleListCompetitionEntries",
+        "handleListMyRosterClaims", "handleListMyTeamEntries", "handleProposeRosterClaims", "handleReleaseRosterClaim", "handleWithdrawEntry",
+      ]);
+      expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
+    });
+
+    it("imports only what its operations and reads need, one statement per module — the refusals of the competitions repository by name, and nothing else of it", () => {
+      const code = adapterCode();
+      const imports: Record<string, string[]> = {};
+      for (const m of code.matchAll(/^import\s+\{([^}]*)\}\s+from\s+["']([^"']+)["'];?$/gm)) {
+        imports[m[2]] = m[1].split(",").map((s) => s.replace(/^\s*type\s+/, "").trim()).filter(Boolean).sort();
+      }
+      expect(imports).toEqual({
+        "next/server": ["NextResponse"],
+        "./httpAuth": ["getSupabaseCredentials", "requireCompetitionsSchemaReady", "requireGamingMember"],
+        "./db/supabaseLifetimeTeamsRepository": ["SupabaseLifetimeTeamsRepository"],
+        "./lifetimeTeams": [...ALLOWED.filter((n) => n !== "requireUuid"), "LifetimeTeamError", "requireUuid"].sort(),
+        "./types": ["AlreadyCaptainOrMemberError", "CompetitionAccessDeniedError", "CompetitionCancelledError", "CompetitionNotFoundError", "CompetitionRegistrationRequiredError", "DuplicateTeamNameError", "HostAccessRevokedError", "TeamRegistrationNotOpenError"],
+      });
+      expect([...code.matchAll(/^import\b/gm)], "no other form of import (default, namespace, side-effect, type-only statement)").toHaveLength(5);
+      expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+    });
+
+    it("is reached only by its eleven routes, which import nothing but the adapter and name no foundation symbol", () => {
+      const SPECIFIER = "@/lib/gaming/competitions/lifetimeEntryHttp";
+      const routes = routesImporting(SPECIFIER);
+      expect(routes).toEqual([
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/decision/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-claims/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/withdraw/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/freeze/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entry-flow/disable/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entry-flow/enable/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-roster-claims/[claimId]/decision/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-roster-claims/[claimId]/release/route.ts",
+        "app/api/gaming/competitions/lifetime-entries/route.ts",
+        "app/api/gaming/competitions/lifetime-roster-claims/route.ts",
+      ]);
+      for (const route of routes) {
+        const code = stripComments(read(route));
+        expect(importsOf(route), route).toEqual([SPECIFIER]);
+        expect(code, route).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
+        expect(TOKENS.test(read(route)), `${route} must not name a foundation symbol`).toBe(false);
+      }
+      const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
+      const mentioning = surfaces.map(unix).filter((f) => f !== ENTRY_HTTP_ADAPTER && /lifetimeEntryHttp/.test(read(f))).sort();
+      expect(mentioning, "nothing but the eleven routes reaches the adapter").toEqual(routes);
+    });
+
+    it("no V1 route, no discovery route and no page is touched: the routes of this adapter are all new, and every one of them is a lifetime route", () => {
+      const all = competitionRoutes();
+      const family = all.filter((f) => /\/lifetime-[a-z-]+\//.test(f));
+      expect(family).toHaveLength(21);
+      const entryRoutes = routesImporting("@/lib/gaming/competitions/lifetimeEntryHttp");
+      expect(entryRoutes.filter((f) => !family.includes(f)), "every route of this adapter is in the lifetime family").toEqual([]);
+      // the V1 routes under a competition keep importing what they always did: none of them imports an adapter of the lifetime family
+      const v1 = all.filter((f) => !family.includes(f));
+      expect(v1.length).toBeGreaterThan(30);
+      for (const route of v1) expect(importsOf(route).filter((s) => /lifetime(?:Entry|Membership)?Http/.test(s)), route).toEqual([]);
+    });
+
+    it("is registered in the explicit test lists: the route test in npm test, the contract file in the contract script only", () => {
+      const scripts = (JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts;
+      expect(scripts.test).toContain("__tests__/lifetimeEntryHttp.test.ts");
+      expect(scripts["test:contract"]).toContain("__tests__/lifetimeEntryHttpSupabase.contract.test.ts");
+      expect(scripts.test, "the contract file must stay out of the in-memory suite").not.toContain("lifetimeEntryHttpSupabase");
     });
   });
 

@@ -471,6 +471,9 @@ describe("no public surface", () => {
     return statSync(full).isDirectory() ? walk(full) : [full];
   });
   const MODULE_FILES = new Set(["lib/gaming/competitions/lifetimeTeams.ts", "lib/gaming/competitions/db/supabaseLifetimeTeamsRepository.ts"]);
+  // UG-CR-GATE-CFM-014 gives the organizer's decisions and the flow's recovery an HTTP surface: through ONE bounded adapter, exempt here by its exact path (never by directory or
+  // pattern) and held to a guard of its own in lifetimeTeams.test.ts. Every route still only forwards to it.
+  const ENTRY_HTTP_ADAPTER = "lib/gaming/competitions/lifetimeEntryHttp.ts";
 
   it("derives its tokens from every function and table the migration creates", () => {
     expect(OBJECTS.sort()).toEqual([
@@ -480,18 +483,20 @@ describe("no public surface", () => {
     for (const name of OBJECTS) expect(TOKENS.test(name), name).toBe(true);
   });
 
-  it("is referenced by no route, page or public file: there is no organizer surface for it yet", () => {
+  it("is referenced by no route, page or public file: the organizer's routes only forward to the one bounded adapter and name none of it", () => {
     const surfaces = [...walk(path.join(ROOT, "app")), ...walk(path.join(ROOT, "public"))].filter((f) => /\.(ts|tsx|js|mjs|html|css|json)$/.test(f));
     expect(surfaces.length).toBeGreaterThan(50);
     const offenders = surfaces.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
   });
 
-  it("is named by no other server code either: outside its own two files, nothing in lib mentions one of its objects", () => {
-    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)));
+  it("is named by no other server code either: outside its own two files and the one bounded entry adapter, nothing in lib mentions one of its objects", () => {
+    const libFiles = walk(path.join(ROOT, "lib")).filter((f) => /\.ts$/.test(f) && !MODULE_FILES.has(path.relative(ROOT, f)) && path.relative(ROOT, f) !== ENTRY_HTTP_ADAPTER);
     expect(libFiles.length).toBeGreaterThan(100);
     const offenders = libFiles.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
+    // the exception is real, not stale: that adapter does name them, and it is the only file that does
+    expect(TOKENS.test(readFileSync(path.join(ROOT, ENTRY_HTTP_ADAPTER), "utf8"))).toBe(true);
   });
 
   it("adds no bracket, group, league, result, standing, statistic or XP object: the migration creates only the audit tables and the operations above", () => {
