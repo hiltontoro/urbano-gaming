@@ -13,6 +13,8 @@ import { POST as endLeadershipRoute } from "../app/api/gaming/competitions/lifet
 import { POST as decideMembershipRoute } from "../app/api/gaming/competitions/lifetime-memberships/[membershipId]/decision/route";
 import { POST as withdrawRoute } from "../app/api/gaming/competitions/lifetime-offers/[offerId]/withdraw/route";
 import { POST as decideLeadershipRoute } from "../app/api/gaming/competitions/lifetime-leaderships/[leadershipId]/decision/route";
+import { GET as byCodeRoute } from "../app/api/gaming/competitions/lifetime-teams/by-code/[teamCode]/route";
+import { POST as disbandRoute } from "../app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/disband/route";
 import { LifetimeTeamError } from "../lib/gaming/competitions/lifetimeTeams";
 import { createHarness, type Person } from "./helpers/lifetimeContract";
 
@@ -968,6 +970,75 @@ describe("privileges and availability", () => {
       process.env.COMPETITIONS_SCHEMA_READY = "true";
     }
     expect(await teamState(team.teamId), "a closed capability changes nothing").toEqual(before);
+  });
+});
+
+// =============================================================================================================================================
+describe("UG-CR-GATE-CFM-016A — a team's join link: the exact code shows a signed-in person the team's name; asking is their own act and a leader decides", () => {
+  const LINK_NOT_VALID = "This team link is not valid.";
+  const byCode = (token: string | undefined, code: string) => call("by code", byCodeRoute, "GET", `${BASE}/lifetime-teams/by-code/${encodeURIComponent(code)}`, { token, params: { teamCode: code } });
+  const rowsOfTeam = async (teamId: string) => rawQuery("select gaming_member_id, status, initiated_by_side from lifetime_team_memberships where lifetime_team_id = $1 order by created_at", [teamId]);
+
+  it("shows only the identifier and the name, creates nothing, and leads to the ordinary request that the captain accepts in the existing inbox", async () => {
+    const captain = await member("Link Captain");
+    const joiner = await member("Link Joiner");
+    const team = await h.createTeam(captain);
+    const code = (await list(captain.token)).json.teams.find((x: any) => x.lifetimeTeamId === team.teamId).publicCode as string;
+    const before = await rowsOfTeam(team.teamId);
+
+    const found = await byCode(joiner.token, code);
+    expect(found.status, found.text).toBe(200);
+    expect(found.cache).toBe(NO_STORE);
+    expect(found.json).toEqual({ team: { lifetimeTeamId: team.teamId, name: team.name } });
+    expect(await rowsOfTeam(team.teamId), "opening the link adds nobody and asks for nothing").toEqual(before);
+    expect((await inbox(captain.token)).json.offers).toEqual([]);
+
+    const asked = await proposeM(joiner.token, found.json.team.lifetimeTeamId, { gamingMemberId: joiner.gamingMemberId });
+    expect(asked.status, asked.text).toBe(201);
+    expect(asked.json.membership.initiatedBySide).toBe("PERSON");
+    const offers = (await inbox(captain.token)).json.offers;
+    expect(offers.map((o: any) => [o.direction, o.team.lifetimeTeamId, o.counterparty.gamingMemberId])).toEqual([["INCOMING", team.teamId, joiner.gamingMemberId]]);
+    expect((await decideM(captain.token, offers[0].offerId, { decision: "ACCEPT" })).status).toBe(200);
+    expect(await activeMembers(team.teamId)).toContain(joiner.gamingMemberId);
+  });
+
+  it("an unknown, malformed, differently-cased or disbanded code, and the team's identifier itself, are one and the same 404 — no search, no pattern, no name", async () => {
+    const captain = await member("Link Owner");
+    const stranger = await member("Link Stranger");
+    const team = await h.createTeam(captain);
+    const code = (await list(captain.token)).json.teams.find((x: any) => x.lifetimeTeamId === team.teamId).publicCode as string;
+    const unknown = await byCode(stranger.token, "Zz9_zZ9-zZ9_zZ9-zZ9_zz");
+    expect(unknown.status, unknown.text).toBe(404);
+    expect(unknown.json).toEqual({ error: LINK_NOT_VALID });
+    const flipped = code.replace(/[a-zA-Z]/, (ch) => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()));
+    expect(flipped).not.toBe(code);
+    const tries = [flipped, team.teamId, team.name, code.slice(0, 21), `${code}A`, `${code.slice(0, 21)}%`, "*".repeat(22), "eq." + code.slice(3), ""];
+    for (const wrong of tries) {
+      const answer = await byCode(stranger.token, wrong);
+      expect(snapshot(answer), JSON.stringify(wrong)).toEqual(snapshot(unknown));
+    }
+    expect((await byCode(stranger.token, code)).status).toBe(200);
+    expect((await call("disband", disbandRoute, "POST", `${BASE}/lifetime-teams/${team.teamId}/disband`, { token: captain.token, params: { lifetimeTeamId: team.teamId } })).status).toBe(200);
+    expect(snapshot(await byCode(stranger.token, code)), "a disbanded team").toEqual(snapshot(unknown));
+  });
+
+  it("signed out is a bounded 401 and a closed capability a bounded 503", async () => {
+    const captain = await member("Link Guard");
+    const team = await h.createTeam(captain);
+    const code = (await list(captain.token)).json.teams.find((x: any) => x.lifetimeTeamId === team.teamId).publicCode as string;
+    for (const token of [undefined, "not-a-real-token", h.serviceKey, h.anonKey]) {
+      const answer = await byCode(token, code);
+      expect(answer.status, answer.text).toBe(401);
+      expectBounded(answer, "signed out");
+    }
+    process.env.COMPETITIONS_SCHEMA_READY = "false";
+    try {
+      const answer = await byCode(captain.token, code);
+      expect([answer.status, answer.json]).toEqual([503, { error: UNAVAILABLE_503 }]);
+      expect(answer.cache).toBe(NO_STORE);
+    } finally {
+      process.env.COMPETITIONS_SCHEMA_READY = "true";
+    }
   });
 });
 

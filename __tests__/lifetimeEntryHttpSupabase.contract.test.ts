@@ -12,6 +12,7 @@ import { POST as freezeRoute } from "../app/api/gaming/competitions/[competition
 import { POST as decideEntryRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/decision/route";
 import { POST as withdrawRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/withdraw/route";
 import { POST as proposeRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-claims/route";
+import { GET as candidatesRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-candidates/route";
 import { POST as decideClaimRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-roster-claims/[claimId]/decision/route";
 import { POST as releaseRoute } from "../app/api/gaming/competitions/[competitionId]/lifetime-roster-claims/[claimId]/release/route";
 import { GET as leaderListRoute } from "../app/api/gaming/competitions/lifetime-entries/route";
@@ -133,6 +134,7 @@ const enter = (token: Token, c: string, lifetimeTeamId: unknown, x: Extra = {}) 
 const withdraw = (token: Token, c: string, entry: string, x: Extra = {}) => call("withdraw", withdrawRoute, "POST", at(c, `lifetime-entries/${entry}/withdraw`, x), { token, authorization: x.authorization, headers: x.headers, params: { competitionId: c, competitionTeamId: entry } });
 const propose = (token: Token, c: string, entry: string, gamingMemberIds: unknown, x: Extra = {}) => call("propose", proposeRoute, "POST", at(c, `lifetime-entries/${entry}/roster-claims`, x), { token, authorization: x.authorization, headers: x.headers, body: { gamingMemberIds }, params: { competitionId: c, competitionTeamId: entry } });
 const myTeamEntries = (token: Token, x: Extra = {}) => call("leader list", leaderListRoute, "GET", `${BASE}/lifetime-entries${x.query ?? ""}`, { token, authorization: x.authorization, headers: x.headers });
+const candidates = (token: Token, c: string, entry: string, x: Extra = {}) => call("roster candidates", candidatesRoute, "GET", at(c, `lifetime-entries/${entry}/roster-candidates`, x), { token, authorization: x.authorization, headers: x.headers, params: { competitionId: c, competitionTeamId: entry } });
 // a person's
 const decideClaim = (token: Token, c: string, claim: string, decision: unknown, x: Extra = {}) => call("decide claim", decideClaimRoute, "POST", at(c, `lifetime-roster-claims/${claim}/decision`, x), { token, authorization: x.authorization, headers: x.headers, body: { decision }, params: { competitionId: c, claimId: claim } });
 const release = (token: Token, c: string, claim: string, x: Extra = {}) => call("release", releaseRoute, "POST", at(c, `lifetime-roster-claims/${claim}/release`, x), { token, authorization: x.authorization, headers: x.headers, params: { competitionId: c, claimId: claim } });
@@ -693,7 +695,7 @@ describe("[5] V1 isolation: a competition that never enabled the flow, a competi
 
 // =============================================================================================================================================
 describe("[6] the availability guard, authentication, and the exact request shapes — against the real database", () => {
-  it("signed out is a bounded 401 and a closed capability a bounded 503 on every one of the twelve routes — and neither touches a row", async () => {
+  it("signed out is a bounded 401 and a closed capability a bounded 503 on every one of the thirteen routes — and neither touches a row", async () => {
     const w = await standing("Guard", { enterBoth: false });
     const c = w.competition.competitionId;
     const before = await stateOf(c);
@@ -703,8 +705,9 @@ describe("[6] the availability guard, authentication, and the exact request shap
       ["enter", () => enter(token, c, w.A.teamId, x)], ["withdraw", () => withdraw(token, c, w.entryA, x)], ["propose", () => propose(token, c, w.entryA, [id(w.memberA)], x)],
       ["decide claim", () => decideClaim(token, c, randomUUID(), "ACCEPT", x)], ["release", () => release(token, c, randomUUID(), x)],
       ["organizer list", () => organizerList(token, c, x)], ["leader list", () => myTeamEntries(token, x)], ["player list", () => myClaims(token, x)],
+      ["roster candidates", () => candidates(token, c, w.entryA, x)],
     ];
-    expect(everyRoute(undefined)).toHaveLength(12);
+    expect(everyRoute(undefined)).toHaveLength(13);
     for (const [what, run] of everyRoute(undefined)) {
       const answer = await run();
       expect([answer.status, answer.json?.error], `${what}: no credential`).toEqual([401, unauthenticated]);
@@ -756,6 +759,118 @@ describe("[6] the availability guard, authentication, and the exact request shap
     expect(await flowOf(c)).not.toBeNull();
     const after = await stateOf(c);
     expect(after.entries, "no entry changed").toEqual(before.entries);
+  });
+});
+
+// =============================================================================================================================================
+describe("[8] UG-CR-GATE-CFM-016A — the roster picker: a current leader of the entry's team chooses by display name, and nobody else reads anything", () => {
+  const namesOf = async (teamId: string) => new Map((await rawQuery("select g.gaming_member_id, g.display_name from lifetime_team_memberships m join gaming_members g on g.gaming_member_id = m.gaming_member_id where m.lifetime_team_id = $1 and m.status = 'ACTIVE'", [teamId]))
+    .map((r) => [r.gaming_member_id as string, r.display_name as string]));
+  const offered = async (leader: Member, c: string, entry: string) => (expectOk(await candidates(leader.token, c, entry), 200, "candidates").members as Array<{ gamingMemberId: string }>).map((m) => m.gamingMemberId).sort();
+  /** The claim's own record says what it said when made, so a lapsed proposal is staged by the database owner with the triggers set aside, in one connection. */
+  async function lapse(claimId: string) {
+    const db = new Client({ connectionString: h.dbUrl, statement_timeout: 60000 });
+    await db.connect();
+    try {
+      await db.query("set session_replication_role = replica");
+      await db.query("update competition_lifetime_roster_claims set proposed_at = now() - interval '3 days', expires_at = now() - interval '1 day' where competition_lifetime_roster_claim_id = $1", [claimId]);
+    } finally {
+      await db.end().catch(() => {});
+    }
+  }
+
+  it("the captain and the sub-captain get the team's members who can still be proposed — identifier and display name only — and a proposal made from that answer is the person's own to accept", async () => {
+    const w = await standing("Picker");
+    const c = w.competition.competitionId;
+    const names = await namesOf(w.A.teamId);
+    const first = expectOk(await candidates(w.captainA.token, c, w.entryA), 200, "the captain's picker");
+    expect(Object.keys(first)).toEqual(["members"]);
+    expect(first.members.map((m: any) => Object.keys(m).sort())).toEqual(first.members.map(() => ["displayName", "gamingMemberId"]));
+    expect(new Map(first.members.map((m: any) => [m.gamingMemberId, m.displayName]))).toEqual(names);
+    expect(first.members.map((m: any) => m.gamingMemberId).sort()).toEqual(ids(...w.A.everyone).sort());
+    expect(expectOk(await candidates(w.subA.token, c, w.entryA), 200, "the sub-captain's picker")).toEqual(first);
+    expect(await claimsOf(w.entryA), "reading proposes nobody").toEqual([]);
+
+    // a proposal made from the answer: the proposed person leaves the picker, the others stay
+    const picked = first.members.find((m: any) => m.gamingMemberId === id(w.memberA)).gamingMemberId as string;
+    const claimId = expectOk(await propose(w.captainA.token, c, w.entryA, [picked]), 201, "propose from the picker").claims[0].claimId as string;
+    expect(await offered(w.captainA, c, w.entryA)).toEqual(ids(w.A.captain, w.A.subCaptain!).sort());
+    // the person answers for themselves; an accepted place keeps them out
+    await h.register(w.competition, w.A.members[0]);
+    expect(expectOk(await myClaims(w.memberA.token), 200, "the person finds it").claims.map((x: any) => x.claimId)).toEqual([claimId]);
+    expectOk(await decideClaim(w.memberA.token, c, claimId, "ACCEPT"), 200, "accept");
+    expect(await offered(w.captainA, c, w.entryA)).toEqual(ids(w.A.captain, w.A.subCaptain!).sort());
+    // released: offered again
+    expectOk(await release(w.captainA.token, c, claimId), 200, "release");
+    expect(await offered(w.captainA, c, w.entryA)).toEqual(ids(...w.A.everyone).sort());
+    // a lapsed proposal does not keep a person out, and proposing them again works
+    const lapsed = expectOk(await propose(w.captainA.token, c, w.entryA, [picked]), 201, "propose again").claims[0].claimId as string;
+    expect(await offered(w.captainA, c, w.entryA)).not.toContain(picked);
+    await lapse(lapsed);
+    expect(await offered(w.captainA, c, w.entryA)).toContain(picked);
+    expectOk(await propose(w.captainA.token, c, w.entryA, [picked]), 201, "after the lapse");
+    // places in ANOTHER team's entry are not this team's business: the other captain's picker is only their own team
+    expect(await offered(w.captainB, c, w.entryB)).toEqual(ids(...w.B.everyone).sort());
+  });
+
+  it("the authority is inside the one statement that reads the roster: one request to the lifetime tables per call, and it hands the server NOTHING for a caller without it", async () => {
+    const w = await standing("PickerOne");
+    const c = w.competition.competitionId;
+    const real = globalThis.fetch;
+    const seen: Array<{ url: string; body: string }> = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) => {
+      const response = await real(input, init);
+      const url = decodeURIComponent(String(input instanceof Request ? input.url : input));
+      if (url.includes("/rest/v1/") && /lifetime_|competition_teams/.test(url)) seen.push({ url, body: await response.clone().text() });
+      return response;
+    });
+    try {
+      for (const [label, who] of [["the captain", w.captainA], ["the other captain", w.captainB], ["a plain member", w.memberA], ["a stranger", w.stranger]] as const) {
+        seen.length = 0;
+        await candidates(who.token, c, w.entryA);
+        expect(seen.map((r) => new URL(r.url).pathname), `${label}: one statement`).toEqual(["/rest/v1/lifetime_team_leaderships"]);
+        const rows = JSON.parse(seen[0].body) as unknown[];
+        if (who === w.captainA) expect(rows, label).toHaveLength(1);
+        else {
+          expect(rows, `${label}: the database handed the server nothing`).toEqual([]);
+          for (const p of w.A.everyone) expect(seen[0].body, label).not.toContain(p.displayName);
+        }
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("everyone else gets the answer for an entry that does not exist: a stranger, a plain member, another team's captain, a former sub-captain, a former captain — and another competition, an unknown or withdrawn entry", async () => {
+    const w = await standing("PickerNo");
+    const c = w.competition.competitionId;
+    const elsewhere = await h.setUpCompetition("PickerElsewhere", { lifetimeFlow: true });
+    const unknown = await candidates(w.captainA.token, c, randomUUID());
+    expectRefusal(unknown, 404, SAID.entry, "an unknown entry");
+    const refused = async (label: string, answer: Answer) => {
+      expectRefusal(answer, 404, SAID.entry, label);
+      expect(snapshot(answer), `${label}: indistinguishable from an unknown entry`).toEqual(snapshot(unknown));
+    };
+    await refused("a stranger", await candidates(w.stranger.token, c, w.entryA));
+    await refused("a plain member of the team", await candidates(w.memberA.token, c, w.entryA));
+    await refused("the other team's captain", await candidates(w.captainB.token, c, w.entryA));
+    await refused("a captain asking for the other team's entry", await candidates(w.captainA.token, c, w.entryB));
+    await refused("the organizer", await candidates(w.organizer.token, c, w.entryA));
+    await refused("the entry through another competition", await candidates(w.captainA.token, elsewhere.competitionId, w.entryA));
+    expectRefusal(await candidates(w.captainA.token, c, "not-an-id"), 400, messageOf("INPUT_INVALID"), "a malformed entry id");
+
+    // the CURRENT seat decides: a sub-captain who steps down, and a captain who leaves, get nothing at once
+    expectOk(await candidates(w.subA.token, c, w.entryA), 200, "before stepping down");
+    await h.one("end_lifetime_team_leadership_atomically", { p_lifetime_team_id: w.A.teamId, p_actor_gaming_member_id: id(w.subA) });
+    await refused("a former sub-captain", await candidates(w.subA.token, c, w.entryA));
+    await h.makeSubCaptain(w.A.teamId, w.A.captain, w.A.subCaptain!);
+    await h.one("end_lifetime_team_membership_atomically", { p_lifetime_team_id: w.A.teamId, p_actor_gaming_member_id: id(w.captainA), p_subject_gaming_member_id: id(w.captainA), p_successor_gaming_member_id: id(w.subA) });
+    await refused("a captain who left", await candidates(w.captainA.token, c, w.entryA));
+    expect(await offered(w.subA, c, w.entryA), "the new captain: the former captain is no longer on the team").toEqual(ids(w.A.subCaptain!, w.A.members[0]).sort());
+
+    // a withdrawn entry is over
+    expectOk(await withdraw(w.subA.token, c, w.entryA), 200, "withdraw");
+    await refused("a withdrawn entry", await candidates(w.subA.token, c, w.entryA));
   });
 });
 

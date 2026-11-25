@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
  *
  * B1…B13 name the behaviours of the gate: B1 availability first · B2 order · B3 signed out · B4 the actor is the session · B5 the exact body · B6 the addressed ids ·
  * B7 the response is copied field by field · B8 the refusal table · B9 the privacy collapse · B10 raw failures never escape · B11 every response is uncached · B12 the surface is
- * exactly nine POST handlers and three GET · B13 the reads, derived from the verified member alone · B14 an entry or a proposal is only ever reached through ITS competition.
+ * exactly nine POST handlers and four GET · B13 the reads, derived from the verified member alone · B14 an entry or a proposal is only ever reached through ITS competition.
  */
 
 vi.mock("@/lib/gaming/competitions/httpAuth", async () => {
@@ -49,6 +49,7 @@ const lifetime = vi.hoisted(() => ({
     listLiveEntriesForOrganizer: vi.fn(),
     listLiveEntriesOfLedTeams: vi.fn(),
     listOpenClaimsOfMember: vi.fn(),
+    listRosterCandidatesForLeader: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
 }));
 
@@ -903,13 +904,79 @@ describe("B13 — the reads: derived from the verified member alone, projected f
 });
 
 // =============================================================================================================================================
-describe("B12 — the surface is exactly twelve handlers: nine POST and three GET", () => {
+describe("UG-CR-GATE-CFM-016A — GET roster-candidates: whom a leader may propose for the addressed entry", () => {
+  const loadRoute = async () => (await import("../app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-candidates/route")) as RouteModule & { dynamic?: string };
+  const ask = async (competition: string = COMPETITION, entry: string = ENTRY, init: { query?: string; headers?: Record<string, string> } = {}) => {
+    const { GET } = await loadRoute();
+    const request = new Request(`${BASE}/${competition}/lifetime-entries/${entry}/roster-candidates${init.query ?? ""}`, { method: "GET", headers: { authorization: "Bearer session-token", ...init.headers } });
+    const response = await GET!(request, { params: { competitionId: competition, competitionTeamId: entry } });
+    expect(response.headers.get("cache-control"), "uncached").toBe(NO_STORE);
+    return response;
+  };
+
+  it("asks the store for the ADDRESSED entry with the session member — nothing in the query or a header can choose another — and answers only identifier and display name", async () => {
+    lifetime.store.listRosterCandidatesForLeader.mockResolvedValue([
+      { gamingMemberId: P1, displayName: "Pedro", email: "secret@example.com", joinedAt: AT }, { gamingMemberId: P2, displayName: "Lucía" },
+      { gamingMemberId: "nope", displayName: "Bad" }, { gamingMemberId: OTHER, displayName: " " }, null, "x",
+    ]);
+    const res = await ask(COMPETITION, ENTRY, { query: `?gamingMemberId=${OTHER}&entry=${OTHER}`, headers: { "x-gaming-member-id": OTHER } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ members: [{ gamingMemberId: P1, displayName: "Pedro" }, { gamingMemberId: P2, displayName: "Lucía" }] });
+    expect(lifetime.store.listRosterCandidatesForLeader.mock.calls).toEqual([[COMPETITION, ENTRY, SESSION]]);
+    expect(lifetime.order).toEqual(["construct", "store"]);
+  });
+
+  it("no authority, or no such live entry, is the entry's 404; nobody left to propose is an empty list", async () => {
+    lifetime.store.listRosterCandidatesForLeader.mockResolvedValue(null);
+    const res = await ask();
+    expect([res.status, await res.json()]).toEqual([404, { error: SAID.entry }]);
+    lifetime.store.listRosterCandidatesForLeader.mockResolvedValue([]);
+    expect(await (await ask()).json()).toEqual({ members: [] });
+  });
+
+  it("a malformed competition or entry id is a 400 before a repository exists; the closed capability is a 503 and signed out a 401, before anything", async () => {
+    for (const [competition, entry] of [["nope", ENTRY], [COMPETITION, "nope"]]) {
+      const res = await ask(competition, entry);
+      expect([res.status, await res.json()]).toEqual([400, { error: messageOf("INPUT_INVALID") }]);
+    }
+    expect(lifetime.constructed).toEqual([]);
+    process.env.COMPETITIONS_SCHEMA_READY = "false";
+    expect((await ask()).status).toBe(503);
+    process.env.COMPETITIONS_SCHEMA_READY = "true";
+    vi.mocked(httpAuth.requireGamingMember).mockResolvedValue({ errorResponse: NextResponse.json({ error: UNAUTHENTICATED_401 }, { status: 401 }) });
+    expect((await ask()).status).toBe(401);
+    expect(lifetime.constructed).toEqual([]);
+  });
+
+  it("whatever fails — a raw error, a refusal, an answer that is not a list — is the generic 500; a read is never a conflict", async () => {
+    for (const failure of [new Error('relation "lifetime_teams" does not exist'), new LifetimeTeamError("ENTRIES_FROZEN"), new LifetimeTeamError("NOT_A_LEADER"), new CompetitionNotFoundError(), "boom"]) {
+      lifetime.store.listRosterCandidatesForLeader.mockRejectedValue(failure);
+      const res = await ask();
+      expect([res.status, await res.json()], String(failure)).toEqual([500, { error: GENERIC_500 }]);
+    }
+    for (const answer of [undefined, {}, "rows"]) {
+      lifetime.store.listRosterCandidatesForLeader.mockResolvedValue(answer);
+      expect((await ask()).status, String(answer)).toBe(500);
+    }
+  });
+
+  it("the route exports exactly GET, is never prerendered, imports nothing but the adapter", async () => {
+    const route = await loadRoute();
+    expect(Object.keys(route).sort()).toEqual(["GET", "dynamic"]);
+    expect(route.dynamic).toBe("force-dynamic");
+    const source = readFileSync(path.join(ROOT, "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-candidates/route.ts"), "utf8");
+    expect([...source.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1])).toEqual(["@/lib/gaming/competitions/lifetimeEntryHttp"]);
+  });
+});
+
+// =============================================================================================================================================
+describe("B12 — the surface is exactly thirteen handlers: nine POST and four GET", () => {
   const code = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
 
-  it("the adapter exports exactly its twelve handlers and nothing else", () => {
+  it("the adapter exports exactly its thirteen handlers and nothing else", () => {
     expect(Object.keys(adapter).sort()).toEqual([
       "handleDecideEntry", "handleDecideRosterClaim", "handleDisableEntryFlow", "handleEnableEntryFlow", "handleEnterTeam", "handleFreezeEntries", "handleListCompetitionEntries",
-      "handleListMyRosterClaims", "handleListMyTeamEntries", "handleProposeRosterClaims", "handleReleaseRosterClaim", "handleWithdrawEntry",
+      "handleListMyRosterClaims", "handleListMyTeamEntries", "handleListRosterCandidates", "handleProposeRosterClaims", "handleReleaseRosterClaim", "handleWithdrawEntry",
     ]);
   });
 
@@ -925,6 +992,7 @@ describe("B12 — the surface is exactly twelve handlers: nine POST and three GE
     ["app/api/gaming/competitions/[competitionId]/lifetime-roster-claims/[claimId]/release/route.ts", ["POST"]],
     ["app/api/gaming/competitions/lifetime-entries/route.ts", ["GET", "dynamic"]],
     ["app/api/gaming/competitions/lifetime-roster-claims/route.ts", ["GET", "dynamic"]],
+    ["app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-candidates/route.ts", ["GET", "dynamic"]],
   ];
 
   it.each(ROUTES)("%s exports exactly %j, imports nothing but the adapter, and the read routes are never prerendered", async (file, exports) => {
@@ -936,7 +1004,7 @@ describe("B12 — the surface is exactly twelve handlers: nine POST and three GE
     expect(source).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|process\.env|NextResponse|lifetimeTeams|requireGamingMember/);
   });
 
-  it("twelve handlers in eleven route files — nine POST, three GET", async () => {
+  it("thirteen handlers in twelve route files — nine POST, four GET", async () => {
     let get = 0;
     let post = 0;
     for (const [file] of ROUTES) {
@@ -944,7 +1012,7 @@ describe("B12 — the surface is exactly twelve handlers: nine POST and three GE
       if (typeof mod.GET === "function") get += 1;
       if (typeof mod.POST === "function") post += 1;
     }
-    expect([ROUTES.length, get, post]).toEqual([11, 3, 9]);
+    expect([ROUTES.length, get, post]).toEqual([12, 4, 9]);
   });
 
   it("every operation of the table is reached by exactly one route and every route by exactly one operation", () => {

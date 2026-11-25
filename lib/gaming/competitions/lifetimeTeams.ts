@@ -349,6 +349,12 @@ export interface OwnClaimView {
   claimId: string; competitionId: string; status: OpenClaimStatus; expiresAt: string; team: { lifetimeTeamId: string; publicCode: string; name: string };
 }
 
+/** UG-CR-GATE-CFM-016A — what a team's join link may show a signed-in person before they ask to join: the team's identifier (the membership request names it) and its name. */
+export interface JoinLinkTeam { lifetimeTeamId: string; name: string }
+
+/** UG-CR-GATE-CFM-016A — one person a leader may propose for an addressed entry: the identifier the proposal names and the display name the leader chooses by. */
+export interface RosterCandidate { gamingMemberId: string; displayName: string }
+
 // ---------------------------------------------------------------------------------------------------------------------------------------------
 // The store: every operation the database offers, and three bounded reads
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -387,6 +393,13 @@ export interface LifetimeTeamsStore {
   listLiveEntriesOfLedTeams(gamingMemberId: string): Promise<LedEntryView[]>;
   /** The member's own open proposals and accepted places. */
   listOpenClaimsOfMember(gamingMemberId: string): Promise<OwnClaimView[]>;
+  /** The ACTIVE team that carries exactly this public code — its identifier and name only — or null. Never a search: no pattern, no name, no second field. */
+  findActiveTeamByPublicCode(publicCode: string): Promise<JoinLinkTeam | null>;
+  /**
+   * The members of the addressed entry's team who hold no open proposal or place on that entry — only when the member currently leads that team and the entry is a live
+   * entry of that competition; otherwise null. The authority and the rows come from one statement.
+   */
+  listRosterCandidatesForLeader(competitionId: string, competitionTeamId: string, leaderGamingMemberId: string): Promise<RosterCandidate[] | null>;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -581,4 +594,25 @@ export async function listMyOpenRosterClaims(store: LifetimeTeamsStore, gamingMe
 /** The explicit legacy backfill of the NAMED competitions (there is no "all"). It is never run by a migration or a route. */
 export async function backfillLegacyTeams(store: LifetimeTeamsStore, competitionIds: unknown): Promise<LegacyBackfillResult> {
   return store.backfillLegacyTeams(parseBackfillScope(competitionIds));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// UG-CR-GATE-CFM-016A — a team's join link and a leader's roster picker
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+/** The shape of a team's public code (the database's own check). Anything else cannot name a team, so no read is made for it. */
+const TEAM_PUBLIC_CODE = /^[A-Za-z0-9_-]{22}$/;
+
+/**
+ * What a join link shows: the ACTIVE team that carries exactly this code. An unknown, disbanded or malformed code is the same answer, null. The code only finds the team:
+ * it grants nothing — joining is the person's own request, and a captain or sub-captain decides it.
+ */
+export async function findLifetimeTeamByJoinCode(store: LifetimeTeamsStore, code: unknown): Promise<JoinLinkTeam | null> {
+  if (typeof code !== "string" || !TEAM_PUBLIC_CODE.test(code)) return null;
+  return store.findActiveTeamByPublicCode(code);
+}
+
+/** The people the member may propose for the addressed entry of the addressed competition, or null when the member has no authority over it. */
+export async function listLifetimeRosterCandidates(store: LifetimeTeamsStore, competitionId: string, competitionTeamId: string, leaderGamingMemberId: string): Promise<RosterCandidate[] | null> {
+  return store.listRosterCandidatesForLeader(requireUuid(competitionId), requireUuid(competitionTeamId), requireUuid(leaderGamingMemberId));
 }

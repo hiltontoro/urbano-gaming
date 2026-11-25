@@ -3,17 +3,18 @@ import { NextResponse } from "next/server";
 import { getSupabaseCredentials, requireCompetitionsSchemaReady, requireGamingMember } from "./httpAuth";
 import { SupabaseLifetimeTeamsRepository } from "./db/supabaseLifetimeTeamsRepository";
 import {
-  LifetimeTeamError, decideLifetimeLeadership, decideLifetimeMembership, endLifetimeLeadership, endLifetimeMembership, listPendingLifetimeOffers, offerLifetimeLeadership,
-  parseOfferDecision, parseOfferKind, proposeLifetimeMembership, requireUuid, withdrawLifetimeOffer, type LifetimeProblem,
+  LifetimeTeamError, decideLifetimeLeadership, decideLifetimeMembership, endLifetimeLeadership, endLifetimeMembership, findLifetimeTeamByJoinCode, listPendingLifetimeOffers,
+  offerLifetimeLeadership, parseOfferDecision, parseOfferKind, proposeLifetimeMembership, requireUuid, withdrawLifetimeOffer, type LifetimeProblem,
 } from "./lifetimeTeams";
 
 /**
  * UG-CR-GATE-CFM-010 — the ONE bounded HTTP adapter between the lifetime-team membership and leadership operations and a route.
  *
- * Seven operations and one read, and nothing else: propose a membership (an invitation, or a person's own request), decide one, withdraw an offer, end a membership, offer
- * the sub-captain seat, decide that offer, end the seat — and read the member's OWN pending offers (UG-CR-GATE-CFM-012). (The team's own lifecycle — create, list, disband —
- * has an adapter of its own; competition entry, roster claims, the organizer's decisions, the freeze and the backfill have none, and no lookup of a team, an offer or a
- * person by identifier exists here.) Each handler runs the same sequence, in this order and no other:
+ * Seven operations and two reads, and nothing else: propose a membership (an invitation, or a person's own request), decide one, withdraw an offer, end a membership, offer
+ * the sub-captain seat, decide that offer, end the seat — read the member's OWN pending offers (UG-CR-GATE-CFM-012) — and, for a team's join link, find the ACTIVE team
+ * that carries exactly the link's code, as its identifier and name only (UG-CR-GATE-CFM-016A). (The team's own lifecycle — create, list, disband — has an adapter of its
+ * own; competition entry, roster claims, the organizer's decisions, the freeze and the backfill have none here, and there is no lookup of an offer or a person by identifier,
+ * no search and no directory of teams.) Each handler runs the same sequence, in this order and no other:
  *
  *   1. the Competitions availability guard (before credentials, authentication, parsing or any repository);
  *   2. the server credentials;
@@ -312,5 +313,28 @@ export async function handleListMyOffers(request: Request): Promise<Response> {
   } catch (err) {
     // A read has no refusal of its own: whatever went wrong, the inbox is unavailable.
     return unavailable("list-offers", err);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+// The team a join link names (UG-CR-GATE-CFM-016A)
+// ---------------------------------------------------------------------------------------------------------------------------------------------
+
+const TEAM_LINK_NOT_FOUND = "This team link is not valid.";
+
+/**
+ * GET — what a team's join link shows a signed-in person: that team's identifier and name, and nothing else. An unknown, disbanded or malformed code is the same 404.
+ * Reading it creates nothing: joining is the person's own request through the membership route, and a captain or sub-captain of the team decides it.
+ */
+export async function handleFindTeamByCode(request: Request, teamCode: unknown): Promise<Response> {
+  try {
+    const opened = await open(request);
+    if ("response" in opened) return opened.response;
+    const team = await findLifetimeTeamByJoinCode(repositoryFor(opened.credentials), teamCode);
+    if (team === null || !isUuid(team.lifetimeTeamId) || !isText(team.name)) return respond({ error: TEAM_LINK_NOT_FOUND }, 404);
+    return respond({ team: { lifetimeTeamId: team.lifetimeTeamId, name: team.name } }, 200);
+  } catch (err) {
+    // A read has no refusal of its own: whatever went wrong, the lookup is unavailable.
+    return unavailable("find-team-by-code", err);
   }
 }

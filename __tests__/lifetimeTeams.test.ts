@@ -8,6 +8,7 @@ import {
   parseClaimDecision, parseOfferDecision, parseOfferKind, requireUuid,
   createLifetimeTeam, decideLifetimeMembership, endLifetimeMembership, enterLifetimeTeam, listPendingLifetimeOffers, proposeRosterClaims, backfillLegacyTeams,
   decideRosterClaimIn, listLifetimeEntriesForOrganizer, listLifetimeEntriesOfMyTeams, listMyOpenRosterClaims, proposeRosterClaimsIn, releaseRosterClaimIn, withdrawLifetimeEntryIn,
+  findLifetimeTeamByJoinCode, listLifetimeRosterCandidates,
   type LifetimeTeamsStore,
 } from "../lib/gaming/competitions/lifetimeTeams";
 import { SupabaseLifetimeTeamsRepository } from "../lib/gaming/competitions/db/supabaseLifetimeTeamsRepository";
@@ -1202,6 +1203,126 @@ describe("UG-CR-GATE-CFM-014 — the entry reads and the binding of an entry or 
       expect(none.statements).toEqual([]);
     });
   });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------
+  describe("UG-CR-GATE-CFM-016A — the team a join link names, and the people a leader may propose for an entry", () => {
+    const CODE22 = "AbCdEfGhIjKlMnOpQrStUv";
+    const seat = (member: string, over: Record<string, unknown> = {}) => ({ lifetime_team_id: TEAM, gaming_member_id: member, role: "CAPTAIN", status: "ACTIVE", started_at: BEGAN, ended_at: null, ...over });
+    const membership = (person: string, name: string, over: Record<string, unknown> = {}) => ({ lifetime_team_id: TEAM, gaming_member_id: person, status: "ACTIVE", gaming_members: { gaming_member_id: person, display_name: name }, ...over });
+    const claimOn = (person: string, status: string, expires = "2999-01-01T00:00:00+00:00") => ({ gaming_member_id: person, status, expires_at: expires });
+    const entry = (claims: unknown[] = [], over: Record<string, unknown> = {}) => ({
+      competition_team_id: ENTRY, competition_id: COMP, lifetime_team_id: TEAM, entry_flow: "LIFETIME", status: "PENDING_ORGANIZER_APPROVAL", competition_lifetime_roster_claims: claims, ...over,
+    });
+    const people = [membership(LEADER, "Capi"), membership(PERSON_B, "Beto"), membership(PERSON_A, "Ana")];
+    const team = (over: Record<string, unknown> = {}) => ({ lifetime_team_id: TEAM, status: "ACTIVE", competition_teams: [entry()], lifetime_team_memberships: people, ...over });
+    const candidatesOf = (seats: unknown, as = LEADER) => clientOf({ lifetime_team_leaderships: seats as Answer }).repo.listRosterCandidatesForLeader(COMP, ENTRY, as);
+    const through = (teamOver: Record<string, unknown> = {}, seatOver: Record<string, unknown> = {}) => [{ ...seat(LEADER, seatOver), lifetime_teams: team(teamOver) }];
+    const everyone = [{ gamingMemberId: PERSON_A, displayName: "Ana" }, { gamingMemberId: PERSON_B, displayName: "Beto" }, { gamingMemberId: LEADER, displayName: "Capi" }];
+
+    it("is ONE statement rooted on the caller's own current seat, with the addressed entry of that competition and the active members inside it — and only identifier and display name come back", async () => {
+      const { repo, statements } = clientOf({ lifetime_team_leaderships: through() });
+      expect(await repo.listRosterCandidatesForLeader(COMP, ENTRY, LEADER)).toEqual(everyone);
+      expect(statements.map((s) => s.table)).toEqual(["lifetime_team_leaderships"]);
+      expect(statements[0].steps[0]).toBe("select:lifetime_team_id, gaming_member_id, role, status, started_at, ended_at, lifetime_teams!inner(lifetime_team_id, status, competition_teams!inner(competition_team_id, competition_id, lifetime_team_id, entry_flow, status, competition_lifetime_roster_claims(gaming_member_id, status, expires_at)), lifetime_team_memberships(lifetime_team_id, gaming_member_id, status, gaming_members!lifetime_team_memberships_gaming_member_id_fkey(gaming_member_id, display_name)))");
+      expect(statements[0].steps.slice(1)).toEqual([
+        `eq:gaming_member_id,${LEADER}`, "eq:status,ACTIVE", "in:role,CAPTAIN,SUB_CAPTAIN", "eq:lifetime_teams.status,ACTIVE",
+        `eq:lifetime_teams.competition_teams.competition_team_id,${ENTRY}`, `eq:lifetime_teams.competition_teams.competition_id,${COMP}`, "eq:lifetime_teams.competition_teams.entry_flow,LIFETIME",
+        "in:lifetime_teams.competition_teams.status,PENDING_ORGANIZER_APPROVAL,ACCEPTED", "eq:lifetime_teams.lifetime_team_memberships.status,ACTIVE",
+      ]);
+    });
+
+    it("leaves out whoever holds an open proposal or an accepted place on THIS entry; a lapsed or closed proposal leaves them in", async () => {
+      const open = [claimOn(PERSON_A, "PROPOSED"), claimOn(PERSON_B, "ACCEPTED", "2000-01-01T00:00:00+00:00")];
+      expect(await candidatesOf(through({ competition_teams: [entry(open)] }))).toEqual([everyone[2]]);
+      const closed = [claimOn(PERSON_A, "PROPOSED", "2000-01-01T00:00:00+00:00"), claimOn(PERSON_B, "REJECTED"), claimOn(LEADER, "WITHDRAWN"), claimOn(LEADER, "REMOVED"), claimOn(PERSON_A, "EXPIRED")];
+      expect(await candidatesOf(through({ competition_teams: [entry(closed)] }))).toEqual(everyone);
+      // an expiry that cannot be read keeps the person out rather than guessing it lapsed
+      expect(await candidatesOf(through({ competition_teams: [entry([claimOn(PERSON_A, "PROPOSED", "soon")])] }))).toEqual(everyone.slice(1));
+    });
+
+    it("nothing comes back without a current seat of the caller's own on the entry's own team — whatever the database answered", async () => {
+      const bad: Array<[string, unknown]> = [
+        ["no rows", []], ["nothing", null], ["not a list", "x"], ["a null row", [null]],
+        ["another member's seat", [{ ...seat(STRANGER), lifetime_teams: team() }]], ["an ended seat", through({}, { status: "ENDED", ended_at: BEGAN })], ["a pending seat", through({}, { status: "PENDING", started_at: null })],
+        ["a seat that already ended", through({}, { ended_at: BEGAN })], ["a role that does not lead", through({}, { role: "MEMBER" })], ["no team", [{ ...seat(LEADER), lifetime_teams: null }]],
+        ["another team's record", through({ lifetime_team_id: TEAM_2 })], ["a disbanded team", through({ status: "DISBANDED" })], ["no entry", through({ competition_teams: [] })],
+        ["another entry", through({ competition_teams: [entry([], { competition_team_id: ENTRY_2 })] })], ["an entry of another competition", through({ competition_teams: [entry([], { competition_id: ELSEWHERE })] })],
+        ["an entry of another team", through({ competition_teams: [entry([], { lifetime_team_id: TEAM_2 })] })], ["a V1 team", through({ competition_teams: [entry([], { entry_flow: "V1" })] })],
+        ["a withdrawn entry", through({ competition_teams: [entry([], { status: "REJECTED" })] })], ["proposals that are not a list", through({ competition_teams: [entry([], { competition_lifetime_roster_claims: null })] })],
+        ["members that are not a list", through({ lifetime_team_memberships: null })],
+      ];
+      for (const [label, seats] of bad) expect(await candidatesOf(seats), label).toBeNull();
+    });
+
+    it("a malformed membership or person is left out, never repaired, and nobody is offered twice", async () => {
+      const members = [
+        membership(PERSON_A, "Ana"), membership(PERSON_A, "Ana"), membership(PERSON_B, "Beto", { status: "ENDED" }), membership(PERSON_B, "Beto", { lifetime_team_id: TEAM_2 }),
+        membership(PERSON_B, "Beto", { gaming_members: { gaming_member_id: STRANGER, display_name: "Otro" } }), membership(PERSON_B, "  "), membership(PERSON_B, "Beto", { gaming_members: null }),
+        membership("nope", "Nadie"), null, "x", membership(LEADER, "Capi", { gaming_members: [{ gaming_member_id: LEADER, display_name: "Capi" }] }),
+      ];
+      expect(await candidatesOf(through({ lifetime_team_memberships: members }))).toEqual([everyone[0], everyone[2]]);
+    });
+
+    it("the statement that reads the roster is its own authority: a leadership that ENDS before it is evaluated discloses nobody — a current captain still gets the team", async () => {
+      type Rows = Array<Record<string, unknown>>;
+      // A database that evaluates the statement against ITS STATE AT THAT MOMENT, by the statement's own eq / in filters, with its inner embeds (a seat whose team has no matching entry is not a row).
+      const keep = (rows: Rows, steps: string[], level: string): Rows => rows.filter((row) => steps.every((step) => {
+        const kind = step.slice(0, step.indexOf(":"));
+        const [column, ...values] = step.slice(step.indexOf(":") + 1).split(",");
+        if ((kind !== "eq" && kind !== "in") || !column.startsWith(level) || column.slice(level.length).includes(".")) return true;
+        return values.includes(String(row[column.slice(level.length)]));
+      }));
+      const state = { seats: [seat(ME), seat(LEADER, { role: "SUB_CAPTAIN" })] as Rows, beforeRead: null as null | (() => void) };
+      const client = clientOf({
+        lifetime_team_leaderships: (s: Statement) => {
+          state.beforeRead?.();
+          return keep(state.seats, s.steps, "").flatMap((row) => {
+            const entries = keep([entry()] as Rows, s.steps, "lifetime_teams.competition_teams.");
+            if (entries.length === 0) return [];
+            return [{ ...row, lifetime_teams: { ...team(), competition_teams: entries, lifetime_team_memberships: keep(people as Rows, s.steps, "lifetime_teams.lifetime_team_memberships.") } }];
+          });
+        },
+      });
+      expect(await client.repo.listRosterCandidatesForLeader(COMP, ENTRY, LEADER), "while the seat is current").toEqual(everyone);
+      state.beforeRead = () => { state.seats = state.seats.map((x) => (x.gaming_member_id === LEADER ? { ...x, status: "ENDED", ended_at: BEGAN } : x)); };
+      expect(await client.repo.listRosterCandidatesForLeader(COMP, ENTRY, LEADER), "the seat ended before the statement ran").toBeNull();
+      expect(await client.repo.listRosterCandidatesForLeader(COMP, ENTRY, ME), "the captain").toEqual(everyone);
+      expect(client.statements.map((s) => s.table)).toEqual(["lifetime_team_leaderships", "lifetime_team_leaderships", "lifetime_team_leaderships"]);
+    });
+
+    it("a database failure is the bounded UNAVAILABLE, and a malformed identifier never reaches the database", async () => {
+      expect(await refusalOf(candidatesOf(RAW_FAILURE))).toBe("LifetimeTeamError:UNAVAILABLE");
+      const none = clientOf({});
+      for (const [c, e, m] of [["nope", ENTRY, LEADER], [COMP, "nope", LEADER], [COMP, ENTRY, "nope"]]) {
+        expect(await refusalOf(none.repo.listRosterCandidatesForLeader(c, e, m))).toBe("LifetimeTeamError:INPUT_INVALID");
+      }
+      expect(none.statements).toEqual([]);
+    });
+
+    it("the team a join link names: one statement, the exact code and an ACTIVE team — its identifier and name only", async () => {
+      const row = { lifetime_team_id: TEAM, public_code: CODE22, name: "Los Halcones", status: "ACTIVE", created_by_gaming_member_id: LEADER };
+      const { repo, statements } = clientOf({ lifetime_teams: row });
+      expect(await repo.findActiveTeamByPublicCode(CODE22)).toEqual({ lifetimeTeamId: TEAM, name: "Los Halcones" });
+      expect(statements.map((s) => [s.table, ...s.steps])).toEqual([["lifetime_teams", "select:lifetime_team_id, public_code, name, status", `eq:public_code,${CODE22}`, "eq:status,ACTIVE", "maybeSingle"]]);
+      for (const answer of [null, undefined, [], [row], "x", { ...row, status: "DISBANDED" }, { ...row, public_code: CODE22.toLowerCase() }, { ...row, name: " " }, { ...row, lifetime_team_id: "x" }]) {
+        expect(await clientOf({ lifetime_teams: answer as Answer }).repo.findActiveTeamByPublicCode(CODE22), JSON.stringify(answer)).toBeNull();
+      }
+      expect(await refusalOf(clientOf({ lifetime_teams: RAW_FAILURE }).repo.findActiveTeamByPublicCode(CODE22))).toBe("LifetimeTeamError:UNAVAILABLE");
+    });
+
+    it("the domain asks nothing about a value that cannot be a team code, and validates every identifier of the roster read", async () => {
+      const store = { findActiveTeamByPublicCode: vi.fn(async () => null), listRosterCandidatesForLeader: vi.fn(async () => []) };
+      const as = store as unknown as LifetimeTeamsStore;
+      for (const code of [undefined, null, 7, "", "short", `${CODE22}x`, `${CODE22.slice(0, 21)}!`, `${CODE22}\n`, ` ${CODE22.slice(1)}`, U1]) expect(await findLifetimeTeamByJoinCode(as, code), String(code)).toBeNull();
+      expect(store.findActiveTeamByPublicCode).not.toHaveBeenCalled();
+      await findLifetimeTeamByJoinCode(as, CODE22);
+      expect(store.findActiveTeamByPublicCode.mock.calls).toEqual([[CODE22]]);
+      for (const ids of [["x", ENTRY, ME], [COMP, "x", ME], [COMP, ENTRY, "x"]] as const) await expect(listLifetimeRosterCandidates(as, ids[0], ids[1], ids[2])).rejects.toBeInstanceOf(LifetimeTeamError);
+      expect(store.listRosterCandidatesForLeader).not.toHaveBeenCalled();
+      await listLifetimeRosterCandidates(as, COMP, ENTRY, ME);
+      expect(store.listRosterCandidatesForLeader.mock.calls).toEqual([[COMP, ENTRY, ME]]);
+    });
+  });
 });
 
 // =============================================================================================================================================
@@ -1420,6 +1541,9 @@ describe("no public surface", () => {
   // path too — never by directory or pattern — and held to a guard of its own, in the last block of this section.
   const ENTRY_HTTP_ADAPTER = "lib/gaming/competitions/lifetimeEntryHttp.ts";
   const HTTP_ADAPTERS = [HTTP_ADAPTER, MEMBERSHIP_HTTP_ADAPTER, ENTRY_HTTP_ADAPTER];
+  // UG-CR-GATE-CFM-016: the invite-only pilot UI is the first public surface. Its ONE script must call the accepted HTTP routes, whose team route's path is a guarded word; it is
+  // exempt from the public scan by its exact path — never by directory or pattern — and held to the guard of its own below. The pages that load it are not exempt.
+  const PILOT_UI = "public/competitionsEntries.js";
   // The routes of the Competitions API that import a module by its exact specifier (what a route may reach is decided by what it imports, not by where it lives).
   const competitionRoutes = () => walk(path.join(ROOT, "app", "api", "gaming", "competitions")).filter((f) => /[\\/]route\.ts$/.test(f)).map((f) => path.relative(ROOT, f).split(path.sep).join("/")).sort();
   const importsOf = (file: string) => [...read(file).matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
@@ -1435,8 +1559,19 @@ describe("no public surface", () => {
   it("is referenced by no route, page or public file (the foundation is reachable only from server code and tests)", () => {
     const surfaces = [...walk(path.join(ROOT, "app")), ...walk(path.join(ROOT, "public"))].filter((f) => /\.(ts|tsx|js|mjs|html|css|json)$/.test(f));
     expect(surfaces.length).toBeGreaterThan(50);
-    const offenders = surfaces.filter((file) => TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
+    const offenders = surfaces.filter((file) => path.relative(ROOT, file) !== PILOT_UI && TOKENS.test(readFileSync(file, "utf8"))).map((f) => path.relative(ROOT, f));
     expect(offenders).toEqual([]);
+  });
+
+  it("the pilot UI names the foundation only through the accepted team route's path: no operation, table, store method, repository, database call or key", () => {
+    const source = readFileSync(path.join(ROOT, PILOT_UI), "utf8");
+    const named = [...source.matchAll(new RegExp(TOKENS.source, "g"))];
+    expect(named.length, "the exemption is real, not stale").toBeGreaterThan(0);
+    for (const match of named) {
+      expect(match[0]).toBe("lifetime-team");
+      expect(source.slice(match.index! - "${API}/".length, match.index! + "lifetime-teams".length)).toBe("${API}/lifetime-teams");
+    }
+    expect(source).not.toMatch(/_atomically|\.rpc\(|service_role|SERVICE_ROLE|createClient|supabase|competition_lifetime|lifetime_team/i);
   });
 
   it("is called by no other server code either: outside its own two files and the three bounded HTTP adapters, nothing in lib names one of its objects (a new repository file with a direct rpc call would otherwise slip past)", () => {
@@ -1565,7 +1700,8 @@ describe("no public surface", () => {
     ];
     const OPERATIONS = ["proposeLifetimeMembership", "decideLifetimeMembership", "withdrawLifetimeOffer", "endLifetimeMembership", "offerLifetimeLeadership", "decideLifetimeLeadership", "endLifetimeLeadership"];
     // CFM-012: the one read the adapter owns — the member's own pending offers — is called through its domain function, never through the store.
-    const READS = ["listPendingLifetimeOffers"];
+    // CFM-016A: the second read — the team a join link names, by its exact code, through its domain function.
+    const READS = ["listPendingLifetimeOffers", "findLifetimeTeamByJoinCode"];
     const ALLOWED = [...OPERATIONS, ...READS, "parseOfferDecision", "parseOfferKind", "requireUuid", "LifetimeProblem"];
     const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
     const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
@@ -1575,7 +1711,8 @@ describe("no public surface", () => {
       expect(STORE_METHODS.length).toBeGreaterThan(20);
       expect(FORBIDDEN.length).toBeGreaterThan(50);
       for (const name of ["createLifetimeTeam", "disbandLifetimeTeam", "listActiveTeamsOfMember", "normalizeLifetimeTeamName", "decideEntry", "freezeEntries", "backfillLegacyTeams", "getLifetimeTeam", "getEntry", "proposeRosterClaims",
-        "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided", "proposeMembership", "MembershipOffer", "listPendingOffersOfMember", "PendingOfferView", "OfferDirection", "TeamRole"]) {
+        "decideLifetimeEntry", "lifetimeErrorFromDatabase", "LifetimeTeamView", "EntryDecided", "proposeMembership", "MembershipOffer", "listPendingOffersOfMember", "PendingOfferView", "OfferDirection", "TeamRole",
+        "findActiveTeamByPublicCode", "listRosterCandidatesForLeader", "listLifetimeRosterCandidates", "RosterCandidate"]) {
         expect(FORBIDDEN, name).toContain(name);
       }
       for (const name of ALLOWED) expect(FOUNDATION_NAMES, `${name} must exist in the foundation`).toContain(name);
@@ -1604,15 +1741,15 @@ describe("no public surface", () => {
       expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
     });
 
-    it("calls each of the seven operations and its one read, and no other", () => {
+    it("calls each of the seven operations and its two reads, and no other", () => {
       const code = adapterCode();
       for (const operation of [...OPERATIONS, ...READS]) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
     });
 
-    it("exports exactly its eight handlers (seven operations and the member's own offer inbox) and no helper", () => {
+    it("exports exactly its nine handlers (seven operations, the member's own offer inbox and the join link's lookup) and no helper", () => {
       const code = adapterCode();
       expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual([
-        "handleDecideLeadership", "handleDecideMembership", "handleEndLeadership", "handleEndMembership", "handleListMyOffers", "handleOfferLeadership", "handleProposeMembership", "handleWithdrawOffer",
+        "handleDecideLeadership", "handleDecideMembership", "handleEndLeadership", "handleEndMembership", "handleFindTeamByCode", "handleListMyOffers", "handleOfferLeadership", "handleProposeMembership", "handleWithdrawOffer",
       ]);
       expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
     });
@@ -1633,7 +1770,7 @@ describe("no public surface", () => {
       expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
     });
 
-    it("is reached only by its eight routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the three adapters", () => {
+    it("is reached only by its nine routes, which import nothing but the adapter and name no foundation symbol — and no route of the lifetime family is outside the three adapters", () => {
       const SPECIFIER = "@/lib/gaming/competitions/lifetimeMembershipHttp";
       const routes = routesImporting(SPECIFIER);
       expect(routes).toEqual([
@@ -1645,6 +1782,7 @@ describe("no public surface", () => {
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/leadership/end/route.ts",
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/end/route.ts",
         "app/api/gaming/competitions/lifetime-teams/[lifetimeTeamId]/memberships/route.ts",
+        "app/api/gaming/competitions/lifetime-teams/by-code/[teamCode]/route.ts",
       ]);
       for (const route of routes) {
         const code = stripComments(read(route));
@@ -1654,11 +1792,11 @@ describe("no public surface", () => {
       }
       const surfaces = ["app", "lib", "public"].flatMap((dir) => walk(path.join(ROOT, dir))).filter((f) => /\.(ts|tsx|js|mjs|html)$/.test(f));
       const mentioning = surfaces.map(unix).filter((f) => f !== MEMBERSHIP_HTTP_ADAPTER && /lifetimeMembershipHttp/.test(read(f))).sort();
-      expect(mentioning, "nothing but the eight routes reaches the adapter").toEqual(routes);
+      expect(mentioning, "nothing but the nine routes reaches the adapter").toEqual(routes);
       // No broad exemption and no unbounded sibling: every route of the lifetime family (a path segment that starts with "lifetime-", hyphenated names included) imports exactly one
       // of the three adapters and nothing else.
       const family = competitionRoutes().filter((f) => /\/lifetime-[a-z-]+\//.test(f));
-      expect(family).toHaveLength(21);
+      expect(family).toHaveLength(23);
       for (const route of family) expect([["@/lib/gaming/competitions/lifetimeHttp"], [SPECIFIER], ["@/lib/gaming/competitions/lifetimeEntryHttp"]], route).toContainEqual(importsOf(route));
     });
 
@@ -1690,7 +1828,7 @@ describe("no public surface", () => {
       ...namesIn(/^export (?:interface|type) (\w+)/gm, FOUNDATION).filter((n) => n !== "LifetimeTeamsStore"),
     ];
     const OPERATIONS = ["enableLifetimeEntryFlow", "disableLifetimeEntryFlow", "decideLifetimeEntry", "freezeLifetimeEntries", "enterLifetimeTeam", "withdrawLifetimeEntryIn", "proposeRosterClaimsIn", "decideRosterClaimIn", "releaseRosterClaimIn"];
-    const READS = ["listLifetimeEntriesForOrganizer", "listLifetimeEntriesOfMyTeams", "listMyOpenRosterClaims"];
+    const READS = ["listLifetimeEntriesForOrganizer", "listLifetimeEntriesOfMyTeams", "listMyOpenRosterClaims", "listLifetimeRosterCandidates"];
     const ALLOWED = [...OPERATIONS, ...READS, "parseClaimBatch", "parseClaimDecision", "parseEntryDecisionRequest", "requireUuid", "LifetimeProblem"];
     const FORBIDDEN = [...new Set(FOUNDATION_NAMES)].filter((n) => !ALLOWED.includes(n));
     const named = (code: string, candidates: string[]) => candidates.filter((n) => new RegExp(`\\b${n}\\b`).test(code));
@@ -1705,6 +1843,7 @@ describe("no public surface", () => {
         "withdrawLifetimeEntry", "proposeRosterClaims", "decideRosterClaim", "releaseRosterClaim", "parseOfferDecision", "lifetimeErrorFromDatabase",
         // the store, whose reads and writes are reached through the domain operations alone
         "enableEntryFlow", "decideEntry", "freezeEntries", "enterTeam", "withdrawEntry", "getEntryCompetitionId", "getRosterClaimCompetitionId", "listLiveEntriesForOrganizer", "listLiveEntriesOfLedTeams", "listOpenClaimsOfMember",
+        "listRosterCandidatesForLeader", "findActiveTeamByPublicCode", "findLifetimeTeamByJoinCode", "JoinLinkTeam",
         "LifetimeTeamView", "LifetimeEntryView", "EntryDecided", "OrganizerEntryView", "LedEntryView", "OwnClaimView"]) {
         expect(FORBIDDEN, name).toContain(name);
       }
@@ -1720,7 +1859,8 @@ describe("no public surface", () => {
       ["membership and leadership", /Membership|Leadership|Offer/], ["the legacy backfill", /[Bb]ackfill/],
       ["unrestricted team or entry lookup", /^get(?:LifetimeTeam|Entry)$|LifetimeTeamView|LifetimeEntryView/],
       ["an operation that takes an entry or a proposal without its competition", /^(?:withdrawLifetimeEntry|proposeRosterClaims|decideRosterClaim|releaseRosterClaim)$/],
-      ["the store's own lookups and reads", /^(?:getEntryCompetitionId|getRosterClaimCompetitionId|listLiveEntriesForOrganizer|listLiveEntriesOfLedTeams|listOpenClaimsOfMember)$/],
+      ["the store's own lookups and reads", /^(?:getEntryCompetitionId|getRosterClaimCompetitionId|listLiveEntriesForOrganizer|listLiveEntriesOfLedTeams|listOpenClaimsOfMember|listRosterCandidatesForLeader|findActiveTeamByPublicCode)$/],
+      ["a team found by its code", /ByJoinCode|ByPublicCode|JoinLinkTeam/],
     ];
     it.each(CAPABILITIES)("references no %s: the foundation's own names for it are found, and none appears in the adapter", (_capability, pattern) => {
       const theirs = FORBIDDEN.filter((n) => pattern.test(n));
@@ -1735,16 +1875,16 @@ describe("no public surface", () => {
       expect(adapterCode()).not.toMatch(/\.rpc\s*\(|\.from\s*\(|createClient|@supabase\/supabase-js/);
     });
 
-    it("calls each of the nine operations and each of the three reads, and no other", () => {
+    it("calls each of the nine operations and each of the four reads, and no other", () => {
       const code = adapterCode();
       for (const operation of [...OPERATIONS, ...READS]) expect(code, operation).toMatch(new RegExp(`\\b${operation}\\(`));
     });
 
-    it("exports exactly its twelve handlers (nine operations, three reads) and no helper", () => {
+    it("exports exactly its thirteen handlers (nine operations, four reads) and no helper", () => {
       const code = adapterCode();
       expect(namesIn(/^export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/gm, code).sort()).toEqual([
         "handleDecideEntry", "handleDecideRosterClaim", "handleDisableEntryFlow", "handleEnableEntryFlow", "handleEnterTeam", "handleFreezeEntries", "handleListCompetitionEntries",
-        "handleListMyRosterClaims", "handleListMyTeamEntries", "handleProposeRosterClaims", "handleReleaseRosterClaim", "handleWithdrawEntry",
+        "handleListMyRosterClaims", "handleListMyTeamEntries", "handleListRosterCandidates", "handleProposeRosterClaims", "handleReleaseRosterClaim", "handleWithdrawEntry",
       ]);
       expect(code).not.toMatch(/^export\s*(?:\{|\*|default)/m);
     });
@@ -1766,11 +1906,12 @@ describe("no public surface", () => {
       expect(code).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
     });
 
-    it("is reached only by its eleven routes, which import nothing but the adapter and name no foundation symbol", () => {
+    it("is reached only by its twelve routes, which import nothing but the adapter and name no foundation symbol", () => {
       const SPECIFIER = "@/lib/gaming/competitions/lifetimeEntryHttp";
       const routes = routesImporting(SPECIFIER);
       expect(routes).toEqual([
         "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/decision/route.ts",
+        "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-candidates/route.ts",
         "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/roster-claims/route.ts",
         "app/api/gaming/competitions/[competitionId]/lifetime-entries/[competitionTeamId]/withdraw/route.ts",
         "app/api/gaming/competitions/[competitionId]/lifetime-entries/freeze/route.ts",
@@ -1796,7 +1937,7 @@ describe("no public surface", () => {
     it("no V1 route, no discovery route and no page is touched: the routes of this adapter are all new, and every one of them is a lifetime route", () => {
       const all = competitionRoutes();
       const family = all.filter((f) => /\/lifetime-[a-z-]+\//.test(f));
-      expect(family).toHaveLength(21);
+      expect(family).toHaveLength(23);
       const entryRoutes = routesImporting("@/lib/gaming/competitions/lifetimeEntryHttp");
       expect(entryRoutes.filter((f) => !family.includes(f)), "every route of this adapter is in the lifetime family").toEqual([]);
       // the V1 routes under a competition keep importing what they always did: none of them imports an adapter of the lifetime family

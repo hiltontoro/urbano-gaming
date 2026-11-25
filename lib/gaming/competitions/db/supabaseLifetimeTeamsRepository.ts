@@ -7,7 +7,7 @@ import {
   type EntryWithdrawn, type LedEntryView, type LegacyBackfillResult, type LeadershipDecision, type LeadershipEnded,
   type LeadershipOffer, type LifetimeEntryView, type LifetimeTeamCreated, type LifetimeTeamDisbanded, type LifetimeTeamsStore, type LifetimeTeamView, type LiveEntryStatus, type MemberTeamSummary,
   type MembershipDecision, type MembershipEnded, type MembershipOffer, type OfferDecision, type OfferKind, type OfferWithdrawn, type OpenClaimStatus, type OrganizerEntryView, type OwnClaimView,
-  type PendingOfferView, type RosterClaimDecision, type RosterClaimProposed, type RosterClaimReleased, type TeamRole,
+  type PendingOfferView, type RosterClaimDecision, type RosterClaimProposed, type RosterClaimReleased, type TeamRole, type JoinLinkTeam, type RosterCandidate,
 } from "../lifetimeTeams";
 import { CompetitionAccessDeniedError, CompetitionNotFoundError, TeamRegistrationNotOpenError } from "../types";
 import { translateError } from "./supabaseCompetitionsRepository";
@@ -201,6 +201,8 @@ const byCreation = (a: OfferCandidate, b: OfferCandidate): number => {
 const ENTRY_OF_COMPETITION = "competition_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims(status)";
 const ENTRY_OF_TEAM = "competition_team_id, competition_id, lifetime_team_id, public_code, name, status, entry_flow, created_at, claims:competition_lifetime_roster_claims(competition_lifetime_roster_claim_id, gaming_member_id, status, expires_at, seq)";
 const CLAIM_OF_MEMBER = "competition_lifetime_roster_claim_id, seq, competition_id, gaming_member_id, status, expires_at, entry:competition_teams(competition_team_id, competition_id, lifetime_team_id, status, entry_flow, team:lifetime_teams(lifetime_team_id, public_code, name, status))";
+/** CFM-016A — what the roster picker's one statement reads INSIDE a leader's seat: the addressed entry with its proposals, and the team's active members with their display names. */
+const TEAM_FOR_ROSTER = "lifetime_team_id, status, competition_teams!inner(competition_team_id, competition_id, lifetime_team_id, entry_flow, status, competition_lifetime_roster_claims(gaming_member_id, status, expires_at)), lifetime_team_memberships(lifetime_team_id, gaming_member_id, status, gaming_members!lifetime_team_memberships_gaming_member_id_fkey(gaming_member_id, display_name))";
 
 const isLiveEntryStatus = (value: unknown): value is LiveEntryStatus => value === "PENDING_ORGANIZER_APPROVAL" || value === "ACCEPTED";
 const isOpenClaimStatus = (value: unknown): value is OpenClaimStatus => value === "PROPOSED" || value === "ACCEPTED";
@@ -584,5 +586,60 @@ export class SupabaseLifetimeTeamsRepository implements LifetimeTeamsStore {
         view: { claimId: claim.competition_lifetime_roster_claim_id, competitionId: claim.competition_id, status: claim.status, expiresAt: claim.expires_at, team: { lifetimeTeamId: team.lifetime_team_id, publicCode: team.public_code, name: team.name } } satisfies OwnClaimView,
       }];
     }).sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((candidate) => candidate.view);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------------------------------------
+  // UG-CR-GATE-CFM-016A — the join link's lookup and the roster picker's read
+  // ---------------------------------------------------------------------------------------------------------------------------------------------
+
+  async findActiveTeamByPublicCode(publicCode: string): Promise<JoinLinkTeam | null> {
+    // One exact code, one ACTIVE team, two fields. Nothing about who is on it, and no other way to find it: no pattern, no name.
+    const { data, error } = await this.client.from("lifetime_teams").select("lifetime_team_id, public_code, name, status").eq("public_code", publicCode).eq("status", "ACTIVE").maybeSingle();
+    if (error) throw translateLifetimeError(error);
+    const row = plainRow(data);
+    if (row === null || row.public_code !== publicCode || row.status !== "ACTIVE" || !isUuidText(row.lifetime_team_id) || !isText(row.name)) return null;
+    return { lifetimeTeamId: row.lifetime_team_id, name: row.name };
+  }
+
+  async listRosterCandidatesForLeader(competitionId: string, competitionTeamId: string, leaderGamingMemberId: string): Promise<RosterCandidate[] | null> {
+    const competition = requireUuid(competitionId);
+    const addressed = requireUuid(competitionTeamId);
+    const me = requireUuid(leaderGamingMemberId);
+    // ONE statement, and it is its own authority (the CFM-014A discipline). Its rows are the member's CURRENT captain or sub-captain seat on the team whose live entry this is;
+    // that team's active members, their display names and the entry's proposals come back only INSIDE that seat, read in the same snapshot. A leadership that ended a moment ago,
+    // another team's entry, another competition's and a withdrawn entry answer with no rows at all.
+    const found = await this.client.from("lifetime_team_leaderships")
+      .select(`${SEAT_ROWS}, lifetime_teams!inner(${TEAM_FOR_ROSTER})`)
+      .eq("gaming_member_id", me).eq("status", "ACTIVE").in("role", ["CAPTAIN", "SUB_CAPTAIN"])
+      .eq("lifetime_teams.status", "ACTIVE")
+      .eq("lifetime_teams.competition_teams.competition_team_id", addressed).eq("lifetime_teams.competition_teams.competition_id", competition)
+      .eq("lifetime_teams.competition_teams.entry_flow", "LIFETIME").in("lifetime_teams.competition_teams.status", ["PENDING_ORGANIZER_APPROVAL", "ACCEPTED"])
+      .eq("lifetime_teams.lifetime_team_memberships.status", "ACTIVE");
+    if (found.error) throw translateLifetimeError(found.error);
+
+    // The filters are not taken on trust: rows are read only through a seat that is exactly a current one, the member's own, whose embedded team is that seat's team.
+    const now = Date.now();
+    for (const seat of asRows(found.data)) {
+      const team = embeddedRow(seat.lifetime_teams);
+      if (activeSeat(seat) === null || !sameMember(seat.gaming_member_id, me) || team === null || team.status !== "ACTIVE" || !sameMember(team.lifetime_team_id, seat.lifetime_team_id)) continue;
+      const entry = asRows(team.competition_teams).find((e) => sameMember(e.competition_team_id, addressed) && sameMember(e.competition_id, competition)
+        && sameMember(e.lifetime_team_id, team.lifetime_team_id) && e.entry_flow === "LIFETIME" && isLiveEntryStatus(e.status));
+      if (!entry || !Array.isArray(entry.competition_lifetime_roster_claims) || !Array.isArray(team.lifetime_team_memberships)) continue;
+      // A person with an open proposal or an accepted place on THIS entry cannot be proposed again. Their places elsewhere are not looked at: they are not this team's business.
+      const taken = new Set(asRows(entry.competition_lifetime_roster_claims)
+        .filter((c) => c.status === "ACCEPTED" || (c.status === "PROPOSED" && !(Date.parse(String(c.expires_at)) <= now)))
+        .map((c) => String(c.gaming_member_id).toLowerCase()));
+      const people = new Map<string, RosterCandidate>();
+      for (const membership of asRows(team.lifetime_team_memberships)) {
+        const person = embeddedRow(membership.gaming_members);
+        if (membership.status !== "ACTIVE" || !sameMember(membership.lifetime_team_id, team.lifetime_team_id) || !isUuidText(membership.gaming_member_id)) continue;
+        // A person without a display name cannot be chosen by name, so they are left out rather than shown nameless.
+        if (person === null || !sameMember(person.gaming_member_id, membership.gaming_member_id) || !isText(person.display_name)) continue;
+        const key = membership.gaming_member_id.toLowerCase();
+        if (!taken.has(key)) people.set(key, { gamingMemberId: membership.gaming_member_id, displayName: person.display_name });
+      }
+      return [...people.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "en") || (a.gamingMemberId.toLowerCase() < b.gamingMemberId.toLowerCase() ? -1 : 1));
+    }
+    return null;
   }
 }

@@ -44,6 +44,7 @@ const lifetime = vi.hoisted(() => ({
     decideLeadership: vi.fn(),
     endLeadership: vi.fn(),
     listPendingOffersOfMember: vi.fn(),
+    findActiveTeamByPublicCode: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
 }));
 
@@ -995,7 +996,82 @@ describe("B13 (CFM-012) — GET /lifetime-offers: the member's own pending offer
 });
 
 // =============================================================================================================================================
-describe("B12 — the existing routes are unchanged, and the surface is exactly seven POST handlers and one GET that reach nothing but the bounded adapter", () => {
+describe("UG-CR-GATE-CFM-016A — GET by-code: what a team's join link shows a signed-in person", () => {
+  const CODE = "AbCdEfGhIjKlMnOpQrStUv";
+  const LINK_NOT_VALID = "This team link is not valid.";
+  const loadByCode = async () => (await import("../app/api/gaming/competitions/lifetime-teams/by-code/[teamCode]/route")) as RouteModule & { dynamic?: string };
+  const lookUp = async (code: string = CODE, init: { query?: string; headers?: Record<string, string> } = {}) => {
+    const { GET } = await loadByCode();
+    const request = new Request(`${BASE}/lifetime-teams/by-code/${encodeURIComponent(code)}${init.query ?? ""}`, { method: "GET", headers: { authorization: "Bearer session-token", ...init.headers } });
+    return send("by code", GET!, request, { teamCode: code });
+  };
+
+  it("answers exactly the team's identifier and name — never the code back, a member, a leader or anything else the store held — for the code in the path alone", async () => {
+    lifetime.store.findActiveTeamByPublicCode.mockResolvedValue({ lifetimeTeamId: TEAM, name: "Los Halcones", publicCode: CODE, members: [{ gamingMemberId: SUBJECT, displayName: "Secret" }], captainEmail: "secret@example.com" });
+    const res = await lookUp(CODE, { query: `?code=${"z".repeat(22)}&gamingMemberId=${OTHER}`, headers: { "x-team-code": "z".repeat(22) } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(JSON.stringify({ team: { lifetimeTeamId: TEAM, name: "Los Halcones" } }));
+    expect(lifetime.store.findActiveTeamByPublicCode.mock.calls).toEqual([[CODE]]);
+    expect(lifetime.order).toEqual(["construct", "store"]);
+  });
+
+  it("an unknown or malformed code is one and the same 404 — a malformed one is never looked up — and a malformed record is not shown", async () => {
+    lifetime.store.findActiveTeamByPublicCode.mockResolvedValue(null);
+    const answers = new Set<string>();
+    for (const code of [CODE, "short", `${CODE}x`, `${CODE.slice(0, 21)}%`, TEAM]) {
+      const res = await lookUp(code);
+      expect(res.status, code).toBe(404);
+      answers.add(await res.text());
+    }
+    expect([...answers]).toEqual([JSON.stringify({ error: LINK_NOT_VALID })]);
+    expect(lifetime.store.findActiveTeamByPublicCode.mock.calls).toEqual([[CODE]]);
+    for (const record of [{ lifetimeTeamId: "nope", name: "X" }, { lifetimeTeamId: TEAM, name: " " }, { lifetimeTeamId: TEAM }]) {
+      lifetime.store.findActiveTeamByPublicCode.mockResolvedValue(record);
+      const res = await lookUp();
+      expect([res.status, await res.json()], JSON.stringify(record)).toEqual([404, { error: LINK_NOT_VALID }]);
+    }
+    // a store that answers nothing at all (not even "no team") is a failure, not a team and not a "not found"
+    lifetime.store.findActiveTeamByPublicCode.mockResolvedValue(undefined);
+    expect([(await lookUp()).status]).toEqual([500]);
+  });
+
+  it.each(["false", "TRUE", undefined])("with COMPETITIONS_SCHEMA_READY=%j it is the bounded 503 and touches nothing", async (value) => {
+    if (value === undefined) delete process.env.COMPETITIONS_SCHEMA_READY;
+    else process.env.COMPETITIONS_SCHEMA_READY = value;
+    const res = await lookUp();
+    expect([res.status, await res.json()]).toEqual([503, { error: UNAVAILABLE_503 }]);
+    expect(httpAuth.requireGamingMember).not.toHaveBeenCalled();
+    expect(lifetime.constructed).toEqual([]);
+  });
+
+  it("signed out it is the 401 and no repository exists", async () => {
+    signedOut();
+    const res = await lookUp();
+    expect([res.status, await res.json()]).toEqual([401, { error: UNAUTHENTICATED_401 }]);
+    expect(lifetime.constructed).toEqual([]);
+    expect(anyStoreCalled()).toBe(false);
+  });
+
+  it("any failure is the generic 500 with nothing of the database in it", async () => {
+    for (const failure of [new Error('relation "lifetime_teams" does not exist'), new LifetimeTeamError("TEAM_NOT_FOUND"), "boom"]) {
+      lifetime.store.findActiveTeamByPublicCode.mockRejectedValue(failure);
+      const res = await lookUp();
+      expect(res.status, String(failure)).toBe(500);
+      const body = await res.json();
+      expect(body).toEqual({ error: GENERIC_500 });
+      expectBounded(body);
+    }
+  });
+
+  it("the route exports exactly GET, is never prerendered, and only forwards to the adapter", async () => {
+    const route = await loadByCode();
+    expect(Object.keys(route).sort()).toEqual(["GET", "dynamic"]);
+    expect(route.dynamic).toBe("force-dynamic");
+  });
+});
+
+// =============================================================================================================================================
+describe("B12 — the existing routes are unchanged, and the surface is exactly seven POST handlers and two GETs that reach nothing but the bounded adapter", () => {
   const findRouteFiles = (dir: string): string[] => readdirSync(dir).flatMap((entry) => {
     const full = path.join(dir, entry);
     return statSync(full).isDirectory() ? findRouteFiles(full) : entry === "route.ts" ? [full] : [];
@@ -1003,6 +1079,7 @@ describe("B12 — the existing routes are unchanged, and the surface is exactly 
   const unix = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
   const OWN = OPS.map((op) => unix(path.join(ROOT, "__tests__", op.route + ".ts")));
   const INBOX_FILE = "app/api/gaming/competitions/lifetime-offers/route.ts";
+  const BY_CODE_FILE = "app/api/gaming/competitions/lifetime-teams/by-code/[teamCode]/route.ts";
 
   it("the seven routes are exactly the seven named in the gate", () => {
     expect([...OWN].sort()).toEqual([
@@ -1023,14 +1100,14 @@ describe("B12 — the existing routes are unchanged, and the surface is exactly 
   });
 
   it("no pre-existing route file mentions the membership adapter, the foundation or the new surface", () => {
-    const own = new Set([...OWN, INBOX_FILE]);
+    const own = new Set([...OWN, INBOX_FILE, BY_CODE_FILE]);
     const others = findRouteFiles(path.join(ROOT, "app", "api")).map(unix).filter((f) => !own.has(f));
     expect(others.length).toBeGreaterThan(100);
     expect(others.filter((f) => /lifetimeMembershipHttp|lifetime-memberships|lifetime-offers|lifetime-leaderships|SupabaseLifetime/.test(readFileSync(path.join(ROOT, f), "utf8")))).toEqual([]);
   });
 
-  it("the eight routes (seven POST and the inbox GET) import nothing but the adapter and call exactly one of its handlers each", () => {
-    for (const file of [...OWN, INBOX_FILE]) {
+  it("the nine routes (seven POST, the inbox GET and the by-code GET) import nothing but the adapter and call exactly one of its handlers each", () => {
+    for (const file of [...OWN, INBOX_FILE, BY_CODE_FILE]) {
       const code = readFileSync(path.join(ROOT, file), "utf8");
       expect([...code.matchAll(/^\s*import\b[^;]*from\s+["']([^"']+)["']/gm)].map((m) => m[1]), file).toEqual(["@/lib/gaming/competitions/lifetimeMembershipHttp"]);
       expect(code.match(/\bhandle[A-Z]\w*\(/g) ?? [], file).toHaveLength(1);

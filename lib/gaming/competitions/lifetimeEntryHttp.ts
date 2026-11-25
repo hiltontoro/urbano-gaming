@@ -4,7 +4,7 @@ import { getSupabaseCredentials, requireCompetitionsSchemaReady, requireGamingMe
 import { SupabaseLifetimeTeamsRepository } from "./db/supabaseLifetimeTeamsRepository";
 import {
   LifetimeTeamError, decideLifetimeEntry, decideRosterClaimIn, disableLifetimeEntryFlow, enableLifetimeEntryFlow, enterLifetimeTeam, freezeLifetimeEntries,
-  listLifetimeEntriesForOrganizer, listLifetimeEntriesOfMyTeams, listMyOpenRosterClaims, parseClaimBatch, parseClaimDecision, parseEntryDecisionRequest,
+  listLifetimeEntriesForOrganizer, listLifetimeEntriesOfMyTeams, listLifetimeRosterCandidates, listMyOpenRosterClaims, parseClaimBatch, parseClaimDecision, parseEntryDecisionRequest,
   proposeRosterClaimsIn, releaseRosterClaimIn, requireUuid, withdrawLifetimeEntryIn, type LifetimeProblem,
 } from "./lifetimeTeams";
 import {
@@ -15,12 +15,13 @@ import {
 /**
  * UG-CR-GATE-CFM-014 — the ONE bounded HTTP adapter between a competition's lifetime-team entry operations and a route.
  *
- * Nine operations and three reads, and nothing else. The organizer of a competition enables its team-entry flow (or, while nothing has come of it, switches it off again),
+ * Nine operations and four reads, and nothing else. The organizer of a competition enables its team-entry flow (or, while nothing has come of it, switches it off again),
  * decides an entry (approve, reject or remove) and freezes the entries; a leader of a team enters it, withdraws its entry and proposes people for the entry's roster; a person
  * answers a proposal that names them, and the person or a leader releases one. The reads are the organizer's live entries of the competition they run, a leader's live entries of
- * the team they lead, and a person's own open proposals — each derived from the verified Gaming Member, so that nobody has to be handed an identifier by somebody else. (The
- * teams themselves, their members and their seats have adapters of their own; the legacy backfill has none and no route; no lookup of an entry, a proposal or a person by
- * identifier exists here.) Each handler runs the same sequence, in this order and no other:
+ * the team they lead, a person's own open proposals, and — for the addressed entry — the members of the team a leader may still propose, by display name (UG-CR-GATE-CFM-016A):
+ * each derived from the verified Gaming Member, so that nobody has to be handed an identifier by somebody else. (The teams themselves, their memberships and their seats have
+ * adapters of their own; the legacy backfill has none and no route; there is no lookup of an entry, a proposal or a person by identifier, and no directory of people.) Each
+ * handler runs the same sequence, in this order and no other:
  *
  *   1. the Competitions availability guard (before credentials, authentication, parsing or any repository);
  *   2. the server credentials;
@@ -442,5 +443,33 @@ export async function handleListMyRosterClaims(request: Request): Promise<Respon
   return readRun("list-my-roster-claims", NOTHING_ADDRESSED, request, async (credentials, actor) => {
     const rows = await listMyOpenRosterClaims(repositoryFor(credentials), actor);
     return respond({ claims: ownClaims(rows) }, 200);
+  });
+}
+
+/** The people a leader may propose, copied field by field: the identifier the proposal names and the display name. One that is malformed in either is dropped. */
+function rosterCandidates(rows: unknown) {
+  if (!Array.isArray(rows)) throw new LifetimeTeamError("UNAVAILABLE");
+  const members: Array<{ gamingMemberId: string; displayName: string }> = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const { gamingMemberId, displayName } = row;
+    if (!isUuid(gamingMemberId) || !isText(displayName)) continue;
+    members.push({ gamingMemberId, displayName });
+  }
+  return members;
+}
+
+/**
+ * GET — the members of the addressed entry's team that a leader may still propose for it, in the addressed competition (UG-CR-GATE-CFM-016A). Only a current captain or
+ * sub-captain of that team gets them, and the authority and the rows are one statement; anyone else, another competition's entry and a withdrawn or unknown entry are the
+ * same 404. It proposes nobody.
+ */
+export async function handleListRosterCandidates(request: Request, competitionId: unknown, competitionTeamId: unknown): Promise<Response> {
+  return readRun("list-roster-candidates", NOTHING_ADDRESSED, request, async (credentials, actor) => {
+    const competition = requireUuid(competitionId);
+    const entry = requireUuid(competitionTeamId);
+    const rows = await listLifetimeRosterCandidates(repositoryFor(credentials), competition, entry, actor);
+    if (rows === null) return respond({ error: ENTRY_NOT_FOUND }, 404);
+    return respond({ members: rosterCandidates(rows) }, 200);
   });
 }

@@ -135,6 +135,7 @@
 
 <script src="/urbanoAuth.js"></script>
 <script src="/competitionsIntent.js"></script>
+<script src="/competitionsEntries.js"></script>
 <script>
 UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("signin-status"));
 
@@ -182,6 +183,30 @@ let currentTeamId = null;
 // can be re-written (e.g. on every detail render) without re-resolving.
 let currentCompetitionCode = CompetitionsIntent.getIntentCompetitionCodeFromSearch(window.location.search);
 let currentTeamCode = currentCompetitionCode ? CompetitionsIntent.getIntentTeamCodeFromSearch(window.location.search) : null;
+
+// UG-CR-GATE-CFM-016A — a team's join link, ?join=<team code>. Like an invitation's codes it is navigation only: it names a team to look at and grants nothing. It is
+// shape-checked once, kept across sign-in, shown by the team surface, and removed from the address when the person closes it.
+let currentJoinCode = (function () {
+  const raw = new URLSearchParams(window.location.search).get("join");
+  return CompetitionsIntent.isValidTeamCode(raw) ? raw : null;
+})();
+
+/** This page's address with the team's join code and nothing else. */
+function buildTeamJoinLink(teamCode) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("join", teamCode);
+  return url.toString();
+}
+
+function closeJoinLink() {
+  currentJoinCode = null;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("join");
+  window.history.replaceState(null, "", url.pathname + url.search);
+  renderApp();
+}
 
 /** Human-readable label for a raw enum value this page renders (competition/fixture state, team status) — never the raw underscored string. */
 function humanizeState(kind, value) {
@@ -292,6 +317,23 @@ function teamName(teams, teamId) {
   return t ? t.name : "?";
 }
 
+/**
+ * UG-CR-GATE-CFM-016 — the invite-only pilot's team surfaces (public/competitionsEntries.js): a member's team invitations and requests and their teams, and — inside ONE
+ * addressed competition — their team's entry and their own roster proposal. The surface is built only after the server has answered its reads, it is removed in the very
+ * turn any render starts (see renderApp), and a script that did not load leaves this page exactly as it was.
+ */
+function currentMemberId() {
+  return UrbanoAuth.getState().then((state) => (state && state.status === "authenticated" && typeof state.gamingMemberId === "string" ? state.gamingMemberId : null));
+}
+function mountTeamEntries(parent, competition, before) {
+  if (typeof CompetitionsEntries !== "object") return;
+  const host = document.createElement("div");
+  host.id = "team-entries-host";
+  parent.insertBefore(host, before || null);
+  CompetitionsEntries.mountMember({ host, fetch: authedFetch, memberId: currentMemberId, competition,
+    joinCode: currentJoinCode, joinLink: buildTeamJoinLink, copy: copyTextSafely, onJoinClose: closeJoinLink });
+}
+
 async function renderCompetitionList() {
   const res = await authedFetch("/api/gaming/competitions");
   // A 503 (or any other non-200 — UG-CR-GATE-036) must never be mistaken
@@ -307,7 +349,13 @@ async function renderCompetitionList() {
   }
   const competitions = (res.json && res.json.competitions) || [];
   if (competitions.length === 0) {
-    return el(`<div class="empty-state">No competitions have been created yet — ask an organizer to create one from the Competitions admin page.</div>`);
+    const none = el(`<div class="empty-state">No competitions have been created yet — ask an organizer to create one from the Competitions admin page.</div>`);
+    // A join link is about a team, not a competition: it is answered even when there is no competition to list.
+    if (!currentJoinCode) return none;
+    const alone = el(`<div></div>`);
+    mountTeamEntries(alone, null);
+    alone.appendChild(none);
+    return alone;
   }
   const wrap = el(`<div></div>`);
   wrap.appendChild(el(`<h2>Competitions</h2>`));
@@ -331,6 +379,8 @@ async function renderCompetitionList() {
     });
     wrap.appendChild(row);
   }
+  // A visitor who came by a join link sees the team surface first.
+  mountTeamEntries(wrap, null, currentJoinCode ? wrap.firstChild : null);
   return wrap;
 }
 
@@ -444,6 +494,9 @@ async function renderCompetitionDetail(competitionId, competitionCode, teamId) {
       : statusPresent ? "Registration status is unavailable right now." : "Registration is closed for this competition.";
     wrap.appendChild(statusCard);
   }
+
+  // UG-CR-GATE-CFM-016: the team surfaces for THIS competition. Mounted before the registration split below so that a member who must still register sees them too.
+  mountTeamEntries(wrap, { competitionId, name: competition.name, registered: !!myRegistration });
 
   const acceptingRegistration = serverWritesOpen;
   const teamRegistrationOpen = serverWritesOpen;
@@ -891,6 +944,8 @@ async function renderApp() {
   const myGeneration = ++renderGeneration;
   // UG-CR-GATE-SSS-014: any new render (another competition, the list, a session change) removes the captain's plan-change card in this very turn and invalidates its answers.
   removePlanChangeCard();
+  // UG-CR-GATE-CFM-016: so are the team surfaces: whatever they held for the previous view or session is removed, forgotten and aborted in this very turn.
+  if (typeof CompetitionsEntries === "object") CompetitionsEntries.unmountAll();
   const authState = await UrbanoAuth.getState();
   if (myGeneration !== renderGeneration) return;
 
@@ -913,7 +968,7 @@ async function renderApp() {
     } else {
       const message = currentCompetitionCode
         ? "Sign in with URBANO to continue to this competition."
-        : "Sign in with URBANO to view and join Competitions.";
+        : currentJoinCode ? "Sign in with URBANO to see this team and ask to join it." : "Sign in with URBANO to view and join Competitions.";
       content.appendChild(el(`<div class="empty-state">${message}</div>`));
     }
     startIntentAuthPoll();

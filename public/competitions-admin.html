@@ -347,6 +347,10 @@
       </div>
     </div>
 
+    <!-- UG-CR-GATE-CFM-016: the invite-only pilot's team-entries section is BUILT by public/competitionsEntries.js into this empty host, only after the server has answered
+         the organizer's entries read; it is never shipped in this markup. -->
+    <div id="entries-host"></div>
+
     <h3>Accepted Teams</h3>
     <table id="table-teams" class="stack-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Captain</th><th role="columnheader">Invitation</th></tr></thead><tbody role="rowgroup"></tbody></table>
     <p class="msg">New teams come from a registered member's own proposal below, or the organizer accepting one — there is no separate organizer "add team by ID" control.</p>
@@ -376,6 +380,7 @@
 
 <script src="/urbanoAuth.js"></script>
 <script src="/competitionsLifecycle.js"></script>
+<script src="/competitionsEntries.js"></script>
 <script>
 UrbanoAuth.attachSignInButton(document.getElementById("btn-signin"), document.getElementById("auth-status"));
 
@@ -472,6 +477,8 @@ function readAuthorization(path) {
 }
 
 async function refreshAuthState() {
+  // UG-CR-GATE-CFM-016: the team-entries section goes first, in this very turn: whatever it held for the previous session is removed, forgotten and aborted.
+  removeEntriesSection();
   // UG-CR-GATE-SSS-014: any authorization event removes the plan-change section in this very turn and invalidates its outstanding answers;
   // it returns only when the server confirms everything again (see reestablishAmendment); unsent edits wait in memory for that, and no longer than that.
   removeAmendmentSection(true);
@@ -519,6 +526,7 @@ function applyOperations(operations) {
 
 /** Shows nothing but one truthful sentence (and, for the "nothing to administer" case, the two other entries). Never a name, id or count. */
 function closeAdministration(message, offerOtherEntries, operations) {
+  removeEntriesSection();
   cachedCompetitions = [];
   currentView = null;
   currentAccess = null;
@@ -588,7 +596,7 @@ async function loadCompetitions() {
   }
   applyOperations(res.json.operations);
   cachedCompetitions = entries;
-  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) { removeAmendmentSection(false); removeScheduleSection(); removeDrawSection(); }
+  if (currentAccess && currentAccess.access === "ORGANIZER" && !entries.some((c) => c.competitionId === currentAccess.competitionId)) { removeAmendmentSection(false); removeScheduleSection(); removeDrawSection(); removeEntriesSection(); }
   select.innerHTML = "";
   document.getElementById("admin-gate").hidden = true;
   document.getElementById("admin-gate").textContent = "";
@@ -709,6 +717,8 @@ document.getElementById("btn-load-competition").addEventListener("click", async 
 });
 
 async function loadCompetitionDetail(competitionId) {
+  // UG-CR-GATE-CFM-016: reloading the detail removes the team-entries section in this very turn; it is built again, from fresh answers, if the reloaded detail still calls for it.
+  removeEntriesSection();
   // UG-CR-GATE-SSS-028: reloading the detail removes the schedule section in this very turn (its requests aborted, its proposal and digest forgotten); it is built
   // again, from fresh answers, only if the reloaded detail still calls for it.
   removeScheduleSection();
@@ -917,6 +927,29 @@ function makeCell(label, text) {
   return td;
 }
 
+/**
+ * UG-CR-GATE-CFM-016 — the invite-only pilot's team-entries section (public/competitionsEntries.js), contextual to ONE addressed competition and asked for only in an organizer
+ * view. It exists only after the server has confirmed the organizer's entries read; any authorization event, reload or close removes it in the very turn and aborts what it
+ * was waiting for; and a script that did not load leaves this page exactly as it was.
+ */
+function removeEntriesSection() {
+  if (typeof CompetitionsEntries === "object") CompetitionsEntries.unmountAll();
+}
+function currentMemberId() {
+  return UrbanoAuth.getState().then((state) => (state && state.status === "authenticated" && typeof state.gamingMemberId === "string" ? state.gamingMemberId : null));
+}
+function ensureEntries(competition, view) {
+  removeEntriesSection();
+  if (typeof CompetitionsEntries !== "object" || !isOrganizerView()) return;
+  const host = document.getElementById("entries-host");
+  if (!host) return;
+  const v1InUse = (Array.isArray(view.teams) && view.teams.length > 0) || (Array.isArray(view.pendingTeamProposals) && view.pendingTeamProposals.length > 0);
+  CompetitionsEntries.mountOrganizer({
+    host, fetch: authedFetch, memberId: currentMemberId, v1InUse,
+    competition: { competitionId: competition.competitionId, name: competition.name, state: competition.state },
+  });
+}
+
 function renderCompetitionDetail() {
   // Organizer administration only: a view opened under anything but ORGANIZER access renders nothing (fail closed).
   if (!isOrganizerView() || !currentView) return;
@@ -1015,6 +1048,9 @@ function renderCompetitionDetail() {
   // UG-CR-GATE-SSS-031: the permanent draw is asked for on the same terms; it exists only after the server has answered its read exactly. The schedule-and-publish section
   // (UG-CR-GATE-SSS-028) is asked for from the draw section and from nowhere else: only once a fresh read has confirmed that a valid permanent draw exists.
   ensureDraw(competition, currentView);
+
+  // UG-CR-GATE-CFM-016: the team-entries section, on the same terms: only after the server has answered its read.
+  ensureEntries(competition, currentView);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
